@@ -14,7 +14,7 @@ This file covers **how** we build it. The other file covers **what** and **why**
 | Framework | Next.js (App Router) + TypeScript | Confirmed |
 | API | Next.js Route Handlers (`app/api/...`) | Confirmed |
 | Backend-as-a-service | Supabase (PostgreSQL + Auth + Storage) | Confirmed |
-| UI component library | TBD — confirm with designer | Pending |
+| UI component library | **shadcn/ui** + Tailwind CSS | Confirmed |
 
 ## 2. Proposed additions (flagged before use)
 
@@ -30,7 +30,7 @@ Each entry below is a tech choice I recommend. **Nothing here is final — confi
 | 6 | **Vitest** | Unit tests for engine + state machine + reminders | Fast, TS-native, no config vs Jest |
 | 7 | **Playwright** | E2E happy-path tests — **now the validation gate** (replaces pilot) | Covers 14-step demo script on web + mocked Telegram |
 | 8 | **zod** | Validate API inputs + AI extraction output schema | Same schema validates extraction JSON and text parsing |
-| 9 | **Tailwind CSS** | Styling base under the chosen UI library | Almost every TS UI library assumes it; confirm with designer |
+| 9 | **Tailwind CSS** | Styling base under the chosen UI library | Confirmed — shadcn/ui is Tailwind-native |
 | 10 | **Supabase migrations CLI** | Version-controlled DB schema | Schema in git, reproducible environments |
 
 **Explicitly NOT used** (per plan §7): vector DB, embeddings, LangChain/agents, Redis/queue infra, OCR engines, WhatsApp API. Vision-LLM-only for extraction (no self-hosted OCR; revisit if monthly extraction cost > ~$50 ≈ 2–5k images).
@@ -204,12 +204,12 @@ These rules are now **normative** — hand-write engine tests against them:
 | v3: course creation = name only; page count from PDF upload only; course inactive until exam + PDF both exist | Students can't answer "how many pages" |
 | Concurrency guard on session respond | Web + Telegram double-apply corrupts debt |
 | Friendly-user dry run Week 3 exit | First real-user contact shouldn't be demo day |
+| UI library: **shadcn/ui** + Tailwind confirmed | Designer decision (2026-08-01); removed from §12 open decisions |
 
 ## 12. Open decisions
 
 | Question | Owner | Needed by |
 | --- | --- | --- |
-| UI component library (MUI / Chakra / shadcn / other) | Designer | Start of Week 2 |
 | Vision provider (OpenAI vs Anthropic) | Team | Start of Week 3 |
 | Session-length defaults (3 / 5–10 / 15 pages) | Team | Week 1 engine tests |
 | Timezone pinned to Asia/Kuala_Lumpur | Team | Week 1 (confirmed by v2) |
