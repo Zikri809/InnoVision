@@ -60,10 +60,12 @@ test.describe("E1 — Class create → join via code → roster", () => {
     // ── 4. Student joins via the code ──────────────────────────
     await studentPage.getByLabel("Join code").fill(joinCode!);
     await studentPage.getByRole("button", { name: /join/i }).click();
-    await expect(studentPage.getByText("E1 Physics")).toBeVisible();
+    // Exact match: the "Joined E1 Physics." status toast also contains the
+    // title, so a substring query would be ambiguous.
+    await expect(studentPage.getByText("E1 Physics", { exact: true })).toBeVisible();
 
     // ── 5. Lecturer opens the class → roster shows student ─────
-    await lecturerPage.getByText("E1 Physics").click();
+    await lecturerPage.getByText("E1 Physics", { exact: true }).click();
     await expect(lecturerPage).toHaveURL(/\/lecturer\/classes\/[^/]+$/);
     await expect(lecturerPage.getByText("Roster")).toBeVisible();
     // The student's full name is prefixed with "student-" from registerUser.

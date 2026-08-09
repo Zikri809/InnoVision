@@ -59,6 +59,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "class_enrollments_class_id_fkey"
+            columns: ["class_id"]
+            isOneToOne: false
+            referencedRelation: "student_class_view"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "class_enrollments_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
@@ -126,17 +133,254 @@ export type Database = {
         }
         Relationships: []
       }
+      questions: {
+        Row: {
+          correct_index: number
+          created_at: string
+          explanation: string | null
+          id: string
+          options: string[]
+          order_index: number
+          prompt: string
+          quiz_id: string
+          type: Database["public"]["Enums"]["question_type"]
+        }
+        Insert: {
+          correct_index: number
+          created_at?: string
+          explanation?: string | null
+          id?: string
+          options: string[]
+          order_index: number
+          prompt: string
+          quiz_id: string
+          type: Database["public"]["Enums"]["question_type"]
+        }
+        Update: {
+          correct_index?: number
+          created_at?: string
+          explanation?: string | null
+          id?: string
+          options?: string[]
+          order_index?: number
+          prompt?: string
+          quiz_id?: string
+          type?: Database["public"]["Enums"]["question_type"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "questions_quiz_id_fkey"
+            columns: ["quiz_id"]
+            isOneToOne: false
+            referencedRelation: "quizzes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "questions_quiz_id_fkey"
+            columns: ["quiz_id"]
+            isOneToOne: false
+            referencedRelation: "student_quiz_view"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quizzes: {
+        Row: {
+          class_id: string
+          created_at: string
+          created_by: string
+          id: string
+          mode: Database["public"]["Enums"]["quiz_mode"]
+          source_file_url: string | null
+          status: Database["public"]["Enums"]["quiz_status"]
+          time_limit_sec: number | null
+          title: string
+        }
+        Insert: {
+          class_id: string
+          created_at?: string
+          created_by: string
+          id?: string
+          mode?: Database["public"]["Enums"]["quiz_mode"]
+          source_file_url?: string | null
+          status?: Database["public"]["Enums"]["quiz_status"]
+          time_limit_sec?: number | null
+          title: string
+        }
+        Update: {
+          class_id?: string
+          created_at?: string
+          created_by?: string
+          id?: string
+          mode?: Database["public"]["Enums"]["quiz_mode"]
+          source_file_url?: string | null
+          status?: Database["public"]["Enums"]["quiz_status"]
+          time_limit_sec?: number | null
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quizzes_class_id_fkey"
+            columns: ["class_id"]
+            isOneToOne: false
+            referencedRelation: "classes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quizzes_class_id_fkey"
+            columns: ["class_id"]
+            isOneToOne: false
+            referencedRelation: "student_class_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quizzes_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
-      [_ in never]: never
+      student_class_view: {
+        Row: {
+          created_at: string | null
+          id: string | null
+          title: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string | null
+          title?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string | null
+          title?: string | null
+        }
+        Relationships: []
+      }
+      student_quiz_view: {
+        Row: {
+          class_id: string | null
+          created_at: string | null
+          id: string | null
+          mode: Database["public"]["Enums"]["quiz_mode"] | null
+          status: Database["public"]["Enums"]["quiz_status"] | null
+          time_limit_sec: number | null
+          title: string | null
+        }
+        Insert: {
+          class_id?: string | null
+          created_at?: string | null
+          id?: string | null
+          mode?: Database["public"]["Enums"]["quiz_mode"] | null
+          status?: Database["public"]["Enums"]["quiz_status"] | null
+          time_limit_sec?: number | null
+          title?: string | null
+        }
+        Update: {
+          class_id?: string | null
+          created_at?: string | null
+          id?: string | null
+          mode?: Database["public"]["Enums"]["quiz_mode"] | null
+          status?: Database["public"]["Enums"]["quiz_status"] | null
+          time_limit_sec?: number | null
+          title?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quizzes_class_id_fkey"
+            columns: ["class_id"]
+            isOneToOne: false
+            referencedRelation: "classes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quizzes_class_id_fkey"
+            columns: ["class_id"]
+            isOneToOne: false
+            referencedRelation: "student_class_view"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      student_roster_view: {
+        Row: {
+          class_id: string | null
+          enrolled_at: string | null
+          full_name: string | null
+          student_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "class_enrollments_class_id_fkey"
+            columns: ["class_id"]
+            isOneToOne: false
+            referencedRelation: "classes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "class_enrollments_class_id_fkey"
+            columns: ["class_id"]
+            isOneToOne: false
+            referencedRelation: "student_class_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "class_enrollments_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
+      append_question: {
+        Args: {
+          p_correct_index: number
+          p_explanation: string
+          p_options: string[]
+          p_prompt: string
+          p_quiz_id: string
+          p_type: Database["public"]["Enums"]["question_type"]
+        }
+        Returns: {
+          correct_index: number
+          created_at: string
+          explanation: string | null
+          id: string
+          options: string[]
+          order_index: number
+          prompt: string
+          quiz_id: string
+          type: Database["public"]["Enums"]["question_type"]
+        }
+        SetofOptions: {
+          from: "*"
+          to: "questions"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       is_enrolled_in_class: { Args: { p_class_id: string }; Returns: boolean }
       is_lecturer: { Args: never; Returns: boolean }
       is_lecturer_of_class: { Args: { p_class_id: string }; Returns: boolean }
+      is_lecturer_of_quiz: { Args: { p_quiz_id: string }; Returns: boolean }
       join_class: { Args: { code: string }; Returns: Json }
+      reorder_questions: {
+        Args: { p_ordered_ids: string[]; p_quiz_id: string }
+        Returns: undefined
+      }
     }
     Enums: {
+      question_type: "mcq" | "true_false"
+      quiz_mode: "practice" | "assessment"
+      quiz_status: "draft" | "live" | "closed"
       user_role: "lecturer" | "student"
     }
     CompositeTypes: {
@@ -268,6 +512,9 @@ export const Constants = {
   },
   public: {
     Enums: {
+      question_type: ["mcq", "true_false"],
+      quiz_mode: ["practice", "assessment"],
+      quiz_status: ["draft", "live", "closed"],
       user_role: ["lecturer", "student"],
     },
   },

@@ -10,3 +10,13 @@ import type { Database } from "@/lib/types/database";
 export type UserRole = Database["public"]["Enums"]["user_role"];
 
 export type Profile = Database["public"]["Tables"]["profiles"]["Row"];
+
+export type QuizMode = Database["public"]["Enums"]["quiz_mode"];
+
+export type QuizStatus = Database["public"]["Enums"]["quiz_status"];
+
+export type QuestionType = Database["public"]["Enums"]["question_type"];
+
+export type Quiz = Database["public"]["Tables"]["quizzes"]["Row"];
+
+export type Question = Database["public"]["Tables"]["questions"]["Row"];

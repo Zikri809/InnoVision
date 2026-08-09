@@ -120,10 +120,12 @@ export async function GET() {
   }
 
   if (profile.role === "student") {
+    // Students read the join_code-free projection view (security audit M-1):
+    // `classes` is now owner-only, so direct access can no longer leak
+    // join_code/lecturer_id to enrolled students.
     const { data, error } = await supabase
-      .from("classes")
-      .select("id, title, created_at, class_enrollments!inner(enrolled_at)")
-      .eq("class_enrollments.student_id", user.id)
+      .from("student_class_view")
+      .select("id, title, created_at")
       .order("created_at", { ascending: false })
       .limit(CLASS_LIST_LIMIT);
     if (error) {

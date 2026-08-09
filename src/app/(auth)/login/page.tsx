@@ -22,9 +22,11 @@ function LoginForm() {
   const searchParams = useSearchParams();
   // Anti-open-redirect: only allow same-origin local paths (mirrors the auth
   // callback). Handles protocol-relative, absolute, and backslash variants.
+  // `window` is unavailable during SSR (client components are pre-rendered),
+  // so derive the origin lazily with a safe fallback to a local path.
   const redirect = sanitizeRedirect(
     searchParams.get("redirect"),
-    window.location.origin,
+    typeof window !== "undefined" ? window.location.origin : "http://localhost",
   );
 
   const [email, setEmail] = useState("");

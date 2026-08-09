@@ -32,12 +32,23 @@ export default async function LecturerClassesPage() {
 
   if (profile.role !== "lecturer") redirect("/student/classes");
 
-  const { data: classes } = await supabase
+  const { data: classes, error } = await supabase
     .from("classes")
     .select("id, title, join_code, created_at")
     .eq("lecturer_id", user.id)
     .order("created_at", { ascending: false })
     .limit(CLASS_LIST_LIMIT);
+
+  if (error) {
+    console.error("Classes fetch error:", error);
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-8">
+        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
+          Could not load your classes right now. Please refresh.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <>

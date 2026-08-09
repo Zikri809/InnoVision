@@ -72,13 +72,13 @@ export async function GET(_request: Request, { params }: Params) {
 
   // Student: enrolled → title only (never join_code or roster). An unenrolled
   // student gets 404 (the same as a non-existent class) — no title leak, no
-  // enrollment oracle. Using !inner means a student who isn't enrolled gets no
-  // row at all, so there's no separate enrollment check needed.
+  // enrollment oracle. Reads the join_code-free projection view (M-1); the
+  // view's is_enrolled_in_class() filter means a non-enrolled student gets no
+  // row → 404.
   const { data: enrolled, error } = await supabase
-    .from("classes")
-    .select("id, title, class_enrollments!inner(student_id)")
+    .from("student_class_view")
+    .select("id, title")
     .eq("id", id)
-    .eq("class_enrollments.student_id", user.id)
     .maybeSingle();
   if (error) {
     console.error("Class fetch error:", error);

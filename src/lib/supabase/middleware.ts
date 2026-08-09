@@ -10,10 +10,6 @@ function isPublicRoute(pathname: string): boolean {
   );
 }
 
-function isApiRoute(pathname: string): boolean {
-  return pathname === "/api" || pathname.startsWith("/api/");
-}
-
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
@@ -51,15 +47,10 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Unauthenticated API requests: return JSON 401, never an HTML login redirect.
-  // Route handlers own their own authz (they can be hit directly); the middleware
-  // just keeps unauthenticated callers from getting a confusing HTML page.
-  if (!user && isApiRoute(pathname)) {
-    return NextResponse.json(
-      { error: "unauthorized", message: "Authentication required" },
-      { status: 401 },
-    );
-  }
+  // NOTE: `/api/*` is intentionally NOT handled here — the proxy matcher
+  // excludes it (see proxy.ts). Every route handler self-authenticates and
+  // returns JSON 401 on its own, so no HTML-login redirect can reach an API
+  // caller.
 
   // Redirect unauthenticated users to login (except public routes)
   if (!user && !isPublicRoute(pathname)) {

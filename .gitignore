@@ -51,3 +51,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# IDE
+/.idea/
+
+# graphify (local code-graph cache/artifacts; regenerate with `graphify update .`)
+/graphify-out/

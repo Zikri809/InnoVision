@@ -30,12 +30,29 @@ export default async function StudentClassesPage() {
 
   if (profile.role !== "student") redirect("/lecturer/classes");
 
-  const { data: classes } = await supabase
-    .from("classes")
-    .select("id, title, created_at, class_enrollments!inner(enrolled_at)")
-    .eq("class_enrollments.student_id", user.id)
+  const { data: classes, error } = await supabase
+    .from("student_class_view")
+    .select("id, title, created_at")
     .order("created_at", { ascending: false })
     .limit(CLASS_LIST_LIMIT);
+
+  if (error) {
+    console.error("Classes fetch error:", error);
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-8">
+        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
+          Could not load your classes right now. Please refresh.
+        </p>
+      </div>
+    );
+  }
+
+  // The view's generated types mark columns nullable (views can't express
+  // NOT NULL to the type generator); the underlying classes columns are NOT
+  // NULL, so narrow to the non-null shape the client expects.
+  const rows = (classes ?? [])
+    .filter((c) => c.id && c.title && c.created_at)
+    .map((c) => ({ id: c.id!, title: c.title!, created_at: c.created_at! }));
 
   return (
     <>
@@ -43,7 +60,7 @@ export default async function StudentClassesPage() {
         <span className="font-semibold">InnoVision</span>
         <UserNav email={user.email ?? ""} consentGiven={Boolean(profile.consent_given_at)} />
       </header>
-      <StudentClassesClient classes={classes ?? []} />
+      <StudentClassesClient classes={rows} />
     </>
   );
 }

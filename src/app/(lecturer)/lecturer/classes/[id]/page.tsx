@@ -31,12 +31,22 @@ export default async function LecturerClassDetailPage({
   }
   if (profile.role !== "lecturer") redirect("/student/classes");
 
-  const { data: cls } = await supabase
+  const { data: cls, error: classError } = await supabase
     .from("classes")
     .select("id, title, join_code, created_at")
     .eq("id", id)
     .eq("lecturer_id", user.id)
     .maybeSingle();
+  if (classError) {
+    console.error("Class fetch error:", classError);
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-8">
+        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
+          Could not load the class right now. Please refresh.
+        </p>
+      </div>
+    );
+  }
   if (!cls) notFound();
 
   const { roster, error: rosterError } = await getClassRoster(supabase, id);
@@ -52,5 +62,24 @@ export default async function LecturerClassDetailPage({
     );
   }
 
-  return <ClassDetailClient cls={cls} roster={roster} />;
+  // Quizzes in this class (owner sees all statuses — RLS scopes to own classes).
+  const { data: quizzes, error: quizzesError } = await supabase
+    .from("quizzes")
+    .select("id, title, mode, status, time_limit_sec, created_at")
+    .eq("class_id", id)
+    .order("created_at", { ascending: false })
+    .limit(200);
+
+  if (quizzesError) {
+    console.error("Quizzes fetch error:", quizzesError);
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-8">
+        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
+          Could not load the quizzes right now. Please refresh.
+        </p>
+      </div>
+    );
+  }
+
+  return <ClassDetailClient cls={cls} roster={roster} quizzes={quizzes ?? []} />;
 }

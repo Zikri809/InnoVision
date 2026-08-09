@@ -101,6 +101,21 @@
 | D16 | **Concurrent double-join** (P2) | two simultaneous `join_class` calls, same student+code | exactly one succeeds; the other returns `already_enrolled` (PK conflict, no 500) |
 | D17 | **Lecturer cannot join** (P2) | lecturer calls `join_class` with a valid code | typed `not_student`; no enrollment row |
 | D18 | **Join-code charset** (P2) | insert/update `classes.join_code` with disallowed chars (`ABC01!`, lowercase, `0/O/1/I`) | CHECK constraint rejects; stored codes always uppercase canonical |
+| D19 | **Quiz lifecycle (P3)** | owner creates draft quiz → adds questions → reorders → publishes | draft → live; reorder renumbers correctly; publish succeeds with ≥1 question |
+| D20 | **Quiz isolation (P3)** | lecturer B reads A's quiz/questions; student/lecturer-B create a quiz in A's class | 0 rows / RLS insert denied |
+| D21 | **Publish empty quiz (P3)** | `UPDATE quizzes SET status='live'` on a 0-question quiz | trigger error `cannot_publish_empty_quiz` |
+| D22 | **Questions locked after publish (P3)** | question INSERT/UPDATE/DELETE once quiz is `live` | trigger error `questions_locked_quiz_not_draft` (even direct SQL) |
+| D23 | **Draft secrecy (P3)** | enrolled student reads quizzes | sees `live` row, **not** `draft`; unenrolled student sees nothing |
+| D24 | **One-way status machine (P3)** | `live→draft`, `closed→live` | trigger errors (`live_quiz_cannot_reopen` / `closed_quiz_cannot_transition`); `live→closed` allowed |
+| D25 | **Cascade delete (P3 hardening)** | delete a quiz WITH questions; delete a class containing one | succeeds (cascade); no `quiz_not_found` |
+| D26 | **Join-code secrecy (P3 hardening)** | enrolled student reads `classes` directly | 0 rows (owner-only); `student_class_view` exposes `id/title/created_at` only |
+| D27 | **Quiz column secrecy (P3 hardening)** | enrolled student reads `quizzes` directly | 0 rows (owner-only); `student_quiz_view` exposes live quiz metadata only (no `source_file_url`/`created_by`) |
+| D28 | **Biometric secrecy (P3 hardening)** | lecturer reads enrolled student's `profiles` | 0 rows (self-only); `student_roster_view` exposes names only (no `face_embedding`) |
+| D29 | **Quiz starts draft (P3 hardening)** | `INSERT quizzes SET status='live'` | trigger error `quiz_must_start_draft` (D21 holds on every write path) |
+| D30 | **Question immutability (P3 hardening)** | `UPDATE questions SET quiz_id=...` on a live quiz | trigger error `question_quiz_id_immutable` |
+| D31 | **Metadata edit-lock (P3 hardening)** | `UPDATE quizzes SET title/mode/time_limit` on a live/closed quiz | trigger error `quiz_not_draft_edit` |
+| D32 | **Append serialization (P3 hardening)** | N concurrent `append_question` on one draft quiz | order_index 0..N-1, no duplicates (advisory lock) |
+| D33 | **DB/Zod length backstops (P3 hardening)** | options >500 / explanation >2000 / duplicate-after-trim via direct SQL | trigger errors (`option_too_long`/`explanation_too_long`/`duplicate_options`); empty-after-trim rejected |
 
 ---
 
@@ -134,6 +149,19 @@
 | I18 | `POST /api/ocr/vision` | images array | returns concatenated text; **nothing written to storage** |
 | I19 | vision OCR | **payload too large (>3 pages)** | client batches into ≤3-page requests; oversized single request → 413 |
 | I20 | **AuthZ sweep** | student hits every lecturer-only route (`unlock`, `exempt-face`, `reset`, `regenerate-question`, `generate-quiz`) | all → 403 |
+| I-Q1 | `POST /api/classes/[id]/quizzes` (P3) | student creates a quiz | 403 |
+| I-Q2 | `PATCH /api/quizzes/[id]` (P3) | student edits a quiz | 403 |
+| I-Q3 | `DELETE /api/quizzes/[id]` (P3) | student deletes a quiz | 403 |
+| I-Q4 | `POST /api/quizzes/[id]/publish` (P3) | student publishes | 403 |
+| I-Q5 | `POST /api/quizzes/[id]/questions` (P3) | student adds a question | 403 |
+| I-Q6 | `PATCH/DELETE /api/quizzes/[id]/questions/[questionId]` (P3) | student edits/deletes a question | 403 |
+| I-Q7 | `POST /api/quizzes/[id]/reorder` (P3) | student reorders | 403 |
+| I-Q8 | any quiz route | **non-owner lecturer** | 404 (no oracle — same as not-found) |
+| I-Q9 | create quiz / add question | invalid body (empty title, `correctIndex` out of range) | 400 `invalid_body` |
+| I-Q10 | publish | 0 questions | 409 `no_questions` |
+| I-Q11 | question edit | quiz not `draft` (live/closed) | 409 `quiz_not_draft` |
+| I-Q12 | add question | happy path | 201, `order_index` appended after max |
+| I-Q13 | reorder | happy path (RPC stub) | 200 `{ok:true}`; RPC `foreign_question_id` → 400 |
 | I21 | `DELETE /api/sessions/[id]/reset` | lecturer resets an attempt | session + answers + face_checks deleted, audit row written, **student can start again** (unique slot released) |
 | I22 | **Periodic verify cadence** (fake clock) | advance clock while question displayed | verify fires every 30–45s jittered; **no fire while `paused`/`flagged`/between questions** |
 
@@ -203,7 +231,8 @@ The critical guarantees the demo lives or dies by, and where each is proven:
 | Re-enrollment + privileged-action audit | D11, D13 |
 | Supervisor override + session reset | E7, E5b, I21 |
 | Anti-replay nonce | I5c, D14 |
-| Lecturer-route authorization | I20 |
+| Lecturer-route authorization | I20, I-Q1–I-Q8 |
+| Manual-builder publish/lock | D19–D24, I-Q9–I-Q13, E1b |
 | Vision-OCR body-limit batching | I19, manual #7 |
 | Periodic verify cadence | I22 |
 | Consent gate | I1, E3b |
@@ -218,7 +247,7 @@ The build is **gated**: each phase below must (a) deliver its feature, (b) pass 
 |---|---|---|
 | **P1 Scaffold** | E1a — register/login as lecturer + student; consent checkbox persists | Both roles authenticate; unconsented users hit the consent screen |
 | **P2 Classes** | D8, D12, D15–D18 · E1 — create class → join via code → roster updates | Student enrolls via code; lecturer A cannot see lecturer B's classes/files; join is idempotent and code-checked |
-| **P3 Manual builder** | D5, D6 · I20 | Lecturer hand-builds and publishes a quiz; students never see `correct_index`; student role blocked from all lecturer routes |
+| **P3 Manual builder** | D5, D6 · I20 · D19–D33, I-Q1–I-Q13 · **E1b** | Lecturer hand-builds and publishes a quiz; students never see `correct_index`/join_code/source_file_url/embeddings; student role blocked from all lecturer routes; draft/live/closed state machine + question/metadata immutability enforced at the DB layer |
 | **P4 Extraction + AI generation** ★ | U-A1–U-A7 · U-E1–U-E7 · I14–I19 · E2 | Real chapter PDF (incl. scanned via Tesseract) → editable, publishable quiz; invalid AI output inserts **zero** rows; vision-OCR route returns text + stores nothing, batches under body limit |
 | **P5 Play screen (click-first)** | U-T1–U-T3 · D1, D1b, D2–D4, D7, D9 · I7–I13 · E4, E5, E10, E11 | Full quiz playable with mouse; one-attempt enforced; timer enforced server-side; re-answer rules correct per mode |
 | **P6 Gesture layer** | U-G1–U-G7 · E8, E9, E9b | Full quiz playable hands-free; mid-hold change and hand-loss behave; hand-loss auto-pauses (recovery proven in P7) |

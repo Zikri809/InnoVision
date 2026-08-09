@@ -15,42 +15,39 @@ export type RosterEntry = {
 };
 
 /**
- * Fetch the roster for a class: enrollments joined with student full names.
- * Used by both the lecturer detail page and the GET /api/classes/[id] route so
- * the two-step fetch lives in one place. `enrolled_at` is a string (ISO) from
- * PostgREST.
+ * Fetch the roster for a class via the student_roster_view: enrollments joined
+ * with student full names, scoped by is_lecturer_of_class. Used by both the
+ * lecturer detail page and the GET /api/classes/[id] route so the fetch lives
+ * in one place. `enrolled_at` is a string (ISO) from PostgREST.
+ *
+ * The view projects ONLY student_id/full_name/enrolled_at — it can never
+ * expose biometric data (face_embedding) or other profile columns to a
+ * lecturer (security audit MED-3). Direct `profiles` SELECT is self-only.
  */
+export const ROSTER_LIMIT = 100;
+
 export async function getClassRoster(
   supabase: SupabaseClient<Database>,
   classId: string,
 ): Promise<{ roster: RosterEntry[]; error: string | null }> {
-  const { data: enrollmentRows, error: enrollmentError } = await supabase
-    .from("class_enrollments")
-    .select("student_id, enrolled_at")
+  const { data: rows, error } = await supabase
+    .from("student_roster_view")
+    .select("student_id, full_name, enrolled_at")
     .eq("class_id", classId)
     .order("enrolled_at", { ascending: true })
-    .limit(500);
+    .limit(ROSTER_LIMIT);
 
-  if (enrollmentError) return { roster: [], error: enrollmentError.message };
+  if (error) return { roster: [], error: error.message };
 
-  const rows = enrollmentRows ?? [];
-  const studentIds = rows.map((r) => r.student_id);
-  let nameById = new Map<string, string | null>();
-
-  if (studentIds.length > 0) {
-    const { data: students, error: studentsError } = await supabase
-      .from("profiles")
-      .select("id, full_name")
-      .in("id", studentIds);
-    if (studentsError) return { roster: [], error: studentsError.message };
-    nameById = new Map((students ?? []).map((s) => [s.id, s.full_name]));
-  }
-
-  const roster = rows.map((e) => ({
-    student_id: e.student_id,
-    enrolled_at: e.enrolled_at,
-    full_name: nameById.get(e.student_id) ?? null,
-  }));
+  // The view's generated types mark columns nullable; the underlying columns
+  // are NOT NULL. Narrow to the non-null shape the client expects.
+  const roster = (rows ?? [])
+    .filter((r) => r.student_id && r.enrolled_at)
+    .map((r) => ({
+      student_id: r.student_id!,
+      enrolled_at: r.enrolled_at!,
+      full_name: r.full_name,
+    }));
 
   return { roster, error: null };
 }

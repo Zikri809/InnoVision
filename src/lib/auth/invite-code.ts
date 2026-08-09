@@ -1,11 +1,14 @@
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 
 /**
  * Constant-time comparison for the lecturer invite code.
  *
- * `timingSafeEqual` throws on length mismatch, so we normalize both sides to
- * fixed-length buffers first. An empty/missing expected code means lecturer
- * self-signup is disabled entirely (fail closed).
+ * `timingSafeEqual` throws on length mismatch, and a bare length check leaks a
+ * length oracle, so both sides are first hashed (SHA-256) to fixed-length
+ * buffers. Comparing hashes is constant-time regardless of the input length,
+ * and the hash pre-image is the actual secret — the compare never touches the
+ * raw values. An empty/missing expected code means lecturer self-signup is
+ * disabled entirely (fail closed).
  */
 export function isValidInviteCode(
   input: string | undefined | null,
@@ -16,9 +19,8 @@ export function isValidInviteCode(
   if (!expectedCode || !input) return false;
   if (typeof input !== "string") return false;
 
-  const a = Buffer.from(input.trim());
-  const b = Buffer.from(expectedCode.trim());
-  if (a.length !== b.length || a.length === 0) return false;
+  const a = createHash("sha256").update(input.trim(), "utf8").digest();
+  const b = createHash("sha256").update(expectedCode.trim(), "utf8").digest();
 
   return timingSafeEqual(a, b);
 }

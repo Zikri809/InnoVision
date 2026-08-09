@@ -39,12 +39,29 @@ export async function register({
 }): Promise<RegisterResult> {
   const wantsLecturer = Boolean(inviteCode && inviteCode.trim().length > 0);
 
+  // Basic input validation BEFORE any DB/auth work. Mirrors the bounds used
+  // elsewhere (title/prompt) so a pathological payload can't bloat the DB or
+  // reach Supabase's auth API with garbage. Email format + password minimum
+  // match the client-side checks; full_name is capped because it is rendered
+  // on every roster page.
+  const trimmedEmail = email.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+    return { session: false, error: "Please enter a valid email address." };
+  }
+  if (typeof password !== "string" || password.length < 6) {
+    return { session: false, error: "Password must be at least 6 characters." };
+  }
+  const trimmedName = fullName?.trim() ?? "";
+  if (trimmedName.length > 200) {
+    return { session: false, error: "Full name must be at most 200 characters." };
+  }
+
   // Rate-limit lecturer signup attempts (the invite code is a shared secret;
   // without a cap an attacker could brute-force it via repeated calls).
   // Both budgets must pass (&&): the per-email cap AND the global cap, so an
   // attacker rotating emails can't bypass the global throttle via short-circuit.
   if (wantsLecturer) {
-    const rateKey = `invite:${email.trim().toLowerCase()}`;
+    const rateKey = `invite:${trimmedEmail}`;
     const allowed =
       rateLimit(rateKey, INVITE_RATE) && rateLimit("invite:global", {
         limit: 100,
@@ -67,7 +84,7 @@ export async function register({
   const supabase = await createServerActionClient();
 
   const { data, error } = await supabase.auth.signUp({
-    email,
+    email: trimmedEmail,
     password,
     options: {
       data: {

@@ -152,9 +152,20 @@ async function main() {
     joinLectErr === null && joinLect?.error === "not_student",
     JSON.stringify(joinLectErr?.message ?? joinLect));
 
-  // ── D8: student sees 1 class after joining; roster visible to A ──
-  const { data: sClassesAfter } = await clientS.from("classes").select("id").eq("id", clsA.id);
-  record("D8 student sees enrolled class", (sClassesAfter ?? []).length === 1);
+  // ── D8: student sees enrolled class via the join_code-free view; roster ──
+  // The `classes` table is owner-only now (M-1 join-code secrecy) — a student
+  // must NOT read it directly, but MUST see the enrolled class through
+  // student_class_view.
+  const { data: sClassesDirect } = await clientS.from("classes").select("id").eq("id", clsA.id);
+  record("D8 student direct classes read denied (M-1)", (sClassesDirect ?? []).length === 0,
+    `S sees ${(sClassesDirect ?? []).length} direct rows (expect 0)`);
+
+  const { data: sClassesAfter } = await clientS
+    .from("student_class_view")
+    .select("id")
+    .eq("id", clsA.id);
+  record("D8 student sees enrolled class via view", (sClassesAfter ?? []).length === 1,
+    `S sees ${(sClassesAfter ?? []).length} via view (expect 1)`);
 
   const { data: aRoster } = await clientA
     .from("class_enrollments")

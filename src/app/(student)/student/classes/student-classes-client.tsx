@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -64,11 +65,19 @@ export function StudentClassesClient({ classes }: { classes: ClassRow[] }) {
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold">My Classes</h1>
-        <p className="text-sm text-muted-foreground">
-          Enter a join code provided by your lecturer.
-        </p>
+      <div className="mb-6 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">My Classes</h1>
+          <p className="text-sm text-muted-foreground">
+            Enter a join code provided by your lecturer.
+          </p>
+        </div>
+        <Link
+          href="/student/quizzes"
+          className="text-sm font-medium text-primary hover:underline"
+        >
+          Available quizzes →
+        </Link>
       </div>
 
       <Card className="mb-8">

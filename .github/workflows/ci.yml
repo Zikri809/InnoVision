@@ -9,7 +9,11 @@ jobs:
   test:
     runs-on: ubuntu-latest
     env:
-      LECTURER_INVITE_CODE: ci-invite-code
+      # High-entropy, CI-only invite code. NEVER reuse this value in a deployed
+      # environment — the invite code is the single privilege gate to lecturer
+      # role (security audit H-1). Provision a fresh, random, high-entropy code
+      # (>= 24 chars) per environment and rotate it.
+      LECTURER_INVITE_CODE: ci-invite-code-7f3a9c2e4b8d1f6a0e5c7b3a
     steps:
       - uses: actions/checkout@v4
 
@@ -60,12 +64,15 @@ jobs:
       - name: Phase 2 classes probes (D8/D12)
         run: npm run verify:classes
 
+      - name: Phase 3 quizzes probes (D5/D6/D19-D24)
+        run: npm run verify:quizzes
+
       - name: Build
         run: npm run build
 
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
 
-      - name: E2E (E1a regression + E1 classes)
+      - name: E2E (E1a + E1 + E1b regression)
         run: npx playwright test
         timeout-minutes: 15
