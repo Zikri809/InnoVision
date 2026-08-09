@@ -1,4 +1,4 @@
-﻿export type Json =
+export type Json =
   | string
   | number
   | boolean
@@ -34,6 +34,71 @@ export type Database = {
   }
   public: {
     Tables: {
+      class_enrollments: {
+        Row: {
+          class_id: string
+          enrolled_at: string
+          student_id: string
+        }
+        Insert: {
+          class_id: string
+          enrolled_at?: string
+          student_id: string
+        }
+        Update: {
+          class_id?: string
+          enrolled_at?: string
+          student_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "class_enrollments_class_id_fkey"
+            columns: ["class_id"]
+            isOneToOne: false
+            referencedRelation: "classes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "class_enrollments_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      classes: {
+        Row: {
+          created_at: string
+          id: string
+          join_code: string
+          lecturer_id: string
+          title: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          join_code: string
+          lecturer_id: string
+          title: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          join_code?: string
+          lecturer_id?: string
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "classes_lecturer_id_fkey"
+            columns: ["lecturer_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           consent_given_at: string | null
@@ -66,7 +131,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      is_enrolled_in_class: { Args: { p_class_id: string }; Returns: boolean }
+      is_lecturer: { Args: never; Returns: boolean }
+      is_lecturer_of_class: { Args: { p_class_id: string }; Returns: boolean }
+      join_class: { Args: { code: string }; Returns: Json }
     }
     Enums: {
       user_role: "lecturer" | "student"
@@ -194,7 +262,13 @@ export type CompositeTypes<
     ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
     : never
 
-export type UserRole = Database["public"]["Enums"]["user_role"];
-
-export type Profile = Database["public"]["Tables"]["profiles"]["Row"];
-
+export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
+  public: {
+    Enums: {
+      user_role: ["lecturer", "student"],
+    },
+  },
+} as const

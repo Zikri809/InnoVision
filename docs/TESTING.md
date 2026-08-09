@@ -97,6 +97,10 @@
 | D12 | `quiz-sources` storage | lecturer reads own file; other users denied |
 | D13 | **`audit_events` written on privileged actions** | unlock / exempt-face / session-reset / re-enroll each write a row with correct `actor_id`, `subject_id`, `action` |
 | D14 | **`verify_nonce` rotation** | successful verify rotates nonce; replayed request with the old nonce → 409 |
+| D15 | **Join idempotency** (P2) | second `join_class` for an already-enrolled student → typed `already_enrolled`, no duplicate row, no error |
+| D16 | **Concurrent double-join** (P2) | two simultaneous `join_class` calls, same student+code | exactly one succeeds; the other returns `already_enrolled` (PK conflict, no 500) |
+| D17 | **Lecturer cannot join** (P2) | lecturer calls `join_class` with a valid code | typed `not_student`; no enrollment row |
+| D18 | **Join-code charset** (P2) | insert/update `classes.join_code` with disallowed chars (`ABC01!`, lowercase, `0/O/1/I`) | CHECK constraint rejects; stored codes always uppercase canonical |
 
 ---
 
@@ -142,7 +146,8 @@
 | # | Flow | Steps | Expected |
 |---|---|---|---|
 | E1a | **Auth both roles + consent persists** | register as lecturer → logout → register as student (check consent) → logout/in | both roles authenticate; consent checkbox state persists across sessions; unconsented user is routed to consent screen |
-| E1 | **Lecturer: class → quiz → publish** | register lecturer → create class (get join code) → manual-add 3 questions → publish as practice | quiz appears live for enrolled students |
+| E1 | **Lecturer: class → join via code → roster** (P2 scope) | register lecturer → create class (capture join code) → register student → join via code → lecturer opens class | roster shows the enrolled student; student sees the class in their list |
+| E1b | **Lecturer: manual quiz → publish** (P3 scope) | (after P3) create class → manual-add 3 questions → publish as practice | quiz appears live for enrolled students |
 | E2 | **Lecturer: AI generation** | upload sample chapter PDF → extraction cascade runs (mock native) → generate (MSW) → review screen shows editable questions → edit one → publish | edited question persists; status live |
 | E3 | **Student: enroll + consent** | register student → join class via code → consent screen → face-enroll (fake embedder) | `consent_given_at` set, embedding stored |
 | E3b | **Consent gate** | student skips consent → attempts to reach face-enroll directly | blocked; no embedding stored (API 403, I1 end-to-end) |
@@ -164,7 +169,7 @@
 ## 6. Coverage Targets & CI
 
 - **Unit + integration:** run on every push (`vitest run`), target **≥80%** on `lib/face`, `lib/gestures`, `lib/ai`, `lib/extract`, scoring/timer, **`app/api/sessions/*` and `app/api/face/*`** (they carry the integrity logic). CRUD/UI can be lower.
-- **DB/RLS:** `supabase start` in CI, run SQL test suite; **D1–D14 are blocking** (they guard the demo's core promises).
+- **DB/RLS:** `supabase start` in CI, run SQL test suite; **D1–D18 are blocking** (they guard the demo's core promises). Phase 2 D8/D12 are additionally proven by `scripts/verify-classes.mjs` (real anon-token clients).
 - **E2E:** Playwright on PRs; **E5, E6, E7, E8, E12 are the five "demo-killer" tests** — if any fail, do not demo.
 - **AI tests never hit a real model** — MSW serves canned valid/invalid JSON (keeps CI free and deterministic).
 
@@ -212,7 +217,7 @@ The build is **gated**: each phase below must (a) deliver its feature, (b) pass 
 | Phase | Gate tests | Exit criteria |
 |---|---|---|
 | **P1 Scaffold** | E1a — register/login as lecturer + student; consent checkbox persists | Both roles authenticate; unconsented users hit the consent screen |
-| **P2 Classes** | D8, D12 · E1 — create class → join via code → roster updates | Student enrolls via code; lecturer A cannot see lecturer B's classes/files |
+| **P2 Classes** | D8, D12, D15–D18 · E1 — create class → join via code → roster updates | Student enrolls via code; lecturer A cannot see lecturer B's classes/files; join is idempotent and code-checked |
 | **P3 Manual builder** | D5, D6 · I20 | Lecturer hand-builds and publishes a quiz; students never see `correct_index`; student role blocked from all lecturer routes |
 | **P4 Extraction + AI generation** ★ | U-A1–U-A7 · U-E1–U-E7 · I14–I19 · E2 | Real chapter PDF (incl. scanned via Tesseract) → editable, publishable quiz; invalid AI output inserts **zero** rows; vision-OCR route returns text + stores nothing, batches under body limit |
 | **P5 Play screen (click-first)** | U-T1–U-T3 · D1, D1b, D2–D4, D7, D9 · I7–I13 · E4, E5, E10, E11 | Full quiz playable with mouse; one-attempt enforced; timer enforced server-side; re-answer rules correct per mode |

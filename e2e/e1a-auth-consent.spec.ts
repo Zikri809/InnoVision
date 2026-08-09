@@ -1,56 +1,39 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect } from "@playwright/test";
+import { registerUser, E2E_PASSWORD } from "./helpers";
 
 const TEST_TIMESTAMP = Date.now();
 const LECTURER_EMAIL = `lecturer-e1a-${TEST_TIMESTAMP}@innovision.test`;
 const STUDENT_EMAIL = `student-e1a-${TEST_TIMESTAMP}@innovision.test`;
-const PASSWORD = "testpass123";
+const LECTURER_INVITE_CODE = process.env.LECTURER_INVITE_CODE ?? "";
 
 /**
  * E1a — Auth both roles + consent persists
  *
  * Gate test for Phase 1 (Scaffold).
  * Verifies:
- *  1. Register as lecturer → redirected to dashboard
+ *  1. Register as lecturer (requires LECTURER_INVITE_CODE) → lecturer landing
  *  2. Logout → redirected to login
- *  3. Register as student (with consent checkbox) → redirected to dashboard
- *  4. Logout/in → consent state persists (shown on dashboard)
+ *  3. Register as student (with consent checkbox) → student landing
+ *  4. Logout/in → consent state persists (shown on the landing page)
  *  5. Unconsented user is blocked from proceeding without consent
  *
  * Prerequisites: local Supabase running (`supabase start`) + migrations applied.
+ * The LECTURER_INVITE_CODE env var must be set (CI/local .env.local).
  */
-
-async function registerUser(
-  page: Page,
-  email: string,
-  role: "lecturer" | "student",
-) {
-  await page.goto("/register");
-  await page.getByLabel("Full name (optional)").fill(`${role}-test`);
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
-
-  // Select role
-  const roleLabel = role.charAt(0).toUpperCase() + role.slice(1);
-  await page.getByRole("radio", { name: roleLabel }).check();
-
-  // Check consent checkbox (required)
-  await page.getByRole("checkbox").check();
-
-  await page.getByRole("button", { name: /register/i }).click();
-}
 
 test.describe("E1a — Auth both roles + consent persists", () => {
   test("register as lecturer, logout, register as student, consent persists", async ({
     page,
   }) => {
-    // ── 1. Register as lecturer ──────────────────────────────
-    await registerUser(page, LECTURER_EMAIL, "lecturer");
+    test.skip(!LECTURER_INVITE_CODE, "LECTURER_INVITE_CODE not set");
 
-    // Should be redirected to dashboard
-    await expect(page).toHaveURL(/\/dashboard/);
-    await expect(page.getByText("InnoVision", { exact: true })).toBeVisible();
+    // ── 1. Register as lecturer ──────────────────────────────
+    await registerUser(page, LECTURER_EMAIL, "lecturer", LECTURER_INVITE_CODE);
+    await expect(page).toHaveURL(/\/lecturer\/classes/);
+    await expect(
+      page.getByRole("heading", { name: "My Classes" }),
+    ).toBeVisible();
     await expect(page.getByText(LECTURER_EMAIL)).toBeVisible();
-    await expect(page.getByText(/lecturer/i).first()).toBeVisible();
     await expect(page.getByText("Given ✓")).toBeVisible();
 
     // ── 2. Logout ────────────────────────────────────────────
@@ -58,12 +41,9 @@ test.describe("E1a — Auth both roles + consent persists", () => {
     await expect(page).toHaveURL(/\/login/);
 
     // ── 3. Register as student ───────────────────────────────
-    await registerUser(page, STUDENT_EMAIL, "student");
-
-    // Should be redirected to dashboard
-    await expect(page).toHaveURL(/\/dashboard/);
+    await registerUser(page, STUDENT_EMAIL, "student", LECTURER_INVITE_CODE);
+    await expect(page).toHaveURL(/\/student\/classes/);
     await expect(page.getByText(STUDENT_EMAIL)).toBeVisible();
-    await expect(page.getByText(/student/i).first()).toBeVisible();
     await expect(page.getByText("Given ✓")).toBeVisible();
 
     // ── 4. Logout, then login again — consent persists ───────
@@ -71,11 +51,11 @@ test.describe("E1a — Auth both roles + consent persists", () => {
     await expect(page).toHaveURL(/\/login/);
 
     await page.getByLabel("Email").fill(STUDENT_EMAIL);
-    await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
+    await page.getByLabel("Password", { exact: true }).fill(E2E_PASSWORD);
     await page.getByRole("button", { name: /sign in/i }).click();
 
     // Consent should still show as given
-    await expect(page).toHaveURL(/\/dashboard/);
+    await expect(page).toHaveURL(/\/student\/classes/);
     await expect(page.getByText("Given ✓")).toBeVisible();
   });
 
@@ -84,7 +64,7 @@ test.describe("E1a — Auth both roles + consent persists", () => {
 
     await page.goto("/register");
     await page.getByLabel("Email").fill(email);
-    await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
+    await page.getByLabel("Password", { exact: true }).fill(E2E_PASSWORD);
     await page.getByRole("radio", { name: "Student" }).check();
 
     // Register button should be disabled without consent

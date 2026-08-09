@@ -3,7 +3,8 @@
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
+import { login } from "@/lib/auth/login";
+import { sanitizeRedirect } from "@/lib/auth/redirect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,7 +20,12 @@ import {
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirect = searchParams.get("redirect") ?? "/dashboard";
+  // Anti-open-redirect: only allow same-origin local paths (mirrors the auth
+  // callback). Handles protocol-relative, absolute, and backslash variants.
+  const redirect = sanitizeRedirect(
+    searchParams.get("redirect"),
+    window.location.origin,
+  );
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -31,14 +37,10 @@ function LoginForm() {
     setError(null);
     setLoading(true);
 
-    const supabase = createClient();
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    const { error } = await login({ email, password });
 
     if (error) {
-      setError(error.message);
+      setError(error);
       setLoading(false);
       return;
     }

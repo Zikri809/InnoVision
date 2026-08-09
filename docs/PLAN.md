@@ -1,7 +1,7 @@
 # InnoVision — Implementation Plan
 
 > **MVP Goal:** Lecturer-created, AI-generated, gesture-answered quizzes with continuous face verification for assessments.
-> **Stack:** Next.js 15 (App Router) · TypeScript · Supabase · shadcn/ui · MediaPipe · OpenAI-compatible AI
+> **Stack:** Next.js 16.3 (App Router) · TypeScript · Supabase · shadcn/ui · MediaPipe · OpenAI-compatible AI
 > **Demo scale:** ~20 students · Vercel + Supabase free tiers
 
 ---
@@ -276,7 +276,7 @@ components/
 
 | # | Phase | Depends on | Deliverable | Gate — done when |
 |---|---|---|---|---|
-| 1 | **Scaffold** | — | Next.js 15 + TS + Tailwind + shadcn + Supabase; env setup; email auth; role selection; consent checkbox | Register/login as both roles; consent state persists |
+| 1 | **Scaffold** | — | Next.js 16 + TS + Tailwind + shadcn + Supabase; env setup; email auth; role selection; consent checkbox | Register/login as both roles; consent state persists |
 | 2 | **Classes** | P1 | Class CRUD, join codes (retry-on-collision), enrollment, RLS | Student joins class via code; cross-lecturer isolation proven by DB tests |
 | 3 | **Manual builder** | P2 | Question CRUD UI (mcq/true_false only), publish flow | Lecturer builds a quiz by hand, publishes it (status `live`) |
 | 4 | **Extraction + AI generation** ★ | P3 | Upload → native/OCR cascade → generate → **review/edit/reorder/regenerate** → publish | AI quiz from a real chapter PDF (incl. scanned PDF via free OCR) is editable and publishable |
@@ -285,6 +285,8 @@ components/
 | 7 | **Face pipeline** | P5 (P6 optional) | Consent → enrollment (blink + 5 frames) → assessment gate → continuous verify (start / Q-transition / 30–45s jittered) + paused/flagged split | Wrong face at Q3 → paused, then flagged after 3-in-5; lecturer-only unlock |
 | 8 | **Results & attendance** | P5 + P7 | Lecturer dashboard: sessions = attendance (incl. **"abandoned"** derived state), scores, face-check timeline, flags, **unlock + face-exempt + session-reset buttons** (all audited), source-text preview in builder | Lecturer sees who attended + integrity status; can reset a dead-laptop attempt |
 | 9 | **Hardening & deploy** | P1–P8 | RLS audit, error states, model preloading (self-hosted `/public/models`), Vercel deploy | Demo-ready URL + full manual checklist (TESTING §7) green |
+
+> **Phase 2 detail:** see [docs/PLAN_PHASE2.md](PLAN_PHASE2.md) — the validated, execution-ready plan. Key additions beyond §1/§2 above: lecturer provisioning via a server-side `LECTURER_INVITE_CODE` (env-gated, service-role promotion; the audit's "privileged path"), the private `quiz-sources` storage bucket migration (D12), and the `join_class` security-definer RPC as the **only** enrollment insert path.
 
 ### Phase → gate tests (defined in TESTING.md §9)
 

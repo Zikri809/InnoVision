@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      LECTURER_INVITE_CODE: ci-invite-code
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Start local Supabase
+        run: npx supabase start
+        timeout-minutes: 10
+
+      - name: Write .env.local from Supabase status
+        run: |
+          npx supabase status -o env > .env.local
+          # `supabase status -o env` emits API_URL/ANON_KEY/SERVICE_ROLE_KEY, but
+          # the app/scripts read NEXT_PUBLIC_SUPABASE_URL/NEXT_PUBLIC_SUPABASE_ANON_KEY/
+          # SUPABASE_SERVICE_ROLE_KEY. Map them explicitly (and strip quotes).
+          echo "NEXT_PUBLIC_SUPABASE_URL=$(grep '^API_URL=' .env.local | cut -d= -f2- | tr -d '\"')" >> .env.local
+          echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$(grep '^ANON_KEY=' .env.local | cut -d= -f2- | tr -d '\"')" >> .env.local
+          echo "SUPABASE_SERVICE_ROLE_KEY=$(grep '^SERVICE_ROLE_KEY=' .env.local | cut -d= -f2- | tr -d '\"')" >> .env.local
+          # Add the non-Supabase vars needed by the app/tests
+          echo "LECTURER_INVITE_CODE=${{ env.LECTURER_INVITE_CODE }}" >> .env.local
+          echo "FACE_MATCH_THRESHOLD=0.6" >> .env.local
+          echo "TIMER_GRACE_SEC=5" >> .env.local
+
+      - name: Reset DB (apply migrations)
+        run: npx supabase db reset
+
+      - name: Regenerate types
+        run: npm run gen:types
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Phase 1 security probes (live DB, real tokens)
+        run: npm run verify:security
+
+      - name: Phase 2 classes probes (D8/D12)
+        run: npm run verify:classes
+
+      - name: Build
+        run: npm run build
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: E2E (E1a regression + E1 classes)
+        run: npx playwright test
+        timeout-minutes: 15

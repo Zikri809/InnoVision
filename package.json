@@ -13,9 +13,11 @@
     "test:e2e": "playwright test",
     "db:reset": "supabase db reset",
     "db:push": "supabase db push",
-    "gen:types": "supabase gen types typescript --local > src/lib/types/database.ts",
+    "gen:types": "node scripts/gen-types.mjs",
     "supabase:start": "supabase start",
-    "supabase:stop": "supabase stop"
+    "supabase:stop": "supabase stop",
+    "verify:security": "node scripts/verify-security.mjs",
+    "verify:classes": "node scripts/verify-classes.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
@@ -38,9 +40,11 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "babel-plugin-react-compiler": "1.0.0",
+    "dotenv": "^17.4.2",
     "eslint": "^9",
     "eslint-config-next": "16.3.0",
     "msw": "^2.15.0",
+    "supabase": "^2.113.0",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^4.1.10"

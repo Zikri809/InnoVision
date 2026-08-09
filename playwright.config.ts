@@ -1,4 +1,12 @@
 import { defineConfig, devices } from "@playwright/test";
+import { config as loadEnv } from "dotenv";
+import { existsSync } from "fs";
+
+// Load .env.local (without overriding already-set process env) so E2E specs
+// see LECTURER_INVITE_CODE etc. without requiring shell exports.
+if (existsSync(".env.local")) {
+  loadEnv({ path: ".env.local", override: false });
+}
 
 const PORT = process.env.PLAYWRIGHT_PORT ?? "3001";
 const BASE_URL = `http://localhost:${PORT}`;

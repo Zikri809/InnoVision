@@ -3,8 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
-import type { UserRole } from "@/lib/types/database";
+import { register } from "@/lib/auth/register";
+import type { UserRole } from "@/lib/types/aliases";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,7 +28,9 @@ export default function RegisterPage() {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  // Display-only for the picker; the server action always registers "student".
   const [role, setRole] = useState<UserRole>("student");
+  const [inviteCode, setInviteCode] = useState("");
   const [consent, setConsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -47,38 +49,27 @@ export default function RegisterPage() {
       return;
     }
 
+    if (role === "lecturer" && !inviteCode.trim()) {
+      setError("A lecturer invite code is required to register as a lecturer.");
+      return;
+    }
+
     setLoading(true);
 
-    const supabase = createClient();
-    const { data, error } = await supabase.auth.signUp({
+    const { session, error } = await register({
       email,
       password,
-      options: {
-        data: {
-          role,
-          full_name: fullName || undefined,
-        },
-      },
+      fullName: fullName || undefined,
+      inviteCode: role === "lecturer" ? inviteCode : undefined,
     });
 
     if (error) {
-      setError(error.message);
+      setError(error);
       setLoading(false);
       return;
     }
 
-    // If email confirmation is disabled (local dev), sign in immediately
-    // and record consent timestamp on the profile.
-    if (data.session) {
-      const { error: consentError } = await supabase
-        .from("profiles")
-        .update({ consent_given_at: new Date().toISOString() })
-        .eq("id", data.user!.id);
-
-      if (consentError) {
-        console.error("Failed to record consent:", consentError);
-      }
-
+    if (session) {
       router.push("/dashboard");
       router.refresh();
     } else {
@@ -154,6 +145,23 @@ export default function RegisterPage() {
                 </div>
               </RadioGroup>
             </div>
+            {role === "lecturer" && (
+              <div className="space-y-2">
+                <Label htmlFor="invite-code">Lecturer invite code</Label>
+                <Input
+                  id="invite-code"
+                  type="text"
+                  placeholder="Provided by your administrator"
+                  value={inviteCode}
+                  onChange={(e) => setInviteCode(e.target.value)}
+                  autoComplete="off"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Lecturer registration requires a valid invite code. Students
+                  do not need one.
+                </p>
+              </div>
+            )}
             <div className="flex items-start space-x-3 rounded-lg border p-3">
               <Checkbox
                 id="consent"
