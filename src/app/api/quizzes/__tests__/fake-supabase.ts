@@ -287,7 +287,7 @@ export class FakeSupabase {
   }
 
   storage = {
-    from: (_bucket: string) => ({
+    from: () => ({
       download: async (path: string) => {
         const bytes = this.storageFiles[path];
         if (!bytes) {

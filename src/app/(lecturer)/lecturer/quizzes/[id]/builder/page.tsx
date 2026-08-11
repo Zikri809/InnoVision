@@ -44,7 +44,7 @@ export default async function QuizBuilderPage({
   // the explicit eq() on lecturer_id makes the not-found case unambiguous.
   const { data: quiz, error: quizError } = await supabase
     .from("quizzes")
-    .select("id, class_id, title, mode, status, time_limit_sec, created_at")
+    .select("id, class_id, title, mode, status, time_limit_sec, created_at, source_file_url, source_text")
     .eq("id", id)
     .maybeSingle();
 
@@ -116,8 +116,17 @@ export default async function QuizBuilderPage({
         status: quiz.status,
         time_limit_sec: quiz.time_limit_sec,
         created_at: quiz.created_at,
+        source_file_url: quiz.source_file_url,
+        source_text: quiz.source_text,
       }}
       questions={questions ?? []}
+      userId={user.id}
+      ocrConfig={{
+        defaultEngine: (process.env.OCR_DEFAULT_ENGINE as "tesseract" | "glm" | "vision") ?? "tesseract",
+        ollamaBaseUrl: process.env.OLLAMA_BASE_URL ?? "http://localhost:11434",
+        glmModel: process.env.OCR_GLM_MODEL ?? "glm-ocr",
+        visionModel: process.env.OCR_VISION_MODEL ?? "gpt-4o-mini",
+      }}
     />
   );
 }

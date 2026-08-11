@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowDown, ArrowUp, Pencil, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Pencil, RefreshCw, Trash2, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,6 +22,9 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { GenerateFromFileDialog } from "@/components/extract/GenerateFromFileDialog";
+import { SourceTextPreview } from "@/components/extract/SourceTextPreview";
+import type { OcrConfig } from "@/lib/extract/types";
 
 type QuizInfo = {
   id: string;
@@ -32,6 +35,8 @@ type QuizInfo = {
   status: "draft" | "live" | "closed";
   time_limit_sec: number | null;
   created_at: string;
+  source_file_url: string | null;
+  source_text: string | null;
 };
 
 export type QuestionRow = {
@@ -81,9 +86,13 @@ const MODE_LABEL: Record<QuizInfo["mode"], string> = {
 export function QuizBuilderClient({
   quiz,
   questions,
+  userId,
+  ocrConfig,
 }: {
   quiz: QuizInfo;
   questions: QuestionRow[];
+  userId: string;
+  ocrConfig: OcrConfig;
 }) {
   const router = useRouter();
   const isDraft = quiz.status === "draft";
@@ -95,6 +104,9 @@ export function QuizBuilderClient({
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [generateOpen, setGenerateOpen] = useState(false);
+  const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
+  const [regenerateInstruction, setRegenerateInstruction] = useState("");
   const submitLock = useRef(false);
 
   function setOption(index: number, value: string) {
@@ -258,6 +270,38 @@ export function QuizBuilderClient({
     }
   }
 
+  async function handleRegenerate(q: QuestionRow) {
+    if (submitLock.current) return;
+    if (!window.confirm("Regenerate this question with AI? The current version will be replaced.")) return;
+    submitLock.current = true;
+    setRegeneratingId(q.id);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await fetch("/api/ai/regenerate-question", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          questionId: q.id,
+          ...(regenerateInstruction.trim() ? { instruction: regenerateInstruction.trim() } : {}),
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setError(body.message ?? body.error ?? "Could not regenerate the question.");
+        return;
+      }
+      setNotice("Question regenerated.");
+      setRegenerateInstruction("");
+      router.refresh();
+    } catch {
+      setError("Network error regenerating the question.");
+    } finally {
+      submitLock.current = false;
+      setRegeneratingId(null);
+    }
+  }
+
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
       <div className="mb-6">
@@ -278,8 +322,30 @@ export function QuizBuilderClient({
               {quiz.time_limit_sec}s time limit
             </span>
           )}
+          {isDraft && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setGenerateOpen(true)}
+              className="ml-auto"
+            >
+              <Wand2 className="mr-1.5 size-4" />
+              Generate from file
+            </Button>
+          )}
         </div>
       </div>
+
+      {isDraft && <SourceTextPreview text={quiz.source_text} />}
+
+      <GenerateFromFileDialog
+        quizId={quiz.id}
+        userId={userId}
+        config={ocrConfig}
+        open={generateOpen}
+        onOpenChange={setGenerateOpen}
+        hasQuestions={questions.length > 0}
+      />
 
       {!isDraft && (
         <div
@@ -500,41 +566,58 @@ export function QuizBuilderClient({
                     )}
                   </div>
                   {isDraft && (
-                    <div className="flex shrink-0 items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => startEdit(q)}
-                        aria-label="Edit question"
-                      >
-                        <Pencil className="size-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleMove(q, "up")}
-                        disabled={idx === 0}
-                        aria-label="Move up"
-                      >
-                        <ArrowUp className="size-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleMove(q, "down")}
-                        disabled={idx === questions.length - 1}
-                        aria-label="Move down"
-                      >
-                        <ArrowDown className="size-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDelete(q)}
-                        aria-label="Delete question"
-                      >
+                    <div className="flex shrink-0 flex-col items-end gap-1">
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => startEdit(q)}
+                          aria-label="Edit question"
+                        >
+                          <Pencil className="size-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleMove(q, "up")}
+                          disabled={idx === 0}
+                          aria-label="Move up"
+                        >
+                          <ArrowUp className="size-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleMove(q, "down")}
+                          disabled={idx === questions.length - 1}
+                          aria-label="Move down"
+                        >
+                          <ArrowDown className="size-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDelete(q)}
+                          aria-label="Delete question"
+                        >
                         <Trash2 className="size-4" />
                       </Button>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleRegenerate(q)}
+                        disabled={regeneratingId === q.id}
+                        aria-label="Regenerate question"
+                      >
+                        <RefreshCw className={`size-3.5 ${regeneratingId === q.id ? "animate-spin" : ""} mr-1`} />
+                        {regeneratingId === q.id ? "Regenerating…" : "Regenerate"}
+                      </Button>
+                      {regenerateInstruction && regeneratingId === q.id && (
+                        <p className="max-w-[200px] truncate text-[10px] text-muted-foreground">
+                          {regenerateInstruction}
+                        </p>
+                      )}
                     </div>
                   )}
                 </li>

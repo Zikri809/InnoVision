@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { requireQuizOwner } from "@/lib/quizzes/guards";
 import { isUuid } from "@/lib/classes/roster";
@@ -27,8 +28,6 @@ import {
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-type Params = { params: Promise<{ id: string }> };
-
 // Per-user rate limit on generation (token cost guard, S4). In-memory and
 // per-process — accepted at demo scale (documented in SECURITY_AUDIT).
 const GENERATE_RATE = { limit: 10, windowMs: 60 * 60 * 1000 };
@@ -55,38 +54,12 @@ const inFlight = new Set<string>();
  *  - Success → `replace_quiz_questions` replaces all draft questions
  *    atomically and sets title/source fields.
  */
-export async function POST(request: Request, { params }: Params) {
+export async function POST(request: Request, context?: { params?: Promise<{ id?: string }> }) {
   const supabase = await createClient();
-  const { id } = await params;
 
-  if (!isUuid(id)) return notFound();
-
-  const owner = await requireQuizOwner(supabase, id);
-  if (!owner.ok) return owner.response;
-  if (owner.quiz.status !== "draft") return notDraft();
-
-  // Rate-limit immediately after auth + ownership, before any heavy work (S4).
-  if (!rateLimit(`aiGenerate:${owner.userId}`, GENERATE_RATE)) {
-    return rateLimited("Too many quiz generations. Try again in an hour.");
-  }
-
-  // In-flight guard: prevent duplicate LLM spend for the same quiz.
-  if (inFlight.has(id)) {
-    return rateLimited("A generation for this quiz is already in progress.");
-  }
-  inFlight.add(id);
-  try {
-    return await handleGenerate(request, { supabase, quizId: id, userId: owner.userId });
-  } finally {
-    inFlight.delete(id);
-  }
-}
-
-async function handleGenerate(
-  request: Request,
-  ctx: { supabase: Awaited<ReturnType<typeof createClient>>; quizId: string; userId: string },
-): Promise<NextResponse> {
-  const { supabase, quizId, userId } = ctx;
+  // The route has no URL params (quizId comes from the body). Accept the
+  // optional context Next.js passes for route-handler compatibility.
+  void context;
 
   let body: unknown;
   try {
@@ -100,7 +73,48 @@ async function handleGenerate(
     return invalidBody(firstIssueMessage(parsed.error.issues, "Invalid generation payload."));
   }
 
-  const { extractedText, sourcePath, questionCount } = parsed.data;
+  const quizId = parsed.data.quizId;
+
+  if (!isUuid(quizId)) return notFound();
+
+  const owner = await requireQuizOwner(supabase, quizId);
+  if (!owner.ok) return owner.response;
+  if (owner.quiz.status !== "draft") return notDraft();
+
+  // Rate-limit immediately after auth + ownership, before any heavy work (S4).
+  if (!rateLimit(`aiGenerate:${owner.userId}`, GENERATE_RATE)) {
+    return rateLimited("Too many quiz generations. Try again in an hour.");
+  }
+
+  // In-flight guard: prevent duplicate LLM spend for the same quiz.
+  if (inFlight.has(quizId)) {
+    return rateLimited("A generation for this quiz is already in progress.");
+  }
+  inFlight.add(quizId);
+  try {
+    return await handleGenerate(request, {
+      supabase,
+      quizId,
+      userId: owner.userId,
+      body: parsed.data,
+    });
+  } finally {
+    inFlight.delete(quizId);
+  }
+}
+
+async function handleGenerate(
+  _request: Request,
+  ctx: {
+    supabase: Awaited<ReturnType<typeof createClient>>;
+    quizId: string;
+    userId: string;
+    body: z.infer<typeof GenerateQuizSchema>;
+  },
+): Promise<NextResponse> {
+  const { supabase, quizId, userId, body } = ctx;
+
+  const { extractedText, sourcePath, questionCount } = body;
 
   let text = extractedText;
   let sourcePathFinal = sourcePath;

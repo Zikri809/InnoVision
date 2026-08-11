@@ -24,8 +24,6 @@ export const maxDuration = 60;
 
 const REGENERATE_RATE = { limit: 20, windowMs: 60 * 60 * 1000 };
 
-type Params = { params: Promise<{ id: string }> };
-
 /**
  * POST /api/ai/regenerate-question — rewrite ONE question on a DRAFT quiz.
  *
@@ -43,11 +41,12 @@ type Params = { params: Promise<{ id: string }> };
  *  7. Only on success: quiz-scoped UPDATE (WHERE id AND quiz_id) — failure
  *     leaves the original untouched (I17).
  */
-export async function POST(request: Request, { params }: Params) {
+export async function POST(request: Request, context?: { params?: Promise<{ id?: string }> }) {
   const supabase = await createClient();
-  const { id } = await params;
 
-  if (!isUuid(id)) return notFound();
+  // The route has no URL params (questionId comes from the body). Accept the
+  // optional context Next.js passes for route-handler compatibility.
+  void context;
 
   // 1. requireLecturer FIRST (a student must get 403, not a 404 from the RLS
   //    question fetch — the no-oracle guarantee applies to non-owner LECTURERS,
@@ -67,6 +66,8 @@ export async function POST(request: Request, { params }: Params) {
     return invalidBody(firstIssueMessage(parsed.error.issues, "Invalid regenerate payload."));
   }
   const { questionId, instruction } = parsed.data;
+
+  if (!isUuid(questionId)) return notFound();
 
   // 2. Fetch the question user-scoped (RLS: lecturer-of-quiz only).
   const { data: questionRow, error: qErr } = await supabase
