@@ -42,6 +42,13 @@ jobs:
           echo "LECTURER_INVITE_CODE=${{ env.LECTURER_INVITE_CODE }}" >> .env.local
           echo "FACE_MATCH_THRESHOLD=0.6" >> .env.local
           echo "TIMER_GRACE_SEC=5" >> .env.local
+          echo "AI_BASE_URL=https://api.openai.com/v1" >> .env.local
+          echo "AI_API_KEY=test-key" >> .env.local
+          echo "AI_MODEL=gpt-4o-mini" >> .env.local
+          echo "OCR_DEFAULT_ENGINE=tesseract" >> .env.local
+          echo "OLLAMA_BASE_URL=http://localhost:11434" >> .env.local
+          echo "OCR_GLM_MODEL=glm-ocr" >> .env.local
+          echo "OCR_VISION_MODEL=gpt-4o-mini" >> .env.local
 
       - name: Reset DB (apply migrations)
         run: npx supabase db reset
@@ -66,6 +73,9 @@ jobs:
 
       - name: Phase 3 quizzes probes (D5/D6/D19-D24)
         run: npm run verify:quizzes
+
+      - name: Phase 4 AI probes (D34-D40)
+        run: npm run verify:ai
 
       - name: Build
         run: npm run build

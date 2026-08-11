@@ -189,7 +189,9 @@ async function handleGenerate(
       // SQL accepts NULL (supabase gen-types limitation); cast at the boundary.
       p_source_file_url: sourcePathFinal ?? null,
       p_source_text: text.slice(0, MAX_EXTRACT_CHARS),
-      p_questions: JSON.stringify(rows),
+      // Pass the array directly (not JSON.stringify): PostgREST serializes a
+      // jsonb arg as a real JSON array, so jsonb_typeof(p_questions) = 'array'.
+      p_questions: rows,
     } as unknown as never,
   );
 

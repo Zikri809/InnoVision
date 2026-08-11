@@ -10,6 +10,7 @@ if (existsSync(".env.local")) {
 
 const PORT = process.env.PLAYWRIGHT_PORT ?? "3001";
 const BASE_URL = `http://localhost:${PORT}`;
+const MOCK_AI_PORT = process.env.MOCK_AI_PORT ?? "8787";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -28,10 +29,27 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
     },
   ],
-  webServer: {
-    command: `npm run dev -- -p ${PORT}`,
-    url: BASE_URL,
-    reuseExistingServer: !process.env.CI,
-    timeout: 60_000,
-  },
+  webServer: [
+    {
+      // Mock OpenAI-compatible endpoint so /api/ai/generate-quiz and
+      // /api/ai/regenerate-question never hit a real model in CI (TESTING §1).
+      command: `node e2e/mock-ai-server.mjs`,
+      url: `http://127.0.0.1:${MOCK_AI_PORT}/health`,
+      reuseExistingServer: !process.env.CI,
+      timeout: 30_000,
+    },
+    {
+      command: `npm run dev -- -p ${PORT}`,
+      url: BASE_URL,
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+      env: {
+        ...process.env,
+        AI_BASE_URL: `http://127.0.0.1:${MOCK_AI_PORT}/v1`,
+        AI_API_KEY: "test-key",
+        AI_MODEL: "gpt-4o-mini",
+        OCR_VISION_MODEL: "gpt-4o-mini",
+      },
+    },
+  ],
 });

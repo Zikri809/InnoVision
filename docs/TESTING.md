@@ -56,6 +56,10 @@
 | U-A5 | malformed JSON from model | parse-fail path triggers **one retry** with error fed back |
 | U-A6 | retry also invalid | returns 422-equivalent result, no partial insert |
 | U-A7 | question count bounds | <3 or >30 questions rejected |
+| U-A8 | `normalizeOptions` | trims, dedupes case-insensitively, **remaps `correct_index`**; returns null when the correct option vanishes |
+| U-A9 | prompt-injection hardening | system prompt contains the untrusted-data warning + strict-JSON instruction; a mocked model emitting embedded instructions fails Zod → error, zero rows |
+| U-A10 | `parseQuizJson` strips ```json fences | fenced and bare JSON both parse |
+| U-A11 | schema refines | `true_false` with 3 options rejected; duplicate options rejected |
 
 ### 2.4 Extraction pipeline (`lib/extract`)
 | # | Case | Expected |
@@ -63,10 +67,16 @@
 | U-E1 | digital PDF (text layer) | `NativeExtractor` wins, `engine='native'` |
 | U-E2 | scanned PDF (low chars/page) | falls through to OCR picker |
 | U-E3 | text-density heuristic | ≥40 chars/page → native OK; below → `lowConfidence` |
-| U-E4 | GLM-OCR endpoint **unavailable** (probe fails) | picker hides glm-ocr entry, Tesseract stays default |
+| U-E4 | GLM-OCR endpoint **unavailable** (probe fails) | picker hides glm-ocr entry, **Tesseract stays default** |
 | U-E5 | extracted text > 15k chars | truncated to cap, flag set |
 | U-E6 | DOCX / PPTX / image inputs | routed to correct extractor, no crash |
 | U-E7 | corrupt/zero-byte file | clean error, no cascade run |
+| U-E8 | GLM probe timeout/failure | handled gracefully (false), no throw |
+| U-E9 | vision batch splitter | pages split into ≤3-per-batch groups |
+| U-E9b | vision orchestration | `extractWithVision` issues sequential batched calls (3+3+1 for 7 pages) and concatenates |
+| U-E10 | base64 byte estimator | data-URL aware; correct bytes for padded/unpadded base64 |
+| U-E11 | (extract) option normalization | OCR-extracted duplicate/whitespace options normalized end-to-end |
+| U-E12 | file type/size validation | `.exe` / >25 MB rejected |
 
 ### 2.5 Timer & scoring helpers
 | # | Case | Expected |
@@ -116,6 +126,13 @@
 | D31 | **Metadata edit-lock (P3 hardening)** | `UPDATE quizzes SET title/mode/time_limit` on a live/closed quiz | trigger error `quiz_not_draft_edit` |
 | D32 | **Append serialization (P3 hardening)** | N concurrent `append_question` on one draft quiz | order_index 0..N-1, no duplicates (advisory lock) |
 | D33 | **DB/Zod length backstops (P3 hardening)** | options >500 / explanation >2000 / duplicate-after-trim via direct SQL | trigger errors (`option_too_long`/`explanation_too_long`/`duplicate_options`); empty-after-trim rejected |
+| D34 | **AI replace (P4)** | owner replaces a draft quiz's questions via `replace_quiz_questions` | old gone, new set `order_index 0..n-1`, title/source fields set |
+| D35 | **AI authZ (P4)** | non-owner lecturer / student / non-draft | same typed errors; non-existent + non-owned quizzes raise the SAME `not_owner` (no oracle) |
+| D36 | **AI atomicity (P4)** | invalid payload (empty, <3/>30, >5 options, OOR, duplicate) | error and **prior questions untouched** (transaction rollback) |
+| D37 | **Source edit-lock (P4)** | status-less `UPDATE quizzes SET source_text/source_file_url` on a live quiz | `quiz_not_draft_edit` (edit-lock fires on any UPDATE) |
+| D38 | **Source secrecy (P4)** | student reads `student_quiz_view` | no `source_text`/`source_file_url`/`created_by`; second lecturer reads 0 rows (owner-only) |
+| D39 | **AI concurrency (P4)** | N concurrent `replace_quiz_questions` on one draft quiz | no errors, valid final state (advisory lock serialization) |
+| D40 | **Source size backstop (P4)** | `source_text` > 15000 via direct SQL | CHECK error |
 
 ---
 
@@ -149,6 +166,20 @@
 | I18 | `POST /api/ocr/vision` | images array | returns concatenated text; **nothing written to storage** |
 | I19 | vision OCR | **payload too large (>3 pages)** | client batches into ≤3-page requests; oversized single request → 413 |
 | I20 | **AuthZ sweep** | student hits every lecturer-only route (`unlock`, `exempt-face`, `reset`, `regenerate-question`, `generate-quiz`) | all → 403 |
+| I-A1 | generate | sourcePath sets `source_file_url`+`source_text` | fields persisted on the quiz |
+| I-A2 | generate | replaces existing draft questions atomically | old gone, new set present |
+| I-A3 | generate | quiz not draft (live/closed) | 409 `quiz_not_draft` |
+| I-A4 | regenerate | quiz not draft | 409 `quiz_not_draft` |
+| I-A5 | generate | non-owner lecturer | 404 (no oracle) |
+| I-A6 | vision | invalid body (missing images) | 400 |
+| I-A7 | generate/vision | rate limit exceeded / in-flight guard | 429 |
+| I-A8 | generate | AI output with duplicate/whitespace-colliding options | 422 `invalid_ai_output`, **zero rows inserted** (schema gate) |
+| I-A9 | generate | `extractedText` > 15k | 400 (server-side cap) |
+| I-A10 | generate | 45s AI wrapper timeout | 503 `timeout`, zero inserts (fake clock/abort) |
+| I-A11 | generate | `sourcePath` forgery (`..`, `%2F`, `//`, leading/trailing `/`) | 400 |
+| I-A12 | generate | neither `extractedText` nor `source_file_url` | 400 |
+| I-A13 | regenerate | non-owner questionId | 404 (no oracle) |
+| I-A14 | vision | body `baseUrl` ignored | env-configured baseURL used (no SSRF) |
 | I-Q1 | `POST /api/classes/[id]/quizzes` (P3) | student creates a quiz | 403 |
 | I-Q2 | `PATCH /api/quizzes/[id]` (P3) | student edits a quiz | 403 |
 | I-Q3 | `DELETE /api/quizzes/[id]` (P3) | student deletes a quiz | 403 |
@@ -176,7 +207,8 @@
 | E1a | **Auth both roles + consent persists** | register as lecturer → logout → register as student (check consent) → logout/in | both roles authenticate; consent checkbox state persists across sessions; unconsented user is routed to consent screen |
 | E1 | **Lecturer: class → join via code → roster** (P2 scope) | register lecturer → create class (capture join code) → register student → join via code → lecturer opens class | roster shows the enrolled student; student sees the class in their list |
 | E1b | **Lecturer: manual quiz → publish** (P3 scope) | (after P3) create class → manual-add 3 questions → publish as practice | quiz appears live for enrolled students |
-| E2 | **Lecturer: AI generation** | upload sample chapter PDF → extraction cascade runs (mock native) → generate (MSW) → review screen shows editable questions → edit one → publish | edited question persists; status live |
+| E2 | **Lecturer: AI generation** | upload sample chapter PDF → extraction cascade runs (mock native) → generate (MSW/mock AI server) → review screen shows editable questions → edit one → publish | edited question persists; status live |
+| E2b | **Lecturer: AI regenerate** | (after E2) lecturer builds a draft quiz → Regenerate one question (mock AI) | target question replaced; siblings untouched |
 | E3 | **Student: enroll + consent** | register student → join class via code → consent screen → face-enroll (fake embedder) | `consent_given_at` set, embedding stored |
 | E3b | **Consent gate** | student skips consent → attempts to reach face-enroll directly | blocked; no embedding stored (API 403, I1 end-to-end) |
 | E4 | **Practice quiz, click-first** | start practice → answer all via clicks → submit | score shown; can re-attempt (new session) |
@@ -233,7 +265,13 @@ The critical guarantees the demo lives or dies by, and where each is proven:
 | Anti-replay nonce | I5c, D14 |
 | Lecturer-route authorization | I20, I-Q1–I-Q8 |
 | Manual-builder publish/lock | D19–D24, I-Q9–I-Q13, E1b |
-| Vision-OCR body-limit batching | I19, manual #7 |
+| AI generation atomicity + retry | I14, I15, U-A5, U-A6, D34, D36 |
+| Option normalization / schema gate | U-A8, I-A8 |
+| Server-side parse bounds (DoS/zip-bomb) | S1 hardening: bucket limits + route 25 MB/≤50 pages; I-A12 (no text/file) |
+| Prompt-injection hardening | U-A9 |
+| Source secrecy + edit-lock | D37, D38, I-A1 |
+| Vision-OCR body-limit batching | I19, U-E9, U-E9b, U-E10, manual #7 |
+| AI route authZ + no-oracle | I20 extension, I-A5, I-A13, D35 |
 | Periodic verify cadence | I22 |
 | Consent gate | I1, E3b |
 
@@ -248,7 +286,7 @@ The build is **gated**: each phase below must (a) deliver its feature, (b) pass 
 | **P1 Scaffold** | E1a — register/login as lecturer + student; consent checkbox persists | Both roles authenticate; unconsented users hit the consent screen |
 | **P2 Classes** | D8, D12, D15–D18 · E1 — create class → join via code → roster updates | Student enrolls via code; lecturer A cannot see lecturer B's classes/files; join is idempotent and code-checked |
 | **P3 Manual builder** | D5, D6 · I20 · D19–D33, I-Q1–I-Q13 · **E1b** | Lecturer hand-builds and publishes a quiz; students never see `correct_index`/join_code/source_file_url/embeddings; student role blocked from all lecturer routes; draft/live/closed state machine + question/metadata immutability enforced at the DB layer |
-| **P4 Extraction + AI generation** ★ | U-A1–U-A7 · U-E1–U-E7 · I14–I19 · E2 | Real chapter PDF (incl. scanned via Tesseract) → editable, publishable quiz; invalid AI output inserts **zero** rows; vision-OCR route returns text + stores nothing, batches under body limit |
+| **P4 Extraction + AI generation** ★ | U-A1–U-A11 · U-E1–U-E12 · I14–I19 · I-A1–I-A14 · D34–D40 · E2, E2b | Real chapter PDF (incl. scanned via Tesseract) → editable, publishable quiz; invalid AI output inserts **zero** rows; vision-OCR route returns text + stores nothing, batches under body limit |
 | **P5 Play screen (click-first)** | U-T1–U-T3 · D1, D1b, D2–D4, D7, D9 · I7–I13 · E4, E5, E10, E11 | Full quiz playable with mouse; one-attempt enforced; timer enforced server-side; re-answer rules correct per mode |
 | **P6 Gesture layer** | U-G1–U-G7 · E8, E9, E9b | Full quiz playable hands-free; mid-hold change and hand-loss behave; hand-loss auto-pauses (recovery proven in P7) |
 | **P7 Face pipeline** | U-F1–U-F7c · D10, D11, D13, D14 · I1–I6c, I22 · E3, E3b, E6, E7, E12 | Enroll → gate → continuous verify (30–45s cadence proven by fake clock); wrong face at Q3 → paused → flagged; self-recovery only from paused; lecturer-only unlock; nonce replay rejected |
