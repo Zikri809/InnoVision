@@ -33,7 +33,7 @@ export const MAX_EXTRACT_CHARS = 15_000;
 export const MAX_VISION_PAGES = 3;
 /** Max pages rasterized + recognized per Tesseract/GLM OCR run (DoS / responsiveness cap). */
 export const MAX_OCR_PAGES = 50;
-/** Max base64 characters per image sent to /api/ocr/vision (~1.3 MB binary). */
+/** Max base64 characters per image sent to /api/ocr/vision (~0.93 MB binary). */
 export const MAX_IMAGE_BASE64_CHARS = 1_300_000;
 /** Client-side file size cap. */
 export const MAX_FILE_BYTES = 25_000_000;
@@ -62,6 +62,19 @@ export type AllowedExtension = (typeof ALLOWED_EXTENSIONS)[number];
 export function isAllowedExtension(filename: string): boolean {
   const ext = filename.split(".").pop()?.toLowerCase() ?? "";
   return (ALLOWED_EXTENSIONS as readonly string[]).includes(ext);
+}
+
+/**
+ * Sanitize a user-supplied filename for use as a single storage path segment.
+ * Strips path separators and `..` so a name like `../../victim/file.pdf` cannot
+ * escape the `{uid}/{quizId}/` folder (defense-in-depth on top of the storage
+ * RLS `foldername(name)[1] = auth.uid()` check, which only inspects the first
+ * segment). Falls back to a timestamped name when nothing safe remains.
+ */
+export function sanitizeStorageFilename(filename: string): string {
+  const base = filename.replace(/[\\/]/g, "").replace(/\.\./g, "").trim();
+  if (!base) return `file-${Date.now()}`;
+  return base;
 }
 
 /** Estimate decoded bytes from a base64 string (data-URL aware). */

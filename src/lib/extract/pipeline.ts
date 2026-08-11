@@ -38,6 +38,8 @@ export type PipelineOptions = {
   engine?: ExtractEngine;
   config?: Partial<OcrConfig>;
   onProgress?: (p: PipelineProgress) => void;
+  /** Abort signal so a client can cancel a long extraction (checked between stages). */
+  signal?: AbortSignal;
   /** Browser File when available; server passes ArrayBuffer + filename. */
   file?: File;
   data?: ArrayBuffer;
@@ -46,6 +48,13 @@ export type PipelineOptions = {
 
 function capText(text: string): string {
   return text.length > MAX_EXTRACT_CHARS ? text.slice(0, MAX_EXTRACT_CHARS) : text;
+}
+
+/** Throw an AbortError if the caller has cancelled the extraction. */
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new DOMException("The operation was aborted.", "AbortError");
+  }
 }
 
 /**
@@ -77,6 +86,7 @@ export async function runExtractionPipeline(
 
   // ── [1] Native extractor ────────────────────────────────────────
   opts.onProgress?.({ stage: "native", page: 0, total: 1 });
+  throwIfAborted(opts.signal);
   let native: ExtractionResult;
   try {
     native = await nativeExtract(data, filename, { node: !opts.file });
@@ -109,6 +119,7 @@ export async function runExtractionPipeline(
   }
 
   // ── [2] OCR engine ──────────────────────────────────────────────
+  throwIfAborted(opts.signal);
   if (!opts.file) {
     // Server-side: we cannot run browser OCR; signal that the client must.
     throw new Error("ocr_required_browser");

@@ -5,6 +5,8 @@ import {
   buildRegeneratePrompt,
   sanitizePromptFeedback,
   parseQuizJson,
+  parseQuestionJson,
+  remainingBudgetMs,
   generateQuiz,
   regenerateQuestion,
 } from "@/lib/ai/quiz-prompt";
@@ -114,6 +116,55 @@ describe("U-A10 — parseQuizJson strips fences", () => {
     const parsed = parseQuizJson("<html>oops</html>");
     expect(parsed.ok).toBe(false);
     if (!parsed.ok) expect(parsed.issues.length).toBeGreaterThan(0);
+  });
+});
+
+describe("parseQuestionJson — wrapper handling", () => {
+  it("accepts a bare question object", () => {
+    const parsed = parseQuestionJson(JSON.stringify(sampleQuestion));
+    expect(parsed.ok).toBe(true);
+  });
+
+  it("accepts a single-question wrapper", () => {
+    const parsed = parseQuestionJson(
+      JSON.stringify({ title: "T", questions: [sampleQuestion] }),
+    );
+    expect(parsed.ok).toBe(true);
+  });
+
+  it("rejects a wrapper with more than one question", () => {
+    const parsed = parseQuestionJson(
+      JSON.stringify({ title: "T", questions: [sampleQuestion, sampleQuestion] }),
+    );
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.issues[0]).toContain("exactly one question");
+  });
+
+  it("reports the wrapper question's own issues when the single question is invalid", () => {
+    const parsed = parseQuestionJson(
+      JSON.stringify({
+        title: "T",
+        questions: [{ type: "mcq", prompt: "x", options: ["a"], correct_index: 5 }],
+      }),
+    );
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) {
+      // The reported issues must come from the wrapper's question, not the
+      // bare-object path (which would be empty/misleading).
+      expect(parsed.issues.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("remainingBudgetMs — deadline clamping", () => {
+  it("clamps to a minimum of 1s when the deadline has passed", () => {
+    expect(remainingBudgetMs(Date.now() - 10_000)).toBe(1_000);
+  });
+
+  it("returns the remaining time when the deadline is in the future", () => {
+    const remaining = remainingBudgetMs(Date.now() + 5_000);
+    expect(remaining).toBeGreaterThan(1_000);
+    expect(remaining).toBeLessThanOrEqual(5_000);
   });
 });
 

@@ -724,3 +724,189 @@ describe("Parse timeout — pathological file → 503 timeout", () => {
     }
   });
 });
+
+describe("Phase 4 audit gap — AI transport error branches", () => {
+  it("generate: AI service error → 422 ai_unavailable", async () => {
+    ownerContext();
+    defaultAiServer.use(
+      http.post("*/chat/completions", () => HttpResponse.error()),
+    );
+    const { generate } = await importHandlers();
+    const res = await generate.POST(
+      req({ quizId: QUIZ_C, extractedText: "any text" }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe("ai_unavailable");
+  });
+
+  it("regenerate: AI timeout → 503 timeout", async () => {
+    ownerContext({
+      questions: [{ id: QUESTION_D, quiz_id: QUIZ_C, order_index: 0, type: "mcq", prompt: "Old", options: ["a", "b"], correct_index: 0 }],
+    });
+    defaultAiServer.use(
+      http.post("*/chat/completions", () => new Promise(() => {})),
+    );
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { regenerate: regen } = await importHandlers();
+      const promise = regen.POST(req({ questionId: QUESTION_D }), {
+        params: Promise.resolve({ id: QUIZ_C }),
+      });
+      await vi.advanceTimersByTimeAsync(46_000);
+      const res = await promise;
+      expect(res.status).toBe(503);
+      expect((await res.json()).error).toBe("timeout");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("regenerate: AI service error → 422 ai_unavailable", async () => {
+    ownerContext({
+      questions: [{ id: QUESTION_D, quiz_id: QUIZ_C, order_index: 0, type: "mcq", prompt: "Old", options: ["a", "b"], correct_index: 0 }],
+    });
+    defaultAiServer.use(
+      http.post("*/chat/completions", () => HttpResponse.error()),
+    );
+    const { regenerate: regen } = await importHandlers();
+    const res = await regen.POST(req({ questionId: QUESTION_D }), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe("ai_unavailable");
+  });
+
+  it("vision: AI timeout → 503 timeout", async () => {
+    ownerContext();
+    defaultAiServer.use(
+      http.post("*/chat/completions", () => new Promise(() => {})),
+    );
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { vision: vis } = await importHandlers();
+      const promise = vis.POST(req({ images: ["data:image/png;base64,AAAA"] }));
+      await vi.advanceTimersByTimeAsync(46_000);
+      const res = await promise;
+      expect(res.status).toBe(503);
+      expect((await res.json()).error).toBe("timeout");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("vision: AI service error → 503 internal (not a raw message)", async () => {
+    ownerContext();
+    defaultAiServer.use(
+      http.post("*/chat/completions", () => HttpResponse.error()),
+    );
+    const { vision: vis } = await importHandlers();
+    const res = await vis.POST(req({ images: ["data:image/png;base64,AAAA"] }));
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.error).toBe("internal");
+  });
+});
+
+describe("Phase 4 audit gap — generate extraction/validation branches", () => {
+  it("low-confidence native parse → 422 use_browser_ocr", async () => {
+    const ctx = ownerContext();
+    // A sparse text file (< MIN_CHARS_PER_PAGE) → nativeExtract returns
+    // lowConfidence → the route asks the lecturer to run OCR in the browser.
+    ctx.client.seedStorageFile(
+      `${OWNER_ID}/${QUIZ_C}/sparse.txt`,
+      new TextEncoder().encode("Hello."),
+    );
+    const { generate } = await importHandlers();
+    const res = await generate.POST(
+      req({ quizId: QUIZ_C, sourcePath: `${OWNER_ID}/${QUIZ_C}/sparse.txt` }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe("use_browser_ocr");
+  });
+
+  it("unsupported file type → 422 unsupported_file_type", async () => {
+    const ctx = ownerContext();
+    ctx.client.seedStorageFile(
+      `${OWNER_ID}/${QUIZ_C}/notes.xyz`,
+      new TextEncoder().encode("some bytes"),
+    );
+    const { generate } = await importHandlers();
+    const res = await generate.POST(
+      req({ quizId: QUIZ_C, sourcePath: `${OWNER_ID}/${QUIZ_C}/notes.xyz` }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe("unsupported_file_type");
+  });
+
+  it("file larger than 25 MB → 413", async () => {
+    const ctx = ownerContext();
+    // Seed a file whose decoded size exceeds MAX_FILE_BYTES (25 MB).
+    ctx.client.seedStorageFile(
+      `${OWNER_ID}/${QUIZ_C}/big.pdf`,
+      new Uint8Array(26_000_000),
+    );
+    const { generate } = await importHandlers();
+    const res = await generate.POST(
+      req({ quizId: QUIZ_C, sourcePath: `${OWNER_ID}/${QUIZ_C}/big.pdf` }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(413);
+  });
+
+  it("source_file_url fallback: valid stored path is parsed", async () => {
+    const ctx = ownerContext();
+    ctx.client.seedStorageFile(
+      `${OWNER_ID}/${QUIZ_C}/chapter.txt`,
+      new TextEncoder().encode("Velocity is the rate of change of displacement."),
+    );
+    // Set the quiz's stored source_file_url (no sourcePath in the body).
+    const quizRow = ctx.client.tables["quizzes"]?.find((q) => q.id === QUIZ_C);
+    if (quizRow) quizRow.source_file_url = `${OWNER_ID}/${QUIZ_C}/chapter.txt`;
+    const { generate } = await importHandlers();
+    const res = await generate.POST(
+      req({ quizId: QUIZ_C, questionCount: 3 }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.quiz.source_text).toContain("Velocity");
+  });
+
+  it("source_file_url fallback: path outside owner folder → 400", async () => {
+    const ctx = ownerContext();
+    const quizRow = ctx.client.tables["quizzes"]?.find((q) => q.id === QUIZ_C);
+    if (quizRow) quizRow.source_file_url = "00000000-0000-4000-8000-000000000099/victim/x.pdf";
+    const { generate } = await importHandlers();
+    const res = await generate.POST(
+      req({ quizId: QUIZ_C }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("Phase 4 audit gap — regenerate normalizeOptions null", () => {
+  it("regenerated question loses its correct answer → 422 invalid_ai_output", async () => {
+    // AI returns options that, after dedup, drop the marked-correct option.
+    stubAiContent(
+      JSON.stringify({
+        type: "mcq",
+        prompt: "Pick one",
+        options: ["A", "A", "B"],
+        correct_index: 1, // "A" (index 1) dedupes away → normalizeOptions null
+      }),
+    );
+    ownerContext({
+      questions: [{ id: QUESTION_D, quiz_id: QUIZ_C, order_index: 0, type: "mcq", prompt: "Old", options: ["a", "b"], correct_index: 0 }],
+    });
+    const { regenerate: regen } = await importHandlers();
+    const res = await regen.POST(req({ questionId: QUESTION_D }), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe("invalid_ai_output");
+  });
+});

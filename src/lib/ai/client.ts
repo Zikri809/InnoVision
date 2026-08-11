@@ -59,6 +59,11 @@ export async function chatCompletions(opts: {
    */
   jsonMode?: boolean;
   /**
+   * Sampling temperature. Defaults to 0.7 for creative generation; OCR
+   * transcription routes should pass 0 for deterministic output.
+   */
+  temperature?: number;
+  /**
    * Hard deadline for THIS call in milliseconds. If set, the per-call 45s
    * abort timer is clamped to the smaller of the two — lets callers that
    * chain calls (e.g. attempt+retry in `generateQuiz`) share a single
@@ -68,7 +73,7 @@ export async function chatCompletions(opts: {
   timeoutMs?: number;
   signal?: AbortSignal;
 }): Promise<ChatResult> {
-  const { client: ai, model, messages, maxTokens = AI_MAX_OUTPUT_TOKENS, jsonMode = true } = opts;
+  const { client: ai, model, messages, maxTokens = AI_MAX_OUTPUT_TOKENS, jsonMode = true, temperature = 0.7 } = opts;
   const controller = new AbortController();
   const perCallTimeout = opts.timeoutMs
     ? Math.min(AI_ROUND_TRIP_TIMEOUT_MS, opts.timeoutMs)
@@ -83,7 +88,7 @@ export async function chatCompletions(opts: {
       {
         model,
         messages: messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
-        temperature: 0.7,
+        temperature,
         max_tokens: maxTokens,
         ...(jsonMode ? { response_format: { type: "json_object" as const } } : {}),
       },

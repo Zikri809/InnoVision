@@ -107,6 +107,7 @@ export function QuizBuilderClient({
   const [generateOpen, setGenerateOpen] = useState(false);
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const [regenerateInstruction, setRegenerateInstruction] = useState("");
+  const [reordering, setReordering] = useState(false);
 
   function setOption(index: number, value: string) {
     setDraft((d) => {
@@ -215,6 +216,7 @@ export function QuizBuilderClient({
   }
 
   async function handleMove(q: QuestionRow, direction: "up" | "down") {
+    if (reordering) return;
     const index = questions.findIndex((x) => x.id === q.id);
     const target =
       direction === "up" ? index - 1 : index + 1;
@@ -225,6 +227,7 @@ export function QuizBuilderClient({
 
     setError(null);
     setNotice(null);
+    setReordering(true);
     try {
       const res = await fetch(`/api/quizzes/${quiz.id}/reorder`, {
         method: "POST",
@@ -239,6 +242,8 @@ export function QuizBuilderClient({
       router.refresh();
     } catch {
       setError("Network error reordering questions.");
+    } finally {
+      setReordering(false);
     }
   }
 
@@ -573,7 +578,7 @@ export function QuizBuilderClient({
                           variant="ghost"
                           size="sm"
                           onClick={() => handleMove(q, "up")}
-                          disabled={idx === 0}
+                          disabled={idx === 0 || reordering}
                           aria-label="Move up"
                         >
                           <ArrowUp className="size-4" />
@@ -582,7 +587,7 @@ export function QuizBuilderClient({
                           variant="ghost"
                           size="sm"
                           onClick={() => handleMove(q, "down")}
-                          disabled={idx === questions.length - 1}
+                          disabled={idx === questions.length - 1 || reordering}
                           aria-label="Move down"
                         >
                           <ArrowDown className="size-4" />
@@ -606,11 +611,14 @@ export function QuizBuilderClient({
                         <RefreshCw className={`size-3.5 ${regeneratingId === q.id ? "animate-spin" : ""} mr-1`} />
                         {regeneratingId === q.id ? "Regenerating…" : "Regenerate"}
                       </Button>
-                      {regenerateInstruction && regeneratingId === q.id && (
-                        <p className="max-w-[200px] truncate text-[10px] text-muted-foreground">
-                          {regenerateInstruction}
-                        </p>
-                      )}
+                      <Input
+                        value={regenerateInstruction}
+                        onChange={(e) => setRegenerateInstruction(e.target.value)}
+                        placeholder="Optional instruction (e.g. make it harder)"
+                        maxLength={500}
+                        aria-label="Regenerate instruction"
+                        className="h-7 w-full text-xs"
+                      />
                     </div>
                   )}
                 </li>

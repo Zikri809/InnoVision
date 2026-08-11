@@ -93,6 +93,8 @@ export async function POST(request: Request) {
     // OCR transcription is plain text — forcing json_object mode breaks on
     // providers that require the word "json" in the prompt.
     jsonMode: false,
+    // Deterministic transcription: temperature 0 (the GLM path already uses 0).
+    temperature: 0,
   });
 
   if (!result.ok) {

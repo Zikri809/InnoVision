@@ -15,6 +15,8 @@ const eslintConfig = defineConfig([
     // Supabase local dev artifacts (auto-generated):
     "supabase/.temp/**",
     "supabase/.branches/**",
+    // Test coverage output (auto-generated):
+    "coverage/**",
   ]),
 ]);
 

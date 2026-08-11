@@ -56,6 +56,11 @@ const GLM_TRANSCRIBE_PROMPT =
   "faithfully, preserving structure (headings, bullets, tables as text). " +
   "Output ONLY the transcribed text, no commentary.";
 
+// Overall wall-clock budget for a whole GLM OCR run (all pages). Each page
+// call has its own 90s timeout, but a 50-page PDF would otherwise run
+// unbounded sequentially — this caps the total so the dialog can't hang.
+const GLM_OCR_BUDGET_MS = 5 * 60_000;
+
 /**
  * OCR a file with the local GLM-OCR model. Images/PDF pages are sent one at a
  * time (vision-language models accept a single image per message). Returns
@@ -79,9 +84,11 @@ export async function glmExtract(
     images = [{ dataUrl: await fileToDataUrl(file), page: 1 }];
   }
 
+  const deadline = Date.now() + GLM_OCR_BUDGET_MS;
   const parts: string[] = [];
   for (let i = 0; i < images.length; i++) {
     onProgress?.(i + 1, images.length);
+    const remaining = Math.max(1_000, deadline - Date.now());
     const res = await httpChatCompletions({
       baseUrl: cfg.baseUrl,
       model: cfg.model,
@@ -96,15 +103,26 @@ export async function glmExtract(
         },
       ],
       maxTokens: 2000,
-      timeoutMs: 90_000,
+      timeoutMs: Math.min(90_000, remaining),
     });
     if (!res.ok) throw new Error(res.error === "timeout" ? "glm_timeout" : "glm_error");
     parts.push(res.text);
   }
 
   let text = parts.join("\n\n").trim();
+  text = sanitizeGlmText(text);
   if (text.length > MAX_EXTRACT_CHARS) text = text.slice(0, MAX_EXTRACT_CHARS);
   return { text, pages: images.length, engine: "glm" };
+}
+
+/**
+ * Clean GLM-OCR output. The model sometimes emits a long run of markdown-fence
+ * noise (repeated ``` ``` ``` ...) after the real transcription — it loops on
+ * the closing delimiter. Collapse any run of 3+ consecutive fence lines down
+ * to a single fence so the extracted text isn't polluted.
+ */
+export function sanitizeGlmText(text: string): string {
+  return text.replace(/(?:```\s*){3,}/g, "```\n");
 }
 
 function fileToDataUrl(file: File): Promise<string> {

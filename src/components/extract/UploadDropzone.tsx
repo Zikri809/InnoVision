@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { isAllowedExtension, MAX_FILE_BYTES } from "@/lib/extract/types";
+import { isAllowedExtension, MAX_FILE_BYTES, sanitizeStorageFilename } from "@/lib/extract/types";
 
 /**
  * Upload dropzone for source files. Validates extension + size client-side
@@ -24,8 +24,6 @@ export function UploadDropzone({
   const [uploading, setUploading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const supabaseRef = useRef<SupabaseClient | null>(null);
-
   async function handleFile(file: File | undefined) {
     if (!file) return;
     if (!isAllowedExtension(file.name)) {
@@ -41,8 +39,9 @@ export function UploadDropzone({
       // Lazy-load the browser client (keeps SSR clean).
       const { createClient } = await import("@/lib/supabase/client");
       const supabase = createClient();
-      supabaseRef.current = supabase;
-      const path = `${userId}/${quizId}/${file.name}`;
+      // Sanitize the browser-supplied name so it can't escape the user's
+      // storage folder (path-traversal defense; see sanitizeStorageFilename).
+      const path = `${userId}/${quizId}/${sanitizeStorageFilename(file.name)}`;
       const { error } = await supabase.storage.from("quiz-sources").upload(path, file, {
         upsert: true,
       });
@@ -100,13 +99,3 @@ export function UploadDropzone({
     </div>
   );
 }
-
-type SupabaseClient = {
-  storage: {
-    from: (bucket: string) => {
-      upload: (path: string, file: File, opts?: { upsert?: boolean }) => Promise<{
-        error: { message: string } | null;
-      }>;
-    };
-  };
-};

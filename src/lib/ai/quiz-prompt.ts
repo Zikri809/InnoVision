@@ -155,6 +155,9 @@ export function parseQuestionJson(text: string): ParsedQuestion {
       if (list.length === 1) {
         const first = AiQuestionSchema.safeParse(list[0]);
         if (first.success) return { ok: true, question: first.data };
+        // The wrapper path was taken but the single question failed — report
+        // ITS issues, not the bare-object errors (which are misleading here).
+        return { ok: false, issues: first.error.issues.map((i) => i.message) };
       } else {
         return {
           ok: false,
@@ -175,9 +178,6 @@ export function parseQuestionJson(text: string): ParsedQuestion {
 export type GenerateQuizResult =
   | { ok: true; quiz: AiQuiz }
   | { ok: false; error: "invalid_ai_output" | "ai_unavailable" | "timeout"; message?: string };
-
-/** Default per-round budget for AI calls inside the quiz prompt helpers. */
-export const AI_CALL_BUDGET_MS = 45_000;
 
 /** Compute the remaining budget for the next call (clamped to a minimum of 1s). */
 export function remainingBudgetMs(deadline: number, safetyMs = 1_000): number {

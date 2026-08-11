@@ -87,12 +87,15 @@ export function GenerateFromFileDialog({
     setBusy(true);
     setError(null);
     setNotice(null);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
     try {
       const result = await runExtractionPipeline({
         file,
         engine,
         config,
         onProgress: (p) => setProgress(p),
+        signal: controller.signal,
       });
       setExtractedText(result.text);
       setExtractEngine(result.engine);
@@ -102,8 +105,16 @@ export function GenerateFromFileDialog({
           : `OCR complete (${result.engine}). You can review the text below.`,
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Extraction failed.");
+      const aborted = err instanceof Error && err.name === "AbortError";
+      setError(
+        aborted
+          ? "Extraction is taking too long. Try a smaller file or a different engine."
+          : err instanceof Error
+            ? err.message
+            : "Extraction failed.",
+      );
     } finally {
+      clearTimeout(timer);
       setBusy(false);
       setProgress(null);
     }

@@ -125,9 +125,7 @@ export async function POST(request: Request, context?: { params?: Promise<{ id?:
   const ai = createAiClient();
   const result = await regenerateQuestion({
     chat: (messages, timeoutMs) =>
-      chatCompletions({ client: ai, model: AI_MODEL, messages, timeoutMs }).then(
-        (r) => r,
-      ),
+      chatCompletions({ client: ai, model: AI_MODEL, messages, timeoutMs }),
     question: target,
     siblings,
     instruction,

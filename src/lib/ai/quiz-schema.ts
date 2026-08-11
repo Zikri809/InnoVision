@@ -54,7 +54,7 @@ export const AiQuestionSchema = z
         message: "The correct answer must reference an existing option.",
       });
     }
-    const distinct = new Set(q.options.map((o) => o.toLocaleLowerCase()));
+    const distinct = new Set(q.options.map((o) => o.toLowerCase()));
     if (distinct.size !== q.options.length) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -107,15 +107,15 @@ export function normalizeOptions(
   const normalized: string[] = [];
   for (const raw of options) {
     const trimmed = raw.trim();
-    const key = trimmed.toLocaleLowerCase();
+    const key = trimmed.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
     normalized.push(trimmed);
   }
   // After dedup, find the ORIGINAL correct text (by the caller's index) and
   // remap to its new position. If it disappeared, the answer is ambiguous.
-  const correctText = (options[correctIndex] ?? "").trim().toLocaleLowerCase();
-  const newIndex = normalized.findIndex((o) => o.toLocaleLowerCase() === correctText);
+  const correctText = (options[correctIndex] ?? "").trim().toLowerCase();
+  const newIndex = normalized.findIndex((o) => o.toLowerCase() === correctText);
   if (newIndex === -1) return null;
   return { options: normalized, correct_index: newIndex };
 }

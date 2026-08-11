@@ -40,6 +40,11 @@ const GENERATE_RATE = { limit: 10, windowMs: 60 * 60 * 1000 };
 // a clean 503 and Vercel reclaims the worker on the 60s cap.
 const PARSE_TIMEOUT_MS = 15_000;
 
+// Overall wall-clock budget for the whole generation (parse + AI attempt +
+// retry). Kept under `maxDuration = 60` so Vercel never kills the route
+// mid-AI-call: parse can eat up to 15s, leaving ~35s for the AI round-trips.
+const GENERATION_BUDGET_MS = 50_000;
+
 // In-process in-flight guard so a scripted double-POST can't fire two LLM
 // calls for the same quiz (S4). Single-instance caveat documented.
 const inFlight = new Set<string>();
@@ -104,7 +109,7 @@ export async function POST(request: Request, context?: { params?: Promise<{ id?:
   }
   inFlight.add(quizId);
   try {
-    return await handleGenerate(request, {
+    return await handleGenerate({
       supabase,
       quizId,
       userId: owner.userId,
@@ -116,7 +121,6 @@ export async function POST(request: Request, context?: { params?: Promise<{ id?:
 }
 
 async function handleGenerate(
-  _request: Request,
   ctx: {
     supabase: Awaited<ReturnType<typeof createClient>>;
     quizId: string;
@@ -125,6 +129,11 @@ async function handleGenerate(
   },
 ): Promise<NextResponse> {
   const { supabase, quizId, userId, body } = ctx;
+
+  // Single overall deadline for parse + AI attempt + retry, so the AI call
+  // doesn't get a fresh 50s after the parse already consumed part of the 60s
+  // `maxDuration` budget (see GENERATION_BUDGET_MS).
+  const deadlineMs = Date.now() + GENERATION_BUDGET_MS;
 
   const { extractedText, sourcePath, questionCount } = body;
 
@@ -150,6 +159,13 @@ async function handleGenerate(
         .maybeSingle();
       if (quizRow?.source_file_url) {
         sourcePathFinal = quizRow.source_file_url;
+        // Defense-in-depth: the stored source_file_url must also live in the
+        // owner's own folder. Re-apply the same per-tenant prefix check the
+        // body path gets, so a stored path with `..` can't be downloaded.
+        const prefix = `${userId.toLowerCase()}/`;
+        if (!sourcePathFinal.toLowerCase().startsWith(prefix)) {
+          return invalidBody("The source file must be in your own storage folder.");
+        }
       } else {
         return invalidBody("No extracted text or source file provided.");
       }
@@ -170,17 +186,20 @@ async function handleGenerate(
     return unprocessable("Extracted text is empty. Try a different file.", "empty_text");
   }
 
+  // Cap once and reuse — the same capped value feeds both the AI prompt and
+  // the stored `p_source_text` (avoids a redundant second slice).
+  const cappedText = text.slice(0, MAX_EXTRACT_CHARS);
+
   // Run the AI generation (one retry inside generateQuiz). Share a single
   // deadline across attempt + retry so the second call doesn't burn another
-  // full 45s when most of the 50s window is already gone.
+  // full 45s when most of the window is already gone.
   const ai = createAiClient();
   const result: GenerateQuizResult = await generateQuiz({
     chat: (messages, timeoutMs) =>
-      chatCompletions({ client: ai, model: AI_MODEL, messages, timeoutMs }).then(
-        (r) => r,
-      ),
-    text: text.slice(0, MAX_EXTRACT_CHARS),
+      chatCompletions({ client: ai, model: AI_MODEL, messages, timeoutMs }),
+    text: cappedText,
     questionCount: questionCount ?? 10,
+    deadlineMs,
   });
 
   if (!result.ok) {
@@ -214,7 +233,7 @@ async function handleGenerate(
     p_quiz_id: quizId,
     p_title: result.quiz.title,
     p_source_file_url: sourcePathFinal ?? null,
-    p_source_text: text.slice(0, MAX_EXTRACT_CHARS),
+    p_source_text: cappedText,
     // Pass the array directly (not JSON.stringify): PostgREST serializes a
     // jsonb arg as a real JSON array, so jsonb_typeof(p_questions) = 'array'.
     p_questions: rows,
