@@ -57,3 +57,12 @@ export function rateLimit(
 export function _resetRateLimiter(): void {
   buckets.clear();
 }
+
+/**
+ * Test-only: pre-seed a bucket with `count` hits so a test can force a 429
+ * without waiting out a window. Used by route-handler tests (I-A7).
+ */
+export function _seedRateLimit(key: string, count: number): void {
+  const now = Date.now();
+  buckets.set(key, { timestamps: Array.from({ length: count }, () => now) });
+}

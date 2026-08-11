@@ -45,6 +45,21 @@ export const forbidden = () => jsonError("forbidden", undefined, 403);
 export const notDraft = () =>
   jsonError("quiz_not_draft", "Only draft quizzes can be edited.", 409);
 
+/** 413 — request payload too large (vision OCR body limits). */
+export function payloadTooLarge(message: string): NextResponse {
+  return jsonError("payload_too_large", message, 413);
+}
+
+/** 422 — AI output invalid / extraction needs browser OCR. */
+export function unprocessable(message: string, error = "unprocessable"): NextResponse {
+  return jsonError(error, message, 422);
+}
+
+/** 429 — rate limit exceeded. */
+export function rateLimited(message: string): NextResponse {
+  return jsonError("rate_limited", message, 429);
+}
+
 /** 503 — transient outage / DB error. */
 export function internalError(message: string): NextResponse {
   return jsonError("internal", message, 503);

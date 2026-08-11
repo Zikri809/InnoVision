@@ -20,7 +20,7 @@ type Op =
   | { kind: "delete" };
 
 class FakeQueryBuilder {
-  private filters: { col: string; val: unknown }[] = [];
+  private filters: { col: string; val: unknown; negated?: boolean }[] = [];
   private orderBy: { col: string; asc: boolean }[] = [];
   private limitN?: number;
   private countExact = false;
@@ -33,6 +33,11 @@ class FakeQueryBuilder {
 
   eq(col: string, val: unknown): this {
     this.filters.push({ col, val });
+    return this;
+  }
+
+  neq(col: string, val: unknown): this {
+    this.filters.push({ col, val, negated: true });
     return this;
   }
 
@@ -112,10 +117,14 @@ class FakeQueryBuilder {
           const refRow = (this.client.tables[refTable] ?? []).find(
             (x) => x.id === fkVal,
           );
-          return refRow?.[refCol] === f.val;
+          const match = refRow?.[refCol] === f.val;
+          return f.negated ? !match : match;
         });
       } else {
-        out = out.filter((r) => r[f.col] === f.val);
+        out = out.filter((r) => {
+          const match = r[f.col] === f.val;
+          return f.negated ? !match : match;
+        });
       }
     }
     if (this.orderBy.length) {
@@ -169,6 +178,10 @@ export class FakeSupabase {
     data: null,
     error: null,
   };
+  /** Fake storage files keyed by object path. */
+  storageFiles: Record<string, Uint8Array> = {};
+  /** When true, replace_quiz_questions returns an error (simulated). */
+  rpcError: { message: string } | null = null;
 
   auth = {
     getUser: async () => ({ data: { user: this.user } }),
@@ -178,9 +191,9 @@ export class FakeSupabase {
     return new FakeQueryBuilder(this, table);
   }
 
-  // rpc() models the two RPCs the routes call:
-  //  - append_question: appends with order_index = max+1 (mirrors the real RPC
-  //    semantics; the route reads `data` as the created row).
+  // rpc() models the RPCs the routes call:
+  //  - append_question: appends with order_index = max+1.
+  //  - replace_quiz_questions: atomic replace (delete + insert + quiz update).
   //  - reorder_questions / others: return the pre-seeded rpcResult.
   async rpc(name: string, args?: Record<string, unknown>) {
     if (name === "append_question") {
@@ -204,6 +217,41 @@ export class FakeSupabase {
       this.tables["questions"] = [...questions, row];
       return { data: row, error: null };
     }
+
+    if (name === "replace_quiz_questions") {
+      if (this.rpcError) return { data: null, error: this.rpcError };
+      const quizId = String(args?.p_quiz_id);
+      const questions = (this.tables["questions"] ?? []).filter((q) => q.quiz_id !== quizId);
+      // The route passes p_questions as a JSON string (PostgREST serializes the
+      // jsonb arg); parse it into the row array.
+      const raw = args?.p_questions;
+      const parsed: unknown[] =
+        typeof raw === "string" ? JSON.parse(raw) : Array.isArray(raw) ? raw : [];
+      const rows = parsed.map((q, i) => {
+        const row = q as Row;
+        return {
+          id: randomUuid(),
+          quiz_id: quizId,
+          order_index: i,
+          type: row.type,
+          prompt: row.prompt,
+          options: row.options,
+          correct_index: row.correct_index,
+          explanation: row.explanation ?? null,
+          created_at: "2026-01-01T00:00:00Z",
+        };
+      });
+      this.tables["questions"] = [...questions, ...rows];
+      // Update the quiz row's title/source fields.
+      const quizRow = (this.tables["quizzes"] ?? []).find((q) => q.id === quizId);
+      if (quizRow) {
+        if (args?.p_title) quizRow.title = String(args.p_title);
+        if (args?.p_source_file_url !== undefined) quizRow.source_file_url = args.p_source_file_url;
+        if (args?.p_source_text !== undefined) quizRow.source_text = args.p_source_text;
+      }
+      return { data: rows, error: null };
+    }
+
     return this.rpcResult;
   }
 
@@ -232,6 +280,26 @@ export class FakeSupabase {
     this.tables["questions"] ??= [];
     this.tables["questions"].push(question);
   }
+
+  /** Seed a fake stored file for storage.download (I16b). */
+  seedStorageFile(path: string, bytes: Uint8Array) {
+    this.storageFiles[path] = bytes;
+  }
+
+  storage = {
+    from: (_bucket: string) => ({
+      download: async (path: string) => {
+        const bytes = this.storageFiles[path];
+        if (!bytes) {
+          return { data: null, error: { message: "Object not found", statusCode: "404" } };
+        }
+        const blob = new Blob([bytes as unknown as BlobPart], {
+          type: "application/pdf",
+        });
+        return { data: blob, error: null };
+      },
+    }),
+  };
 }
 
 /** Build a fresh fake client with a lecturer owner + owned class/quiz. */
@@ -255,6 +323,8 @@ export function makeOwnerContext(opts?: {
     mode: "practice",
     status: opts?.quizStatus ?? "draft",
     time_limit_sec: null,
+    source_file_url: null,
+    source_text: null,
     created_at: "2026-01-01T00:00:00Z",
   });
   for (const q of opts?.questions ?? []) client.seedQuestion(q);

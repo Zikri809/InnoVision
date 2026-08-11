@@ -192,6 +192,7 @@ export type Database = {
           id: string
           mode: Database["public"]["Enums"]["quiz_mode"]
           source_file_url: string | null
+          source_text: string | null
           status: Database["public"]["Enums"]["quiz_status"]
           time_limit_sec: number | null
           title: string
@@ -203,6 +204,7 @@ export type Database = {
           id?: string
           mode?: Database["public"]["Enums"]["quiz_mode"]
           source_file_url?: string | null
+          source_text?: string | null
           status?: Database["public"]["Enums"]["quiz_status"]
           time_limit_sec?: number | null
           title: string
@@ -214,6 +216,7 @@ export type Database = {
           id?: string
           mode?: Database["public"]["Enums"]["quiz_mode"]
           source_file_url?: string | null
+          source_text?: string | null
           status?: Database["public"]["Enums"]["quiz_status"]
           time_limit_sec?: number | null
           title?: string
@@ -375,6 +378,32 @@ export type Database = {
       reorder_questions: {
         Args: { p_ordered_ids: string[]; p_quiz_id: string }
         Returns: undefined
+      }
+      replace_quiz_questions: {
+        Args: {
+          p_questions: Json
+          p_quiz_id: string
+          p_source_file_url: string
+          p_source_text: string
+          p_title: string
+        }
+        Returns: {
+          correct_index: number
+          created_at: string
+          explanation: string | null
+          id: string
+          options: string[]
+          order_index: number
+          prompt: string
+          quiz_id: string
+          type: Database["public"]["Enums"]["question_type"]
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "questions"
+          isOneToOne: false
+          isSetofReturn: true
+        }
       }
     }
     Enums: {
