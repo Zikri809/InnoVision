@@ -22,6 +22,7 @@ import {
   notFound,
   payloadTooLarge,
   rateLimited,
+  checkSameOrigin,
   timeout,
   unprocessable,
 } from "@/lib/http";
@@ -67,6 +68,10 @@ export async function POST(request: Request, context?: { params?: Promise<{ id?:
   // The route has no URL params (quizId comes from the body). Accept the
   // optional context Next.js passes for route-handler compatibility.
   void context;
+
+  // CSRF: reject cross-origin POSTs (mitigates the SameSite=Lax subdomain gap).
+  const originError = checkSameOrigin(request);
+  if (originError) return originError;
 
   let body: unknown;
   try {
@@ -193,19 +198,31 @@ async function handleGenerate(
 
   const rows = aiQuizToRows(result.quiz);
 
+  // Build the RPC args with a typed boundary. The generated `Args` type marks
+  // the source fields non-null and `p_questions: Json`, but the SQL accepts
+  // NULL sources and an array serializes to jsonb — so we cast only the
+  // nullability/array shape via `unknown`, keeping all field names checked by
+  // the `ReplaceQuizQuestionsArgs` type.
+  type ReplaceQuizQuestionsArgs = {
+    p_quiz_id: string;
+    p_title: string;
+    p_source_file_url: string | null;
+    p_source_text: string | null;
+    p_questions: unknown;
+  };
+  const rpcArgs: ReplaceQuizQuestionsArgs = {
+    p_quiz_id: quizId,
+    p_title: result.quiz.title,
+    p_source_file_url: sourcePathFinal ?? null,
+    p_source_text: text.slice(0, MAX_EXTRACT_CHARS),
+    // Pass the array directly (not JSON.stringify): PostgREST serializes a
+    // jsonb arg as a real JSON array, so jsonb_typeof(p_questions) = 'array'.
+    p_questions: rows,
+  };
+
   const { data: questions, error: rpcError } = await supabase.rpc(
     "replace_quiz_questions",
-    {
-      p_quiz_id: quizId,
-      p_title: result.quiz.title,
-      // The generated arg type marks source fields non-null even though the
-      // SQL accepts NULL (supabase gen-types limitation); cast at the boundary.
-      p_source_file_url: sourcePathFinal ?? null,
-      p_source_text: text.slice(0, MAX_EXTRACT_CHARS),
-      // Pass the array directly (not JSON.stringify): PostgREST serializes a
-      // jsonb arg as a real JSON array, so jsonb_typeof(p_questions) = 'array'.
-      p_questions: rows,
-    } as unknown as never,
+    rpcArgs as unknown as never,
   );
 
   if (rpcError) {

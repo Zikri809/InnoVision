@@ -175,6 +175,17 @@ describe("I16b — no extractedText → server native parse", () => {
 
 describe("I17 — regenerate happy path", () => {
   it("replaces a single question, siblings untouched", async () => {
+    // The regenerate endpoint expects a SINGLE-question response (a 3-question
+    // wrapper is now rejected by parseQuestionJson). Stub a bare question.
+    stubAiContent(
+      JSON.stringify({
+        type: "mcq",
+        prompt: "What is velocity?",
+        options: ["Speed in a direction", "Total distance", "Time taken"],
+        correct_index: 0,
+        explanation: "Velocity includes direction.",
+      }),
+    );
     const ctx = ownerContext({
       questions: [
         { id: QUESTION_D, quiz_id: QUIZ_C, order_index: 0, type: "mcq", prompt: "Old Q", options: ["a", "b"], correct_index: 0 },
@@ -287,6 +298,15 @@ describe("I-A3/I-A4 — draft-only enforcement", () => {
 
 describe("I-A4b — regenerate trigger-error backstop", () => {
   it("UPDATE questions_locked_quiz_not_draft → 409 (race backstop)", async () => {
+    // Stub a valid single-question AI response so the flow reaches the UPDATE.
+    stubAiContent(
+      JSON.stringify({
+        type: "mcq",
+        prompt: "Replacement question",
+        options: ["x", "y"],
+        correct_index: 0,
+      }),
+    );
     const ctx = ownerContext({
       // Pass the route-level draft check, but the UPDATE itself errors.
       questions: [{ id: QUESTION_D, quiz_id: QUIZ_C, order_index: 0, type: "mcq", prompt: "Old", options: ["a", "b"], correct_index: 0 }],
@@ -301,6 +321,14 @@ describe("I-A4b — regenerate trigger-error backstop", () => {
   });
 
   it("UPDATE duplicate_options / check constraint → 422", async () => {
+    stubAiContent(
+      JSON.stringify({
+        type: "mcq",
+        prompt: "Replacement question",
+        options: ["x", "y"],
+        correct_index: 0,
+      }),
+    );
     const ctx = ownerContext({
       questions: [{ id: QUESTION_D, quiz_id: QUIZ_C, order_index: 0, type: "mcq", prompt: "Old", options: ["a", "b"], correct_index: 0 }],
     });
@@ -672,7 +700,7 @@ describe("Parse timeout — pathological file → 503 timeout", () => {
       "fake",
     );
     const origDownload = ctx.client.storage.from;
-    ctx.client.storage.from = (bucket: string) => ({
+    ctx.client.storage.from = () => ({
       download: () => new Promise(() => {}),
     });
     try {

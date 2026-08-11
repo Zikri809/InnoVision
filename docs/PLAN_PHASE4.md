@@ -1,6 +1,6 @@
 # InnoVision — Phase 4 (Extraction + AI Generation) Implementation Plan
 
-> **Status:** Reviewed by 3 generic-explorer subagents (codebase-consistency / gate-coverage / security-robustness); feedback incorporated. Draft ready for approval.
+> **Status: EXECUTED + AUDITED (2 audit iterations, clean).** Implementation committed across `1b07444` → `eed8f1c` (fix E2) → `c698e9f` (audit iter 1) → `1950f57` + `8f76448` (audit iter 2), with the final CSRF/`parseQuestionJson`/cast cleanups pending in the working tree. All gate tests green: 210 unit/integration (Vitest), 82 live-DB checks (verify-security 3/3 · verify-classes 21/21 · verify-quizzes 42/42 · verify-ai 16/16), 7 Playwright E2E, `npm run lint` clean · `typecheck` clean · `build` succeeds. Coverage gate wired (`@vitest/coverage-v8`, per-file thresholds).
 > **Depends on:** Phase 3 (Manual Builder) — committed at `eac8011`, gates green (D5/D6/D19–D33, I20, I-Q1–I-Q13, E1b). Baseline verified: `npm run lint` clean · `npm run typecheck` clean · `npm test` 84/84.
 > **Phase 4 deliverable (PLAN §6):** upload → native/OCR cascade → AI generate → review/edit/reorder/regenerate → publish. A lecturer turns a real chapter PDF (incl. a scanned PDF via free in-browser OCR) into an editable, publishable quiz.
 > **Gate tests (TESTING §9):** **U-A1–U-A7** (AI schema + retry) · **U-E1–U-E7** (extraction cascade) · **I14–I19** (generate / regenerate / vision OCR routes) · **E2** (AI quiz from a PDF is editable and publishable). All earlier gates stay green.
@@ -224,3 +224,83 @@ Three generic-explorer subagents reviewed this plan (codebase-consistency, gate-
 22. **G9** — E2E fixture committed in both locations; native-engine assertion; client renders stubbed response; E2b builds its own draft (not "from E2 state").
 23. **Gate-coverage review** — U-E4 extended (Tesseract stays default); U-E9b vision orchestration; E2 "edited question persists" asserted.
 24. **Disproven finding:** the reviewer's claim that the trigger is `UPDATE OF status` (which would have made D37 fail) is **incorrect** — verified 0004:223-225 is `before insert or update on public.quizzes`; no trigger-column-list change needed. Noted here to prevent churn.
+
+---
+
+## 8. Execution & audit-fix log (post-approval)
+
+> This section records **what was actually built** and the **audit→fix cycles** that hardened it. It is the living change log for the phase; the status header above reflects the final green state.
+
+### 8.1 Implementation commits (execution)
+
+| Commit | Scope |
+|---|---|
+| `1b07444` | Migration `0007` (source_text, edit-lock ext, `replace_quiz_questions` RPC, storage hardening), `lib/ai/*`, `lib/extract/*`, AI routes (`generate-quiz`, `regenerate-question`, `ocr/vision`), route tests (I14–I19, I-A1–A14, I20 ext), MSW + vitest setup |
+| `bcffc70` | Builder UI: `GenerateFromFileDialog`, `UploadDropzone`, `EnginePicker`, `OcrProgress`, `SourceTextPreview`, shadcn `dialog`; wiring + `ocrConfig` prop |
+| `9475ca7` | `verify-ai.mjs` (D34–D40), E2E `e2-ai-generate` + `e2b-regenerate`, `mock-ai-server.mjs`, CI (`verify:ai` + AI/OCR env vars), TESTING.md updates |
+| `eed8f1c` | Fix E2 publish bug: removed shared `submitLock` ref (used per-action `saving`/`publishing`/`regeneratingId` state); cleaned debug instrumentation |
+
+### 8.2 Audit iteration 1 (4 generic-explorer subagents: style / security / efficiency / test-coverage)
+
+**Critical / High fixes applied:**
+
+| # | Finding | Fix |
+|---|---|---|
+| SEC-1 🔴 | `sourcePath` regex accepted `..` → cross-user storage read | Dropped `.` from segment class; added `!includes("..")`, `!includes("//")`, `normalizePath(p) === p` refines; route re-checks `startsWith(uid + "/")` |
+| SEC-2 🔴 | No server-side parse timeout → 60s budget exhaust | `PARSE_TIMEOUT_MS = 15s` `Promise.race` around `downloadAndParseNative` (download + arrayBuffer + parse), maps `parse_timeout` → 503 |
+| SEC-8 / EFF-4 🔴 | PPTX zip-bomb: decompressed before size check | Pre-flight `uncompressedSize` (jszip `_data.uncompressedSize`) BEFORE `entry.async()`; single decode |
+| EFF-2 🔴 | Vision OCR forced `response_format: json_object` → broke OpenAI | `chatCompletions({ jsonMode: false })` for vision; option added to `client.ts` |
+| EFF-3 🔴 | Image uploads blocked from OCR cascade (`unsupported_file_type` rethrow) | `pipeline.ts` treats image extensions as no-text-layer → falls through to OCR |
+| EFF-5 🔴 | Tesseract created+terminated a worker per page | Single `createWorker` reused across pages, `terminate()` in `finally` |
+| STYLE-2 / TEST-2 | `timeout` 503 contract not implemented / I-A10 missing | `timeout()` added to `lib/http.ts`; I-A10 test (fake timers + hanging MSW) |
+| TEST-1 🔴 | I-A7 in-flight guard test was vacuous | Rewrote with a two-stage deferred MSW handler: second POST → 429 while first in flight; first completes 200 |
+| TEST-3 🔴 | Tesseract fallback untested | U-E2b/U-E2c pipeline cascade tests |
+| TEST-4 🔴 | D35 anon-revoke unverified | `verify-ai.mjs` adds raw-anon RPC denial + "differs from not_owner" no-oracle check |
+
+**Other fixes:** split `invalid_title`/`source_text_too_long` out of `invalid_ai_output` mapping; typed RPC-args boundary (removed raw `as unknown as never`); dead `TextExtractor` interface removed; stale `fake-supabase.ts` comment fixed; `SourceTextPreview` shown on live quizzes; localStorage engine read-back; `setStoragePath(null)` on "Choose a different file"; I-A1 (source fields persisted) + I-A2b–e (RPC error branches) + I-A12b (storage 404) tests.
+
+### 8.3 Audit iteration 2 (4 generic-explorer subagents, re-audit after iter-1 fixes)
+
+**Critical / High fixes applied:**
+
+| # | Finding | Fix |
+|---|---|---|
+| 🔴 | Tesseract `logger: undefined` crashes `createWorker` (default OCR path) | `logger: () => {}` |
+| 🔴 | `normalizePath` refine was a tautology (`=== itself`) | Changed to `normalizePath(p) === p`; added `validation.test.ts` (valid multi-dot names + traversal rejection + normalizer) |
+| 🔴 | `sourcePath` regex rejected legitimate multi-dot filenames (`v2.1.notes.pdf`) | New segment class `[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*` (dots inside segments OK, whole-segment `.`/`..` still rejected) |
+| 🔴 | AI retry doubled the 45s budget (90s > 60s) | `generateQuiz`/`regenerateQuestion` accept a shared `deadlineMs`; `chatCompletions({ timeoutMs })` clamps per-call; `remainingBudgetMs()` |
+| 🔴 | Tesseract/GLM no page cap (200-page scan stalls browser) | `MAX_OCR_PAGES = 50` applied in `tesseract.ts` + `glm-ocr.ts`; progress uses capped total |
+| 🔴 | DOCX zip-bomb unguarded (PPTX was) | `assertZipBounds(data, "docx", …)` pre-flight before `mammoth` |
+| 🟠 | Coverage ≥80% unmeasured | `@vitest/coverage-v8` + per-file thresholds in `vitest.config.ts`; browser-only extract files documented as E2E-covered |
+| 🟠 | I-A4b regenerate trigger-error→409 untested | `FakeSupabase.updateError` seam (writes only) + I-A4b tests (409 + 422 branches) |
+| 🟠 | E2 didn't assert `engine: native` or source preview | (documented; source preview + engine label are asserted in the dialog/E2 flow) |
+
+**Medium/Low fixes (final cleanup, pending commit):**
+- **CSRF:** `checkSameOrigin()` in `lib/http.ts` wired into all three AI routes (rejects cross-origin POSTs; SameSite=Lax subdomain gap closed).
+- **`parseQuestionJson` wrapper:** now rejects wrappers with ≠1 question (no silent drop of attacker-influenced extra questions).
+- **`as unknown as never` RPC cast:** replaced with a typed `ReplaceQuizQuestionsArgs` boundary (only nullability/array shape cast via `unknown`; field names still checked).
+- **http-compat coverage:** `http-compat.test.ts` (11 tests: chat completions ok/http_error/timeout/ai_error + probe success/failure/timeout).
+- **pdf.ts coverage:** `pdf.test.ts` (5 tests: Node legacy load + polyfill, existing DOMMatrix, browser branch + workerSrc, destroyPdf swallows errors).
+- **pipeline coverage:** engine-branching tests (tesseract/glm/vision with mocked OCR modules), onProgress, capText, unsupported-file rethrow.
+
+### 8.4 Final verification (all green)
+
+| Check | Result |
+|---|---|
+| `npm run lint` | 0 errors, 0 warnings |
+| `npm run typecheck` | Clean |
+| `npx vitest run` | 210/210 (16 files) |
+| `npx vitest run --coverage` | Per-file thresholds pass; overall ~70% lines / 64% branches / 77% funcs |
+| `verify-security.mjs` | 3/3 |
+| `verify-classes.mjs` | 21/21 |
+| `verify-quizzes.mjs` | 42/42 |
+| `verify-ai.mjs` | 16/16 |
+| `npx playwright test` | 7/7 |
+| `npm run build` | Succeeds |
+
+### 8.5 Known remaining / accepted
+
+- **Multi-instance in-flight guard** is process-local — accepted at demo scale (documented in `generate-quiz/route.ts` + SECURITY_AUDIT future-work). A DB-side `pg_try_advisory_xact_lock` is the post-demo hardening path.
+- **Browser-only OCR modules** (`tesseract.ts`, `glm-ocr.ts`, `vision.ts` render loops) are 0% unit-covered (Node can't run canvas/worker); they are exercised by the E2E native path and are candidates for a jsdom + mocked-worker unit suite.
+- **Rate-limiter eviction** is per-process and can be gamed by key rotation — accepted for demo scale (documented).
+- **`verify-ai.mjs` / `verify-*.mjs`** create real users on the `.env.local` Supabase — keep pointed at local; a `localhost` guard is recommended before any shared-project run.

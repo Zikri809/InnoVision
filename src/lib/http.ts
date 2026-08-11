@@ -70,6 +70,32 @@ export function internalError(message: string): NextResponse {
   return jsonError("internal", message, 503);
 }
 
+/** 403 — CSRF: request Origin (if present) does not match this app's host. */
+export function invalidOrigin(): NextResponse {
+  return jsonError("invalid_origin", "Cross-origin request rejected.", 403);
+}
+
+/**
+ * Cheap CSRF defense for state-changing JSON routes. Rejects when an `Origin`
+ * header is present and its host differs from the request's own host. Same-
+ * site Lax cookies + this check closes the realistic CSRF surface (the
+ * classic Lax-only gap is same-site subdomain attacks). Returns a typed 403
+ * NextResponse if rejected, or `null` if the origin is acceptable (or absent
+ * — non-browser callers won't send Origin).
+ */
+export function checkSameOrigin(request: Request): NextResponse | null {
+  const origin = request.headers.get("origin");
+  if (!origin) return null;
+  try {
+    const originHost = new URL(origin).host.toLowerCase();
+    const reqHost = new URL(request.url).host.toLowerCase();
+    if (originHost === reqHost) return null;
+  } catch {
+    return invalidOrigin();
+  }
+  return invalidOrigin();
+}
+
 /** 503 — authenticated but the profile row isn't ready yet (signup race). */
 export function profileUnavailable(): NextResponse {
   return jsonError(

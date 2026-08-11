@@ -1,7 +1,32 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { runExtractionPipeline } from "@/lib/extract/pipeline";
 import { probeOllamaModel } from "@/lib/ai/http-compat";
 import { base64ByteLength, batch, MAX_VISION_PAGES } from "@/lib/extract/types";
+
+// Mock the OCR modules so pipeline-level tests can exercise the GLM/vision
+// branches without the browser-only pdf.js/tesseract.js canvases.
+vi.mock("@/lib/extract/tesseract", () => ({
+  tesseractExtract: vi.fn(async () => ({
+    text: "OCR result",
+    pages: 1,
+    engine: "tesseract",
+  })),
+}));
+vi.mock("@/lib/extract/glm-ocr", () => ({
+  glmExtract: vi.fn(async () => ({
+    text: "GLM result",
+    pages: 1,
+    engine: "glm",
+  })),
+  glmAvailable: vi.fn(async () => true),
+}));
+vi.mock("@/lib/extract/vision", () => ({
+  visionExtract: vi.fn(async () => ({
+    text: "Vision result",
+    pages: 1,
+    engine: "vision",
+  })),
+}));
 
 describe("U-E2 — low chars/page falls through to OCR picker", () => {
   it("server-side path throws ocr_required_browser when native is sparse", async () => {
@@ -100,5 +125,132 @@ describe("U-E10 — base64 byte estimator edge cases", () => {
     expect(base64ByteLength("YWJjZA==")).toBe(4);
     // "abcde" → "YWJjZGU=" (8 chars, = padding) = 5 bytes.
     expect(base64ByteLength("YWJjZGU=")).toBe(5);
+  });
+});
+
+describe("Pipeline engine branching", () => {
+  // The pipeline requires a `File` for the OCR branches (server-side path
+  // throws `ocr_required_browser` to avoid Node-only canvas code). A tiny
+  // `File`-shaped stub is enough — we never call arrayBuffer/canvas on it
+  // because the OCR modules are mocked.
+  const fileStub = (filename: string) =>
+    ({ name: filename, arrayBuffer: async () => new ArrayBuffer(0) }) as unknown as File;
+
+  beforeEach(() => {
+    // Clear the OCR mock call counts between tests so `not.toHaveBeenCalled`
+    // assertions aren't polluted by previous tests.
+    vi.clearAllMocks();
+  });
+
+  it("selects tesseract when engine='tesseract'", async () => {
+    const tesseract = await import("@/lib/extract/tesseract");
+    // sparse content so the cascade falls through to OCR.
+    const r = await runExtractionPipeline({
+      file: fileStub("scan.pdf"),
+      engine: "tesseract",
+    });
+    expect(r.engine).toBe("tesseract");
+    expect(tesseract.tesseractExtract).toHaveBeenCalled();
+  });
+
+  it("selects glm when engine='glm'", async () => {
+    const glm = await import("@/lib/extract/glm-ocr");
+    const r = await runExtractionPipeline({
+      file: fileStub("scan.pdf"),
+      engine: "glm",
+    });
+    expect(r.engine).toBe("glm");
+    expect(glm.glmExtract).toHaveBeenCalled();
+  });
+
+  it("selects vision when engine='vision'", async () => {
+    const vision = await import("@/lib/extract/vision");
+    const r = await runExtractionPipeline({
+      file: fileStub("scan.pdf"),
+      engine: "vision",
+    });
+    expect(r.engine).toBe("vision");
+    expect(vision.visionExtract).toHaveBeenCalled();
+  });
+
+  it("uses dense native text and skips OCR entirely", async () => {
+    const tesseract = await import("@/lib/extract/tesseract");
+    // A dense enough plain text > MIN_CHARS_PER_PAGE → native is usable.
+    const dense = "a".repeat(200);
+    const r = await runExtractionPipeline({
+      file: {
+        name: "notes.txt",
+        arrayBuffer: async () =>
+          new TextEncoder().encode(dense).buffer as ArrayBuffer,
+      } as unknown as File,
+      engine: "tesseract",
+    });
+    expect(r.engine).toBe("native");
+    expect(tesseract.tesseractExtract).not.toHaveBeenCalled();
+  });
+
+  it("uses the config defaultEngine when no engine is set", async () => {
+    // Dense enough content so the cascade is short-circuited (no OCR path)
+    // and the engine returned is the config's defaultEngine.
+    const dense = "a".repeat(200);
+    const r = await runExtractionPipeline({
+      file: {
+        name: "notes.txt",
+        arrayBuffer: async () =>
+          new TextEncoder().encode(dense).buffer as ArrayBuffer,
+      } as unknown as File,
+      config: { defaultEngine: "vision", ollamaBaseUrl: "x", glmModel: "y", visionModel: "z" },
+    });
+    expect(r.engine).toBe("native");
+  });
+
+  it("forwards onProgress events from the native + OCR phases", async () => {
+    const events: Array<{ stage: string; page: number; total: number }> = [];
+    const dense = "a".repeat(200);
+    await runExtractionPipeline({
+      file: {
+        name: "notes.txt",
+        arrayBuffer: async () =>
+          new TextEncoder().encode(dense).buffer as ArrayBuffer,
+      } as unknown as File,
+      engine: "tesseract",
+      onProgress: (p) => events.push({ stage: p.stage, page: p.page, total: p.total }),
+    });
+    // At least one "native" progress event fired (the cascade ran).
+    expect(events.some((e) => e.stage === "native")).toBe(true);
+  });
+
+  it("rethrows unsupported_file_type for genuinely unsupported file extensions", async () => {
+    // .exe is in the server-side blocklist but not a browser-OCR input.
+    await expect(
+      runExtractionPipeline({
+        file: {
+          name: "archive.exe",
+          arrayBuffer: async () => new TextEncoder().encode("MZ").buffer as ArrayBuffer,
+        } as unknown as File,
+        engine: "tesseract",
+      }),
+    ).rejects.toThrow(/unsupported_file_type/);
+  });
+
+  it("caps the returned text at MAX_EXTRACT_CHARS (capText is exercised)", async () => {
+    // Dense text > MAX_EXTRACT_CHARS (15k) exercises the capText branch.
+    // Tesseract mock returns 3 chars; force a large string by overriding
+    // the mock for this test only.
+    const tesseract = await import("@/lib/extract/tesseract");
+    const hugeText = "x".repeat(20_000);
+    vi.mocked(tesseract.tesseractExtract).mockResolvedValueOnce({
+      text: hugeText,
+      pages: 1,
+      engine: "tesseract",
+    });
+    const r = await runExtractionPipeline({
+      file: {
+        name: "scan.pdf",
+        arrayBuffer: async () => new TextEncoder().encode("Hi.").buffer as ArrayBuffer,
+      } as unknown as File,
+      engine: "tesseract",
+    });
+    expect(r.text.length).toBeLessThanOrEqual(15_000);
   });
 });

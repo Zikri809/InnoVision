@@ -16,6 +16,7 @@ import {
   notDraft,
   notFound,
   rateLimited,
+  checkSameOrigin,
   timeout,
   unprocessable,
 } from "@/lib/http";
@@ -48,6 +49,10 @@ export async function POST(request: Request, context?: { params?: Promise<{ id?:
   // The route has no URL params (questionId comes from the body). Accept the
   // optional context Next.js passes for route-handler compatibility.
   void context;
+
+  // CSRF: reject cross-origin POSTs (mitigates the SameSite/Lax subdomain gap).
+  const originError = checkSameOrigin(request);
+  if (originError) return originError;
 
   // 1. requireLecturer FIRST (a student must get 403, not a 404 from the RLS
   //    question fetch — the no-oracle guarantee applies to non-owner LECTURERS,

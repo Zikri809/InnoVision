@@ -60,18 +60,22 @@ function charCount(s: string): number {
  * the strongest hard bound.
  */
 async function assertZipBounds(
-  source: ArrayBuffer | unknown[],
+  source: ArrayBuffer | Array<{ name: string; dir: boolean; async: (type: string) => Promise<Uint8Array | string> }>,
   label: "docx" | "pptx",
   select: (name: string) => boolean,
 ): Promise<void> {
-  let entries: unknown[];
+  let entries: Array<{ name: string; dir: boolean; async: (type: string) => Promise<Uint8Array | string> }>;
   if (source instanceof ArrayBuffer) {
     // DOCX is via mammoth; we pre-flight the central-directory sizes by loading
     // with jszip (which only parses the directory at this point — no entry
     // bodies are decompressed until entry.async() is called).
     const JSZip = (await import("jszip")).default;
     const zip = await JSZip.loadAsync(source);
-    entries = Object.values(zip.files);
+    entries = Object.values(zip.files) as unknown as Array<{
+      name: string;
+      dir: boolean;
+      async: (type: string) => Promise<Uint8Array | string>;
+    }>;
   } else {
     entries = source;
   }
@@ -80,11 +84,13 @@ async function assertZipBounds(
   }
   let preflightBytes = 0;
   for (const entry of entries) {
-    if (!select((entry as { name: string }).name)) continue;
+    if (!select(entry.name)) continue;
+    // jszip's ZipObject also exposes _data.uncompressedSize (not in the public
+    // type) — fall back to it. Same field read as the PPTX path.
     const entryAny = entry as unknown as {
+      name: string;
       uncompressedSize?: number;
       _data?: { uncompressedSize?: number };
-      name: string;
     };
     preflightBytes +=
       entryAny.uncompressedSize ?? entryAny._data?.uncompressedSize ?? 0;
@@ -134,7 +140,7 @@ async function extractDocxText(data: ArrayBuffer): Promise<{ pages: string[] }> 
   // DOCX zip-bomb pre-check (mirrors the PPTX one). Mammoth internally
   // decompresses the zip on extractRawText; pre-flight declared sizes so a
   // bomb entry can't OOM the worker.
-  await assertZipBounds(data, "docx", (e) => /^word\//.test(e.name) || /^\[Content_Types\]\.xml$/.test(e.name));
+  await assertZipBounds(data, "docx", (name) => /^word\//.test(name) || /^\[Content_Types\]\.xml$/.test(name));
   const mammoth = await import("mammoth");
   // Mammoth's Node build reads `{ buffer }`; the browser build reads
   // `{ arrayBuffer }`. Pass both-compatible options explicitly.
@@ -149,8 +155,16 @@ async function extractDocxText(data: ArrayBuffer): Promise<{ pages: string[] }> 
 async function extractPptxText(data: ArrayBuffer): Promise<{ pages: string[] }> {
   const JSZip = (await import("jszip")).default;
   const zip = await JSZip.loadAsync(data);
-  const entries = Object.values(zip.files);
-  await assertZipBounds(entries, "pptx", (e) => /^ppt\/slides\/slide\d+\.xml$/.test(e.name));
+  const entries = Object.values(zip.files) as unknown as Array<{
+    name: string;
+    dir: boolean;
+    async: (type: string) => Promise<Uint8Array | string>;
+  }>;
+  await assertZipBounds(
+    entries,
+    "pptx",
+    (name) => /^ppt\/slides\/slide\d+\.xml$/.test(name),
+  );
   const slideFiles = entries
     .filter((e) => /^ppt\/slides\/slide\d+\.xml$/.test(e.name) && !e.dir)
     .sort((a, b) => {
@@ -162,7 +176,7 @@ async function extractPptxText(data: ArrayBuffer): Promise<{ pages: string[] }> 
   const pages: string[] = [];
   for (const entry of slideFiles) {
     // Read the entry ONCE (avoid double-decompress); decode the bytes as text.
-    const bytes = await entry.async("uint8array");
+    const bytes = (await entry.async("uint8array")) as Uint8Array;
     const xml = new TextDecoder("utf-8").decode(bytes);
     // Strip tags and collect <a:t> text node contents.
     const text = xml

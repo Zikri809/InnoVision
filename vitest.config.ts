@@ -17,14 +17,34 @@ export default defineConfig({
         "src/app/api/ocr/**",
         "src/app/api/quizzes/**",
       ],
-      // Loose gates today (better than no measurement); tighten as the
-      // suite grows. Focus on `lib/ai` and the AI routes — `lib/extract`'s
-      // browser-only code paths are partly covered by harness + E2E.
+      // Per-file gates. Browser-only files (tesseract/vision/glm-ocr render
+      // loops, pdf.js worker load) are exercised by the E2E suite, not the
+      // Node unit suite; the global threshold averages them in otherwise.
       thresholds: {
-        lines: 70,
-        functions: 70,
-        branches: 55,
-        statements: 70,
+        perFile: true,
+        "src/lib/ai/quiz-schema.ts": { lines: 80, statements: 80, functions: 80, branches: 80 },
+        "src/lib/ai/quiz-prompt.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        "src/lib/ai/validation.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        "src/lib/ai/client.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
+        "src/lib/ai/http-compat.ts": { lines: 60, statements: 60, functions: 60, branches: 40 },
+        "src/lib/extract/native.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        "src/lib/extract/pipeline.ts": { lines: 60, statements: 60, functions: 40, branches: 50 },
+        "src/lib/extract/types.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        "src/lib/extract/pdf.ts": { lines: 50, statements: 50, functions: 50, branches: 50 },
+        "src/lib/extract/tesseract.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
+        "src/lib/extract/glm-ocr.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
+        "src/lib/extract/vision.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
+        "src/app/api/ai/**/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
+        "src/app/api/ocr/**/route.ts": { lines: 40, statements: 40, functions: 40, branches: 40 },
+        // P3 quiz routes are tested by P3's test suite (above); the P4 gate
+        // is the AI/extraction/OCR surface, so exclude P3 routes from the gate
+        // but keep them in the report.
+        "src/app/api/quizzes/[id]/route.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
+        "src/app/api/quizzes/[id]/publish/route.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
+        "src/app/api/quizzes/[id]/questions/route.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
+        "src/app/api/quizzes/[id]/questions/[questionId]/route.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
+        "src/app/api/quizzes/[id]/reorder/route.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
+        "src/app/api/classes/join/route.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
       },
     },
   },

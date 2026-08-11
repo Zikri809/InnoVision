@@ -146,12 +146,21 @@ export function parseQuestionJson(text: string): ParsedQuestion {
   const direct = AiQuestionSchema.safeParse(parsed);
   if (direct.success) return { ok: true, question: direct.data };
 
-  // Wrapper { title, questions: [...] }?
+  // Wrapper { title, questions: [...] }? Only accept EXACTLY one question —
+  // silently dropping extra (possibly attacker-influenced) questions is a
+  // correctness risk (LOW #14 from the audit).
   if (typeof parsed === "object" && parsed !== null && "questions" in parsed) {
     const list = (parsed as { questions: unknown }).questions;
-    if (Array.isArray(list) && list.length >= 1) {
-      const first = AiQuestionSchema.safeParse(list[0]);
-      if (first.success) return { ok: true, question: first.data };
+    if (Array.isArray(list)) {
+      if (list.length === 1) {
+        const first = AiQuestionSchema.safeParse(list[0]);
+        if (first.success) return { ok: true, question: first.data };
+      } else {
+        return {
+          ok: false,
+          issues: ["Expected exactly one question in the response wrapper."],
+        };
+      }
     }
   }
 

@@ -12,6 +12,7 @@ import {
   invalidJson,
   payloadTooLarge,
   rateLimited,
+  checkSameOrigin,
   timeout,
 } from "@/lib/http";
 
@@ -37,6 +38,9 @@ const VISION_RATE = { limit: 30, windowMs: 60 * 60 * 1000 };
  */
 export async function POST(request: Request) {
   const supabase = await createClient();
+  // CSRF: reject cross-origin POSTs (mitigates the SameSite=Lax subdomain gap).
+  const originError = checkSameOrigin(request);
+  if (originError) return originError;
   const auth = await requireLecturer(supabase);
   if (!auth.ok) return auth.response;
 
