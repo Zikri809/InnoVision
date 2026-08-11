@@ -21,12 +21,17 @@ import {
  *  - `instruction` on regenerate is capped to bound prompt size.
  */
 
-// Only letters, digits, underscores, hyphens, and dots that are NOT used for
-// parent-dir traversal. The `.` is kept to support file extensions, but
-// segments consisting only of `.` or `..` are explicitly rejected by the
-// SUPER_REFINE check below.
-const SOURCE_PATH_REGEX =
-  /^[0-9a-fA-F-]{36}\/[0-9a-fA-F-]{36}\/[A-Za-z0-9_-]+(?:[./][A-Za-z0-9_-]+)*$/;
+// Storage path shape: `<uuid>/<uuid>/<file-with-dots>[/<file-with-dots>]*`
+//   - segments: letters/digits/underscore/hyphen, optionally with internal dots
+//     (e.g. `chapter.2024.notes.pdf`) — but never `.`/`..` as the whole
+//     segment (traversal), and never `//`.
+//   - The literal `..` substring + the canonical-normalize refine are
+//     belt-and-suspenders: even if the regex ever changes, traversal is
+//     rejected at the refine layer.
+const SEGMENT = String.raw`[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*`;
+const SOURCE_PATH_REGEX = new RegExp(
+  `^[0-9a-fA-F-]{36}/[0-9a-fA-F-]{36}/${SEGMENT}(?:/${SEGMENT})*$`,
+);
 
 export const GenerateQuizSchema = z.object({
   quizId: z.string().uuid("quizId must be a valid UUID."),
@@ -42,10 +47,11 @@ export const GenerateQuizSchema = z.object({
     .refine((p) => !p.includes("//"), "sourcePath contains an empty segment.")
     .refine(
       // POSIX-normalize the path and reject if it changes — catches any
-      // remaining traversal trick (e.g. `./`, `../foo`, mixed slashes).
-      // The normalizer prepends `/`; we compare against the same canonical
-      // form so inputs without a leading slash still match.
-      (p) => normalizePath(p) === normalizePath(p),
+      // remaining traversal trick (e.g. `./`, `../foo`, mixed slashes). The
+      // normalizer preserves a leading slash if the input had one; since the
+      // regex already rejects leading/trailing slashes, this comparison is
+      // exact for the valid input space.
+      (p) => normalizePath(p) === p,
       "sourcePath is not a canonical storage path.",
     )
     .optional(),

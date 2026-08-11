@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from "vitest";
 import { FakeSupabase, makeOwnerContext } from "@/app/api/quizzes/__tests__/fake-supabase";
-import { defaultAiServer, invalidJson } from "@/test/msw/server";
+import { defaultAiServer, invalidJson, validQuizJson } from "@/test/msw/server";
 import { _resetRateLimiter, _seedRateLimit } from "@/lib/classes/rate-limit";
 import { http, HttpResponse } from "msw";
 import * as generateRoute from "@/app/api/ai/generate-quiz/route";
@@ -324,22 +324,71 @@ describe("I-A7 — rate limit → 429", () => {
     });
     expect(res.status).toBe(429);
   });
+});
 
-  it("in-flight guard rejects concurrent generation for the same quiz", async () => {
+describe("I-A7b — in-flight guard blocks concurrent same-quiz generate", () => {
+  it("second concurrent POST returns 429 while first is in flight; first completes 200", async () => {
     ownerContext();
+    // Two-stage deferred MSW handler: the first call records that MSW was
+    // entered (proving the in-flight lock is held) and then waits for the
+    // second call to fire. The second call sees the lock and returns 429.
+    let releaseFirst!: () => void;
+    let releaseSecond!: () => void;
+    let firstEntered = false;
+    let secondEntered = false;
+    const firstGate = new Promise<void>((r) => (releaseFirst = r));
+    const secondGate = new Promise<void>((r) => (releaseSecond = r));
+
+    defaultAiServer.use(
+      http.post("*/chat/completions", async ({ request }) => {
+        const body = (await request.clone().json()) as { messages?: unknown[] };
+        const callIndex =
+          (body.messages?.length ?? 0) > 0 && !firstEntered
+            ? "first"
+            : "second";
+        if (callIndex === "first") {
+          firstEntered = true;
+          await secondGate; // hold until the test fires the second POST
+          return HttpResponse.json({
+            choices: [{ message: { content: validQuizJson } }],
+          });
+        }
+        secondEntered = true;
+        await firstGate; // symmetric
+        return HttpResponse.json({
+          choices: [{ message: { content: validQuizJson } }],
+        });
+      }),
+    );
+
     const { generate } = await importHandlers();
-    // First request holds the in-flight lock (simulate by seeding the set is
-    // internal; instead fire two and let the first complete — simpler: assert
-    // the guard exists via a direct unit on the module isn't possible, so we
-    // test the rate-limit 429 path which is the observable behavior).
-    const res = await generate.POST(req({ quizId: QUIZ_C, extractedText: "x" }), {
-      params: Promise.resolve({ id: QUIZ_C }),
-    });
-    expect(res.status).toBe(200);
+    const p1 = generate.POST(
+      req({ quizId: QUIZ_C, extractedText: "t" }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    // Wait until the first request has actually entered chatCompletions
+    // (proving the in-flight lock is held).
+    await vi.waitFor(() => firstEntered, { timeout: 2000 });
+    // Fire the second request — it should immediately get 429.
+    const res2 = await generate.POST(
+      req({ quizId: QUIZ_C, extractedText: "t" }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res2.status).toBe(429);
+    const body2 = await res2.json();
+    expect(body2.error).toBe("rate_limited");
+    // Release the first request — it should complete 200.
+    releaseSecond();
+    const res1 = await p1;
+    expect(res1.status).toBe(200);
+    // Sanity: the second handler was never entered (it was rejected at the route).
+    expect(secondEntered).toBe(false);
+    // Suppress unused-var lint for the unused releaseFirst.
+    void releaseFirst;
   });
 });
 
-describe("I-A9 — extractedText > 15k → 400", () => {
+describe("I-A8 — duplicate/whitespace-colliding options are REJECTED (schema gate)", () => {
   it("AI output with duplicate options → 422, zero rows inserted", async () => {
     // The AI schema rejects duplicate options at parse time (before any insert),
     // so the route must return 422 and never reach the RPC. This is the actual
@@ -580,6 +629,41 @@ describe("I-A10 — AI 45s timeout → 503 timeout, zero inserts", () => {
       expect(currentClient().tables["questions"] ?? []).toHaveLength(0);
     } finally {
       vi.useRealTimers();
+    }
+  });
+});
+
+describe("Parse timeout — pathological file → 503 timeout", () => {
+  it("server-native parse that exceeds PARSE_TIMEOUT_MS returns 503", { timeout: 15_000 }, async () => {
+    const ctx = ownerContext();
+    // Seed a file, but override storage.download to hang indefinitely so the
+    // route races against the parse-timeout. The download hangs inside the
+    // route's `downloadAndParseNative`; the 15s parse timeout fires first.
+    ctx.client.storageFiles[`${OWNER_ID}/${QUIZ_C}/hang.pdf`] = new TextEncoder().encode(
+      "fake",
+    );
+    const origDownload = ctx.client.storage.from;
+    ctx.client.storage.from = (bucket: string) => ({
+      download: () => new Promise(() => {}),
+    });
+    try {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const { generate: gen } = await importHandlers();
+      const promise = gen.POST(
+        req({
+          quizId: QUIZ_C,
+          sourcePath: `${OWNER_ID}/${QUIZ_C}/hang.pdf`,
+        }),
+        { params: Promise.resolve({ id: QUIZ_C }) },
+      );
+      // Advance past the 15s parse timeout.
+      await vi.advanceTimersByTimeAsync(16_000);
+      const res = await promise;
+      expect(res.status).toBe(503);
+      expect((await res.json()).error).toBe("timeout");
+    } finally {
+      vi.useRealTimers();
+      ctx.client.storage.from = origDownload;
     }
   });
 });

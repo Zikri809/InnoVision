@@ -35,10 +35,12 @@ export async function tesseractExtract(
   // internally creates+terminates a worker per call, which re-fetches the WASM
   // core (~MB) and eng.traineddata (~4-11 MB) on every page. Creating one worker
   // here and reusing it is the supported pattern.
+  //
+  // `logger` MUST be a function — tesseract.js v7's message handler invokes
+  // `logger({...})` unconditionally and crashes with `TypeError: logger is
+  // not a function` when undefined.
   const worker = await Tesseract.createWorker("eng", 1, {
-    // Suppress verbose progress logging; the dialog's progress bar is driven by
-    // our `onProgress` callback.
-    logger: undefined,
+    logger: () => {},
   });
 
   const parts: string[] = [];

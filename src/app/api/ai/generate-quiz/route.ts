@@ -33,6 +33,12 @@ export const maxDuration = 60;
 // per-process — accepted at demo scale (documented in SECURITY_AUDIT).
 const GENERATE_RATE = { limit: 10, windowMs: 60 * 60 * 1000 };
 
+// Per PLAN §S1: ~10s parse timeout. A pathological file can otherwise eat the
+// full `maxDuration=60` budget. The underlying parse continues to run in the
+// isolate (we can't truly abort pdf.js/mammoth/jszip), but the route returns
+// a clean 503 and Vercel reclaims the worker on the 60s cap.
+const PARSE_TIMEOUT_MS = 15_000;
+
 // In-process in-flight guard so a scripted double-POST can't fire two LLM
 // calls for the same quiz (S4). Single-instance caveat documented.
 const inFlight = new Set<string>();
@@ -255,6 +261,39 @@ async function handleGenerate(
 
 /** Download + native-parse a stored file with server-side bounds (S1). */
 async function downloadAndParseNative(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  path: string,
+): Promise<{ text?: string; lowConfidence?: boolean; error?: NextResponse }> {
+  // Parse with a wall-clock timeout (PLAN §S1) so a pathological file can't
+  // consume the full `maxDuration=60` budget. We race the ENTIRE
+  // download+arrayBuffer+parse chain against a 15s deadline: the storage
+  // download, the size check, AND the PDF/DOCX/PPTX parse are all covered.
+  // The underlying work continues in the isolate (we can't truly abort
+  // pdf.js/mammoth/jszip), but the route returns a clean 503 and Vercel
+  // reclaims the worker on the 60s cap.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      downloadParse(supabase, path),
+      new Promise<{ error: NextResponse }>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("parse_timeout")), PARSE_TIMEOUT_MS);
+      }),
+    ]);
+  } catch (err) {
+    if ((err as Error)?.message === "parse_timeout") {
+      return {
+        error: timeout(
+          "The file could not be parsed in time. Try a smaller file or run OCR in the browser.",
+        ),
+      };
+    }
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function downloadParse(
   supabase: Awaited<ReturnType<typeof createClient>>,
   path: string,
 ): Promise<{ text?: string; lowConfidence?: boolean; error?: NextResponse }> {
