@@ -72,24 +72,26 @@ class FakeQueryBuilder {
   }
 
   async maybeSingle(): Promise<{ data: Row | null; error: { message: string } | null }> {
-    const rows = this._execute();
-    return { data: rows[0] ?? null, error: null };
+    const { rows, error } = this._execute();
+    return { data: error ? null : rows[0] ?? null, error };
   }
 
   async single(): Promise<{ data: Row | null; error: { message: string } | null }> {
-    const rows = this._execute();
+    const { rows, error } = this._execute();
+    if (error) return { data: null, error };
     if (rows.length === 0) return { data: null, error: { message: "PGRST116" } };
     return { data: rows[0], error: null };
   }
 
   /** Thenable so `await builder` works for count queries (publish route). */
   then(
-    resolve: (value: { count?: number; data?: Row[]; error: null }) => void,
+    resolve: (value: { count?: number; data?: Row[]; error: { message: string } | null }) => void,
   ): void {
-    const rows = this._execute();
+    const { rows, error } = this._execute();
     // Match PostgREST's real shape: count queries return { count, data, error },
     // plain queries return { data, error }.
-    if (this.countExact) resolve({ count: rows.length, data: rows, error: null });
+    if (error) resolve({ count: undefined, data: undefined, error });
+    else if (this.countExact) resolve({ count: rows.length, data: rows, error: null });
     else resolve({ data: rows, error: null });
   }
 
@@ -139,17 +141,24 @@ class FakeQueryBuilder {
     return out;
   }
 
-  private _execute(): Row[] {
+  private _execute(): { rows: Row[]; error: { message: string } | null } {
+    // Test-only error seam: when set, every WRITE operation (insert/update/
+    // delete) on this table returns the seeded error so the route's
+    // error-mapping branches can be exercised (e.g. trigger errors on
+    // UPDATE). SELECTs pass through (the seam is for writes only).
+    if (this.client.updateError && this.op && this.op.kind !== undefined) {
+      return { rows: [], error: { message: this.client.updateError } };
+    }
     const tableRows = (this.client.tables[this.table] ??= []);
 
     if (!this.op) {
-      return this._filtered(tableRows);
+      return { rows: this._filtered(tableRows), error: null };
     }
 
     if (this.op.kind === "insert") {
       const r: Row = { ...this.op.row, id: this.op.row.id ?? randomUuid() };
       tableRows.push(r);
-      return [r];
+      return { rows: [r], error: null };
     }
 
     const op = this.op;
@@ -157,12 +166,12 @@ class FakeQueryBuilder {
 
     if (op.kind === "update") {
       targets.forEach((r) => Object.assign(r, op.row));
-      return targets;
+      return { rows: targets, error: null };
     }
 
     // delete
     this.client.tables[this.table] = tableRows.filter((r) => !targets.includes(r));
-    return targets;
+    return { rows: targets, error: null };
   }
 }
 
@@ -182,6 +191,12 @@ export class FakeSupabase {
   storageFiles: Record<string, Uint8Array> = {};
   /** When true, replace_quiz_questions returns an error (simulated). */
   rpcError: { message: string } | null = null;
+  /**
+   * Test-only: when set, every `.update()`/`.delete()`/etc. on this table
+   * returns the seeded error so the route's error-mapping branches can be
+   * exercised (e.g. trigger errors on UPDATE).
+   */
+  updateError: string | null = null;
 
   auth = {
     getUser: async () => ({ data: { user: this.user } }),

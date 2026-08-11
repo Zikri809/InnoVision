@@ -167,18 +167,29 @@ export type GenerateQuizResult =
   | { ok: true; quiz: AiQuiz }
   | { ok: false; error: "invalid_ai_output" | "ai_unavailable" | "timeout"; message?: string };
 
+/** Default per-round budget for AI calls inside the quiz prompt helpers. */
+export const AI_CALL_BUDGET_MS = 45_000;
+
+/** Compute the remaining budget for the next call (clamped to a minimum of 1s). */
+export function remainingBudgetMs(deadline: number, safetyMs = 1_000): number {
+  return Math.max(safetyMs, deadline - Date.now());
+}
+
 /**
  * Generate a full quiz from extracted text with ONE validation retry. The
  * caller (route) never inserts on failure — so invalid output means ZERO rows.
  */
 export async function generateQuiz(opts: {
-  chat: (messages: ChatMessage[]) => Promise<ChatResult>;
+  chat: (messages: ChatMessage[], timeoutMs?: number) => Promise<ChatResult>;
   text: string;
   questionCount: number;
+  /** Wall-clock deadline for attempt+retry combined. Defaults to now + 50s. */
+  deadlineMs?: number;
 }): Promise<GenerateQuizResult> {
-  const { chat, text, questionCount } = opts;
+  const { chat, text, questionCount, deadlineMs = Date.now() + 50_000 } = opts;
 
   const attempt = async (extra?: string): Promise<GenerateQuizResult> => {
+    const remaining = remainingBudgetMs(deadlineMs);
     const messages: ChatMessage[] = [
       { role: "system", content: buildQuizSystemPrompt() },
       {
@@ -188,7 +199,7 @@ export async function generateQuiz(opts: {
           : buildQuizUserPrompt(text, questionCount),
       },
     ];
-    const res = await chat(messages);
+    const res = await chat(messages, remaining);
     if (!res.ok) {
       return res.error === "timeout"
         ? { ok: false, error: "timeout" }
@@ -219,14 +230,16 @@ export type RegenerateResult =
  * writes on success, so a failure leaves the original untouched (I17).
  */
 export async function regenerateQuestion(opts: {
-  chat: (messages: ChatMessage[]) => Promise<ChatResult>;
+  chat: (messages: ChatMessage[], timeoutMs?: number) => Promise<ChatResult>;
   question: AiQuestion;
   siblings: AiQuestion[];
   instruction?: string;
+  deadlineMs?: number;
 }): Promise<RegenerateResult> {
-  const { chat, question, siblings, instruction } = opts;
+  const { chat, question, siblings, instruction, deadlineMs = Date.now() + 50_000 } = opts;
 
   const attempt = async (extra?: string): Promise<RegenerateResult> => {
+    const remaining = remainingBudgetMs(deadlineMs);
     const messages: ChatMessage[] = [
       { role: "system", content: buildQuizSystemPrompt() },
       {
@@ -236,7 +249,7 @@ export async function regenerateQuestion(opts: {
           : buildRegeneratePrompt({ question, siblings, instruction }),
       },
     ];
-    const res = await chat(messages);
+    const res = await chat(messages, remaining);
     if (!res.ok) {
       return res.error === "timeout"
         ? { ok: false, error: "timeout" }

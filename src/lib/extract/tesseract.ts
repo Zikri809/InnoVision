@@ -10,6 +10,7 @@
 
 import {
   MAX_EXTRACT_CHARS,
+  MAX_OCR_PAGES,
   MIN_CHARS_PER_PAGE,
   type ExtractionResult,
 } from "@/lib/extract/types";
@@ -105,7 +106,9 @@ async function rasterizeToImages(
   const arrayBuffer = await file.arrayBuffer();
   const doc = await pdfjs.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
   try {
-    const total = doc.numPages;
+    // Cap pages (MAX_OCR_PAGES) to bound browser CPU/memory on huge scans.
+    // `progress.total` reflects the capped count so the dialog bar matches.
+    const total = Math.min(doc.numPages, MAX_OCR_PAGES);
     const pages: RenderedPage[] = [];
     for (let i = 1; i <= total; i++) {
       onProgress?.(i, total);

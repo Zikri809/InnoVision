@@ -165,11 +165,15 @@ async function handleGenerate(
     return unprocessable("Extracted text is empty. Try a different file.", "empty_text");
   }
 
-  // Run the AI generation (one retry inside generateQuiz).
+  // Run the AI generation (one retry inside generateQuiz). Share a single
+  // deadline across attempt + retry so the second call doesn't burn another
+  // full 45s when most of the 50s window is already gone.
   const ai = createAiClient();
   const result: GenerateQuizResult = await generateQuiz({
-    chat: (messages) =>
-      chatCompletions({ client: ai, model: AI_MODEL, messages }).then((r) => r),
+    chat: (messages, timeoutMs) =>
+      chatCompletions({ client: ai, model: AI_MODEL, messages, timeoutMs }).then(
+        (r) => r,
+      ),
     text: text.slice(0, MAX_EXTRACT_CHARS),
     questionCount: questionCount ?? 10,
   });

@@ -31,6 +31,8 @@ export const MIN_CHARS_PER_PAGE = 40;
 export const MAX_EXTRACT_CHARS = 15_000;
 /** Max pages rendered per vision OCR request (Vercel 4.5 MB body cap). */
 export const MAX_VISION_PAGES = 3;
+/** Max pages rasterized + recognized per Tesseract/GLM OCR run (DoS / responsiveness cap). */
+export const MAX_OCR_PAGES = 50;
 /** Max base64 characters per image sent to /api/ocr/vision (~1.3 MB binary). */
 export const MAX_IMAGE_BASE64_CHARS = 1_300_000;
 /** Client-side file size cap. */

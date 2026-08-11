@@ -285,6 +285,35 @@ describe("I-A3/I-A4 — draft-only enforcement", () => {
   });
 });
 
+describe("I-A4b — regenerate trigger-error backstop", () => {
+  it("UPDATE questions_locked_quiz_not_draft → 409 (race backstop)", async () => {
+    const ctx = ownerContext({
+      // Pass the route-level draft check, but the UPDATE itself errors.
+      questions: [{ id: QUESTION_D, quiz_id: QUIZ_C, order_index: 0, type: "mcq", prompt: "Old", options: ["a", "b"], correct_index: 0 }],
+    });
+    ctx.client.updateError = "questions_locked_quiz_not_draft";
+    const { regenerate } = await importHandlers();
+    const res = await regenerate.POST(req({ questionId: QUESTION_D }), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("quiz_not_draft");
+  });
+
+  it("UPDATE duplicate_options / check constraint → 422", async () => {
+    const ctx = ownerContext({
+      questions: [{ id: QUESTION_D, quiz_id: QUIZ_C, order_index: 0, type: "mcq", prompt: "Old", options: ["a", "b"], correct_index: 0 }],
+    });
+    ctx.client.updateError = "duplicate_options";
+    const { regenerate } = await importHandlers();
+    const res = await regenerate.POST(req({ questionId: QUESTION_D }), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe("invalid_ai_output");
+  });
+});
+
 describe("I-A5 — non-owner → 404", () => {
   it("generate by a different lecturer's context → 404", async () => {
     const other = new FakeSupabase();

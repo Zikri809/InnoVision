@@ -9,7 +9,7 @@
  * Ollama (localhost). The server NEVER proxies this endpoint (SSRF guard).
  */
 
-import { MAX_EXTRACT_CHARS, type ExtractionResult } from "@/lib/extract/types";
+import { MAX_EXTRACT_CHARS, MAX_OCR_PAGES, type ExtractionResult } from "@/lib/extract/types";
 import { httpChatCompletions, probeOllamaModel } from "@/lib/ai/http-compat";
 import { destroyPdf, loadPdfJs } from "@/lib/extract/pdf";
 
@@ -32,7 +32,9 @@ async function rasterizePdfToPngs(file: File): Promise<{ dataUrl: string; page: 
   const doc = await pdfjs.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
   try {
     const out: { dataUrl: string; page: number }[] = [];
-    for (let i = 1; i <= doc.numPages; i++) {
+    // Cap pages (MAX_OCR_PAGES) to bound browser CPU/memory on huge scans.
+    const total = Math.min(doc.numPages, MAX_OCR_PAGES);
+    for (let i = 1; i <= total; i++) {
       const page = await doc.getPage(i);
       const viewport = page.getViewport({ scale: 2 });
       const canvas = document.createElement("canvas");

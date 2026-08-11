@@ -58,11 +58,22 @@ export async function chatCompletions(opts: {
    * true (JSON) so existing callers stay unchanged.
    */
   jsonMode?: boolean;
+  /**
+   * Hard deadline for THIS call in milliseconds. If set, the per-call 45s
+   * abort timer is clamped to the smaller of the two — lets callers that
+   * chain calls (e.g. attempt+retry in `generateQuiz`) share a single
+   * deadline so the second call doesn't get the full 45s budget when only
+   * 5s of the overall 50s remain.
+   */
+  timeoutMs?: number;
   signal?: AbortSignal;
 }): Promise<ChatResult> {
   const { client: ai, model, messages, maxTokens = AI_MAX_OUTPUT_TOKENS, jsonMode = true } = opts;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), AI_ROUND_TRIP_TIMEOUT_MS);
+  const perCallTimeout = opts.timeoutMs
+    ? Math.min(AI_ROUND_TRIP_TIMEOUT_MS, opts.timeoutMs)
+    : AI_ROUND_TRIP_TIMEOUT_MS;
+  const timer = setTimeout(() => controller.abort(), perCallTimeout);
 
   const onOuterAbort = () => controller.abort();
   opts.signal?.addEventListener("abort", onOuterAbort);

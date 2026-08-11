@@ -46,6 +46,54 @@ function charCount(s: string): number {
   return s.length;
 }
 
+/**
+ * Zip-bomb pre-flight (PLAN §S1). Validates the total entry count and the
+ * cumulative declared-uncompressed size of the selected entries (the ones
+ * actually decompressed by the caller) BEFORE the underlying library reads
+ * anything. Throws `<label>_too_many_entries` or `<label>_too_large` so the
+ * route maps to a typed 4xx.
+ *
+ * The pre-check is best-effort: jszip exposes the declared
+ * `uncompressedSize` (a *hint* from the central directory), not the true
+ * output size. A pathological zip that lies in its headers can still OOM on
+ * decompress — the route also caps input at 25 MB (route + bucket), which is
+ * the strongest hard bound.
+ */
+async function assertZipBounds(
+  source: ArrayBuffer | unknown[],
+  label: "docx" | "pptx",
+  select: (name: string) => boolean,
+): Promise<void> {
+  let entries: unknown[];
+  if (source instanceof ArrayBuffer) {
+    // DOCX is via mammoth; we pre-flight the central-directory sizes by loading
+    // with jszip (which only parses the directory at this point — no entry
+    // bodies are decompressed until entry.async() is called).
+    const JSZip = (await import("jszip")).default;
+    const zip = await JSZip.loadAsync(source);
+    entries = Object.values(zip.files);
+  } else {
+    entries = source;
+  }
+  if (entries.length > MAX_ZIP_ENTRIES) {
+    throw new Error(`${label}_too_many_entries`);
+  }
+  let preflightBytes = 0;
+  for (const entry of entries) {
+    if (!select((entry as { name: string }).name)) continue;
+    const entryAny = entry as unknown as {
+      uncompressedSize?: number;
+      _data?: { uncompressedSize?: number };
+      name: string;
+    };
+    preflightBytes +=
+      entryAny.uncompressedSize ?? entryAny._data?.uncompressedSize ?? 0;
+    if (preflightBytes > MAX_ZIP_TOTAL_BYTES) {
+      throw new Error(`${label}_too_large`);
+    }
+  }
+}
+
 /** Extract text layer from a PDF ArrayBuffer. Returns per-page text. */
 async function extractPdfText(
   data: ArrayBuffer,
@@ -83,6 +131,10 @@ async function extractPdfText(
 
 /** Extract text from a DOCX (mammoth → raw text). */
 async function extractDocxText(data: ArrayBuffer): Promise<{ pages: string[] }> {
+  // DOCX zip-bomb pre-check (mirrors the PPTX one). Mammoth internally
+  // decompresses the zip on extractRawText; pre-flight declared sizes so a
+  // bomb entry can't OOM the worker.
+  await assertZipBounds(data, "docx", (e) => /^word\//.test(e.name) || /^\[Content_Types\]\.xml$/.test(e.name));
   const mammoth = await import("mammoth");
   // Mammoth's Node build reads `{ buffer }`; the browser build reads
   // `{ arrayBuffer }`. Pass both-compatible options explicitly.
@@ -98,9 +150,7 @@ async function extractPptxText(data: ArrayBuffer): Promise<{ pages: string[] }> 
   const JSZip = (await import("jszip")).default;
   const zip = await JSZip.loadAsync(data);
   const entries = Object.values(zip.files);
-  if (entries.length > MAX_ZIP_ENTRIES) {
-    throw new Error("pptx_too_many_entries");
-  }
+  await assertZipBounds(entries, "pptx", (e) => /^ppt\/slides\/slide\d+\.xml$/.test(e.name));
   const slideFiles = entries
     .filter((e) => /^ppt\/slides\/slide\d+\.xml$/.test(e.name) && !e.dir)
     .sort((a, b) => {
@@ -108,22 +158,6 @@ async function extractPptxText(data: ArrayBuffer): Promise<{ pages: string[] }> 
       const nb = Number(/slide(\d+)\.xml$/.exec(b.name)?.[1] ?? 0);
       return na - nb;
     });
-
-  // Pre-check uncompressed sizes BEFORE any decompression. JSZip exposes
-  // `uncompressedSize` (or `_data?.uncompressedSize` on its internal type)
-  // without reading the entry. This is the zip-bomb DoS guard the plan called
-  // for — checking AFTER `entry.async(...)` decompresses the entry into RAM.
-  let preflightBytes = 0;
-  for (const entry of slideFiles) {
-    // JSZip's `ZipObject` type doesn't expose `uncompressedSize` publicly; the
-    // internal `_data?.uncompressedSize` is the documented pre-check field.
-    const entryAny = entry as unknown as { uncompressedSize?: number; _data?: { uncompressedSize?: number } };
-    const sz = entryAny.uncompressedSize ?? entryAny._data?.uncompressedSize ?? 0;
-    preflightBytes += sz;
-    if (preflightBytes > MAX_ZIP_TOTAL_BYTES) {
-      throw new Error("pptx_too_large");
-    }
-  }
 
   const pages: string[] = [];
   for (const entry of slideFiles) {
