@@ -31,16 +31,28 @@ export async function tesseractExtract(
   // PDFs must be rasterized page-by-page first; images OCR directly.
   const pages = await rasterizeToImages(file, onProgress);
 
+  // Single worker reused across all pages — in tesseract.js v7, recognize()
+  // internally creates+terminates a worker per call, which re-fetches the WASM
+  // core (~MB) and eng.traineddata (~4-11 MB) on every page. Creating one worker
+  // here and reusing it is the supported pattern.
+  const worker = await Tesseract.createWorker("eng", 1, {
+    // Suppress verbose progress logging; the dialog's progress bar is driven by
+    // our `onProgress` callback.
+    logger: undefined,
+  });
+
   const parts: string[] = [];
   let recognizedChars = 0;
-  for (let i = 0; i < pages.length; i++) {
-    onProgress?.(i + 1, pages.length);
-    const { data } = await Tesseract.recognize(pages[i].dataUrl, "eng", {
-      logger: undefined,
-    });
-    parts.push(data.text);
-    recognizedChars += data.text.length;
-    if (recognizedChars > MAX_EXTRACT_CHARS * 2) break; // safety backstop
+  try {
+    for (let i = 0; i < pages.length; i++) {
+      onProgress?.(i + 1, pages.length);
+      const { data } = await worker.recognize(pages[i].dataUrl);
+      parts.push(data.text);
+      recognizedChars += data.text.length;
+      if (recognizedChars > MAX_EXTRACT_CHARS * 2) break; // safety backstop
+    }
+  } finally {
+    await worker.terminate().catch(() => undefined);
   }
 
   let text = parts.join("\n\n").trim();

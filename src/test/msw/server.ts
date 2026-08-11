@@ -28,13 +28,4 @@ export const aiHandlers = [
   ),
 ];
 
-/** Server with a stub that always returns the given content. */
-export function aiServerWith(content: string) {
-  return setupServer(
-    http.post(CHAT_URL, () =>
-      HttpResponse.json({ choices: [{ message: { content } }] }),
-    ),
-  );
-}
-
 export const defaultAiServer = setupServer(...aiHandlers);

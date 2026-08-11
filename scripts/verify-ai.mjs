@@ -237,12 +237,41 @@ async function main() {
     p_title: null,
     p_source_file_url: null,
     p_source_text: null,
-    p_questions: makePayload("GHOST"),
+p_questions: makePayload("GHOST"),
   });
   const ghostMsg = ghostErr?.message ?? "";
   record("D35 non-existent quiz raises not_owner (no oracle)",
     Boolean(ghostErr) && ghostMsg.includes("not_owner"),
     ghostMsg);
+
+  // D35 fold-in: an unauthenticated caller (raw anon key, no sign-in) must
+  // not be able to call replace_quiz_questions. The RPC's
+  // `revoke execute from public, anon` (migration 0007) is what guarantees
+  // this — if it regresses the call would either succeed or leak a different
+  // error code than a logged-in non-owner.
+  const anonClient = createClient(URL, ANON, { auth: { persistSession: false } });
+  const { data: anonData, error: anonErr } = await anonClient.rpc(
+    "replace_quiz_questions",
+    {
+      p_quiz_id: quiz34.id,
+      p_title: null,
+      p_source_file_url: null,
+      p_source_text: null,
+      p_questions: makePayload("ANON"),
+    },
+  );
+  const anonMsg = anonErr?.message ?? "";
+  record("D35 anon caller denied by revoke execute",
+    Boolean(anonErr) &&
+      (anonMsg.includes("permission denied") ||
+        anonMsg.includes("not_owner") ||
+        anonMsg.includes("JWT")),
+    `${anonMsg} | data=${JSON.stringify(anonData ?? null)?.slice(0, 60)}`);
+  // The error code MUST differ from the authenticated not_owner so a
+  // non-authenticated caller learns nothing about quiz existence.
+  record("D35 anon error differs from authenticated not_owner (no oracle)",
+    anonMsg !== ghostMsg,
+    `anon="${anonMsg}" ghost="${ghostMsg}"`);
 
   // Non-draft (live) quiz → questions_locked_quiz_not_draft.
   const quizLive = await makeDraftQuiz("D35 Live");

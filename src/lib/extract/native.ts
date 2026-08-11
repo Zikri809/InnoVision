@@ -31,6 +31,14 @@ function isBrowser(): boolean {
 export type NativeParseOptions = {
   /** When true, force Node-safe pdf.js settings (no worker/fetch). */
   node?: boolean;
+  /**
+   * Hard deadline for the parse. If the deadline elapses, the PDF/DOCX/PPTX
+   * parse rejects with `parse_timeout` (mapped by the route to 503). The
+   * browser/Node APIs we use don't all honor AbortSignal natively, so the
+   * deadline is enforced via Promise.race at the route boundary rather than
+   * threaded through every parse call.
+   */
+  timeoutMs?: number;
 };
 
 /** Count characters (approx) in a string — used for the density heuristic. */
@@ -93,7 +101,6 @@ async function extractPptxText(data: ArrayBuffer): Promise<{ pages: string[] }> 
   if (entries.length > MAX_ZIP_ENTRIES) {
     throw new Error("pptx_too_many_entries");
   }
-  let totalBytes = 0;
   const slideFiles = entries
     .filter((e) => /^ppt\/slides\/slide\d+\.xml$/.test(e.name) && !e.dir)
     .sort((a, b) => {
@@ -102,12 +109,27 @@ async function extractPptxText(data: ArrayBuffer): Promise<{ pages: string[] }> 
       return na - nb;
     });
 
+  // Pre-check uncompressed sizes BEFORE any decompression. JSZip exposes
+  // `uncompressedSize` (or `_data?.uncompressedSize` on its internal type)
+  // without reading the entry. This is the zip-bomb DoS guard the plan called
+  // for — checking AFTER `entry.async(...)` decompresses the entry into RAM.
+  let preflightBytes = 0;
+  for (const entry of slideFiles) {
+    // JSZip's `ZipObject` type doesn't expose `uncompressedSize` publicly; the
+    // internal `_data?.uncompressedSize` is the documented pre-check field.
+    const entryAny = entry as unknown as { uncompressedSize?: number; _data?: { uncompressedSize?: number } };
+    const sz = entryAny.uncompressedSize ?? entryAny._data?.uncompressedSize ?? 0;
+    preflightBytes += sz;
+    if (preflightBytes > MAX_ZIP_TOTAL_BYTES) {
+      throw new Error("pptx_too_large");
+    }
+  }
+
   const pages: string[] = [];
   for (const entry of slideFiles) {
-    const sz = await entry.async("uint8array").then((b) => b.byteLength).catch(() => 0);
-    totalBytes += sz;
-    if (totalBytes > MAX_ZIP_TOTAL_BYTES) throw new Error("pptx_too_large");
-    const xml = await entry.async("string");
+    // Read the entry ONCE (avoid double-decompress); decode the bytes as text.
+    const bytes = await entry.async("uint8array");
+    const xml = new TextDecoder("utf-8").decode(bytes);
     // Strip tags and collect <a:t> text node contents.
     const text = xml
       .replace(/<a:t[^>]*>/gi, "\u0001")

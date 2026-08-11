@@ -16,6 +16,7 @@ import {
   notDraft,
   notFound,
   rateLimited,
+  timeout,
   unprocessable,
 } from "@/lib/http";
 
@@ -127,7 +128,7 @@ export async function POST(request: Request, context?: { params?: Promise<{ id?:
 
   if (!result.ok) {
     if (result.error === "timeout") {
-      return internalError("The AI request timed out. Please try again.");
+      return timeout("The AI request timed out. Please try again.");
     }
     if (result.error === "ai_unavailable") {
       return unprocessable("The AI service is unavailable right now. Try again later.", "ai_unavailable");

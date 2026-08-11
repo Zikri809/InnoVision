@@ -222,8 +222,8 @@ export class FakeSupabase {
       if (this.rpcError) return { data: null, error: this.rpcError };
       const quizId = String(args?.p_quiz_id);
       const questions = (this.tables["questions"] ?? []).filter((q) => q.quiz_id !== quizId);
-      // The route passes p_questions as a JSON string (PostgREST serializes the
-      // jsonb arg); parse it into the row array.
+      // The route passes p_questions as an ARRAY; PostgREST serializes the jsonb
+      // arg. Parse JSON strings for robustness against future regressions.
       const raw = args?.p_questions;
       const parsed: unknown[] =
         typeof raw === "string" ? JSON.parse(raw) : Array.isArray(raw) ? raw : [];

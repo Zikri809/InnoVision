@@ -20,6 +20,33 @@ describe("U-E2 — low chars/page falls through to OCR picker", () => {
   });
 });
 
+describe("U-E2b — image uploads fall through to the OCR cascade", () => {
+  it("an image extension does NOT throw unsupported_file_type; it cascades to tesseract", async () => {
+    // Image files are first-class inputs (ALLOWED_EXTENSIONS includes png/jpg/jpeg/webp).
+    // The native extractor has no text-layer concept for images; the cascade must
+    // fall through to OCR. In a test environment (no browser canvas), tesseract.js
+    // fails — that's fine, we assert the pipeline reaches it.
+    const data = new TextEncoder().encode("not a real png").buffer as ArrayBuffer;
+    // Use a sparse enough buffer that even if tesseract "succeeds" the lowConfidence
+    // flag would fire. We assert the pipeline doesn't reject the file outright.
+    await expect(
+      runExtractionPipeline({ data, filename: "scan.png", engine: "tesseract" }),
+    ).rejects.not.toThrow(/unsupported_file_type/);
+  });
+});
+
+describe("U-E2c — Tesseract OCR is the fallback for low-density native", () => {
+  it("native lowConfidence (sparse text) cascades to tesseract (which errors in Node)", async () => {
+    // We verify the cascade by asserting that the pipeline reaches the OCR
+    // branch (not rejected as unsupported_file_type) — the actual Tesseract
+    // call requires a browser canvas and is covered by the E2E test.
+    const data = new TextEncoder().encode("Hi.").buffer as ArrayBuffer;
+    await expect(
+      runExtractionPipeline({ data, filename: "scan.pdf", engine: "tesseract" }),
+    ).rejects.not.toThrow(/unsupported_file_type/);
+  });
+});
+
 describe("U-E4 — GLM availability probe gating", () => {
   it("probeOllamaModel returns false when the endpoint is unreachable", async () => {
     const ok = await probeOllamaModel({

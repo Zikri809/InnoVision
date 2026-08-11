@@ -17,11 +17,6 @@ export type ExtractionResult = {
   lowConfidence?: boolean;
 };
 
-export interface TextExtractor {
-  name: string;
-  extract(file: File | ArrayBuffer, opts?: Record<string, never>): Promise<ExtractionResult>;
-}
-
 /** Config passed from the builder page (server component reads env). */
 export type OcrConfig = {
   defaultEngine: ExtractEngine;

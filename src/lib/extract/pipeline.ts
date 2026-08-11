@@ -81,11 +81,22 @@ export async function runExtractionPipeline(
   try {
     native = await nativeExtract(data, filename, { node: !opts.file });
   } catch (err) {
-    if ((err as Error)?.message === "unsupported_file_type") throw err;
-    // Corrupt / unparseable native extraction: fall through to OCR instead of
-    // failing the whole pipeline (U-E7 requires a clean error for zero-byte
-    // files though — handled by the caller's pre-check).
-    native = { text: "", pages: 0, engine: "native", lowConfidence: true };
+    if ((err as Error)?.message === "unsupported_file_type") {
+      // Image files (PNG/JPG/WEBP) have no "native text layer" — they are
+      // first-class extraction inputs and should fall through to OCR. Return a
+      // low-confidence empty result so the cascade continues.
+      const isImage = /\.(png|jpe?g|webp)$/i.test(filename);
+      if (isImage) {
+        native = { text: "", pages: 0, engine: "native", lowConfidence: true };
+      } else {
+        throw err;
+      }
+    } else {
+      // Corrupt / unparseable native extraction: fall through to OCR instead of
+      // failing the whole pipeline (U-E7 requires a clean error for zero-byte
+      // files though — handled by the caller's pre-check).
+      native = { text: "", pages: 0, engine: "native", lowConfidence: true };
+    }
   }
 
   const usable =

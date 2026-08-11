@@ -60,6 +60,11 @@ export function rateLimited(message: string): NextResponse {
   return jsonError("rate_limited", message, 429);
 }
 
+/** 503 — AI/LLM request timed out (used by AI routes after the 45s abort). */
+export function timeout(message: string): NextResponse {
+  return jsonError("timeout", message, 503);
+}
+
 /** 503 — transient outage / DB error. */
 export function internalError(message: string): NextResponse {
   return jsonError("internal", message, 503);

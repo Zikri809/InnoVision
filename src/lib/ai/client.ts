@@ -51,9 +51,16 @@ export async function chatCompletions(opts: {
   model: string;
   messages: ChatMessage[];
   maxTokens?: number;
+  /**
+   * When false, omit `response_format: { type: "json_object" }`. OpenAI and
+   * some compatible providers reject this mode unless the word "json" appears
+   * in the messages; for OCR transcription routes this is wrong. Defaults to
+   * true (JSON) so existing callers stay unchanged.
+   */
+  jsonMode?: boolean;
   signal?: AbortSignal;
 }): Promise<ChatResult> {
-  const { client: ai, model, messages, maxTokens = AI_MAX_OUTPUT_TOKENS } = opts;
+  const { client: ai, model, messages, maxTokens = AI_MAX_OUTPUT_TOKENS, jsonMode = true } = opts;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), AI_ROUND_TRIP_TIMEOUT_MS);
 
@@ -67,7 +74,7 @@ export async function chatCompletions(opts: {
         messages: messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
         temperature: 0.7,
         max_tokens: maxTokens,
-        response_format: { type: "json_object" },
+        ...(jsonMode ? { response_format: { type: "json_object" as const } } : {}),
       },
       { signal: controller.signal },
     );

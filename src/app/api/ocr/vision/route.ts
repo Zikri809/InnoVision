@@ -12,6 +12,7 @@ import {
   invalidJson,
   payloadTooLarge,
   rateLimited,
+  timeout,
 } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
@@ -85,11 +86,14 @@ export async function POST(request: Request) {
     model: VISION_MODEL,
     messages: messages as Parameters<typeof chatCompletions>[0]["messages"],
     maxTokens: 3000,
+    // OCR transcription is plain text — forcing json_object mode breaks on
+    // providers that require the word "json" in the prompt.
+    jsonMode: false,
   });
 
   if (!result.ok) {
     if (result.error === "timeout") {
-      return internalError("The vision request timed out. Please try again.");
+      return timeout("The vision request timed out. Please try again.");
     }
     return internalError("The vision service could not process the images right now.");
   }

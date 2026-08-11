@@ -22,6 +22,7 @@ import {
   notFound,
   payloadTooLarge,
   rateLimited,
+  timeout,
   unprocessable,
 } from "@/lib/http";
 
@@ -122,9 +123,11 @@ async function handleGenerate(
   // No client text → server-side native parse of the stored file.
   if (!text) {
     if (sourcePathFinal) {
-      // Validate the first path segment is the caller's own uid (S2).
-      const firstSeg = sourcePathFinal.split("/")[0].toLowerCase();
-      if (firstSeg !== userId.toLowerCase()) {
+      // Defense-in-depth: Zod already rejects `..` and `//` in the regex +
+      // refinements, but re-verify the path STARTS with `${userId}/` so a
+      // future Zod-schema drift can't silently bypass the per-tenant boundary.
+      const prefix = `${userId.toLowerCase()}/`;
+      if (!sourcePathFinal.toLowerCase().startsWith(prefix)) {
         return invalidBody("The source file must be in your own storage folder.");
       }
     } else {
@@ -167,7 +170,7 @@ async function handleGenerate(
 
   if (!result.ok) {
     if (result.error === "timeout") {
-      return internalError("The AI request timed out. Please try again.");
+      return timeout("The AI request timed out. Please try again.");
     }
     if (result.error === "ai_unavailable") {
       return unprocessable("The AI service is unavailable right now. Try again later.", "ai_unavailable");
@@ -200,17 +203,38 @@ async function handleGenerate(
     console.error("replace_quiz_questions error:", rpcError);
     if (msg.includes("not_owner") || msg.includes("quiz_not_found")) return notFound();
     if (msg.includes("questions_locked_quiz_not_draft")) return notDraft();
+    // Distinguish "model emitted malformed JSON" (could fix with retry / file
+    // choice) from "content exceeds DB limits" (route should report which
+    // field so the lecturer can act on it).
+    if (msg.includes("invalid_questions_json")) {
+      return unprocessable(
+        "The AI returned malformed JSON. Try a different file or model.",
+        "invalid_ai_output",
+      );
+    }
+    if (msg.includes("invalid_title")) {
+      return unprocessable(
+        "The AI returned a title outside the allowed range. Try again.",
+        "invalid_ai_output",
+      );
+    }
+    if (msg.includes("source_text_too_long")) {
+      return unprocessable(
+        "The source text exceeded the 15k character limit. Try a shorter file.",
+        "source_text_too_long",
+      );
+    }
     if (
-      msg.includes("invalid_questions_json") ||
-      msg.includes("invalid_title") ||
-      msg.includes("source_text_too_long") ||
       msg.includes("violates check constraint") ||
       msg.includes("duplicate_options") ||
       msg.includes("empty_option") ||
       msg.includes("option_too_long") ||
       msg.includes("explanation_too_long")
     ) {
-      return unprocessable("The AI produced questions that failed validation. Try again.", "invalid_ai_output");
+      return unprocessable(
+        "The AI produced questions that failed validation. Try again.",
+        "invalid_ai_output",
+      );
     }
     return internalError("Could not save the generated quiz right now.");
   }

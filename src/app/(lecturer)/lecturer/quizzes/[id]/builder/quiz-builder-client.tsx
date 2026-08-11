@@ -329,7 +329,7 @@ export function QuizBuilderClient({
         </div>
       </div>
 
-      {isDraft && <SourceTextPreview text={quiz.source_text} />}
+      <SourceTextPreview text={quiz.source_text} />
 
       <GenerateFromFileDialog
         quizId={quiz.id}

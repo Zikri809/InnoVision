@@ -48,7 +48,19 @@ export function GenerateFromFileDialog({
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
   const [storagePath, setStoragePath] = useState<string | null>(null);
-  const [engine, setEngine] = useState<ExtractEngine>(config.defaultEngine);
+  const [engine, setEngine] = useState<ExtractEngine>(() => {
+    // Restore the lecturer's last-chosen engine from localStorage if it's a
+    // valid value, otherwise fall back to the server-configured default.
+    try {
+      const stored = localStorage.getItem("innovision.ocrEngine");
+      if (stored === "tesseract" || stored === "glm" || stored === "vision") {
+        return stored;
+      }
+    } catch {
+      /* ignore storage errors */
+    }
+    return config.defaultEngine;
+  });
   const [extractedText, setExtractedText] = useState<string | null>(null);
   const [extractEngine, setExtractEngine] = useState<ExtractEngine | null>(null);
   const [progress, setProgress] = useState<PipelineProgress | null>(null);
@@ -226,6 +238,9 @@ export function GenerateFromFileDialog({
                   onClick={() => {
                     setExtractedText(null);
                     setFile(null);
+                    // Also clear the previously-uploaded storage path so the
+                    // Generate button doesn't silently re-target the OLD file.
+                    setStoragePath(null);
                   }}
                 >
                   Choose a different file

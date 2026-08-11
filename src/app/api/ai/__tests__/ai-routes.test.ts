@@ -71,6 +71,10 @@ beforeEach(() => {
   fakeHolder.current = undefined;
   _resetRateLimiter();
   defaultAiServer.resetHandlers();
+  // Clear any test-seeded RPC error so a stale value can't leak across tests.
+  // (FakeSupabase may not exist yet — guarded.)
+  const fc = fakeHolder.current;
+  if (fc) (fc as { rpcError: unknown }).rpcError = null;
 });
 
 beforeAll(() => {
@@ -335,7 +339,7 @@ describe("I-A7 — rate limit → 429", () => {
   });
 });
 
-describe("I-A8 — duplicate/whitespace-colliding options are REJECTED (schema gate)", () => {
+describe("I-A9 — extractedText > 15k → 400", () => {
   it("AI output with duplicate options → 422, zero rows inserted", async () => {
     // The AI schema rejects duplicate options at parse time (before any insert),
     // so the route must return 422 and never reach the RPC. This is the actual
@@ -376,14 +380,115 @@ describe("I-A9 — extractedText > 15k → 400", () => {
   });
 });
 
+describe("RPC error-mapping branches (Phase 4 audit gap)", () => {
+  function stubRpcError(message: string) {
+    currentClient().rpcError = { message };
+  }
+
+  it("not_owner → 404", async () => {
+    ownerContext();
+    stubRpcError("not_owner");
+    const { generate } = await importHandlers();
+    const res = await generate.POST(
+      req({ quizId: QUIZ_C, extractedText: "any text" }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("questions_locked_quiz_not_draft → 409", async () => {
+    ownerContext();
+    stubRpcError("questions_locked_quiz_not_draft");
+    const { generate } = await importHandlers();
+    const res = await generate.POST(
+      req({ quizId: QUIZ_C, extractedText: "any text" }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(409);
+  });
+
+  it("invalid_questions_json → 422 invalid_ai_output", async () => {
+    ownerContext();
+    stubRpcError("invalid_questions_json");
+    const { generate } = await importHandlers();
+    const res = await generate.POST(
+      req({ quizId: QUIZ_C, extractedText: "any text" }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe("invalid_ai_output");
+  });
+
+  it("invalid_title → 422 invalid_ai_output (distinct from JSON failure)", async () => {
+    ownerContext();
+    stubRpcError("invalid_title");
+    const { generate } = await importHandlers();
+    const res = await generate.POST(
+      req({ quizId: QUIZ_C, extractedText: "any text" }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe("invalid_ai_output");
+  });
+
+  it("source_text_too_long → 422 source_text_too_long", async () => {
+    ownerContext();
+    stubRpcError("source_text_too_long");
+    const { generate } = await importHandlers();
+    const res = await generate.POST(
+      req({ quizId: QUIZ_C, extractedText: "any text" }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe("source_text_too_long");
+  });
+
+  it("unknown RPC error → 503 (not a raw message)", async () => {
+    ownerContext();
+    stubRpcError("some_unexpected_db_error");
+    const { generate } = await importHandlers();
+    const res = await generate.POST(
+      req({ quizId: QUIZ_C, extractedText: "any text" }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.error).toBe("internal");
+    // The raw DB message must NOT leak into the response.
+    expect(JSON.stringify(body)).not.toContain("some_unexpected_db_error");
+  });
+});
+
+describe("I-A12b — sourcePath set but object missing → 404", () => {
+  it("storage download returns 404 → route maps to 404 not_found", async () => {
+    ownerContext();
+    const { generate } = await importHandlers();
+    // Well-formed path that was never seeded.
+    const res = await generate.POST(
+      req({
+        quizId: QUIZ_C,
+        sourcePath: `${OWNER_ID}/${QUIZ_C}/never-uploaded.pdf`,
+      }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(404);
+  });
+});
+
 describe("I-A11 — sourcePath forgery → 400", () => {
-  it("rejects paths with .. or %2F", async () => {
+  it("rejects path-traversal and malformed paths", async () => {
     ownerContext();
     const { generate } = await importHandlers();
     for (const bad of [
+      // Classic ../ traversal.
       `${OWNER_ID}/../../secret.pdf`,
+      // ../ embedded inside a valid segment.
+      `${OWNER_ID}/${QUIZ_C}/a/../b.pdf`,
+      // URL-encoded traversal.
       `${OWNER_ID}/%2e%2e/x.pdf`,
+      // Empty segment (double slash).
       `${OWNER_ID}//double.pdf`,
+      // Leading-slash escape.
       `../${OWNER_ID}/x.pdf`,
     ]) {
       const res = await generate.POST(req({ quizId: QUIZ_C, sourcePath: bad }), {
@@ -423,5 +528,58 @@ describe("I-A14 — vision ignores body baseUrl", () => {
     const png = "data:image/png;base64," + Buffer.from("fake").toString("base64");
     const res = await vision.POST(req({ images: [png], baseUrl: "http://evil.example.com" }));
     expect(res.status).toBe(200);
+  });
+});
+
+describe("I-A1 — sourcePath persists source_file_url + source_text", () => {
+  it("server native parse writes both source fields onto the quiz row", async () => {
+    const ctx = ownerContext();
+    ctx.client.seedStorageFile(
+      `${OWNER_ID}/${QUIZ_C}/chapter.txt`,
+      new TextEncoder().encode("Velocity is the rate of change of displacement."),
+    );
+    const { generate } = await importHandlers();
+    const res = await generate.POST(
+      req({
+        quizId: QUIZ_C,
+        sourcePath: `${OWNER_ID}/${QUIZ_C}/chapter.txt`,
+        questionCount: 3,
+      }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(200);
+    const quizRow = ctx.client.tables["quizzes"]?.find((q) => q.id === QUIZ_C);
+    expect(quizRow?.source_file_url).toBe(`${OWNER_ID}/${QUIZ_C}/chapter.txt`);
+    expect(quizRow?.source_text).toContain("Velocity");
+  });
+});
+
+describe("I-A10 — AI 45s timeout → 503 timeout, zero inserts", () => {
+  it("returns 503 timeout and never calls the RPC", async () => {
+    ownerContext();
+    // Hang MSW's chat-completions handler indefinitely.
+    defaultAiServer.use(
+      http.post("*/chat/completions", () => new Promise(() => {})),
+    );
+    // Use fake timers to advance past the 45s abort inside chatCompletions
+    // without waiting real wall-clock time.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { generate: gen } = await importHandlers();
+      const promise = gen.POST(
+        req({ quizId: QUIZ_C, extractedText: "any text" }),
+        { params: Promise.resolve({ id: QUIZ_C }) },
+      );
+      // Advance past the 45s abort deadline (in fake ms).
+      await vi.advanceTimersByTimeAsync(46_000);
+      const res = await promise;
+      expect(res.status).toBe(503);
+      const body = await res.json();
+      expect(body.error).toBe("timeout");
+      // Zero rows inserted (the RPC was never reached).
+      expect(currentClient().tables["questions"] ?? []).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

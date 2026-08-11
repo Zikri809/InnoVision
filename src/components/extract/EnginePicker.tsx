@@ -40,7 +40,7 @@ export function EnginePicker({
     };
   }, [config.ollamaBaseUrl, config.glmModel]);
 
-  // Persist the selection.
+  // Persist the selection (so a reload restores it — read below on init).
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, value);
@@ -48,6 +48,10 @@ export function EnginePicker({
       /* ignore storage errors */
     }
   }, [value]);
+
+  // Re-hide GLM if the stored engine is tesseract/vision (the parent's `value`
+  // already controls selection; this only affects the probe visibility).
+  // (No additional state needed — `glmAvailableFlag` already drives visibility.)
 
   return (
     <div className="space-y-1">
