@@ -34,7 +34,8 @@ export const AiQuestionSchema = z
       .min(2, "A question needs at least 2 options.")
       .max(5, "A question can have at most 5 options."),
     correct_index: z.number().int().min(0),
-    explanation: z.string().trim().optional(),
+    // Models frequently emit `explanation: null` — accept both absent and null.
+    explanation: z.string().trim().optional().nullable(),
   })
   // Gesture constraint: true_false must have exactly 2 options, and
   // correct_index must point at an existing option.

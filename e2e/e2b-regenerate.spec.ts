@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { registerUser } from "./helpers";
 
 const TEST_TIMESTAMP = Date.now();

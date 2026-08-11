@@ -52,8 +52,9 @@ const server = http.createServer((req, res) => {
       } catch {
         /* ignore */
       }
-      const messages = (body.messages ?? []) as { role: string; content: string }[];
+      const messages = body.messages ?? [];
       const userMsg = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
+      console.log(`[mock-ai] ${req.method} ${req.url} (${userMsg.length} chars)`);
 
       // A regenerate request asks for ONE question; a generate asks for a quiz.
       // Heuristic: the regenerate prompt contains "Rewrite the following question".

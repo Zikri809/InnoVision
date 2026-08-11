@@ -14,6 +14,7 @@ import {
   MAX_VISION_PAGES,
   type ExtractionResult,
 } from "@/lib/extract/types";
+import { destroyPdf, loadPdfJs } from "@/lib/extract/pdf";
 
 export type VisionOcrConfig = {
   /** Base path of the API, e.g. '' (same origin). Overridable in tests. */
@@ -21,7 +22,7 @@ export type VisionOcrConfig = {
 };
 
 async function rasterizeToBase64(file: File, maxPages: number): Promise<string[]> {
-  const pdfjs = await import("pdfjs-dist");
+  const pdfjs = await loadPdfJs();
   const arrayBuffer = await file.arrayBuffer();
   const doc = await pdfjs.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
   try {
@@ -40,7 +41,7 @@ async function rasterizeToBase64(file: File, maxPages: number): Promise<string[]
     }
     return out;
   } finally {
-    await doc.loadingTask.destroy().catch(() => undefined);
+    await destroyPdf(doc);
   }
 }
 

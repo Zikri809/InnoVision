@@ -22,6 +22,7 @@ import {
   MIN_CHARS_PER_PAGE,
   type ExtractionResult,
 } from "@/lib/extract/types";
+import { destroyPdf, loadPdfJs } from "@/lib/extract/pdf";
 
 function isBrowser(): boolean {
   return typeof window !== "undefined";
@@ -35,28 +36,6 @@ export type NativeParseOptions = {
 /** Count characters (approx) in a string — used for the density heuristic. */
 function charCount(s: string): number {
   return s.length;
-}
-
-/** Load pdfjs-dist lazily (dynamic import keeps SSR/bundler happy). */
-async function loadPdfJs() {
-  if (isBrowser()) {
-    return import("pdfjs-dist");
-  }
-  // Node: pdfjs-dist warns to use the legacy build, which needs a DOMMatrix
-  // global that Node doesn't provide. Polyfill the minimal surface.
-  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  if (typeof globalThis.DOMMatrix === "undefined") {
-    globalThis.DOMMatrix = class DOMMatrix {
-      a = 1; b = 0; c = 0; d = 1; e = 0; f = 0;
-      constructor(init?: string) {
-        if (init) {
-          const m = init.split(",").map(Number);
-          if (m.length >= 6) [this.a, this.b, this.c, this.d, this.e, this.f] = m;
-        }
-      }
-    } as unknown as typeof DOMMatrix;
-  }
-  return pdfjs;
 }
 
 /** Extract text layer from a PDF ArrayBuffer. Returns per-page text. */
@@ -90,11 +69,7 @@ async function extractPdfText(
     }
     return { pages };
   } finally {
-    try {
-      await doc.loadingTask.destroy();
-    } catch {
-      /* ignore cleanup errors */
-    }
+    await destroyPdf(doc);
   }
 }
 

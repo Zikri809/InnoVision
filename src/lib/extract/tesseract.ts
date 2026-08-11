@@ -13,6 +13,7 @@ import {
   MIN_CHARS_PER_PAGE,
   type ExtractionResult,
 } from "@/lib/extract/types";
+import { destroyPdf, loadPdfJs } from "@/lib/extract/pdf";
 
 export type OcrProgress = (page: number, total: number) => void;
 
@@ -86,7 +87,7 @@ async function rasterizeToImages(
     return [{ dataUrl: canvas.toDataURL("image/png"), width: canvas.width, height: canvas.height }];
   }
 
-  const pdfjs = await import("pdfjs-dist");
+  const pdfjs = await loadPdfJs();
   const arrayBuffer = await file.arrayBuffer();
   const doc = await pdfjs.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
   try {
@@ -110,6 +111,6 @@ async function rasterizeToImages(
     }
     return pages;
   } finally {
-    await doc.loadingTask.destroy().catch(() => undefined);
+    await destroyPdf(doc);
   }
 }

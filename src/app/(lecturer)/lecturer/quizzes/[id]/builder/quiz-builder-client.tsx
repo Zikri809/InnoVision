@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowDown, ArrowUp, Pencil, RefreshCw, Trash2, Wand2 } from "lucide-react";
@@ -107,7 +107,6 @@ export function QuizBuilderClient({
   const [generateOpen, setGenerateOpen] = useState(false);
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const [regenerateInstruction, setRegenerateInstruction] = useState("");
-  const submitLock = useRef(false);
 
   function setOption(index: number, value: string) {
     setDraft((d) => {
@@ -156,8 +155,7 @@ export function QuizBuilderClient({
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
-    if (submitLock.current) return;
-    submitLock.current = true;
+    if (saving) return;
     setSaving(true);
     setError(null);
     setNotice(null);
@@ -191,7 +189,6 @@ export function QuizBuilderClient({
     } catch {
       setError("Network error saving question.");
     } finally {
-      submitLock.current = false;
       setSaving(false);
     }
   }
@@ -246,8 +243,7 @@ export function QuizBuilderClient({
   }
 
   async function handlePublish() {
-    if (submitLock.current) return;
-    submitLock.current = true;
+    if (publishing) return;
     setPublishing(true);
     setError(null);
     setNotice(null);
@@ -265,15 +261,13 @@ export function QuizBuilderClient({
     } catch {
       setError("Network error publishing quiz.");
     } finally {
-      submitLock.current = false;
       setPublishing(false);
     }
   }
 
   async function handleRegenerate(q: QuestionRow) {
-    if (submitLock.current) return;
+    if (regeneratingId) return;
     if (!window.confirm("Regenerate this question with AI? The current version will be replaced.")) return;
-    submitLock.current = true;
     setRegeneratingId(q.id);
     setError(null);
     setNotice(null);
@@ -297,7 +291,6 @@ export function QuizBuilderClient({
     } catch {
       setError("Network error regenerating the question.");
     } finally {
-      submitLock.current = false;
       setRegeneratingId(null);
     }
   }

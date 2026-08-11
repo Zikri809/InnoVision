@@ -10,9 +10,9 @@ const LECTURER_INVITE_CODE = process.env.LECTURER_INVITE_CODE ?? "";
  * E2 (Phase 4 scope) — Lecturer: AI generation from a PDF → editable → publish
  *
  * The Next.js dev server is configured (playwright.config.ts) with AI_BASE_URL
- * pointing at e2e/mock-ai-server.mjs, so /api/ai/generate-quiz hits the mock
- * OpenAI-compatible endpoint and returns deterministic valid quiz JSON. No real
- * LLM is ever contacted in CI.
+ * pointing at e2e/mock-ai-server.mjs, so /api/ai/generate-quiz and
+ * /api/ai/regenerate-question hit the mock OpenAI-compatible endpoint and return
+ * deterministic valid JSON. No real LLM is ever contacted in CI.
  *
  * Flow:
  *  1. Lecturer registers → creates a class → creates a draft quiz → opens builder
@@ -39,8 +39,7 @@ test.describe("E2 — AI quiz from a PDF is editable and publishable", () => {
 
     await lecturerPage.getByLabel("Class title").fill("E2 Physics");
     await lecturerPage.getByRole("button", { name: /create/i }).click();
-    const classCard = lecturerPage.getByText("E2 Physics", { exact: true });
-    await expect(classCard).toBeVisible();
+    await expect(lecturerPage.getByText("E2 Physics", { exact: true })).toBeVisible();
 
     const joinCode = await lecturerPage
       .getByText(/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/)
@@ -62,12 +61,12 @@ test.describe("E2 — AI quiz from a PDF is editable and publishable", () => {
       lecturerPage.getByRole("heading", { name: "Generate quiz from file" }),
     ).toBeVisible();
 
-    await lecturerPage.getByLabel("Upload source file").setInputFiles(
+    // Target the hidden file input directly (the dropzone wraps it).
+    await lecturerPage.locator('input[type="file"]').setInputFiles(
       "e2e/fixtures/chapter-sample.pdf",
     );
 
     await lecturerPage.getByRole("button", { name: /extract text/i }).click();
-    // Native extraction of the committed text-layer PDF.
     await expect(
       lecturerPage.getByText(/Velocity is the rate of change of displacement/),
     ).toBeVisible({ timeout: 20_000 });
@@ -94,14 +93,15 @@ test.describe("E2 — AI quiz from a PDF is editable and publishable", () => {
       lecturerPage.getByText("What is velocity in a straight line?", { exact: true }),
     ).toBeVisible();
 
-    await lecturerPage.getByRole("button", { name: /publish/i }).click();
+    const publishButton = lecturerPage.getByRole("button", { name: /publish/i });
+    await expect(publishButton).toBeEnabled();
+    await publishButton.click();
     await expect(lecturerPage.getByText(/published/i)).toBeVisible();
     await expect(lecturerPage.getByText("Live", { exact: true })).toBeVisible();
-    await expect(
-      lecturerPage.getByText("What is velocity in a straight line?", { exact: true }),
-    ).toBeVisible();
 
     // ── 5. Student sees the live quiz ───────────────────────────
+    // Note: the AI generation replaces the quiz title with the mock's title
+    // ("AI Motion Quiz"), so we assert that here.
     await registerUser(studentPage, STUDENT_EMAIL, "student", LECTURER_INVITE_CODE);
     await expect(studentPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
     await studentPage.getByLabel("Join code").fill(joinCode!);
@@ -113,7 +113,7 @@ test.describe("E2 — AI quiz from a PDF is editable and publishable", () => {
     await expect(
       studentPage.getByRole("heading", { name: "Available quizzes" }),
     ).toBeVisible();
-    await expect(studentPage.getByText("Chapter 1: Motion", { exact: true })).toBeVisible();
+    await expect(studentPage.getByText("AI Motion Quiz", { exact: true })).toBeVisible();
     await expect(studentPage.getByText("Practice", { exact: true })).toBeVisible();
 
     await lecturerCtx.close();

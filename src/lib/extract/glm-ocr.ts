@@ -11,6 +11,7 @@
 
 import { MAX_EXTRACT_CHARS, type ExtractionResult } from "@/lib/extract/types";
 import { httpChatCompletions, probeOllamaModel } from "@/lib/ai/http-compat";
+import { destroyPdf, loadPdfJs } from "@/lib/extract/pdf";
 
 export type GlmOcrConfig = {
   baseUrl: string; // ROOT URL, e.g. http://localhost:11434
@@ -26,7 +27,7 @@ export async function glmAvailable(cfg: GlmOcrConfig): Promise<boolean> {
 
 /** Rasterize a PDF to base64 PNG pages in the browser. */
 async function rasterizePdfToPngs(file: File): Promise<{ dataUrl: string; page: number }[]> {
-  const pdfjs = await import("pdfjs-dist");
+  const pdfjs = await loadPdfJs();
   const arrayBuffer = await file.arrayBuffer();
   const doc = await pdfjs.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
   try {
@@ -44,7 +45,7 @@ async function rasterizePdfToPngs(file: File): Promise<{ dataUrl: string; page: 
     }
     return out;
   } finally {
-    await doc.loadingTask.destroy().catch(() => undefined);
+    await destroyPdf(doc);
   }
 }
 
