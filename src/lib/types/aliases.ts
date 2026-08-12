@@ -20,3 +20,9 @@ export type QuestionType = Database["public"]["Enums"]["question_type"];
 export type Quiz = Database["public"]["Tables"]["quizzes"]["Row"];
 
 export type Question = Database["public"]["Tables"]["questions"]["Row"];
+
+export type SessionStatus = Database["public"]["Enums"]["session_status"];
+
+export type QuizSession = Database["public"]["Tables"]["quiz_sessions"]["Row"];
+
+export type SessionAnswer = Database["public"]["Tables"]["session_answers"]["Row"];

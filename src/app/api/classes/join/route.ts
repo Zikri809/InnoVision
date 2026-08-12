@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { requireStudent } from "@/lib/classes/guards";
 import { normalizeJoinCode } from "@/lib/classes/join-code";
 import { rateLimit } from "@/lib/classes/rate-limit";
+import { checkSameOrigin } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +28,10 @@ export async function POST(request: Request) {
   const supabase = await createClient();
   const auth = await requireStudent(supabase);
   if (!auth.ok) return auth.response;
+
+  // CSRF: reject cross-origin joins (AI/session-route precedent).
+  const originError = checkSameOrigin(request);
+  if (originError) return originError;
 
   // Per-user rate limit (keyed on the authenticated user id).
   if (!rateLimit(`join:${auth.userId}`, JOIN_RATE)) {

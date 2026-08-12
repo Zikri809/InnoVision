@@ -4,6 +4,7 @@ import { requireQuizOwner } from "@/lib/quizzes/guards";
 import { isUuid } from "@/lib/classes/roster";
 import { UpdateQuizSchema } from "@/lib/quizzes/validation";
 import {
+  checkSameOrigin,
   firstIssueMessage,
   internalError,
   invalidBody,
@@ -31,6 +32,10 @@ export async function PATCH(request: Request, { params }: Params) {
   const owner = await requireQuizOwner(supabase, id);
   if (!owner.ok) return owner.response;
   if (owner.quiz.status !== "draft") return notDraft();
+
+  // CSRF: reject cross-origin state changes (AI/session-route precedent).
+  const originError = checkSameOrigin(request);
+  if (originError) return originError;
 
   let body: unknown;
   try {
@@ -79,9 +84,16 @@ export async function PATCH(request: Request, { params }: Params) {
 
 /**
  * DELETE /api/quizzes/[id] — owner only. Cascades questions.
- * (P5+ adds a "block when sessions exist" guard — no sessions exist yet.)
+ *
+ * P5 prerequisite guard: a quiz with student attempts cannot be deleted
+ * (prevents a lecturer accidentally destroying attendance). This is an
+ * advisory, route-level guard — the count-then-delete has a narrow TOCTOU
+ * window (a session started between the two round trips would cascade-delete)
+ * that is accepted at demo scale; a `before delete on quizzes` trigger would
+ * close it but would also block class deletion via cascade (deferred, §5).
+ * The DB layer is `on delete cascade` by design (D41 is route-owned → I-S12).
  */
-export async function DELETE(_request: Request, { params }: Params) {
+export async function DELETE(request: Request, { params }: Params) {
   const supabase = await createClient();
   const { id } = await params;
 
@@ -91,6 +103,31 @@ export async function DELETE(_request: Request, { params }: Params) {
 
   const owner = await requireQuizOwner(supabase, id);
   if (!owner.ok) return owner.response;
+
+  // CSRF: reject cross-origin deletes (the P5 session routes set the
+  // precedent; a cross-site DELETE could otherwise cascade student sessions).
+  const originError = checkSameOrigin(request);
+  if (originError) return originError;
+
+  const { count, error: countError } = await supabase
+    .from("quiz_sessions")
+    .select("id", { count: "exact", head: true })
+    .eq("quiz_id", id);
+
+  if (countError) {
+    console.error("Quiz delete session-count error:", countError);
+    return internalError("Could not delete the quiz right now.");
+  }
+
+  if ((count ?? 0) > 0) {
+    return NextResponse.json(
+      {
+        error: "quiz_has_sessions",
+        message: "This quiz has student attempts. Close or reset them before deleting.",
+      },
+      { status: 409, headers: { "content-type": "application/json" } },
+    );
+  }
 
   const { error } = await supabase.from("quizzes").delete().eq("id", id);
   if (error) {

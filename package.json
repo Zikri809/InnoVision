@@ -19,7 +19,8 @@
     "verify:security": "node scripts/verify-security.mjs",
     "verify:classes": "node scripts/verify-classes.mjs",
     "verify:quizzes": "node scripts/verify-quizzes.mjs",
-    "verify:ai": "node scripts/verify-ai.mjs"
+    "verify:ai": "node scripts/verify-ai.mjs",
+    "verify:sessions": "node scripts/verify-sessions.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

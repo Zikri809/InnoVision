@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireQuizOwner } from "@/lib/quizzes/guards";
 import { isUuid } from "@/lib/classes/roster";
-import { internalError, jsonError, notFound } from "@/lib/http";
+import { checkSameOrigin, internalError, jsonError, notFound } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +16,7 @@ type Params = { params: Promise<{ id: string }> };
  *  - live→live is an idempotent no-op (double-click safe).
  *  - closed→live is rejected (one-way state machine).
  */
-export async function POST(_request: Request, { params }: Params) {
+export async function POST(request: Request, { params }: Params) {
   const supabase = await createClient();
   const { id } = await params;
 
@@ -26,6 +26,10 @@ export async function POST(_request: Request, { params }: Params) {
 
   const owner = await requireQuizOwner(supabase, id);
   if (!owner.ok) return owner.response;
+
+  // CSRF: reject cross-origin publishes (AI/session-route precedent).
+  const originError = checkSameOrigin(request);
+  if (originError) return originError;
 
   // Idempotent re-publish.
   if (owner.quiz.status === "live") {

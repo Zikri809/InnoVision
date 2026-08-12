@@ -1,0 +1,499 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { QuestionCard } from "@/components/quiz/question-card";
+import { ProgressHud } from "@/components/quiz/progress-hud";
+import { Button } from "@/components/ui/button";
+
+type Question = {
+  id: string;
+  order_index: number;
+  type: "mcq" | "true_false";
+  prompt: string;
+  options: string[];
+  created_at: string;
+};
+
+type Quiz = {
+  title: string;
+  mode: "practice" | "assessment";
+  timeLimitSec: number | null;
+};
+
+type SeedAnswer = {
+  question_id: string;
+  selected_index: number;
+  is_correct: boolean;
+};
+
+export type AnswerState = {
+  selectedIndex: number;
+  isCorrect: boolean;
+  correctIndex?: number;
+  explanation?: string;
+  /** True when feedback came from a resume seed (no key/explanation). */
+  seeded?: boolean;
+};
+
+type Phase =
+  | "question"
+  | "locked"
+  | "feedback"
+  | "submitting"
+  | "submitted"
+  | "timeUp"
+  | "dead";
+
+const FETCH_TIMEOUT_MS = 15_000;
+
+/**
+ * The quiz engine (click-first). Owns the answer flow, the UX-only countdown
+ * timer, and submit.
+ *
+ * Robustness notes (PLAN_PHASE5 Â§2/Â§4):
+ *  - `submitLock` guards against double-submits (released in `finally`).
+ *  - The countdown is seeded server-side (`initialRemainingMs`) and decremented
+ *    monotonically — never `Date.now()` re-reads, never paused mid-question,
+ *    stopped at â‰¤0 or when untimed.
+ *  - When the timer hits 0, `timeUp` blocks new answers, AWAITS any in-flight
+ *    answer fetch (so the last answer isn't silently dropped), then submits.
+ *  - A 403 `time_expired` from an awaited answer is treated as confirmation
+ *    (the client is already in `timeUp`), not an error.
+ *  - Submit 200 or 409 `already_submitted` are both terminal: the end state is
+ *    rendered from the response payload immediately (robustness: a
+ *    `router.refresh()` may fail), then refreshed to reconcile with the DB.
+ *  - Answer endpoints are idempotent (assessment `already_answered`, practice
+ *    upsert), so a retry after an abort/network error is safe.
+ *
+ * Resume: seeded answers carry only `selectedIndex`/`isCorrect` (no key —
+ * the key is never stored on session_answers); questions answered in the
+ * current page session get full practice feedback.
+ */
+export function PlayClient({
+  sessionId,
+  quiz,
+  questions,
+  initialAnswers,
+  initialIndex,
+  initialRemainingMs,
+}: {
+  sessionId: string;
+  quiz: Quiz;
+  questions: Question[];
+  initialAnswers: SeedAnswer[];
+  initialIndex: number;
+  initialRemainingMs: number | null;
+}) {
+  const router = useRouter();
+
+  const [index, setIndex] = useState(initialIndex < 0 ? 0 : initialIndex);
+  const [answers, setAnswers] = useState<Record<string, AnswerState>>(() => {
+    const seed: Record<string, AnswerState> = {};
+    for (const a of initialAnswers) {
+      seed[a.question_id] = {
+        selectedIndex: a.selected_index,
+        isCorrect: a.is_correct,
+        seeded: true,
+      };
+    }
+    return seed;
+  });
+  const [phase, setPhase] = useState<Phase>(
+    initialIndex < 0 ? "feedback" : "question",
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [remainingMs, setRemainingMs] = useState<number | null>(initialRemainingMs);
+  const [result, setResult] = useState<{ score: number; total: number } | null>(null);
+
+  // Locks: one answer in flight at a time; no submit while answering.
+  const submitLock = useRef(false);
+  const inFlightAnswer = useRef<Promise<void> | null>(null);
+  // Mirror of `phase` for async callbacks (so a promise resolving later can
+  // tell whether handleTimeUp already moved us into timeUp).
+  const phaseRef = useRef<Phase>(initialIndex < 0 ? "feedback" : "question");
+  function setPhaseAndRef(p: Phase) {
+    phaseRef.current = p;
+    setPhase(p);
+  }
+
+  const isPractice = quiz.mode === "practice";
+  const question = questions[Math.min(index, questions.length - 1)];
+  const answered = answers[question?.id];
+
+  // Monotonic countdown — UX only, never trusted (the RPC is authoritative).
+  // Re-runs whenever remainingMs changes (each tick) so the `<= 0` branch can
+  // fire handleTimeUp; the interval is torn down and recreated per second,
+  // which is acceptable for a single countdown. Never paused mid-question;
+  // stopped at â‰¤0 or when untimed.
+  useEffect(() => {
+    if (remainingMs === null) return;
+    if (phase === "submitted" || phase === "timeUp") return;
+    if (remainingMs <= 0) {
+      void handleTimeUp();
+      return;
+    }
+    const t = setInterval(() => {
+      setRemainingMs((prev) => (prev === null ? null : Math.max(0, prev - 1000)));
+    }, 1000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remainingMs, phase]);
+
+  async function handleTimeUp() {
+    if (phase === "submitted" || phase === "timeUp") return;
+    setPhaseAndRef("timeUp");
+    setError(null);
+    setNotice("Time's up — submitting your answers.");
+    // Await any in-flight answer so the student's last answer isn't dropped.
+    if (inFlightAnswer.current) {
+      try {
+        await inFlightAnswer.current;
+      } catch {
+        // The awaited answer may have rejected (abort/network); the submit
+        // below is still safe (idempotent), and a 403 time_expired from it is
+        // treated as confirmation — the client is already in timeUp.
+      }
+    }
+    await submitNow();
+  }
+
+  function selectOption(optionIndex: number) {
+    if (phase !== "question") return;
+    if (!question) return;
+    // Ignore clicks on already-answered questions while in question phase
+    // (resume) — they must advance via Next instead.
+    if (answers[question.id]) return;
+    void answer(optionIndex);
+  }
+
+  async function answer(optionIndex: number) {
+    if (submitLock.current) return;
+    submitLock.current = true;
+    setPhaseAndRef("locked");
+    setError(null);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+    const promise = (async () => {
+      try {
+        const res = await fetch(`/api/sessions/${sessionId}/answer`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ questionId: question.id, selectedIndex: optionIndex }),
+          signal: controller.signal,
+        });
+        // Strictly parse the body; a non-JSON 200 must NOT render "Incorrect"
+        // for a correct answer (the server recorded the truth). If a 200 body
+        // has no usable shape, surface an error instead of fabricating feedback.
+        let body: Record<string, unknown> = {};
+        if (res.ok || res.status === 409 || res.status === 403) {
+          body = await res.json().catch(() => ({}));
+        }
+
+        // Shape-validate the SUCCESS body: `isCorrect` must be a boolean, or
+        // the response is malformed and we should NOT fabricate feedback.
+        if (res.ok && typeof body.isCorrect !== "boolean") {
+          setError("Unexpected server response. Refresh to see your answer.");
+          setPhaseAndRef("question");
+          return;
+        }
+
+        if (res.status === 409 && body.error === "already_answered") {
+          // Assessment re-answer (e.g. resume racing an in-flight answer):
+          // render the existing feedback and advance.
+          setAnswers((prev) => ({
+            ...prev,
+            [question.id]: {
+              selectedIndex: optionIndex,
+              isCorrect: Boolean(body.isCorrect),
+            },
+          }));
+          setPhaseAndRef("feedback");
+          return;
+        }
+
+        if (res.status === 403 && body.error === "time_expired") {
+          // Server authoritative — the timer expired server-side. If the
+          // client is already in timeUp (handleTimeUp is awaiting us), do NOT
+          // re-enter timeUp / re-submit — just let handleTimeUp's own submit
+          // run after this promise resolves. Otherwise (answer raced the
+          // deadline without the countdown firing), enter timeUp + submit.
+          const alreadyTimeUp = phaseRef.current === "timeUp";
+          setPhaseAndRef("timeUp");
+          if (!alreadyTimeUp) {
+            await submitNow();
+          }
+          return;
+        }
+
+        if (res.status === 409 && body.error === "session_not_active") {
+          setError("This session is no longer active.");
+          setPhaseAndRef("dead");
+          return;
+        }
+
+        if (res.status === 409 && body.error === "quiz_not_live") {
+          setError("This quiz is no longer available.");
+          setPhaseAndRef("dead");
+          return;
+        }
+
+        if (!res.ok) {
+          setError(
+            typeof body.message === "string"
+              ? body.message
+              : typeof body.error === "string"
+                ? body.error
+                : "Could not record the answer.",
+          );
+          setPhaseAndRef("question");
+          return;
+        }
+
+        setAnswers((prev) => ({
+          ...prev,
+          [question.id]: {
+            selectedIndex: optionIndex,
+            isCorrect: Boolean(body.isCorrect),
+            ...(body.correctIndex !== undefined ? { correctIndex: body.correctIndex as number } : {}),
+            ...(body.explanation !== undefined ? { explanation: body.explanation as string } : {}),
+          },
+        }));
+        setPhaseAndRef("feedback");
+      } catch (err) {
+        // Abort/network error â†’ surface a retry (endpoints are idempotent).
+        if ((err as Error)?.name === "AbortError") {
+          setError("The request timed out. Tap your answer again to retry.");
+        } else {
+          setError("Network error recording your answer. Tap again to retry.");
+        }
+        setPhaseAndRef("question");
+      } finally {
+        submitLock.current = false;
+        clearTimeout(timeout);
+      }
+    })();
+
+    inFlightAnswer.current = promise;
+    await promise;
+    inFlightAnswer.current = null;
+  }
+
+  async function submitNow() {
+    // Guard against a double-submit (double-click Finish, or a timeUp racing a
+    // manual submit). The first caller owns the POST; a second caller bails.
+    if (submitLock.current) return;
+    submitLock.current = true;
+    setPhaseAndRef("submitting");
+    setError(null);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/submit`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+        signal: controller.signal,
+      });
+      // Strictly parse the body; a non-JSON 200 (proxy/error page) must NOT be
+      // silently treated as `{}` and render a misleading score.
+      let body: Record<string, unknown> = {};
+      if (res.ok || res.status === 409) {
+        body = await res.json().catch(() => ({}));
+      }
+
+      if (res.status === 409 && body.error === "already_submitted") {
+        // Terminal success — render the end state from the payload. The 409
+        // body always carries score/total; fall back to the question count.
+        setResult({ score: (body.score as number) ?? 0, total: (body.total as number) ?? questions.length });
+        setPhaseAndRef("submitted");
+        router.refresh();
+        return;
+      }
+
+      if (res.status === 409 && body.error === "session_not_active") {
+        setError("This session is no longer active. Refresh to see its current state.");
+        setPhaseAndRef("dead");
+        return;
+      }
+
+      if (!res.ok) {
+        setError(
+          typeof body.message === "string"
+            ? body.message
+            : typeof body.error === "string"
+              ? body.error
+              : "Could not submit the quiz.",
+        );
+        setPhaseAndRef(phase === "timeUp" ? "timeUp" : "question");
+        return;
+      }
+
+      // Shape-validate the SUCCESS body: score/total must be numbers, or the
+      // response is malformed and we must NOT render a fabricated score.
+      if (typeof body.score !== "number" || typeof body.total !== "number") {
+        setError("Unexpected server response. Refresh to see your result.");
+        setPhaseAndRef(phase === "timeUp" ? "timeUp" : "question");
+        return;
+      }
+
+      setResult({ score: body.score as number, total: body.total as number });
+      setPhaseAndRef("submitted");
+      // Render the end state immediately (above) THEN refresh to reconcile
+      // with the DB (single source of truth when it lands).
+      router.refresh();
+    } catch (err) {
+      if ((err as Error)?.name === "AbortError") {
+        setError("The submit request timed out. Please submit again.");
+      } else {
+        setError("Network error submitting the quiz. Please submit again.");
+      }
+      setPhaseAndRef(phase === "timeUp" ? "timeUp" : "question");
+    } finally {
+      submitLock.current = false;
+      clearTimeout(timeout);
+    }
+  }
+
+  function goNext() {
+    if (index + 1 >= questions.length) {
+      void submitNow();
+      return;
+    }
+    setIndex((i) => i + 1);
+    setPhaseAndRef("question");
+    setError(null);
+    setNotice(null);
+  }
+
+  // ── Render ──────────────────────────────────────────────────────
+  // Defensive: the server guards against 0 questions, but a partial/broken RSC
+  // payload must not crash the client (question would be undefined). Kept
+  // after all hooks (rules-of-hooks).
+  if (!question) {
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-8">
+        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
+          This quiz has no questions yet. Please try again later.
+        </p>
+      </div>
+    );
+  }
+
+  if (phase === "submitted" && result) {
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-8">
+        <div className="mb-6">
+          <h1 className="text-2xl font-semibold">{quiz.title}</h1>
+          <p className="text-sm text-muted-foreground">
+            {isPractice ? "Practice" : "Assessment"}
+          </p>
+        </div>
+        <div className="rounded-xl border bg-card p-8 text-center" role="status">
+          <p className="text-sm text-muted-foreground">Your score</p>
+          <p className="mt-2 text-5xl font-semibold">
+            {result.score} <span className="text-2xl text-muted-foreground">/ {result.total}</span>
+          </p>
+          {isPractice && (
+            <p className="mt-4 text-sm text-muted-foreground">
+              Practice again any time — each attempt creates a new session.
+            </p>
+          )}
+          <div className="mt-6 flex justify-center gap-3">
+            <Button variant="outline" onClick={() => router.push("/student/quizzes")}>
+              Back to quizzes
+            </Button>
+            {isPractice && (
+              <Button onClick={() => router.push("/student/quizzes")}>Try again</Button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Terminal dead-end: session no longer active / quiz no longer available.
+  // A non-actionable "back to question" would strand the student with no way
+  // out — render a CTA instead.
+  if (phase === "dead") {
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-8">
+        <div className="mb-6">
+          <h1 className="text-2xl font-semibold">{quiz.title}</h1>
+          <p className="text-sm text-muted-foreground">
+            {isPractice ? "Practice" : "Assessment"}
+          </p>
+        </div>
+        <div className="rounded-xl border bg-card p-8 text-center" role="alert">
+          <p className="text-sm text-destructive">{error ?? "This quiz is no longer available."}</p>
+          <div className="mt-6 flex justify-center gap-3">
+            <Button variant="outline" onClick={() => router.push("/student/quizzes")}>
+              Back to quizzes
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto max-w-3xl px-4 py-8">
+      <div className="mb-6 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">{quiz.title}</h1>
+          <p className="text-sm text-muted-foreground">
+            {isPractice ? "Practice" : "Assessment"}
+          </p>
+        </div>
+        <ProgressHud
+          current={index + 1}
+          total={questions.length}
+          remainingMs={remainingMs}
+        />
+      </div>
+
+      {error && (
+        <p className="mb-4 text-sm text-destructive" role="alert">
+          {error}
+        </p>
+      )}
+      {notice && (
+        <p className="mb-4 text-sm text-amber-700" role="status">
+          {notice}
+        </p>
+      )}
+
+      <QuestionCard
+        question={question}
+        answer={answered}
+        mode={quiz.mode}
+        disabled={phase !== "question"}
+        onSelect={selectOption}
+      />
+
+      <div className="mt-6 flex justify-end">
+        {phase === "feedback" && (
+          <Button onClick={goNext}>
+            {index + 1 >= questions.length ? "Finish" : "Next"}
+          </Button>
+        )}
+        {phase === "submitting" && (
+          <Button disabled>Submitting…</Button>
+        )}
+        {phase === "timeUp" && (
+          // Auto-submit failed (network/abort) — offer an in-page retry so the
+          // student isn't stranded on a disabled button.
+          <Button onClick={() => void submitNow()}>Retry submit</Button>
+        )}
+        {phase === "locked" && (
+          <Button disabled>Recording…</Button>
+        )}
+      </div>
+    </div>
+  );
+}

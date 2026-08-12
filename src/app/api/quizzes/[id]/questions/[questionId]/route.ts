@@ -4,6 +4,7 @@ import { requireQuizOwner } from "@/lib/quizzes/guards";
 import { isUuid } from "@/lib/classes/roster";
 import { QuestionInputSchema } from "@/lib/quizzes/validation";
 import {
+  checkSameOrigin,
   firstIssueMessage,
   internalError,
   invalidBody,
@@ -33,6 +34,10 @@ export async function PATCH(request: Request, { params }: Params) {
   const owner = await requireQuizOwner(supabase, id);
   if (!owner.ok) return owner.response;
   if (owner.quiz.status !== "draft") return notDraft();
+
+  // CSRF: reject cross-origin question edits (AI/session-route precedent).
+  const originError = checkSameOrigin(request);
+  if (originError) return originError;
 
   // The question must belong to this quiz (no cross-quiz moves).
   const { data: existing, error: existingError } = await supabase
@@ -100,7 +105,7 @@ export async function PATCH(request: Request, { params }: Params) {
  * DELETE /api/quizzes/[id]/questions/[questionId] — remove a question from a
  * DRAFT quiz. Order gaps are tolerated (soft ordinal).
  */
-export async function DELETE(_request: Request, { params }: Params) {
+export async function DELETE(request: Request, { params }: Params) {
   const supabase = await createClient();
   const { id, questionId } = await params;
 
@@ -111,6 +116,10 @@ export async function DELETE(_request: Request, { params }: Params) {
   const owner = await requireQuizOwner(supabase, id);
   if (!owner.ok) return owner.response;
   if (owner.quiz.status !== "draft") return notDraft();
+
+  // CSRF: reject cross-origin question deletes (AI/session-route precedent).
+  const originError = checkSameOrigin(request);
+  if (originError) return originError;
 
   const { data: deleted, error } = await supabase
     .from("questions")

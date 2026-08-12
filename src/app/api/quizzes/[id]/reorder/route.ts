@@ -4,6 +4,7 @@ import { requireQuizOwner } from "@/lib/quizzes/guards";
 import { isUuid } from "@/lib/classes/roster";
 import { ReorderSchema } from "@/lib/quizzes/validation";
 import {
+  checkSameOrigin,
   firstIssueMessage,
   internalError,
   invalidBody,
@@ -39,6 +40,10 @@ export async function POST(request: Request, { params }: Params) {
   const owner = await requireQuizOwner(supabase, id);
   if (!owner.ok) return owner.response;
   if (owner.quiz.status !== "draft") return notDraft();
+
+  // CSRF: reject cross-origin reorders (AI/session-route precedent).
+  const originError = checkSameOrigin(request);
+  if (originError) return originError;
 
   let body: unknown;
   try {

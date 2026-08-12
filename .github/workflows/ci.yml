@@ -65,6 +65,9 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      - name: Unit coverage (per-file thresholds)
+        run: npx vitest run --coverage
+
       - name: Phase 1 security probes (live DB, real tokens)
         run: npm run verify:security
 
@@ -76,6 +79,9 @@ jobs:
 
       - name: Phase 4 AI probes (D34-D40)
         run: npm run verify:ai
+
+      - name: Phase 5 session probes (D1/D1b/D2-D4/D7/D9/D42-D47)
+        run: npm run verify:sessions
 
       - name: Build
         run: npm run build

@@ -13,9 +13,11 @@ export default defineConfig({
       include: [
         "src/lib/ai/**",
         "src/lib/extract/**",
+        "src/lib/sessions/**",
         "src/app/api/ai/**",
         "src/app/api/ocr/**",
         "src/app/api/quizzes/**",
+        "src/app/api/sessions/**",
       ],
       // Per-file gates. Browser-only files (tesseract/vision/glm-ocr render
       // loops, pdf.js worker load) are exercised by the E2E suite, not the
@@ -45,6 +47,16 @@ export default defineConfig({
         "src/app/api/quizzes/[id]/questions/[questionId]/route.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
         "src/app/api/quizzes/[id]/reorder/route.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
         "src/app/api/classes/join/route.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
+        // P5: pure session helpers + session routes carry the timer/grading
+        // integrity logic (unit + route-test covered). Browser-only UI
+        // components (play-client, question-card, option-card, progress-hud,
+        // end-screen, student-quizzes-client) are E2E-covered (P4 precedent)
+        // and excluded from the report entirely — no 0-threshold keys needed.
+        "src/lib/sessions/timer.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        "src/lib/sessions/validation.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        "src/app/api/sessions/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
+        "src/app/api/sessions/[id]/answer/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
+        "src/app/api/sessions/[id]/submit/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
       },
     },
   },

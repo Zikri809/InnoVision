@@ -85,6 +85,18 @@
 | U-T2 | untimed quiz (`time_limit_sec=null`) | always within limit |
 | U-T3 | score computation | correct answers count once each |
 | U-T4 | **"abandoned" derived state** (PLAN §1) | session `active`/`paused` + quiz closed **or** `last_activity_at` > 2h ago → renders "abandoned"; recently-active session → "in progress"; `completed`/`flagged` never shown as abandoned |
+| U-T5 | **boundary (inclusive)** | exactly `limit + grace` → still within |
+| U-T6 | `firstUnansweredIndex` + `remainingMs` | all answered → -1; mid-list resume; untimed → null; timed → correct ms |
+
+> **U-T4 (abandoned derived state) is a P8 gate** — P5 does not implement or test it; `last_activity_at` is schema completeness only.
+
+### 2.6 Session validation (`lib/sessions`)
+| # | Case | Expected |
+|---|---|---|
+| U-S1 | valid `StartSessionSchema` / `AnswerSchema` / `SubmitSchema` | passes |
+| U-S2 | non-UUID `quizId` / `questionId` | rejected |
+| U-S3 | negative / non-int `selectedIndex` | rejected |
+| U-S4 | `SubmitSchema` accepts `{}` (boundary) | empty body tolerated |
 
 ---
 
@@ -133,6 +145,14 @@
 | D38 | **Source secrecy (P4)** | student reads `student_quiz_view` | no `source_text`/`source_file_url`/`created_by`; second lecturer reads 0 rows (owner-only) |
 | D39 | **AI concurrency (P4)** | N concurrent `replace_quiz_questions` on one draft quiz | no errors, valid final state (advisory lock serialization) |
 | D40 | **Source size backstop (P4)** | `source_text` > 15000 via direct SQL | CHECK error |
+| D42 | **Question view secrecy (P5)** | student reads `student_question_view` for a live quiz | row count == seeded count AND `correct_index`/`explanation` absent from the returned object keys; owner lecturer still reads `correct_index` (D6 stays green) |
+| D43 | **Index bounds (P5)** | `answer_question` with `p_selected_index` ≥ options length (and NULL) | `{error:'invalid_selected_index'}` |
+| D44 | **Real-DB grading (P5)** | answer Q1 correctly + Q2 incorrectly → submit | stored `is_correct` per row; `submit_session` returns `score=1, total=N`; per-mode jsonb shapes (`{is_correct}` vs `{is_correct, correct_index, explanation}`) |
+| D44b | **Foreign question (P5)** | `answer_question` with a question id from a different quiz | `{error:'invalid_question'}` |
+| D45 | **Timer authoritative (P5)** | sleep ≥ `time_limit_sec + 5s + 1s` then late `answer_question` → `{error:'time_expired'}`; **then submit past deadline → succeeds** (deviation pin); rejected answer created no `session_answers` row |
+| D46 | **Session RLS + answer-after-submit (P5)** | student A reads own session/answers (visible); student B reads A's (0 rows); lecturer reads own quiz's sessions/answers (visible); submit then answer on same session | `{error:'session_not_active'}` |
+| D47 | **Anon denial (P5)** | raw-anon PostgREST call to `start_quiz_session`/`answer_question`/`submit_session` → denied (execute revoked); anon SELECT on `quiz_sessions`/`session_answers` → 0 rows (RLS/grants) |
+| — | **Quiz-delete guard (P5, route-owned)** | quiz DELETE with sessions → 409 `quiz_has_sessions` (route test **I-S12**; the DB layer cascades by design — D41 is deliberately not a D-test) |
 
 ---
 
@@ -195,6 +215,20 @@
 | I-Q13 | reorder | happy path (RPC stub) | 200 `{ok:true}`; RPC `foreign_question_id` → 400 |
 | I21 | `DELETE /api/sessions/[id]/reset` | lecturer resets an attempt | session + answers + face_checks deleted, audit row written, **student can start again** (unique slot released) |
 | I22 | **Periodic verify cadence** (fake clock) | advance clock while question displayed | verify fires every 30–45s jittered; **no fire while `paused`/`flagged`/between questions** |
+| I-S1 | `POST /api/sessions` (P5) | student start happy | 201 `{ session }` (mode copied from quiz) |
+| I-S2 | start | assessment already attempted | 409 `already_attempted` + `session_id` |
+| I-S3 | start | quiz not live / not enrolled | 404 (single no-oracle error) |
+| I-S4 | start | lecturer caller | 403 |
+| I-S5 | `POST /api/sessions/[id]/answer` (P5) | lecturer caller | 403 |
+| I-S6 | answer | RPC `not_owner` (session not theirs) | 404 |
+| I-S7 | answer | invalid body (non-int `selectedIndex`) | 400 |
+| I-S8 | start/answer/submit | cross-origin POST | 403 `invalid_origin` |
+| I-S9 | answer | rate limit exceeded | 429 (`_seedRateLimit`) |
+| I-S10 | `POST /api/sessions/[id]/submit` (P5) | lecturer caller | 403 |
+| I-S11 | submit | RPC `not_owner` | 404 |
+| I-S12 | `DELETE /api/quizzes/[id]` (P5) | quiz has a seeded session | 409 `quiz_has_sessions`; without sessions → 200. *(Lives in the existing quiz-route test file, not a new sessions test file.)* |
+| I-S14 | answer | RPC `invalid_selected_index` | 400 |
+| I-S15 | submit | no answers | 200 `{ score: 0, total }` |
 
 ---
 
@@ -211,24 +245,23 @@
 | E2b | **Lecturer: AI regenerate** | (after E2) lecturer builds a draft quiz → Regenerate one question (mock AI) | target question replaced; siblings untouched |
 | E3 | **Student: enroll + consent** | register student → join class via code → consent screen → face-enroll (fake embedder) | `consent_given_at` set, embedding stored |
 | E3b | **Consent gate** | student skips consent → attempts to reach face-enroll directly | blocked; no embedding stored (API 403, I1 end-to-end) |
-| E4 | **Practice quiz, click-first** | start practice → answer all via clicks → submit | score shown; can re-attempt (new session) |
-| E5 | **Assessment one-attempt lock** | start assessment → answer → submit → try to start again | second start blocked with clean "already taken" message (typed RPC result, no 500) |
+| E4 | **Practice quiz, click-first** | start practice → answer all via clicks → submit | score shown; can re-attempt (new session); **resume sub-case**: feedback chip visible BEFORE reload → engine resumes at Q2 (not stuck on Q1 `already_answered`) → finishes; **replay sub-case**: navigate directly to the completed session URL → EndScreen renders (not the quiz) |
+| E5 | **Assessment one-attempt lock** | start assessment → answer → submit → try to start again | second start blocked with clean "already taken" message (typed RPC result, no 500); a second student in the same class can still start (one-attempt is per student) |
 | E5b | **Lecturer resets attempt** | E5 state → lecturer deletes session from results | student can start fresh; reset audited |
 | E6 | **Wrong face at gate → paused → flagged** | enroll as Student A → start assessment with fake embedder returning **mismatched** embedding | first fail → `paused`, self-recovery offered; repeated fails → `flagged` after 3-in-5, **self-recovery path disappears**, lecturer sees ⚑ |
 | E7 | **Flagged → lecturer-only unlock** | E6 flagged state → student tries self-recover (still flagged) → lecturer unlocks / marks face-exempt | only lecturer action clears it; student resumes; override audited |
 | E8 | **Gesture answering (simulated)** | practice quiz → inject finger sequence `2 (hold 900ms)` → `4 (hold 900ms)` | correct options selected in order, hold-to-confirm fired once each |
 | E9 | **Gesture accidental-lock guard** | hold 2 fingers, change to 3 mid-hold | selection resets, no premature answer (U-G4 end-to-end) |
 | E9b | **Hand lost → auto-pause** | assessment → hide hand >10s | quiz → `paused` (not flagged); answers blocked (U-G6 end-to-end). *The blink-liveness recovery half is exercised by E6/E7 in P7, so P6 and P7 stay order-independent.* |
-| E10 | **Timer expiry** | assessment with 5s limit → wait past `limit + grace` → answer | answer rejected with time-expired message |
-| E11 | **Answer secrecy** | student opens DevTools network → question fetch | no `correct_index` in any response |
-| E12 | **Continuous verify mid-quiz** | assessment → fake embedder matches at start, **mismatches at Q3** | quiz pauses/flags at Q3, not silently passes (cadence works) |
+| E10 | **Timer expiry (P5)** | **API half**: assessment `time_limit_sec=5`; wait until `started_at + 10s + 2s` (deadline = limit + grace, anchored to the start-session response) → `page.request` answer | 403 `time_expired`; then submit → 200 `{ session, score: 0, total }` (late-submit acceptance + late-answer rejection pinned). **UI half**: separate 10s assessment → client countdown hits 0 → auto-submit → EndScreen with the ANSWERED score |
+| E11 | **Answer secrecy (P5, assessment only)** | collect same-origin text responses filtered by content-type + URL + `response.ok()` across the whole flow (incl. answer responses) | `correct_index`/`explanation` absent everywhere; assessment answer body has `isCorrect` but NOT `correctIndex`. (Practice disclosure lives in E4.) || E12 | **Continuous verify mid-quiz** | assessment → fake embedder matches at start, **mismatches at Q3** | quiz pauses/flags at Q3, not silently passes (cadence works) |
 | E13 | **Attendance = session** | 3 students take quiz → lecturer opens results | 3 sessions listed with scores + face-check timelines; abandoned sessions shown as "abandoned" |
 
 ---
 
 ## 6. Coverage Targets & CI
 
-- **Unit + integration:** run on every push (`vitest run`), target **≥80%** on `lib/face`, `lib/gestures`, `lib/ai`, `lib/extract`, scoring/timer, **`app/api/sessions/*` and `app/api/face/*`** (they carry the integrity logic). CRUD/UI can be lower.
+- **Unit + integration:** run on every push (`vitest run`), target **≥80%** on `lib/face`, `lib/gestures`, `lib/ai`, `lib/extract`, scoring/timer, **`app/api/sessions/*` and `app/api/face/*`** (they carry the integrity logic). CRUD/UI can be lower. Coverage thresholds are per-file (vitest v8) — P5 added `lib/sessions/**` + `app/api/sessions/**` to `coverage.include` with literal per-file keys; browser-only UI components (`play-client`, `question-card`, `option-card`, `progress-hud`, `end-screen`, `student-quizzes-client`) are E2E-covered and excluded from the report.
 - **DB/RLS:** `supabase start` in CI, run SQL test suite; **D1–D18 are blocking** (they guard the demo's core promises). Phase 2 D8/D12 are additionally proven by `scripts/verify-classes.mjs` (real anon-token clients).
 - **E2E:** Playwright on PRs; **E5, E6, E7, E8, E12 are the five "demo-killer" tests** — if any fail, do not demo.
 - **AI tests never hit a real model** — MSW serves canned valid/invalid JSON (keeps CI free and deterministic).
@@ -258,8 +291,14 @@ The critical guarantees the demo lives or dies by, and where each is proven:
 | Assessment re-answer rejected / answer idempotency | D1b, D9, I10 |
 | Fail-streak fairness (sliding window, flat count) | U-F6, U-F7c, I5, I5b |
 | Paused self-recovery vs flagged lecturer-only split | U-F7, U-F7b, I6b, I6c, E6, E7, E9b |
-| Answer secrecy (both modes) | D5, I7, E11 |
-| Server timer enforcement (+grace) | U-T1, I9, E10 |
+| Answer secrecy (both modes) | D5, I7, E11, D42 |
+| Server timer enforcement (+grace) | U-T1, I9, E10, D45 |
+| One-attempt race (P5) | D1, E5 |
+| Resume (P5) | U-T6, E4 |
+| Timer authoritative in RPC (P5) | D45, E10 |
+| Submit-after-deadline deviation (P5) | D45, E10 |
+| Grading against real DB (P5) | D44 |
+| Answer secrecy end-to-end (P5) | D42, I7, E11 |
 | Re-enrollment + privileged-action audit | D11, D13 |
 | Supervisor override + session reset | E7, E5b, I21 |
 | Anti-replay nonce | I5c, D14 |
@@ -287,7 +326,7 @@ The build is **gated**: each phase below must (a) deliver its feature, (b) pass 
 | **P2 Classes** | D8, D12, D15–D18 · E1 — create class → join via code → roster updates | Student enrolls via code; lecturer A cannot see lecturer B's classes/files; join is idempotent and code-checked |
 | **P3 Manual builder** | D5, D6 · I20 · D19–D33, I-Q1–I-Q13 · **E1b** | Lecturer hand-builds and publishes a quiz; students never see `correct_index`/join_code/source_file_url/embeddings; student role blocked from all lecturer routes; draft/live/closed state machine + question/metadata immutability enforced at the DB layer |
 | **P4 Extraction + AI generation** ★ | U-A1–U-A11 · U-E1–U-E12 · I14–I19 · I-A1–I-A14 · D34–D40 · E2, E2b | Real chapter PDF (incl. scanned via Tesseract) → editable, publishable quiz; invalid AI output inserts **zero** rows; vision-OCR route returns text + stores nothing, batches under body limit |
-| **P5 Play screen (click-first)** | U-T1–U-T3 · D1, D1b, D2–D4, D7, D9 · I7–I13 · E4, E5, E10, E11 | Full quiz playable with mouse; one-attempt enforced; timer enforced server-side; re-answer rules correct per mode |
+| **P5 Play screen (click-first)** | U-T1–U-T3, U-T5–U-T6 · U-S1–U-S4 · D1, D1b, D2–D4, D7, D9, D42–D47 · I7–I13, I-S1–I-S12, I-S14–I-S15 · E4 (resume+replay), E5, E10 (API+UI), E11 | Full quiz playable with mouse; one-attempt enforced; timer enforced server-side; re-answer rules correct per mode; `correct_index`/`explanation` never leak to students |
 | **P6 Gesture layer** | U-G1–U-G7 · E8, E9, E9b | Full quiz playable hands-free; mid-hold change and hand-loss behave; hand-loss auto-pauses (recovery proven in P7) |
 | **P7 Face pipeline** | U-F1–U-F7c · D10, D11, D13, D14 · I1–I6c, I22 · E3, E3b, E6, E7, E12 | Enroll → gate → continuous verify (30–45s cadence proven by fake clock); wrong face at Q3 → paused → flagged; self-recovery only from paused; lecturer-only unlock; nonce replay rejected |
 | **P8 Results & attendance** | U-T4 · I21 · E5b, E13 | Dashboard shows attendance (incl. abandoned — derivation pinned by U-T4), scores, face-check timeline; unlock/exempt/reset audited; reset releases the one-attempt slot |

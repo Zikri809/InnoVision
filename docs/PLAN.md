@@ -66,6 +66,9 @@ session_answers: id, session_id, question_id,
                  selected_index (null = unanswered), is_correct (bool),
                  answered_at,
                  UNIQUE (session_id, question_id)  -- idempotent answers (no double-count)
+-- NOTE: session_answers deliberately does NOT store correct_index/explanation —
+-- storing the key would leak it through the own-session SELECT policy in
+-- assessment. Grading is server-side only.
 
 face_checks: id, session_id, checked_at, matched (bool),
              distance (float4), trigger ('start'|'question'|'periodic')
@@ -82,7 +85,7 @@ audit_events: id, actor_id → profiles, subject_id (uuid),
 
 - **One-attempt (assessment):** enforced by the **partial unique index** above (not just the RPC check) so concurrent starts can't race. RPC `start_quiz_session(quiz_id)` (security definer) validates live/enrolled then inserts; on unique violation it **returns a typed result** — `{session}` for practice (rejoin existing) or `{error:'already_attempted', session_id}` for assessment (UI shows "You've already taken this assessment", never a 500).
 - **Answer secrecy (BOTH modes):** client fetches questions via view/RPC that **omits `correct_index`** for practice *and* assessment (a student can read the network tab before starting). Grading is server-side only; practice additionally returns `correctIndex` *after* the answer is submitted.
-- **Server-side timer:** `answer` and `submit` reject when `now() > started_at + time_limit_sec + grace`, where `grace = TIMER_GRACE_SEC` (env, default **5s** — covers network latency in the demo room). Client timer is UX-only, never trusted.
+- **Server-side timer:** `answer_question` rejects when `clock_timestamp() > started_at + time_limit_sec + grace`, where `grace` is a **SQL constant `interval '5 seconds'`** in the RPC (never caller-supplied — a caller can't pass a larger grace). `TIMER_GRACE_SEC` (env, default **5s**) mirrors it for the client/JS layer only — it is NOT an enforcement knob. Client timer is UX-only, never trusted. **Submit is ALLOWED past the deadline** (deviation pinned by D45/E10): the timer's job is stopping answers, not stranding a late auto-submit.
 - **RLS:** lecturers → own classes/quizzes/sessions only; students → enrolled classes, own sessions, own profile row. `correct_index` never exposed via any client-readable policy.
 - **Re-enrollment audit:** updating `face_embedding` writes an `audit_events` row (who/when); during a live assessment window it requires lecturer approval (closes proxy-attendance hole).
 - **Abandoned sessions:** a session still `active`/`paused` after the quiz closes (or after 2h of no `last_activity_at` updates) is rendered as **"abandoned"** in the results dashboard — no status migration needed, it's derived at read time.
@@ -102,8 +105,8 @@ audit_events: id, actor_id → profiles, subject_id (uuid),
 | `/api/face/self-recover` | POST | Student self-service, **`paused` sessions only**: `{ sessionId }` after client-side blink-liveness re-pass → reset streak, rotate nonce, set `active`. **No-op (403) on `flagged` sessions — flagged requires the lecturer.** Audited |
 | `/api/face/unlock` | POST | **Lecturer-only**: `{ sessionId }` → reset streak, rotate nonce, set `active`. Writes `audit_events('unlock')` |
 | `/api/sessions/[id]/exempt-face` | POST | Lecturer-only supervisor override: `{ sessionId, reason }` → sets `face_exempt=true`, writes `audit_events('exempt_face')` (demo fallback for bad webcams) |
-| `/api/sessions/[id]/answer` | POST | Input: `{ questionId, selectedIndex }` → **rejects if past time limit** (403 `time_expired`) → rejects if session `paused`/`flagged` (409) → server grades → **assessment: `INSERT ... ON CONFLICT DO NOTHING`, returns 409 `already_answered` on re-answer (no overwrite); practice: upsert allowed** → returns `{ isCorrect }` (+ `correctIndex` **only in practice mode**) |
-| `/api/sessions/[id]/submit` | POST | **Rejects if past time limit** → compute score, set `submitted_at`, `status='completed'`. Idempotent (re-submit returns existing score, no change) |
+| `/api/sessions/[id]/answer` | POST | Input: `{ questionId, selectedIndex }` → **rejects if past time limit** (403 `time_expired`; RPC-enforced with a SQL-constant 5s grace) → rejects if session `paused`/`flagged`/`completed` (409 `session_not_active`) → server grades → **assessment: `INSERT ... ON CONFLICT DO NOTHING`, returns 409 `already_answered` on re-answer (no overwrite; payload carries the existing `is_correct`); practice: upsert allowed** → returns `{ isCorrect }` (+ `correctIndex` **only in practice mode**) |
+| `/api/sessions/[id]/submit` | POST | **No timer rejection (deviation, D45/E10):** computes score, sets `submitted_at`, `status='completed'`. Idempotent (re-submit returns 409 `already_submitted` with the existing score, no change) |
 | `/api/sessions/[id]/reset` | DELETE | **Lecturer-only**: deletes the session + its answers/face_checks, writes `audit_events('session_reset')` → releases the one-attempt unique slot so the student can retake (demo fallback for dead laptops) |
 | `/api/classes` | POST | Create class; on join-code unique violation, **retry with a new code (up to 3 attempts)** before erroring |
 

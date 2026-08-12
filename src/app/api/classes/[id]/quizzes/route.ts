@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { requireClassOwner } from "@/lib/quizzes/guards";
 import { isUuid } from "@/lib/classes/roster";
 import { CreateQuizSchema } from "@/lib/quizzes/validation";
+import { checkSameOrigin } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,10 @@ export async function POST(request: Request, { params }: Params) {
 
   const owner = await requireClassOwner(supabase, classId);
   if (!owner.ok) return owner.response;
+
+  // CSRF: reject cross-origin quiz creation (AI/session-route precedent).
+  const originError = checkSameOrigin(request);
+  if (originError) return originError;
 
   let body: unknown;
   try {

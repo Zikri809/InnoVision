@@ -7,6 +7,13 @@
  * exercise the actual authZ logic (I20: student → 403) and validation paths
  * without a live DB.
  *
+ * Session RPC branches (`start_quiz_session` / `answer_question` /
+ * `submit_session`) are ROUTE-MAPPING STUBS ONLY — they must stay in lockstep
+ * with migration `0008_sessions.sql`; the authoritative RPC-semantics checks
+ * are `scripts/verify-sessions.mjs` (D-tests). The fake must NOT re-implement
+ * the SQL timer (seeded `{error:'time_expired'}` via the `rpcResult` seam),
+ * nor the DB constraint details beyond what the route-mapping branches need.
+ *
  * NOT a production module — test-only, imported only by `*.test.ts`.
  */
 
@@ -149,6 +156,10 @@ class FakeQueryBuilder {
     if (this.client.updateError && this.op && this.op.kind !== undefined) {
       return { rows: [], error: { message: this.client.updateError } };
     }
+    // Count-only error seam (publish / quiz-DELETE session-count pre-checks).
+    if (this.client.countError && this.countExact) {
+      return { rows: [], error: { message: this.client.countError } };
+    }
     const tableRows = (this.client.tables[this.table] ??= []);
 
     if (!this.op) {
@@ -197,6 +208,12 @@ export class FakeSupabase {
    * exercised (e.g. trigger errors on UPDATE).
    */
   updateError: string | null = null;
+  /**
+   * Test-only: when set, `count: "exact"` queries (the publish/quiz-DELETE
+   * session-count pre-checks) return this error so the route's 503 branch can
+   * be exercised (SELECTs otherwise pass through).
+   */
+  countError: string | null = null;
 
   auth = {
     getUser: async () => ({ data: { user: this.user } }),
@@ -209,8 +226,20 @@ export class FakeSupabase {
   // rpc() models the RPCs the routes call:
   //  - append_question: appends with order_index = max+1.
   //  - replace_quiz_questions: atomic replace (delete + insert + quiz update).
+  //  - start_quiz_session / answer_question / submit_session: route-mapping
+  //    stubs (see header comment) modeling real semantics at the level the
+  //    routes branch on.
   //  - reorder_questions / others: return the pre-seeded rpcResult.
   async rpc(name: string, args?: Record<string, unknown>) {
+    if (name === "start_quiz_session") {
+      return this._startQuizSession(args);
+    }
+    if (name === "answer_question") {
+      return this._answerQuestion(args);
+    }
+    if (name === "submit_session") {
+      return this._submitSession(args);
+    }
     if (name === "append_question") {
       const questions = this.tables["questions"] ?? [];
       const quizId = String(args?.p_quiz_id);
@@ -268,6 +297,229 @@ export class FakeSupabase {
     }
 
     return this.rpcResult;
+  }
+
+  // ── session RPC stubs (route-mapping only; see header comment) ──
+  /**
+   * start_quiz_session — models practice rejoin-or-insert and assessment
+   * one-attempt semantics at the level the routes branch on. Returns the
+   * same jsonb shape as the real RPC (`{session}` / `{error, session_id}`).
+   */
+  private async _startQuizSession(args?: Record<string, unknown>) {
+    // Test seam: an explicitly seeded rpcResult overrides the stub (used to
+    // exercise error-mapping branches without re-modeling the real RPC).
+    if (this.rpcResult.data !== null || this.rpcResult.error !== null) return this.rpcResult;
+    const quizId = String(args?.p_quiz_id);
+    const studentId = this.user?.id ?? "";
+    const sessions = (this.tables["quiz_sessions"] ??= []);
+    const quizzes = this.tables["quizzes"] ?? [];
+
+    // If the quiz is not live, the real RPC returns quiz_not_live.
+    const quiz = quizzes.find((q) => q.id === quizId);
+    if (!quiz || quiz.status !== "live") {
+      return { data: { error: "quiz_not_live" }, error: null };
+    }
+
+    const mode = (quiz.mode as string) ?? "practice";
+
+    if (mode === "practice") {
+      const existing = sessions.find(
+        (s) =>
+          s.quiz_id === quizId &&
+          s.student_id === studentId &&
+          (s.status === "active" || s.status === "paused"),
+      );
+      if (existing) {
+        return { data: { session: existing }, error: null };
+      }
+      const row: Row = {
+        id: randomUuid(),
+        quiz_id: quizId,
+        student_id: studentId,
+        mode: "practice",
+        status: "active",
+        started_at: "2026-01-01T00:00:00Z",
+        submitted_at: null,
+        score: null,
+        last_activity_at: "2026-01-01T00:00:00Z",
+      };
+      sessions.push(row);
+      return { data: { session: row }, error: null };
+    }
+
+    // assessment: one-attempt.
+    const existing = sessions.find(
+      (s) => s.quiz_id === quizId && s.student_id === studentId && s.mode === "assessment",
+    );
+    if (existing) {
+      return { data: { error: "already_attempted", session_id: existing.id }, error: null };
+    }
+    const row: Row = {
+      id: randomUuid(),
+      quiz_id: quizId,
+      student_id: studentId,
+      mode: "assessment",
+      status: "active",
+      started_at: "2026-01-01T00:00:00Z",
+      submitted_at: null,
+      score: null,
+      last_activity_at: "2026-01-01T00:00:00Z",
+    };
+    sessions.push(row);
+    return { data: { session: row }, error: null };
+  }
+
+  /**
+   * answer_question — models assessment conflict → already_answered (existing
+   * is_correct), practice upsert, and error-branch payloads. The SQL timer is
+   * NOT re-implemented: seeded `{error:'time_expired'}` goes through the
+   * `rpcResult` seam (I9), and `session_not_active`/`not_owner` come from the
+   * seeded session row's status / ownership.
+   */
+  private async _answerQuestion(args?: Record<string, unknown>) {
+    // Test seam: an explicitly seeded rpcResult overrides the stub (used to
+    // seed `{error:'time_expired'}` for I9 — the SQL timer is NOT re-modeled).
+    if (this.rpcResult.data !== null || this.rpcResult.error !== null) return this.rpcResult;
+    const sessionId = String(args?.p_session_id);
+    const studentId = this.user?.id ?? "";
+    const sessions = this.tables["quiz_sessions"] ?? [];
+    const session = sessions.find(
+      (s) => s.id === sessionId && s.student_id === studentId,
+    );
+    if (!session) {
+      return { data: { error: "not_owner" }, error: null };
+    }
+    if (session.status !== "active") {
+      return { data: { error: "session_not_active" }, error: null };
+    }
+
+    const questionId = String(args?.p_question_id);
+    const selectedIndex = args?.p_selected_index as number | undefined;
+    const answers = (this.tables["session_answers"] ??= []);
+
+    // Resolve correctness against the seeded question's correct_index.
+    const question = (this.tables["questions"] ?? []).find(
+      (q) => q.id === questionId && q.quiz_id === session.quiz_id,
+    );
+    if (!question) {
+      return { data: { error: "invalid_question" }, error: null };
+    }
+    const options = (question.options as string[]) ?? [];
+    if (
+      selectedIndex === undefined ||
+      selectedIndex === null ||
+      selectedIndex < 0 ||
+      selectedIndex >= options.length
+    ) {
+      return { data: { error: "invalid_selected_index" }, error: null };
+    }
+
+    const isCorrect = selectedIndex === (question.correct_index as number);
+    const mode = session.mode as string;
+    const existing = answers.find(
+      (a) => a.session_id === sessionId && a.question_id === questionId,
+    );
+
+    if (mode === "assessment" && existing) {
+      return { data: { error: "already_answered", is_correct: existing.is_correct }, error: null };
+    }
+
+    if (existing) {
+      existing.selected_index = selectedIndex;
+      existing.is_correct = isCorrect;
+      existing.answered_at = "2026-01-01T00:01:00Z";
+      return {
+        data:
+          mode === "assessment"
+            ? { is_correct: isCorrect }
+            : {
+                is_correct: isCorrect,
+                correct_index: question.correct_index,
+                explanation: question.explanation ?? null,
+              },
+        error: null,
+      };
+    }
+
+    const row: Row = {
+      id: randomUuid(),
+      session_id: sessionId,
+      question_id: questionId,
+      selected_index: selectedIndex,
+      is_correct: isCorrect,
+      answered_at: "2026-01-01T00:01:00Z",
+    };
+    answers.push(row);
+    return {
+      data:
+        mode === "assessment"
+          ? { is_correct: isCorrect }
+          : {
+              is_correct: isCorrect,
+              correct_index: question.correct_index,
+              explanation: question.explanation ?? null,
+            },
+      error: null,
+    };
+  }
+
+  /**
+   * submit_session — models idempotent already_submitted + score from answers.
+   * Marks the session completed and sets submitted_at, mirroring the RPC.
+   */
+  private async _submitSession(args?: Record<string, unknown>) {
+    // Test seam: an explicitly seeded rpcResult overrides the stub.
+    if (this.rpcResult.data !== null || this.rpcResult.error !== null) return this.rpcResult;
+    const sessionId = String(args?.p_session_id);
+    const studentId = this.user?.id ?? "";
+    const sessions = this.tables["quiz_sessions"] ?? [];
+    const session = sessions.find(
+      (s) => s.id === sessionId && s.student_id === studentId,
+    );
+    if (!session) {
+      return { data: { error: "not_owner" }, error: null };
+    }
+
+    const answers = this.tables["session_answers"] ?? [];
+    const total = (this.tables["questions"] ?? []).filter(
+      (q) => q.quiz_id === session.quiz_id,
+    ).length;
+
+    if (session.status === "completed") {
+      return {
+        data: {
+          session,
+          score: session.score ?? 0,
+          total,
+          already_submitted: true,
+        },
+        error: null,
+      };
+    }
+
+    if (session.status !== "active") {
+      return { data: { error: "session_not_active" }, error: null };
+    }
+
+    const score = answers.filter(
+      (a) => a.session_id === sessionId && a.is_correct === true,
+    ).length;
+    session.status = "completed";
+    session.score = score;
+    session.submitted_at = "2026-01-01T00:02:00Z";
+    return { data: { session, score, total }, error: null };
+  }
+
+  /** Seed a session row (I-S12 / session route tests). */
+  seedSession(session: Row) {
+    this.tables["quiz_sessions"] ??= [];
+    this.tables["quiz_sessions"].push(session);
+  }
+
+  /** Seed an answer row (I10 / submit tests). */
+  seedAnswer(answer: Row) {
+    this.tables["session_answers"] ??= [];
+    this.tables["session_answers"].push(answer);
   }
 
   // ── test setup helpers ────────────────────────────────────────

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireLecturer } from "@/lib/classes/guards";
 import { getClassRoster, isUuid } from "@/lib/classes/roster";
+import { checkSameOrigin } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 
@@ -100,6 +101,10 @@ export async function PATCH(request: Request, { params }: Params) {
 
   if (!isUuid(id)) return invalidId();
 
+  // CSRF: reject cross-origin renames (AI/session-route precedent).
+  const originError = checkSameOrigin(request);
+  if (originError) return originError;
+
   let body: { title?: unknown };
   try {
     body = await request.json();
@@ -136,13 +141,17 @@ export async function PATCH(request: Request, { params }: Params) {
 /**
  * DELETE /api/classes/[id] — owner only; cascades enrollments (and, later, quizzes).
  */
-export async function DELETE(_request: Request, { params }: Params) {
+export async function DELETE(request: Request, { params }: Params) {
   const supabase = await createClient();
   const auth = await requireLecturer(supabase);
   if (!auth.ok) return auth.response;
   const { id } = await params;
 
   if (!isUuid(id)) return invalidId();
+
+  // CSRF: reject cross-origin class deletion (AI/session-route precedent).
+  const originError = checkSameOrigin(request);
+  if (originError) return originError;
 
   const { data, error } = await supabase
     .from("classes")

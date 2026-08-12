@@ -184,6 +184,73 @@ export type Database = {
           },
         ]
       }
+      quiz_sessions: {
+        Row: {
+          face_exempt: boolean
+          face_fail_streak: number
+          id: string
+          last_activity_at: string
+          mode: Database["public"]["Enums"]["quiz_mode"]
+          quiz_id: string
+          score: number | null
+          started_at: string
+          status: Database["public"]["Enums"]["session_status"]
+          student_id: string
+          submitted_at: string | null
+          verify_nonce: string
+        }
+        Insert: {
+          face_exempt?: boolean
+          face_fail_streak?: number
+          id?: string
+          last_activity_at?: string
+          mode: Database["public"]["Enums"]["quiz_mode"]
+          quiz_id: string
+          score?: number | null
+          started_at?: string
+          status?: Database["public"]["Enums"]["session_status"]
+          student_id: string
+          submitted_at?: string | null
+          verify_nonce?: string
+        }
+        Update: {
+          face_exempt?: boolean
+          face_fail_streak?: number
+          id?: string
+          last_activity_at?: string
+          mode?: Database["public"]["Enums"]["quiz_mode"]
+          quiz_id?: string
+          score?: number | null
+          started_at?: string
+          status?: Database["public"]["Enums"]["session_status"]
+          student_id?: string
+          submitted_at?: string | null
+          verify_nonce?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quiz_sessions_quiz_id_fkey"
+            columns: ["quiz_id"]
+            isOneToOne: false
+            referencedRelation: "quizzes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quiz_sessions_quiz_id_fkey"
+            columns: ["quiz_id"]
+            isOneToOne: false
+            referencedRelation: "student_quiz_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quiz_sessions_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       quizzes: {
         Row: {
           class_id: string
@@ -245,6 +312,55 @@ export type Database = {
           },
         ]
       }
+      session_answers: {
+        Row: {
+          answered_at: string
+          id: string
+          is_correct: boolean
+          question_id: string
+          selected_index: number | null
+          session_id: string
+        }
+        Insert: {
+          answered_at?: string
+          id?: string
+          is_correct: boolean
+          question_id: string
+          selected_index?: number | null
+          session_id: string
+        }
+        Update: {
+          answered_at?: string
+          id?: string
+          is_correct?: boolean
+          question_id?: string
+          selected_index?: number | null
+          session_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "session_answers_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "questions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "session_answers_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "student_question_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "session_answers_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "quiz_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       student_class_view: {
@@ -264,6 +380,51 @@ export type Database = {
           title?: string | null
         }
         Relationships: []
+      }
+      student_question_view: {
+        Row: {
+          created_at: string | null
+          id: string | null
+          options: string[] | null
+          order_index: number | null
+          prompt: string | null
+          quiz_id: string | null
+          type: Database["public"]["Enums"]["question_type"] | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string | null
+          options?: string[] | null
+          order_index?: number | null
+          prompt?: string | null
+          quiz_id?: string | null
+          type?: Database["public"]["Enums"]["question_type"] | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string | null
+          options?: string[] | null
+          order_index?: number | null
+          prompt?: string | null
+          quiz_id?: string | null
+          type?: Database["public"]["Enums"]["question_type"] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "questions_quiz_id_fkey"
+            columns: ["quiz_id"]
+            isOneToOne: false
+            referencedRelation: "quizzes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "questions_quiz_id_fkey"
+            columns: ["quiz_id"]
+            isOneToOne: false
+            referencedRelation: "student_quiz_view"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       student_quiz_view: {
         Row: {
@@ -343,6 +504,14 @@ export type Database = {
       }
     }
     Functions: {
+      answer_question: {
+        Args: {
+          p_question_id: string
+          p_selected_index: number
+          p_session_id: string
+        }
+        Returns: Json
+      }
       append_question: {
         Args: {
           p_correct_index: number
@@ -370,10 +539,15 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      can_student_view_quiz: { Args: { p_quiz_id: string }; Returns: boolean }
       is_enrolled_in_class: { Args: { p_class_id: string }; Returns: boolean }
       is_lecturer: { Args: never; Returns: boolean }
       is_lecturer_of_class: { Args: { p_class_id: string }; Returns: boolean }
       is_lecturer_of_quiz: { Args: { p_quiz_id: string }; Returns: boolean }
+      is_session_owner_or_lecturer: {
+        Args: { p_session_id: string }
+        Returns: boolean
+      }
       join_class: { Args: { code: string }; Returns: Json }
       reorder_questions: {
         Args: { p_ordered_ids: string[]; p_quiz_id: string }
@@ -405,11 +579,14 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      start_quiz_session: { Args: { p_quiz_id: string }; Returns: Json }
+      submit_session: { Args: { p_session_id: string }; Returns: Json }
     }
     Enums: {
       question_type: "mcq" | "true_false"
       quiz_mode: "practice" | "assessment"
       quiz_status: "draft" | "live" | "closed"
+      session_status: "active" | "paused" | "flagged" | "completed"
       user_role: "lecturer" | "student"
     }
     CompositeTypes: {
@@ -544,6 +721,7 @@ export const Constants = {
       question_type: ["mcq", "true_false"],
       quiz_mode: ["practice", "assessment"],
       quiz_status: ["draft", "live", "closed"],
+      session_status: ["active", "paused", "flagged", "completed"],
       user_role: ["lecturer", "student"],
     },
   },

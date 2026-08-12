@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireLecturer } from "@/lib/classes/guards";
 import { createClassWithRetry } from "@/lib/classes/join-code";
+import { checkSameOrigin } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,10 @@ export async function POST(request: Request) {
   const supabase = await createClient();
   const auth = await requireLecturer(supabase);
   if (!auth.ok) return auth.response;
+
+  // CSRF: reject cross-origin class creation (AI/session-route precedent).
+  const originError = checkSameOrigin(request);
+  if (originError) return originError;
 
   let body: { title?: unknown };
   try {
