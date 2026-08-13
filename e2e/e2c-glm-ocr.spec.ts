@@ -18,6 +18,12 @@ const LECTURER_INVITE_CODE = process.env.LECTURER_INVITE_CODE ?? "";
  *
  * Gated on OLLAMA_BASE_URL being reachable (the GLM engine only appears in
  * the picker when the availability probe succeeds). Skipped otherwise.
+ *
+ * CI note: GitHub Actions runners do NOT run a local Ollama, so this spec is
+ * skipped when `CI` is set (the E2E suite's Playwright config already runs
+ * `workers: 1` + `retries: 2` in CI). The GLM-OCR path remains a manual
+ * pre-demo checklist item (TESTING §7 #3) and is covered locally by running
+ * Ollama on the dev machine.
  */
 test.describe("E2-GLM — GLM-OCR extraction from a scanned image", () => {
   test("lecturer extracts a scanned image with GLM-OCR, then generates", async ({
@@ -25,6 +31,7 @@ test.describe("E2-GLM — GLM-OCR extraction from a scanned image", () => {
   }) => {
     test.setTimeout(180_000);
     test.skip(!LECTURER_INVITE_CODE, "LECTURER_INVITE_CODE not set");
+    test.skip(!!process.env.CI, "GLM-OCR requires local Ollama, not provisioned in CI");
 
     const ctx = await browser.newContext();
     const page = await ctx.newPage();

@@ -4,7 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { QuestionCard } from "@/components/quiz/question-card";
 import { ProgressHud } from "@/components/quiz/progress-hud";
+import { GestureLayer } from "@/components/vision/gesture-layer";
 import { Button } from "@/components/ui/button";
+import { MAX_ANSWER_FINGERS } from "@/lib/gestures/constants";
+import type { HoldProgress } from "@/lib/gestures/types";
 
 type Question = {
   id: string;
@@ -46,6 +49,9 @@ type Phase =
   | "dead";
 
 const FETCH_TIMEOUT_MS = 15_000;
+
+/** Phases where the pause overlay is suppressed so the timeUp Retry-submit stays reachable. */
+const BLOCK_INPUT_PHASES: Phase[] = ["timeUp", "submitting", "submitted", "dead"];
 
 /**
  * The quiz engine (click-first). Owns the answer flow, the UX-only countdown
@@ -106,6 +112,8 @@ export function PlayClient({
   const [notice, setNotice] = useState<string | null>(null);
   const [remainingMs, setRemainingMs] = useState<number | null>(initialRemainingMs);
   const [result, setResult] = useState<{ score: number; total: number } | null>(null);
+  const [holdProgress, setHoldProgress] = useState<HoldProgress | null>(null);
+  const [gestureActive, setGestureActive] = useState(false);
 
   // Locks: one answer in flight at a time; no submit while answering.
   const submitLock = useRef(false);
@@ -162,6 +170,9 @@ export function PlayClient({
   function selectOption(optionIndex: number) {
     if (phase !== "question") return;
     if (!question) return;
+    // Defensive bounds guard (P6): the RPC is the backstop, but a malformed
+    // gesture/click must never attempt an out-of-range index.
+    if (optionIndex < 0 || optionIndex >= question.options.length) return;
     // Ignore clicks on already-answered questions while in question phase
     // (resume) — they must advance via Next instead.
     if (answers[question.id]) return;
@@ -361,6 +372,10 @@ export function PlayClient({
   }
 
   function goNext() {
+    // Phase guard (P6): the Next button only renders in `feedback`, so this is
+    // behavior-preserving for clicks but blocks a stale palm-next frame from
+    // flipping `timeUp`/`submitting` back to `question`.
+    if (phase !== "feedback") return;
     if (index + 1 >= questions.length) {
       void submitNow();
       return;
@@ -468,19 +483,40 @@ export function PlayClient({
         </p>
       )}
 
-      <QuestionCard
-        question={question}
-        answer={answered}
+      <GestureLayer
         mode={quiz.mode}
-        disabled={phase !== "question"}
-        onSelect={selectOption}
-      />
+        optionCount={question.options.length}
+        questionId={question.id}
+        armed={phase === "question" && !answered}
+        nextArmed={phase === "feedback"}
+        blockInput={BLOCK_INPUT_PHASES.includes(phase)}
+        onSelect={(i) => selectOption(i)}
+        onNext={() => goNext()}
+        onHoldProgress={setHoldProgress}
+        onStatusChange={(s) => setGestureActive(s === "active")}
+      >
+        <QuestionCard
+          question={question}
+          answer={answered}
+          mode={quiz.mode}
+          disabled={phase !== "question"}
+          holdProgress={holdProgress}
+          onSelect={selectOption}
+        />
+      </GestureLayer>
 
       <div className="mt-6 flex justify-end">
         {phase === "feedback" && (
-          <Button onClick={goNext}>
-            {index + 1 >= questions.length ? "Finish" : "Next"}
-          </Button>
+          <div className="flex items-center gap-3">
+            {gestureActive && question.options.length < MAX_ANSWER_FINGERS && (
+              <span className="text-xs text-muted-foreground" role="status">
+                or hold ✋
+              </span>
+            )}
+            <Button onClick={goNext}>
+              {index + 1 >= questions.length ? "Finish" : "Next"}
+            </Button>
+          </div>
         )}
         {phase === "submitting" && (
           <Button disabled>Submitting…</Button>

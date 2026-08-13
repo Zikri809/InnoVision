@@ -1,5 +1,6 @@
 import { OptionCard } from "@/components/quiz/option-card";
 import type { AnswerState } from "@/components/quiz/play-client";
+import type { HoldProgress } from "@/lib/gestures/types";
 
 type Question = {
   id: string;
@@ -11,27 +12,32 @@ type Question = {
 };
 
 /**
- * Prompt + ordered option cards (A/B/C/D/E + finger badge placeholder for P6).
- * Click-first: each option is a keyboard-focusable card; feedback states are
- * driven by the `answer` prop:
+ * Prompt + ordered option cards (A/B/C/D/E + finger glyphs). Click-first: each
+ * option is a keyboard-focusable card; feedback states are driven by the
+ * `answer` prop:
  *  - `answer` undefined → unanswered (selectable when `disabled` is false)
  *  - `answer.seeded` → previously answered on a resume: neutral "answered"
  *    chip (assessment) or correct/incorrect chip (practice) — WITHOUT the key
  *    or explanation (they're never stored on session_answers)
  *  - fresh answer → full practice feedback (correct/incorrect + correctIndex
  *    + explanation) or quiet "answered" chip (assessment)
+ *
+ * `holdProgress` (P6) forwards the 0..1 hold completion to the matching
+ * OptionCard (finger === `i + 1`); other options show no bar.
  */
 export function QuestionCard({
   question,
   answer,
   mode,
   disabled,
+  holdProgress,
   onSelect,
 }: {
   question: Question;
   answer: AnswerState | undefined;
   mode: "practice" | "assessment";
   disabled: boolean;
+  holdProgress?: HoldProgress | null;
   onSelect: (index: number) => void;
 }) {
   const letters = ["A", "B", "C", "D", "E"];
@@ -72,6 +78,8 @@ export function QuestionCard({
           const isCorrectOption = showCorrect && answer.correctIndex === i;
           const isWrongSelection =
             showCorrect && selected && answer.correctIndex !== i && !answer.isCorrect;
+          const optionProgress =
+            holdProgress && holdProgress.finger === i + 1 ? holdProgress.progress : 0;
           return (
             <li key={i}>
               <OptionCard
@@ -82,6 +90,7 @@ export function QuestionCard({
                 correct={isCorrectOption}
                 incorrect={isWrongSelection}
                 disabled={disabled || Boolean(answer)}
+                holdProgress={optionProgress}
                 onClick={() => onSelect(i)}
               />
             </li>

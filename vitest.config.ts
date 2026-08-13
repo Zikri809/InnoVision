@@ -14,6 +14,7 @@ export default defineConfig({
         "src/lib/ai/**",
         "src/lib/extract/**",
         "src/lib/sessions/**",
+        "src/lib/gestures/**",
         "src/app/api/ai/**",
         "src/app/api/ocr/**",
         "src/app/api/quizzes/**",
@@ -54,6 +55,15 @@ export default defineConfig({
         // and excluded from the report entirely — no 0-threshold keys needed.
         "src/lib/sessions/timer.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/lib/sessions/validation.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        // P6: pure gesture logic (Node-unit-tested, U-G1..U-G7). The browser
+        // MediaPipe glue (hand-tracker.ts) is E2E/manual-only — 0-key precedent
+        // (mirrors tesseract/vision/glm-ocr). constants/types/fake-seam have no
+        // meaningful executable surface (fake-seam is exercised by E2E only).
+        "src/lib/gestures/finger-count.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        "src/lib/gestures/hold-confirm.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        "src/lib/gestures/hand-loss.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        "src/lib/gestures/fake-seam.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        "src/lib/gestures/hand-tracker.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
         "src/app/api/sessions/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
         "src/app/api/sessions/[id]/answer/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
         "src/app/api/sessions/[id]/submit/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },

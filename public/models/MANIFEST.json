@@ -1,0 +1,42 @@
+{
+  "version": "1.0.1",
+  "files": {
+    "mediapipe/vision_bundle.mjs": {
+      "sha256": "eaa59b8fe08b33b7a8b8e7a46b5e297e0683eda61829fd702ea183fb7d242375",
+      "sourceUrl": "node_modules/@mediapipe/tasks-vision@1.0.1/vision_bundle.mjs",
+      "version": "1.0.1"
+    },
+    "mediapipe/wasm/vision_wasm_internal.js": {
+      "sha256": "e170ee67dd4e16c1a6fcd8840a206687e5a59b22c20e4a902bc445b095454d73",
+      "version": "1.0.1"
+    },
+    "mediapipe/wasm/vision_wasm_internal.wasm": {
+      "sha256": "8da277a733926eacd0474b8704b36742d6ec3231c57a860c5b889dff8f1df886",
+      "sourceUrl": "node_modules/@mediapipe/tasks-vision@1.0.1/vision_wasm_internal.wasm",
+      "version": "1.0.1"
+    },
+    "mediapipe/wasm/vision_wasm_module_internal.js": {
+      "sha256": "da8934057f147b622e82cfb4c0dbd85461c598e268588b5a8ba9ca963a8ff82d",
+      "version": "1.0.1"
+    },
+    "mediapipe/wasm/vision_wasm_module_internal.wasm": {
+      "sha256": "2dabd8e23c60984628beb7bb338764c81a08e6837145273f59578684b5d53c1b",
+      "sourceUrl": "node_modules/@mediapipe/tasks-vision@1.0.1/vision_wasm_module_internal.wasm",
+      "version": "1.0.1"
+    },
+    "mediapipe/wasm/vision_wasm_nosimd_internal.js": {
+      "sha256": "e81d715a3d42cc3373602eb2f7aff795d164934db680e32496b65dab537f9658",
+      "version": "1.0.1"
+    },
+    "mediapipe/wasm/vision_wasm_nosimd_internal.wasm": {
+      "sha256": "a28483cd42e74e855bf5ebdb6b40d9b66a5b49e35e95020bc97669e6822a3192",
+      "sourceUrl": "node_modules/@mediapipe/tasks-vision@1.0.1/vision_wasm_nosimd_internal.wasm",
+      "version": "1.0.1"
+    },
+    "models/hand_landmarker.task": {
+      "sha256": "FBC2A30080C3C557093B5DDFC334698132EB341044CCEE322CCF8BCF3607CDE1",
+      "sourceUrl": "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+      "version": "float16/1"
+    }
+  }
+}

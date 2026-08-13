@@ -1,0 +1,99 @@
+"use client";
+
+import { Button } from "@/components/ui/button";
+
+const FINGER_GUIDE = ["1", "2", "3", "4", "5"];
+
+/**
+ * Calibration panel shown once before the quiz starts (Phase 6). Non-gated and
+ * always skippable: Continue is enabled only when the tracker is ready
+ * (`trackerReady`); Skip is always enabled and turns gestures off.
+ *
+ * The live webcam/canvas is rendered ABOVE this panel by `GestureLayer` as a
+ * persistent node (never remounted between calibration and the PIP), so this
+ * component only renders the status readout, finger guide, privacy notice, and
+ * the Continue/Skip actions.
+ *
+ * The `notice` is the honest webcam-consent line: MediaPipe runs locally and
+ * only the selected option index is POSTed (exactly as a click would) — video
+ * never leaves the device.
+ */
+export function GestureCalibration({
+  fingerCount,
+  handDetected,
+  notice,
+  onContinue,
+  onSkip,
+  continueDisabled,
+}: {
+  fingerCount: number;
+  handDetected: boolean;
+  notice: string;
+  onContinue: () => void;
+  onSkip: () => void;
+  continueDisabled: boolean;
+}) {
+  return (
+    <div className="mx-auto max-w-2xl px-4 pb-8">
+      <div className="mb-6">
+        <h1 className="text-2xl font-semibold">Hand gestures</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Hold up one to five fingers and keep them steady to answer. Raise all
+          five (open palm) to continue between questions.
+        </p>
+      </div>
+
+      <div className="overflow-hidden rounded-xl border bg-card">
+        <div className="flex items-center justify-between border-b px-4 py-3">
+          <div className="flex items-center gap-3">
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                handDetected ? "bg-emerald-100 text-emerald-800" : "bg-muted text-muted-foreground"
+              }`}
+              role="status"
+            >
+              <span
+                className={`size-1.5 rounded-full ${handDetected ? "bg-emerald-500" : "bg-muted-foreground/50"}`}
+                aria-hidden
+              />
+              {handDetected ? "Hand detected" : "No hand"}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              Fingers: {fingerCount}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2 px-4 py-3">
+          {FINGER_GUIDE.map((n) => (
+            <span
+              key={n}
+              className="inline-flex size-8 items-center justify-center rounded-full border text-sm font-medium text-muted-foreground"
+              aria-hidden
+            >
+              {n}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <p role="note" className="mt-4 text-xs text-muted-foreground">
+        {notice}
+      </p>
+
+      <div className="mt-6 flex gap-3">
+        <Button onClick={onContinue} disabled={continueDisabled}>
+          Continue
+        </Button>
+        <Button variant="outline" onClick={onSkip}>
+          Skip — click to answer
+        </Button>
+      </div>
+      {continueDisabled && (
+        <p className="mt-2 text-xs text-muted-foreground" role="status">
+          Waiting for hand tracking to be ready…
+        </p>
+      )}
+    </div>
+  );
+}

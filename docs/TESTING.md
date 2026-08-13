@@ -36,6 +36,7 @@
 | U-F7c | single fail → paused, not flagged | one mismatch → status `paused` (self-recoverable), no flag |
 
 ### 2.2 Gestures (`lib/gestures`)
+> **Status: IMPLEMENTED (P6, 2026-08-13)** — `finger-count.test.ts` (U-G1/U-G2 incl. thumb + handedness + full `mapFingersToOption` corner table), `hold-confirm.test.ts` (U-G3/U-G4/U-G5/U-G7 incl. latch + reset-release), `hand-loss.test.ts` (U-G6 incl. once-per-episode + re-arm + practice-never-pauses). Browser glue (`hand-tracker.ts`) is E2E/manual-only (0-key coverage).
 | # | Case | Expected |
 |---|---|---|
 | U-G1 | finger count from landmarks (1–5 raised) | counts 1..5 correctly |
@@ -235,6 +236,8 @@
 ## 5. E2E Tests (Playwright)
 
 > Webcam is faked: Playwright launches with a stub `getUserMedia` + injected fake `IFaceEmbedder`/`IHandTracker` so tests are deterministic. Real-device run is a separate manual checklist (§7).
+>
+> **P6 gesture seam mechanism:** the fake hand tracker is injected via a **`window.__INNOVISION_FAKE_HAND_TRACKER__` / `__INNOVISION_FAKE_HAND_CONTROL__` global** installed by `e2e/fake-hand-tracker.ts` (`installFakeHandTracker` = `addInitScript` + an immediate in-document evaluate, because the student Start→`/play` flow is SPA navigation and `addInitScript` alone is not retroactive to the already-loaded document). App code reads it only through the typed accessor `getFakeHandTracker()` in `lib/gestures/fake-seam.ts`, and the `NODE_ENV !== "production"` gate lives in the GestureLayer boot effect — so the seam never reaches production builds. The real MediaPipe path (bundle + WASM + model → live feed) is manual-only (§7).
 
 | # | Flow | Steps | Expected |
 |---|---|---|---|
@@ -250,9 +253,9 @@
 | E5b | **Lecturer resets attempt** | E5 state → lecturer deletes session from results | student can start fresh; reset audited |
 | E6 | **Wrong face at gate → paused → flagged** | enroll as Student A → start assessment with fake embedder returning **mismatched** embedding | first fail → `paused`, self-recovery offered; repeated fails → `flagged` after 3-in-5, **self-recovery path disappears**, lecturer sees ⚑ |
 | E7 | **Flagged → lecturer-only unlock** | E6 flagged state → student tries self-recover (still flagged) → lecturer unlocks / marks face-exempt | only lecturer action clears it; student resumes; override audited |
-| E8 | **Gesture answering (simulated)** | practice quiz → inject finger sequence `2 (hold 900ms)` → `4 (hold 900ms)` | correct options selected in order, hold-to-confirm fired once each |
-| E9 | **Gesture accidental-lock guard** | hold 2 fingers, change to 3 mid-hold | selection resets, no premature answer (U-G4 end-to-end) |
-| E9b | **Hand lost → auto-pause** | assessment → hide hand >10s | quiz → `paused` (not flagged); answers blocked (U-G6 end-to-end). *The blink-liveness recovery half is exercised by E6/E7 in P7, so P6 and P7 stay order-independent.* |
+| E8 | **Gesture answering (simulated)** | practice quiz → inject finger sequence `2 (hold 900ms)` → `4 (hold 900ms)` | correct options selected in order, hold-to-confirm fired once each. **P6 impl**: also palm-next (hold 5 → auto-advance) + hold-once (replay while disarmed → no POST) |
+| E9 | **Gesture accidental-lock guard** | hold 2 fingers, change to 3 mid-hold | selection resets, no premature answer (U-G4 end-to-end). **P6 impl**: 400ms finger-2 then finger-3 hold → no `selectedIndex:1`, then `selectedIndex:2` via `waitForRequest` |
+| E9b | **Hand lost → auto-pause** | assessment → hide hand >10s | quiz → `paused` (not flagged); answers blocked (U-G6 end-to-end). **P6 impl**: client-side pause overlay (no DB status change — recovery answer POST resolves 200, not 409); a full hold while paused is blocked by the `PAUSE_CLEAR_MS` stabilization window; re-show + hold clears after `PAUSE_CLEAR_MS` then answers recover. *The blink-liveness recovery half is exercised by E6/E7 in P7, so P6 and P7 stay order-independent.* |
 | E10 | **Timer expiry (P5)** | **API half**: assessment `time_limit_sec=5`; wait until `started_at + 10s + 2s` (deadline = limit + grace, anchored to the start-session response) → `page.request` answer | 403 `time_expired`; then submit → 200 `{ session, score: 0, total }` (late-submit acceptance + late-answer rejection pinned). **UI half**: separate 10s assessment → client countdown hits 0 → auto-submit → EndScreen with the ANSWERED score |
 | E11 | **Answer secrecy (P5, assessment only)** | collect same-origin text responses filtered by content-type + URL + `response.ok()` across the whole flow (incl. answer responses) | `correct_index`/`explanation` absent everywhere; assessment answer body has `isCorrect` but NOT `correctIndex`. (Practice disclosure lives in E4.) || E12 | **Continuous verify mid-quiz** | assessment → fake embedder matches at start, **mismatches at Q3** | quiz pauses/flags at Q3, not silently passes (cadence works) |
 | E13 | **Attendance = session** | 3 students take quiz → lecturer opens results | 3 sessions listed with scores + face-check timelines; abandoned sessions shown as "abandoned" |
@@ -261,19 +264,19 @@
 
 ## 6. Coverage Targets & CI
 
-- **Unit + integration:** run on every push (`vitest run`), target **≥80%** on `lib/face`, `lib/gestures`, `lib/ai`, `lib/extract`, scoring/timer, **`app/api/sessions/*` and `app/api/face/*`** (they carry the integrity logic). CRUD/UI can be lower. Coverage thresholds are per-file (vitest v8) — P5 added `lib/sessions/**` + `app/api/sessions/**` to `coverage.include` with literal per-file keys; browser-only UI components (`play-client`, `question-card`, `option-card`, `progress-hud`, `end-screen`, `student-quizzes-client`) are E2E-covered and excluded from the report.
+- **Unit + integration:** run on every push (`vitest run`), target **≥80%** on `lib/face`, `lib/gestures`, `lib/ai`, `lib/extract`, scoring/timer, **`app/api/sessions/*` and `app/api/face/*`** (they carry the integrity logic). CRUD/UI can be lower. Coverage thresholds are per-file (vitest v8) — P5 added `lib/sessions/**` + `app/api/sessions/**` to `coverage.include` with literal per-file keys; P6 added `lib/gestures/**` (`finger-count`/`hold-confirm`/`hand-loss` ≥80% stmts/lines/funcs, ≥70% branches; `hand-tracker.ts` 0-key browser-only); browser-only UI components (`play-client`, `question-card`, `option-card`, `progress-hud`, `end-screen`, `student-quizzes-client`, `gesture-layer`, `gesture-calibration`) are E2E-covered and excluded from the report.
 - **DB/RLS:** `supabase start` in CI, run SQL test suite; **D1–D18 are blocking** (they guard the demo's core promises). Phase 2 D8/D12 are additionally proven by `scripts/verify-classes.mjs` (real anon-token clients).
 - **E2E:** Playwright on PRs; **E5, E6, E7, E8, E12 are the five "demo-killer" tests** — if any fail, do not demo.
 - **AI tests never hit a real model** — MSW serves canned valid/invalid JSON (keeps CI free and deterministic).
 
 ## 7. Manual / Real-Device Checklist (pre-demo, can't be automated)
 
-1. Real webcam: hand tracking selects 1–4 fingers reliably in the **actual demo room lighting**.
+1. Real webcam: hand tracking selects 1–4 fingers reliably in the **actual demo room lighting** (the fake-tracker E2E proves the state machine; real-lighting reliability is this manual item).
 2. Real face enroll + verify with the presenter and a volunteer "impostor".
-3. GLM-OCR on Ollama (optional high-accuracy path): pull model, confirm the picker entry appears after probe, run one scanned slide deck end-to-end; note per-page latency on the demo machine. Tesseract-only path must work with no Ollama installed.
+3. GLM-OCR on Ollama (optional high-accuracy path): pull model, confirm the picker entry appears after probe, run one scanned slide deck end-to-end; note per-page latency on the demo machine. Tesseract-only path must work with no Ollama installed. **CI:** the `E2-GLM` Playwright spec is skipped when `CI` is set (GitHub Actions runners don't run local Ollama); it runs only on a dev machine with Ollama reachable (`OLLAMA_BASE_URL`).
 4. Wake Supabase free tier (7-day pause) the day before.
 5. 2–3 laptops simultaneously on one assessment — confirm no race on session start.
-6. **Model hosting reachable from the demo room** — confirm `/public/models` (self-hosted MediaPipe files) loads on the venue Wi-Fi; if Google CDN fallback is ever used, verify `storage.googleapis.com` isn't blocked by the network.
+6. **Model hosting reachable from the demo room** — confirm `/public/models` (self-hosted MediaPipe files) loads on the venue Wi-Fi; `verify-mediapipe` proves integrity. (P6 vendors + commits the assets; no Google CDN at runtime.)
 7. **Vercel body limit on vision OCR** — run one real multi-page scan through the cloud-vision path and confirm client-side ≤3-page batching keeps each request under 4.5 MB.
 
 ---
@@ -327,7 +330,7 @@ The build is **gated**: each phase below must (a) deliver its feature, (b) pass 
 | **P3 Manual builder** | D5, D6 · I20 · D19–D33, I-Q1–I-Q13 · **E1b** | Lecturer hand-builds and publishes a quiz; students never see `correct_index`/join_code/source_file_url/embeddings; student role blocked from all lecturer routes; draft/live/closed state machine + question/metadata immutability enforced at the DB layer |
 | **P4 Extraction + AI generation** ★ | U-A1–U-A11 · U-E1–U-E12 · I14–I19 · I-A1–I-A14 · D34–D40 · E2, E2b | Real chapter PDF (incl. scanned via Tesseract) → editable, publishable quiz; invalid AI output inserts **zero** rows; vision-OCR route returns text + stores nothing, batches under body limit |
 | **P5 Play screen (click-first)** | U-T1–U-T3, U-T5–U-T6 · U-S1–U-S4 · D1, D1b, D2–D4, D7, D9, D42–D47 · I7–I13, I-S1–I-S12, I-S14–I-S15 · E4 (resume+replay), E5, E10 (API+UI), E11 | Full quiz playable with mouse; one-attempt enforced; timer enforced server-side; re-answer rules correct per mode; `correct_index`/`explanation` never leak to students |
-| **P6 Gesture layer** | U-G1–U-G7 · E8, E9, E9b | Full quiz playable hands-free; mid-hold change and hand-loss behave; hand-loss auto-pauses (recovery proven in P7) |
+| **P6 Gesture layer** ✅ | U-G1–U-G7 · E8, E9, E9b | Full quiz playable hands-free; mid-hold change and hand-loss behave; hand-loss auto-pauses (client-side overlay; DB pause + blink recovery proven in P7) |
 | **P7 Face pipeline** | U-F1–U-F7c · D10, D11, D13, D14 · I1–I6c, I22 · E3, E3b, E6, E7, E12 | Enroll → gate → continuous verify (30–45s cadence proven by fake clock); wrong face at Q3 → paused → flagged; self-recovery only from paused; lecturer-only unlock; nonce replay rejected |
 | **P8 Results & attendance** | U-T4 · I21 · E5b, E13 | Dashboard shows attendance (incl. abandoned — derivation pinned by U-T4), scores, face-check timeline; unlock/exempt/reset audited; reset releases the one-attempt slot |
 | **P9 Hardening & deploy** | Full suite (all gates above) + manual checklist §7 | Demo URL live; self-hosted models load on venue Wi-Fi; Supabase awake |
