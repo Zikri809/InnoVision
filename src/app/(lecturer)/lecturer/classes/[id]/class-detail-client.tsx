@@ -65,6 +65,14 @@ const MODE_CLASS: Record<QuizRow["mode"], string> = {
   assessment: "border-accent/40 bg-blue-100 text-accent",
 };
 
+const DATE_FMT = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" });
+
+function formatDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "—" : DATE_FMT.format(d);
+}
+
 export function ClassDetailClient({
   cls,
   roster,
@@ -271,9 +279,9 @@ export function ClassDetailClient({
             <ul className="divide-y divide-border">
               {roster.map((s) => (
                 <li key={s.student_id} className="flex items-center justify-between py-2.5">
-                  <span className="font-heading text-base font-semibold">{s.full_name ?? "Unnamed student"}</span>
+                  <span translate="no" className="font-heading text-base font-semibold">{s.full_name ?? "Unnamed student"}</span>
                   <span className="text-xs font-bold text-muted-foreground">
-                    Joined {new Date(s.enrolled_at).toLocaleDateString()}
+                    Joined {formatDate(s.enrolled_at)}
                   </span>
                 </li>
               ))}

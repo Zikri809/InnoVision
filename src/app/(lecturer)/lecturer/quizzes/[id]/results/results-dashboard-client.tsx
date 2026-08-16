@@ -50,6 +50,14 @@ const TRIGGER_LABEL: Record<string, string> = {
   periodic: "Periodic",
 };
 
+const DATE_FMT = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" });
+
+function formatDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "—" : DATE_FMT.format(d);
+}
+
 function formatTime(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -233,6 +241,7 @@ export function ResultsDashboardClient({
                     <div className="min-w-0">
                       <button
                         type="button"
+                        translate="no"
                         className="block cursor-pointer text-left font-heading text-base font-semibold hover:text-primary hover:underline"
                         onClick={() => setExpanded((p) => ({ ...p, [row.id]: !p[row.id] }))}
                         aria-expanded={Boolean(expanded[row.id])}
@@ -338,9 +347,9 @@ export function ResultsDashboardClient({
             <ul className="divide-y divide-border">
               {notAttempted.map((s) => (
                 <li key={s.student_id} className="flex items-center justify-between py-2.5">
-                  <span className="font-heading text-base font-semibold">{s.full_name ?? "Unnamed student"}</span>
+                  <span translate="no" className="font-heading text-base font-semibold">{s.full_name ?? "Unnamed student"}</span>
                   <span className="text-xs font-bold text-muted-foreground">
-                    Joined {new Date(s.enrolled_at).toLocaleDateString()}
+                    Joined {formatDate(s.enrolled_at)}
                   </span>
                 </li>
               ))}

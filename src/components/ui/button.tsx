@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
 // Clay button system: chunky radius, 3px borders, hard offset "3D base" shadow,
 // soft-press on active. See design-system/innovision/MASTER.md.
 const buttonVariants = cva(
-  "group/button inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 rounded-2xl border-[3px] font-sans font-extrabold whitespace-nowrap transition-[transform,box-shadow,background-color,color] duration-[180ms] ease-out outline-none select-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/button inline-flex shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-2xl border-[3px] font-sans font-extrabold whitespace-nowrap transition-[transform,box-shadow,background-color,color] duration-[180ms] ease-out outline-none select-none focus-visible:ring-4 focus-visible:ring-ring/40 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
