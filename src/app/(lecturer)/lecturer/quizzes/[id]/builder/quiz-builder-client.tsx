@@ -73,14 +73,19 @@ const STATUS_LABEL: Record<QuizInfo["status"], string> = {
 };
 
 const STATUS_CLASS: Record<QuizInfo["status"], string> = {
-  draft: "bg-muted text-muted-foreground",
-  live: "bg-emerald-100 text-emerald-800",
-  closed: "bg-destructive/10 text-destructive",
+  draft: "border-border bg-muted text-muted-foreground",
+  live: "border-emerald-300 bg-emerald-100 text-emerald-800",
+  closed: "border-destructive/40 bg-destructive/10 text-destructive",
 };
 
 const MODE_LABEL: Record<QuizInfo["mode"], string> = {
   practice: "Practice",
   assessment: "Assessment",
+};
+
+const MODE_CLASS: Record<QuizInfo["mode"], string> = {
+  practice: "border-emerald-300 bg-emerald-100 text-emerald-800",
+  assessment: "border-accent/40 bg-blue-100 text-accent",
 };
 
 export function QuizBuilderClient({
@@ -301,23 +306,25 @@ export function QuizBuilderClient({
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8">
+    <div className="mx-auto max-w-3xl">
       <div className="mb-6">
         <Link
           href={`/lecturer/classes/${quiz.class_id}`}
-          className="text-sm text-muted-foreground hover:underline"
+          className="text-sm font-bold text-muted-foreground hover:text-primary hover:underline"
         >
           ← {quiz.class_title}
         </Link>
         <div className="mt-2 flex flex-wrap items-center gap-3">
-          <h1 className="text-2xl font-semibold">{quiz.title}</h1>
-          <span className={`rounded px-2 py-0.5 text-xs font-medium ${STATUS_CLASS[quiz.status]}`}>
+          <h1 className="font-heading text-2xl font-semibold">{quiz.title}</h1>
+          <span className={`rounded-full border-[3px] px-3 py-0.5 text-xs font-extrabold ${STATUS_CLASS[quiz.status]}`}>
             {STATUS_LABEL[quiz.status]}
           </span>
-          <span className="rounded bg-muted px-2 py-0.5 text-xs">{MODE_LABEL[quiz.mode]}</span>
+          <span className={`rounded-full border-[3px] px-3 py-0.5 text-xs font-extrabold ${MODE_CLASS[quiz.mode]}`}>
+            {MODE_LABEL[quiz.mode]}
+          </span>
           {quiz.mode === "assessment" && quiz.time_limit_sec != null && (
-            <span className="text-xs text-muted-foreground">
-              {quiz.time_limit_sec}s time limit
+            <span className="rounded-full border-[3px] border-border bg-muted px-3 py-0.5 text-xs font-extrabold tabular-nums text-muted-foreground">
+              {quiz.time_limit_sec}s limit
             </span>
           )}
           {isDraft && (
@@ -334,7 +341,7 @@ export function QuizBuilderClient({
           {!isDraft && (
             <Link
               href={`/lecturer/quizzes/${quiz.id}/results`}
-              className="ml-auto text-sm text-muted-foreground hover:underline"
+              className="ml-auto text-sm font-bold text-primary hover:underline"
             >
               Results
             </Link>
@@ -356,25 +363,27 @@ export function QuizBuilderClient({
       {!isDraft && (
         <div
           role="alert"
-          className="mb-6 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"
+          className="mb-6 rounded-2xl border-[3px] border-amber-300 bg-amber-50 p-4 text-sm font-semibold text-amber-900"
         >
-          This quiz is <strong>{STATUS_LABEL[quiz.status].toLowerCase()}</strong>.
+          This quiz is <strong className="font-extrabold">{STATUS_LABEL[quiz.status].toLowerCase()}</strong>.
           Questions can no longer be edited. {quiz.status === "live"
             ? "Students can see and take it."
             : "It is closed to new attempts."}
         </div>
       )}
 
-      {notice && (
-        <p className="mb-4 text-sm text-emerald-600" role="status">
-          {notice}
-        </p>
-      )}
-      {error && (
-        <p className="mb-4 text-sm text-destructive" role="alert">
-          {error}
-        </p>
-      )}
+      <div aria-live="polite">
+        {notice && (
+          <p className="mb-4 rounded-2xl border-[3px] border-emerald-300 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-800" role="status">
+            {notice}
+          </p>
+        )}
+        {error && (
+          <p className="mb-4 rounded-2xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-3 text-sm font-bold text-destructive" role="alert">
+            {error}
+          </p>
+        )}
+      </div>
 
       {isDraft && (
         <Card className="mb-6">
@@ -544,29 +553,29 @@ export function QuizBuilderClient({
         </CardHeader>
         <CardContent>
           {questions.length === 0 ? (
-            <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+            <p className="rounded-2xl border-[3px] border-dashed border-border bg-card p-6 text-center text-sm font-semibold text-muted-foreground">
               No questions yet. Add one above — you need at least one to publish.
             </p>
           ) : (
-            <ul className="divide-y">
+            <ul className="divide-y divide-border">
               {questions.map((q, idx) => (
-                <li key={q.id} className="flex items-start justify-between gap-4 py-3">
+                <li key={q.id} className="flex items-start justify-between gap-4 py-4">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium">{idx + 1}.</span>
-                      <span className="rounded bg-muted px-1.5 py-0.5 text-xs">
+                      <span className="font-heading text-sm font-semibold text-muted-foreground">{idx + 1}.</span>
+                      <span className="rounded-full border-[3px] border-border bg-muted px-2.5 py-0.5 text-xs font-extrabold text-foreground">
                         {q.type === "mcq" ? "MCQ" : "T/F"}
                       </span>
-                      <span className="text-xs text-muted-foreground">
+                      <span className="text-xs font-bold text-muted-foreground">
                         Answer: {q.correct_index + 1}
                       </span>
                     </div>
-                    <p className="mt-1 font-medium">{q.prompt}</p>
-                    <p className="mt-0.5 text-sm text-muted-foreground">
+                    <p className="mt-1.5 font-heading text-base font-semibold">{q.prompt}</p>
+                    <p className="mt-1 text-sm font-semibold text-muted-foreground">
                       {q.options.join(" · ")}
                     </p>
                     {q.explanation && (
-                      <p className="mt-1 text-xs text-muted-foreground">
+                      <p className="mt-1.5 text-xs font-semibold text-muted-foreground">
                         {q.explanation}
                       </p>
                     )}

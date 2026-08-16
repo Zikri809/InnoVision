@@ -50,14 +50,19 @@ const STATUS_LABEL: Record<QuizRow["status"], string> = {
 };
 
 const STATUS_CLASS: Record<QuizRow["status"], string> = {
-  draft: "bg-muted text-muted-foreground",
-  live: "bg-emerald-100 text-emerald-800",
-  closed: "bg-destructive/10 text-destructive",
+  draft: "border-border bg-muted text-muted-foreground",
+  live: "border-emerald-300 bg-emerald-100 text-emerald-800",
+  closed: "border-destructive/40 bg-destructive/10 text-destructive",
 };
 
 const MODE_LABEL: Record<QuizRow["mode"], string> = {
   practice: "Practice",
   assessment: "Assessment",
+};
+
+const MODE_CLASS: Record<QuizRow["mode"], string> = {
+  practice: "border-emerald-300 bg-emerald-100 text-emerald-800",
+  assessment: "border-accent/40 bg-blue-100 text-accent",
 };
 
 export function ClassDetailClient({
@@ -111,15 +116,15 @@ export function ClassDetailClient({
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8">
+    <div className="mx-auto max-w-3xl">
       <div className="mb-6">
         <Link
           href="/lecturer/classes"
-          className="text-sm text-muted-foreground hover:underline"
+          className="text-sm font-bold text-muted-foreground hover:text-primary hover:underline"
         >
           ← Back to classes
         </Link>
-        <h1 className="mt-2 text-2xl font-semibold">{cls.title}</h1>
+        <h1 className="mt-2 font-heading text-2xl font-semibold">{cls.title}</h1>
       </div>
 
       <Card className="mb-6">
@@ -130,7 +135,7 @@ export function ClassDetailClient({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <p className="rounded-lg bg-muted px-4 py-3 text-center font-mono text-2xl tracking-[0.4em]">
+          <p className="rounded-2xl border-[3px] border-border bg-orange-50 px-4 py-4 text-center font-heading text-3xl font-semibold tracking-[0.4em] text-primary">
             {cls.join_code}
           </p>
         </CardContent>
@@ -144,7 +149,7 @@ export function ClassDetailClient({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleCreate} className="mb-6 space-y-3 rounded-lg border p-4">
+          <form onSubmit={handleCreate} className="mb-6 space-y-3 rounded-2xl border-[3px] border-border bg-muted/40 p-4">
             <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
               <div className="space-y-1">
                 <Label htmlFor="quiz-title" className="sr-only">
@@ -190,7 +195,7 @@ export function ClassDetailClient({
               </div>
             </div>
             <div className="flex items-center justify-between gap-3">
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs font-semibold text-muted-foreground">
                 Leave the time limit empty for an untimed quiz.
               </p>
               <Button type="submit" disabled={creating || !title.trim()}>
@@ -198,45 +203,45 @@ export function ClassDetailClient({
               </Button>
             </div>
             {error && (
-              <p className="text-sm text-destructive" role="alert">
+              <p className="rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm font-bold text-destructive" role="alert">
                 {error}
               </p>
             )}
           </form>
 
           {quizzes.length === 0 ? (
-            <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+            <p className="rounded-2xl border-[3px] border-dashed border-border bg-card p-6 text-center text-sm font-semibold text-muted-foreground">
               No quizzes yet. Create one above.
             </p>
           ) : (
-            <ul className="divide-y">
+            <ul className="divide-y divide-border">
               {quizzes.map((q) => (
                 <li key={q.id}>
-                  <div className="flex items-center justify-between rounded-lg px-2 py-3">
+                  <div className="flex items-center justify-between gap-3 rounded-xl px-2 py-3">
                     <Link
                       href={`/lecturer/quizzes/${q.id}/builder`}
-                      className="flex min-w-0 items-center gap-3 rounded transition-colors hover:bg-muted/50"
+                      className="flex min-w-0 items-center gap-3 rounded transition-colors hover:text-primary"
                     >
-                      <span className="font-medium">{q.title}</span>
-                      <span className="rounded bg-muted px-2 py-0.5 text-xs">
+                      <span className="font-heading text-base font-semibold">{q.title}</span>
+                      <span className={`rounded-full border-[3px] px-2.5 py-0.5 text-xs font-extrabold ${MODE_CLASS[q.mode]}`}>
                         {MODE_LABEL[q.mode]}
                       </span>
                     </Link>
                     <div className="flex shrink-0 items-center gap-3">
                       {q.mode === "assessment" && q.time_limit_sec != null && (
-                        <span className="text-xs text-muted-foreground">
+                        <span className="text-xs font-bold tabular-nums text-muted-foreground">
                           {q.time_limit_sec}s
                         </span>
                       )}
                       <span
-                        className={`rounded px-2 py-0.5 text-xs font-medium ${STATUS_CLASS[q.status]}`}
+                        className={`rounded-full border-[3px] px-2.5 py-0.5 text-xs font-extrabold ${STATUS_CLASS[q.status]}`}
                       >
                         {STATUS_LABEL[q.status]}
                       </span>
                       {q.status !== "draft" && (
                         <Link
                           href={`/lecturer/quizzes/${q.id}/results`}
-                          className="text-xs text-muted-foreground hover:underline"
+                          className="text-xs font-bold text-primary hover:underline"
                         >
                           Results
                         </Link>
@@ -259,15 +264,15 @@ export function ClassDetailClient({
         </CardHeader>
         <CardContent>
           {roster.length === 0 ? (
-            <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+            <p className="rounded-2xl border-[3px] border-dashed border-border bg-card p-6 text-center text-sm font-semibold text-muted-foreground">
               No students have joined yet.
             </p>
           ) : (
-            <ul className="divide-y">
+            <ul className="divide-y divide-border">
               {roster.map((s) => (
-                <li key={s.student_id} className="flex items-center justify-between py-2">
-                  <span className="font-medium">{s.full_name ?? "Unnamed student"}</span>
-                  <span className="text-xs text-muted-foreground">
+                <li key={s.student_id} className="flex items-center justify-between py-2.5">
+                  <span className="font-heading text-base font-semibold">{s.full_name ?? "Unnamed student"}</span>
+                  <span className="text-xs font-bold text-muted-foreground">
                     Joined {new Date(s.enrolled_at).toLocaleDateString()}
                   </span>
                 </li>
