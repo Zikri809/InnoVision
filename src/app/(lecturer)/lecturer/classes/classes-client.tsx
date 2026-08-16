@@ -107,9 +107,9 @@ export function ClassesPageClient({ classes }: { classes: LecturerClassCard[] })
       </section>
 
       {/* ── Create + list ── */}
-      <section className="grid items-start gap-6 lg:grid-cols-[340px_1fr]">
-        {/* Create card */}
-        <Card className="lg:sticky lg:top-24">
+      <section className="grid items-stretch gap-6 lg:grid-cols-[340px_1fr]">
+        {/* Create card — stretches to match the classes row height (bento alignment). */}
+        <Card className="flex flex-col">
           <CardHeader>
             <div className="mb-1 grid h-11 w-11 place-items-center rounded-2xl bg-orange-100 text-primary">
               <Plus className="h-5 w-5" aria-hidden />
@@ -119,8 +119,8 @@ export function ClassesPageClient({ classes }: { classes: LecturerClassCard[] })
               A unique 6-character join code is generated for each class.
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <form onSubmit={handleCreate} className="space-y-3">
+          <CardContent className="flex flex-1 flex-col">
+            <form onSubmit={handleCreate} className="flex flex-1 flex-col gap-3">
               <div>
                 <Label htmlFor="class-title" className="sr-only">
                   Class title
@@ -134,17 +134,17 @@ export function ClassesPageClient({ classes }: { classes: LecturerClassCard[] })
                   maxLength={200}
                 />
               </div>
-              <Button type="submit" className="w-full" disabled={creating || !title.trim()}>
+              <div aria-live="polite" className="flex-1">
+                {error && (
+                  <p className="rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm font-bold text-destructive" role="alert">
+                    {error}
+                  </p>
+                )}
+              </div>
+              <Button type="submit" className="mt-auto w-full" disabled={creating || !title.trim()}>
                 {creating ? "Creating…" : "Create class"}
               </Button>
             </form>
-            <div aria-live="polite">
-              {error && (
-                <p className="mt-3 rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm font-bold text-destructive" role="alert">
-                  {error}
-                </p>
-              )}
-            </div>
           </CardContent>
         </Card>
 

@@ -114,9 +114,9 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
       </section>
 
       {/* ── Join + list ── */}
-      <section className="grid items-start gap-6 lg:grid-cols-[340px_1fr]">
-        {/* Join card */}
-        <Card className="lg:sticky lg:top-24">
+      <section className="grid items-stretch gap-6 lg:grid-cols-[340px_1fr]">
+        {/* Join card — stretches to match the classes row height (bento alignment). */}
+        <Card className="flex flex-col">
           <CardHeader>
             <div className="mb-1 grid h-11 w-11 place-items-center rounded-2xl bg-blue-100 text-accent">
               <KeyRound className="h-5 w-5" aria-hidden />
@@ -126,8 +126,8 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
               Use the 6-character code your lecturer shared.
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <form onSubmit={handleJoin} className="space-y-3">
+          <CardContent className="flex flex-1 flex-col">
+            <form onSubmit={handleJoin} className="flex flex-1 flex-col gap-3">
               <div>
                 <Label htmlFor="join-code" className="sr-only">
                   Join code
@@ -141,22 +141,22 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
                   className="font-mono uppercase tracking-widest"
                 />
               </div>
-              <Button type="submit" variant="accent" className="w-full" disabled={joining || !code.trim()}>
+              <div aria-live="polite" className="flex-1">
+                {error && (
+                  <p className="rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm font-bold text-destructive" role="alert">
+                    {error}
+                  </p>
+                )}
+                {notice && (
+                  <p className="rounded-xl border-[3px] border-emerald-300 bg-emerald-50 px-4 py-2.5 text-sm font-bold text-emerald-800" role="status">
+                    {notice}
+                  </p>
+                )}
+              </div>
+              <Button type="submit" variant="accent" className="mt-auto w-full" disabled={joining || !code.trim()}>
                 {joining ? "Joining…" : "Join class"}
               </Button>
             </form>
-            <div aria-live="polite">
-              {error && (
-                <p className="mt-3 rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm font-bold text-destructive" role="alert">
-                  {error}
-                </p>
-              )}
-              {notice && (
-                <p className="mt-3 rounded-xl border-[3px] border-emerald-300 bg-emerald-50 px-4 py-2.5 text-sm font-bold text-emerald-800" role="status">
-                  {notice}
-                </p>
-              )}
-            </div>
           </CardContent>
         </Card>
 
