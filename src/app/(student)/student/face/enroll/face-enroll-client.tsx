@@ -177,10 +177,10 @@ export function FaceEnrollClient({
 
   if (!available && !booting) {
     return (
-      <div className="mx-auto max-w-2xl px-4 py-8">
-        <div className="rounded-xl border bg-card p-6">
-          <h1 className="text-xl font-semibold">Face enrollment</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
+      <div className="mx-auto max-w-2xl">
+        <div className="rounded-[28px] border-[3px] border-border bg-card p-8 shadow-[var(--shadow-clay)]">
+          <h1 className="font-heading text-2xl font-semibold">Face enrollment</h1>
+          <p className="mt-2 text-sm font-semibold text-muted-foreground">
             Camera or face service unavailable — face enrollment needs a working webcam and the face service online.
           </p>
         </div>
@@ -202,9 +202,9 @@ export function FaceEnrollClient({
   };
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8">
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Face enrollment</h1>
+    <div className="mx-auto max-w-2xl">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <h1 className="font-heading text-2xl font-semibold">Face enrollment</h1>
         {consent && (
           <Button variant="outline" onClick={() => void handleRevoke()} disabled={revoking}>
             {revoking ? "Revoking…" : "Revoke consent"}
@@ -222,28 +222,30 @@ export function FaceEnrollClient({
         aria-hidden
       />
 
-      {error && (
-        <p className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive" role="alert">
-          {error}
-        </p>
-      )}
-      {notice && (
-        <p className="mb-4 rounded-lg border border-amber-300/40 bg-amber-50 p-3 text-sm text-amber-800" role="status">
-          {notice}
-        </p>
-      )}
+      <div aria-live="polite">
+        {error && (
+          <p className="mb-4 rounded-2xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-3 text-sm font-bold text-destructive" role="alert">
+            {error}
+          </p>
+        )}
+        {notice && (
+          <p className="mb-4 rounded-2xl border-[3px] border-amber-300 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800" role="status">
+            {notice}
+          </p>
+        )}
+      </div>
 
       {!consent ? (
-        <div className="rounded-xl border bg-card p-6">
-          <h2 className="text-lg font-semibold">Biometric consent</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
+        <div className="rounded-[28px] border-[3px] border-border bg-card p-7 shadow-[var(--shadow-clay)] md:p-8">
+          <h2 className="font-heading text-xl font-semibold">Biometric consent</h2>
+          <p className="mt-2 text-sm font-semibold text-muted-foreground">
             InnoVision uses your webcam for face verification during assessments.
             Face data is processed by a self-hosted recognition service; face
             images are never stored in the quiz database. You can revoke consent
             at any time — note that revoking mid-assessment flags in-progress
             sessions for a lecturer.
           </p>
-          <label className="mt-4 flex items-start gap-3 rounded-lg border p-3">
+          <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-2xl border-[3px] border-border bg-orange-50/60 p-4">
             <Checkbox
               checked={consent}
               onCheckedChange={(v) => {
@@ -251,25 +253,25 @@ export function FaceEnrollClient({
               }}
               className="mt-0.5"
             />
-            <span className="text-sm">
+            <span className="text-sm font-bold">
               I consent to face verification.
             </span>
           </label>
         </div>
       ) : (
-        <div className="rounded-xl border bg-card p-6">
-          <h2 className="text-lg font-semibold">
+        <div className="rounded-[28px] border-[3px] border-border bg-card p-7 shadow-[var(--shadow-clay)] md:p-8">
+          <h2 className="font-heading text-xl font-semibold">
             {enrolled ? "Face already enrolled" : "Enroll your face"}
           </h2>
-          <p className="mt-2 text-sm text-muted-foreground">
+          <p className="mt-2 text-sm font-semibold text-muted-foreground">
             {enrolled
               ? "Your face is already enrolled. You can re-enroll by running the capture again."
               : "We'll capture 3 angles (front, left, right). Look at the camera, blink when prompted, and hold still for each angle."}
           </p>
 
-          <div className="mt-4 rounded-lg border p-4" role="status">
-            <p className="text-sm font-medium">Status</p>
-            <p className="mt-1 text-xs text-muted-foreground">
+          <div className="mt-5 rounded-2xl border-[3px] border-border bg-muted/50 p-5" role="status">
+            <p className="font-heading text-base font-semibold">Status</p>
+            <p className="mt-1.5 text-sm font-bold text-muted-foreground">
               {booting && "Starting camera…"}
               {!booting && captureState === "idle" && "Ready. Press start below."}
               {!booting && captureState === "blink" && `Blink now — ${angleLabel(currentAngle)}`}
@@ -282,12 +284,12 @@ export function FaceEnrollClient({
           </div>
 
           {(captureState === "idle" || captureState === "failed") && (
-            <Button className="mt-4" onClick={() => void runCapture()}>
+            <Button size="lg" className="mt-5" onClick={() => void runCapture()}>
               {captureState === "failed" ? "Try again" : "Start capture"}
             </Button>
           )}
           {captureState === "done" && (
-            <Button className="mt-4" onClick={() => void runCapture()}>
+            <Button size="lg" className="mt-5" onClick={() => void runCapture()}>
               Re-capture
             </Button>
           )}

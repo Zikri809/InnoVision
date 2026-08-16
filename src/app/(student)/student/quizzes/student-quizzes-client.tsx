@@ -103,31 +103,33 @@ export function StudentQuizzesClient({
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8">
+    <div className="mx-auto max-w-3xl">
       <div className="mb-6">
-        <h1 className="text-2xl font-semibold">Available quizzes</h1>
-        <p className="text-sm text-muted-foreground">
+        <h1 className="font-heading text-2xl font-semibold">Available quizzes</h1>
+        <p className="mt-1 text-sm font-semibold text-muted-foreground">
           Quizzes published by your lecturers appear here.
         </p>
       </div>
 
-      {error && (
-        <p className="mb-4 text-sm text-destructive" role="alert">
-          {error}
-        </p>
-      )}
+      <div aria-live="polite">
+        {error && (
+          <p className="mb-4 rounded-2xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-3 text-sm font-bold text-destructive" role="alert">
+            {error}
+          </p>
+        )}
+      </div>
 
       {!enrolled && (
-        <div className="mb-4 rounded-lg border border-amber-300/40 bg-amber-50 p-4">
-          <p className="text-sm font-medium text-amber-800">
+        <div className="mb-5 rounded-2xl border-[3px] border-amber-300 bg-amber-50 p-5 shadow-[0_4px_0_rgba(217,119,6,0.15)]">
+          <p className="font-heading text-base font-semibold text-amber-800">
             Face enrollment recommended
           </p>
-          <p className="mt-1 text-xs text-amber-700">
+          <p className="mt-1.5 text-sm font-semibold text-amber-700">
             Assessment quizzes use face verification. Enroll now so you&apos;re
             ready when an assessment opens.
           </p>
           <Button
-            className="mt-3"
+            className="mt-4"
             variant="outline"
             onClick={() => router.push("/student/face/enroll")}
           >
@@ -137,27 +139,31 @@ export function StudentQuizzesClient({
       )}
 
       {quizzes.length === 0 ? (
-        <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+        <p className="rounded-2xl border-[3px] border-dashed border-border bg-card p-8 text-center text-sm font-semibold text-muted-foreground">
           No quizzes available yet. Check back once your lecturer publishes one.
         </p>
       ) : (
-        <ul className="space-y-3">
+        <ul className="space-y-4">
           {quizzes.map((q) => (
             <li key={q.id}>
               <Card>
                 <CardHeader className="flex flex-row items-start justify-between gap-4">
-                  <div>
+                  <div className="min-w-0">
                     <CardTitle className="text-lg">{q.title}</CardTitle>
                     <CardDescription>
                       {q.classes?.title ?? "Class"}
                     </CardDescription>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    <span className="rounded bg-muted px-2 py-0.5 text-xs">
+                    <span className={`rounded-full border-[3px] px-3 py-1 text-xs font-extrabold ${
+                      q.mode === "practice"
+                        ? "border-emerald-300 bg-emerald-100 text-emerald-800"
+                        : "border-accent/40 bg-blue-100 text-accent"
+                    }`}>
                       {MODE_LABEL[q.mode]}
                     </span>
                     {q.mode === "assessment" && q.time_limit_sec != null && (
-                      <span className="text-xs text-muted-foreground">
+                      <span className="rounded-full border-[3px] border-border bg-muted px-3 py-1 text-xs font-extrabold tabular-nums text-muted-foreground">
                         {q.time_limit_sec}s
                       </span>
                     )}
@@ -165,11 +171,11 @@ export function StudentQuizzesClient({
                 </CardHeader>
                 <CardContent className="flex items-center justify-between gap-3">
                   {notice[q.id] ? (
-                    <p className="text-sm text-muted-foreground" role="status">
+                    <p className="text-sm font-bold text-muted-foreground" role="status">
                       {notice[q.id]}
                     </p>
                   ) : (
-                    <span className="text-xs text-muted-foreground">
+                    <span className="text-sm font-semibold text-muted-foreground">
                       {q.mode === "assessment"
                         ? "One attempt only."
                         : "Answer as many times as you like."}

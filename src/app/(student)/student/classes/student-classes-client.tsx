@@ -2,7 +2,6 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -64,20 +63,12 @@ export function StudentClassesClient({ classes }: { classes: ClassRow[] }) {
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8">
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">My Classes</h1>
-          <p className="text-sm text-muted-foreground">
-            Enter a join code provided by your lecturer.
-          </p>
-        </div>
-        <Link
-          href="/student/quizzes"
-          className="text-sm font-medium text-primary hover:underline"
-        >
-          Available quizzes →
-        </Link>
+    <div className="mx-auto max-w-3xl">
+      <div className="mb-6">
+        <h1 className="font-heading text-2xl font-semibold">My Classes</h1>
+        <p className="mt-1 text-sm font-semibold text-muted-foreground">
+          Enter a join code provided by your lecturer.
+        </p>
       </div>
 
       <Card className="mb-8">
@@ -106,21 +97,23 @@ export function StudentClassesClient({ classes }: { classes: ClassRow[] }) {
               {joining ? "Joining…" : "Join"}
             </Button>
           </form>
-          {error && (
-            <p className="mt-3 text-sm text-destructive" role="alert">
-              {error}
-            </p>
-          )}
-          {notice && (
-            <p className="mt-3 text-sm text-emerald-600" role="status">
-              {notice}
-            </p>
-          )}
+          <div aria-live="polite">
+            {error && (
+              <p className="mt-3 rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm font-bold text-destructive" role="alert">
+                {error}
+              </p>
+            )}
+            {notice && (
+              <p className="mt-3 rounded-xl border-[3px] border-emerald-300 bg-emerald-50 px-4 py-2.5 text-sm font-bold text-emerald-800" role="status">
+                {notice}
+              </p>
+            )}
+          </div>
         </CardContent>
       </Card>
 
       {classes.length === 0 ? (
-        <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+        <p className="rounded-2xl border-[3px] border-dashed border-border bg-card p-8 text-center text-sm font-semibold text-muted-foreground">
           You are not enrolled in any classes yet.
         </p>
       ) : (
@@ -128,9 +121,9 @@ export function StudentClassesClient({ classes }: { classes: ClassRow[] }) {
           {classes.map((c) => (
             <li
               key={c.id}
-              className="rounded-lg border p-4"
+              className="rounded-2xl border-[3px] border-border bg-card p-4 shadow-[var(--shadow-clay)]"
             >
-              <span className="font-medium">{c.title}</span>
+              <span className="font-heading text-base font-semibold">{c.title}</span>
             </li>
           ))}
         </ul>
