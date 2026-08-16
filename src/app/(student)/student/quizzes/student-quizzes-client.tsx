@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -10,7 +11,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { ClipboardList, Zap, ShieldCheck, Timer, Play, ScanFace } from "lucide-react";
+import { ClipboardList, Zap, ShieldCheck, Timer, Play, ScanFace, Layers } from "lucide-react";
 
 type QuizRow = {
   id: string;
@@ -254,6 +255,22 @@ export function StudentQuizzesClient({
               </li>
             );
           })}
+
+          {/* Balancing tile — points back to classes so a short list never looks stranded. */}
+          <li>
+            <Link
+              href="/student/classes"
+              className="group flex h-full min-h-[180px] w-full flex-col items-center justify-center gap-2 rounded-[22px] border-[3px] border-dashed border-border bg-transparent p-6 text-center text-muted-foreground transition-[border-color,color,transform] duration-200 hover:-translate-y-1 hover:border-primary hover:text-primary"
+            >
+              <span className="grid h-11 w-11 place-items-center rounded-2xl border-[3px] border-current">
+                <Layers className="h-5 w-5" aria-hidden />
+              </span>
+              <span className="text-sm font-extrabold">Browse your classes</span>
+              <span className="max-w-[180px] text-xs font-semibold text-muted-foreground">
+                Join more classes to unlock more quizzes
+              </span>
+            </Link>
+          </li>
         </ul>
       )}
     </div>
