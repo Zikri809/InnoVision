@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowDown, ArrowUp, Pencil, RefreshCw, Trash2, Wand2 } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, Pencil, RefreshCw, Timer, Trash2, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -306,48 +306,55 @@ export function QuizBuilderClient({
   }
 
   return (
-    <div className="mx-auto max-w-3xl">
-      <div className="mb-6">
-        <Link
-          href={`/lecturer/classes/${quiz.class_id}`}
-          className="text-sm font-bold text-muted-foreground hover:text-primary hover:underline"
-        >
-          ← {quiz.class_title}
-        </Link>
-        <div className="mt-2 flex flex-wrap items-center gap-3">
-          <h1 className="font-heading text-2xl font-semibold">{quiz.title}</h1>
-          <span className={`rounded-full border-[3px] px-3 py-0.5 text-xs font-extrabold ${STATUS_CLASS[quiz.status]}`}>
-            {STATUS_LABEL[quiz.status]}
-          </span>
-          <span className={`rounded-full border-[3px] px-3 py-0.5 text-xs font-extrabold ${MODE_CLASS[quiz.mode]}`}>
-            {MODE_LABEL[quiz.mode]}
-          </span>
-          {quiz.mode === "assessment" && quiz.time_limit_sec != null && (
-            <span className="rounded-full border-[3px] border-border bg-muted px-3 py-0.5 text-xs font-extrabold tabular-nums text-muted-foreground">
-              {quiz.time_limit_sec}s limit
-            </span>
-          )}
-          {isDraft && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setGenerateOpen(true)}
-              className="ml-auto"
-            >
-              <Wand2 className="mr-1.5 size-4" />
-              Generate from file
-            </Button>
-          )}
-          {!isDraft && (
-            <Link
-              href={`/lecturer/quizzes/${quiz.id}/results`}
-              className="ml-auto text-sm font-bold text-primary hover:underline"
-            >
-              Results
-            </Link>
-          )}
+    <div className="space-y-6">
+      {/* ── Hero band ── */}
+      <section className="relative overflow-hidden rounded-[28px] border-[3px] border-border bg-gradient-to-br from-orange-100 via-orange-50 to-blue-50 p-7 shadow-[var(--shadow-clay)] md:p-8">
+        <div aria-hidden className="pointer-events-none absolute -right-8 -top-10 h-36 w-36 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-white/50" />
+        <div className="relative">
+          <Link
+            href={`/lecturer/classes/${quiz.class_id}`}
+            className="inline-flex items-center gap-1.5 text-sm font-extrabold text-muted-foreground transition-colors hover:text-primary"
+          >
+            <ArrowLeft className="h-4 w-4" aria-hidden /> {quiz.class_title}
+          </Link>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-4">
+            <div className="min-w-0">
+              <h1 className="font-heading text-3xl font-semibold [text-wrap:balance]">{quiz.title}</h1>
+              <div className="mt-3 flex flex-wrap items-center gap-2.5">
+                <span className={`rounded-full border-[3px] px-3 py-1 text-xs font-extrabold ${STATUS_CLASS[quiz.status]}`}>
+                  {STATUS_LABEL[quiz.status]}
+                </span>
+                <span className={`rounded-full border-[3px] px-3 py-1 text-xs font-extrabold ${MODE_CLASS[quiz.mode]}`}>
+                  {MODE_LABEL[quiz.mode]}
+                </span>
+                {quiz.mode === "assessment" && quiz.time_limit_sec != null && (
+                  <span className="inline-flex items-center gap-1 rounded-full border-[3px] border-border bg-muted px-3 py-1 text-xs font-extrabold tabular-nums text-muted-foreground">
+                    <Timer className="h-3.5 w-3.5" aria-hidden />
+                    {quiz.time_limit_sec}s limit
+                  </span>
+                )}
+                <span className="rounded-full border-[3px] border-border bg-muted px-3 py-1 text-xs font-extrabold text-muted-foreground">
+                  {questions.length} {questions.length === 1 ? "question" : "questions"}
+                </span>
+              </div>
+            </div>
+            {isDraft && (
+              <Button
+                variant="outline"
+                onClick={() => setGenerateOpen(true)}
+              >
+                <Wand2 className="mr-1.5 size-4" />
+                Generate from file
+              </Button>
+            )}
+            {!isDraft && (
+              <Link href={`/lecturer/quizzes/${quiz.id}/results`}>
+                <Button variant="accent">View results</Button>
+              </Link>
+            )}
+          </div>
         </div>
-      </div>
+      </section>
 
       <SourceTextPreview text={quiz.source_text} />
 

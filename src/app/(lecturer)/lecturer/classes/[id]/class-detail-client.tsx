@@ -20,6 +20,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { ArrowLeft } from "lucide-react";
 
 type ClassInfo = {
   id: string;
@@ -124,32 +125,36 @@ export function ClassDetailClient({
   }
 
   return (
-    <div className="mx-auto max-w-3xl">
-      <div className="mb-6">
-        <Link
-          href="/lecturer/classes"
-          className="text-sm font-bold text-muted-foreground hover:text-primary hover:underline"
-        >
-          ← Back to classes
-        </Link>
-        <h1 className="mt-2 font-heading text-2xl font-semibold">{cls.title}</h1>
-      </div>
+    <div className="space-y-6">
+      {/* ── Hero band ── */}
+      <section className="relative overflow-hidden rounded-[28px] border-[3px] border-border bg-gradient-to-br from-orange-100 via-orange-50 to-blue-50 p-7 shadow-[var(--shadow-clay)] md:p-8">
+        <div aria-hidden className="pointer-events-none absolute -right-8 -top-10 h-36 w-36 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-white/50" />
+        <div className="relative">
+          <Link
+            href="/lecturer/classes"
+            className="inline-flex items-center gap-1.5 text-sm font-extrabold text-muted-foreground transition-colors hover:text-primary"
+          >
+            <ArrowLeft className="h-4 w-4" aria-hidden /> Back to classes
+          </Link>
+          <div className="mt-3 flex flex-wrap items-end justify-between gap-6">
+            <div className="min-w-0">
+              <h1 className="font-heading text-3xl font-semibold [text-wrap:balance]">{cls.title}</h1>
+              <p className="mt-1.5 text-sm font-semibold text-muted-foreground">
+                {roster.length} {roster.length === 1 ? "student" : "students"} · {quizzes.length} {quizzes.length === 1 ? "quiz" : "quizzes"}
+              </p>
+            </div>
+            {/* Join code */}
+            <div className="rounded-2xl border-[3px] border-border bg-card px-5 py-4 text-center shadow-[var(--shadow-clay-sm)]">
+              <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted-foreground">Join code</p>
+              <p className="mt-0.5 font-heading text-2xl font-bold tracking-[0.3em] text-primary">
+                {cls.join_code}
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
 
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle>Join code</CardTitle>
-          <CardDescription>
-            Share this code with students to enroll them in this class.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <p className="rounded-2xl border-[3px] border-border bg-orange-50 px-4 py-4 text-center font-heading text-3xl font-semibold tracking-[0.4em] text-primary">
-            {cls.join_code}
-          </p>
-        </CardContent>
-      </Card>
-
-      <Card className="mb-6">
+      <Card>
         <CardHeader>
           <CardTitle>Quizzes</CardTitle>
           <CardDescription>
@@ -272,15 +277,23 @@ export function ClassDetailClient({
         </CardHeader>
         <CardContent>
           {roster.length === 0 ? (
-            <p className="rounded-2xl border-[3px] border-dashed border-border bg-card p-6 text-center text-sm font-semibold text-muted-foreground">
-              No students have joined yet.
-            </p>
+            <div className="grid place-items-center rounded-2xl border-[3px] border-dashed border-border bg-card/60 px-6 py-10 text-center">
+              <p className="font-heading text-base font-semibold">No students yet</p>
+              <p className="mt-1 text-sm font-semibold text-muted-foreground">
+                Share the join code above to enroll your first student.
+              </p>
+            </div>
           ) : (
             <ul className="divide-y divide-border">
               {roster.map((s) => (
-                <li key={s.student_id} className="flex items-center justify-between py-2.5">
-                  <span translate="no" className="font-heading text-base font-semibold">{s.full_name ?? "Unnamed student"}</span>
-                  <span className="text-xs font-bold text-muted-foreground">
+                <li key={s.student_id} className="flex items-center justify-between gap-3 py-3">
+                  <span className="flex min-w-0 items-center gap-3">
+                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-orange-100 font-heading text-sm font-bold text-primary">
+                      {(s.full_name ?? "U").trim().charAt(0).toUpperCase()}
+                    </span>
+                    <span translate="no" className="truncate font-heading text-base font-semibold">{s.full_name ?? "Unnamed student"}</span>
+                  </span>
+                  <span className="shrink-0 text-xs font-bold text-muted-foreground">
                     Joined {formatDate(s.enrolled_at)}
                   </span>
                 </li>

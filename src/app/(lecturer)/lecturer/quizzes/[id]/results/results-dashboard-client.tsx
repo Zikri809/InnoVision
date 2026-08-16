@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { ArrowLeft } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
@@ -200,23 +201,47 @@ export function ResultsDashboardClient({
   }
 
   return (
-    <div className="mx-auto max-w-3xl">
-      <div className="mb-6">
-        <Link
-          href={`/lecturer/quizzes/${quizId}/builder`}
-          className="text-sm font-bold text-muted-foreground hover:text-primary hover:underline"
-        >
-          ← Back to builder
-        </Link>
-        <h1 className="mt-2 font-heading text-2xl font-semibold">{quizTitle}</h1>
-        <p className="mt-1 text-sm font-semibold text-muted-foreground">
-          {mode === "assessment" ? "Assessment" : "Practice"} · {status === "live" ? "Live" : status === "closed" ? "Closed" : "Draft"}
-          {timeLimitSec != null ? ` · ${timeLimitSec}s limit` : ""} · {totalQuestions} questions
-        </p>
-      </div>
+    <div className="space-y-6">
+      {/* ── Hero band ── */}
+      <section className="relative overflow-hidden rounded-[28px] border-[3px] border-border bg-gradient-to-br from-orange-100 via-orange-50 to-blue-50 p-7 shadow-[var(--shadow-clay)] md:p-8">
+        <div aria-hidden className="pointer-events-none absolute -right-8 -top-10 h-36 w-36 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-white/50" />
+        <div className="relative">
+          <Link
+            href={`/lecturer/quizzes/${quizId}/builder`}
+            className="inline-flex items-center gap-1.5 text-sm font-extrabold text-muted-foreground transition-colors hover:text-primary"
+          >
+            <ArrowLeft className="h-4 w-4" aria-hidden /> Back to builder
+          </Link>
+          <h1 className="mt-3 font-heading text-3xl font-semibold [text-wrap:balance]">{quizTitle}</h1>
+          <p className="mt-2 text-sm font-semibold text-muted-foreground">
+            {mode === "assessment" ? "Assessment" : "Practice"} · {status === "live" ? "Live" : status === "closed" ? "Closed" : "Draft"}
+            {timeLimitSec != null ? ` · ${timeLimitSec}s limit` : ""} · {totalQuestions} questions
+          </p>
+
+          {/* summary stat tiles */}
+          <div className="mt-6 grid max-w-2xl grid-cols-2 gap-4 sm:grid-cols-4">
+            <div className="rounded-2xl border-[3px] border-border bg-card px-4 py-3.5 shadow-[var(--shadow-clay-sm)]">
+              <span className="font-heading text-2xl font-bold text-emerald-600">{completed}</span>
+              <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">Completed</p>
+            </div>
+            <div className="rounded-2xl border-[3px] border-border bg-card px-4 py-3.5 shadow-[var(--shadow-clay-sm)]">
+              <span className="font-heading text-2xl font-bold text-amber-600">{flagged}</span>
+              <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">Flagged</p>
+            </div>
+            <div className="rounded-2xl border-[3px] border-border bg-card px-4 py-3.5 shadow-[var(--shadow-clay-sm)]">
+              <span className="font-heading text-2xl font-bold text-destructive">{abandoned}</span>
+              <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">Abandoned</p>
+            </div>
+            <div className="rounded-2xl border-[3px] border-border bg-card px-4 py-3.5 shadow-[var(--shadow-clay-sm)]">
+              <span className="font-heading text-2xl font-bold text-sky-600">{inProgress}</span>
+              <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">In progress</p>
+            </div>
+          </div>
+        </div>
+      </section>
 
       {truncated && (
-        <p className="mb-4 rounded-2xl border-[3px] border-dashed border-border bg-card px-4 py-3 text-sm font-semibold text-muted-foreground" role="status">
+        <p className="rounded-2xl border-[3px] border-dashed border-border bg-card px-4 py-3 text-sm font-semibold text-muted-foreground" role="status">
           Showing the most recent 200 sessions.
         </p>
       )}
