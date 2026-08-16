@@ -73,7 +73,7 @@ export function FaceVerifier({
     return (
       <div className="relative">
         <div className="mb-2 flex justify-center">
-          <span className="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground" role="status">
+          <span className="rounded-full border-[3px] border-border bg-muted px-3.5 py-1 text-xs font-extrabold text-muted-foreground" role="status">
             Face check unavailable — camera or models offline
           </span>
         </div>
@@ -102,18 +102,18 @@ export function FaceVerifier({
       {children}
 
       {(status === "paused" || status === "recovering") && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-background/80 p-4" role="alert">
-          <div className="rounded-xl border bg-card p-6 text-center shadow-lg">
-            <p className="text-sm font-medium">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm" role="alert">
+          <div className="rounded-[28px] border-[3px] border-border bg-card p-8 text-center shadow-[var(--shadow-clay)]">
+            <p className="font-heading text-xl font-semibold">
               {status === "recovering" ? "Blink to recover" : "Face check paused"}
             </p>
-            <p className="mt-2 text-sm text-muted-foreground">
+            <p className="mx-auto mt-2 max-w-xs text-sm font-semibold text-muted-foreground">
               {status === "recovering"
                 ? "Look at the camera and blink."
                 : "A face mismatch paused the check. Blink to continue."}
             </p>
             {status === "paused" && (
-              <Button className="mt-4" onClick={onRecover}>
+              <Button size="lg" className="mt-6" onClick={onRecover}>
                 Blink to recover
               </Button>
             )}
@@ -122,15 +122,15 @@ export function FaceVerifier({
       )}
 
       {status === "flagged" && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-background/80 p-4" role="alert">
-          <div className="rounded-xl border bg-card p-6 text-center shadow-lg">
-            <p className="text-sm font-medium text-destructive">Assessment flagged</p>
-            <p className="mt-2 text-sm text-muted-foreground">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm" role="alert">
+          <div className="rounded-[28px] border-[3px] border-destructive/40 bg-card p-8 text-center shadow-[var(--shadow-clay)]">
+            <p className="font-heading text-xl font-semibold text-destructive">Assessment flagged</p>
+            <p className="mx-auto mt-2 max-w-sm text-sm font-semibold text-muted-foreground">
               Our system detected repeated face mismatches. A lecturer must review
               and unlock your assessment before you can continue.
             </p>
-            <div className="mt-4 flex justify-center gap-3">
-              <Button variant="outline" onClick={onCheckAgain}>
+            <div className="mt-6 flex justify-center gap-3">
+              <Button size="lg" variant="outline" onClick={onCheckAgain}>
                 Check again
               </Button>
             </div>

@@ -4,9 +4,8 @@
 const WARNING_THRESHOLD_MS = 30_000;
 
 /**
- * "Question n/N" + time remaining. Reuses the hand-rolled progress-bar
- * pattern from OcrProgress (no shadcn progress exists). Time is formatted
- * mm:ss from a monotonic countdown seeded server-side.
+ * "Question n/N" + time remaining as a chunky clay progress bar. Time is
+ * formatted mm:ss from a monotonic countdown seeded server-side.
  */
 export function ProgressHud({
   current,
@@ -27,21 +26,29 @@ export function ProgressHud({
     return `${m}:${s.toString().padStart(2, "0")}`;
   }
 
+  const warning = remainingMs !== null && remainingMs <= WARNING_THRESHOLD_MS;
+
   return (
-    <div className="w-40 space-y-1">
-      <div className="flex items-center justify-between text-xs text-muted-foreground">
-        <span>
-          Question {Math.min(current, total)}/{total}
+    <div className="w-44 space-y-2">
+      <div className="flex items-center justify-between text-sm font-extrabold">
+        <span className="text-foreground">
+          Q {Math.min(current, total)}/{total}
         </span>
         {remainingMs !== null && (
-          <span className={remainingMs <= WARNING_THRESHOLD_MS ? "font-medium text-destructive" : ""}>
+          <span
+            className={
+              warning
+                ? "rounded-lg bg-destructive/15 px-2 py-0.5 tabular-nums text-destructive"
+                : "rounded-lg bg-muted px-2 py-0.5 tabular-nums text-muted-foreground"
+            }
+          >
             {formatMs(remainingMs)}
           </span>
         )}
       </div>
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+      <div className="h-3 w-full overflow-hidden rounded-full border-[3px] border-border bg-muted">
         <div
-          className="h-full bg-primary transition-all"
+          className="h-full rounded-full bg-primary transition-[width] duration-300"
           style={{ width: `${pct}%` }}
         />
       </div>

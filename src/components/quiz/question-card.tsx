@@ -12,8 +12,8 @@ type Question = {
 };
 
 /**
- * Prompt + ordered option cards (A/B/C/D/E + finger glyphs). Click-first: each
- * option is a keyboard-focusable card; feedback states are driven by the
+ * Prompt + ordered clay option cards (A/B/C/D/E + finger glyphs). Click-first:
+ * each option is a keyboard-focusable card; feedback states are driven by the
  * `answer` prop:
  *  - `answer` undefined → unanswered (selectable when `disabled` is false)
  *  - `answer.seeded` → previously answered on a resume: neutral "answered"
@@ -23,7 +23,7 @@ type Question = {
  *    + explanation) or quiet "answered" chip (assessment)
  *
  * `holdProgress` (P6) forwards the 0..1 hold completion to the matching
- * OptionCard (finger === `i + 1`); other options show no bar.
+ * OptionCard (finger === `i + 1`); other options show no fill.
  */
 export function QuestionCard({
   question,
@@ -44,18 +44,18 @@ export function QuestionCard({
 
   return (
     <section aria-labelledby="question-prompt">
-      <div className="mb-2 flex items-center justify-between">
-        <span className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <span className="rounded-full border-[3px] border-border bg-card px-3.5 py-1 text-xs font-extrabold text-muted-foreground">
           {question.type === "mcq" ? "Multiple choice" : "True / False"}
         </span>
         {answer && (
           <span
-            className={`rounded px-2 py-0.5 text-xs ${
+            className={`rounded-full border-[3px] px-3.5 py-1 text-xs font-extrabold ${
               mode === "practice"
                 ? answer.isCorrect
-                  ? "bg-emerald-100 text-emerald-800"
-                  : "bg-destructive/10 text-destructive"
-                : "bg-muted text-muted-foreground"
+                  ? "border-emerald-300 bg-emerald-100 text-emerald-800"
+                  : "border-destructive/40 bg-destructive/10 text-destructive"
+                : "border-border bg-muted text-muted-foreground"
             }`}
           >
             {mode === "practice"
@@ -67,11 +67,11 @@ export function QuestionCard({
         )}
       </div>
 
-      <h2 id="question-prompt" className="mb-4 text-lg font-medium">
+      <h2 id="question-prompt" className="mb-5 font-heading text-xl font-semibold leading-snug [text-wrap:balance] md:text-2xl">
         {question.prompt}
       </h2>
 
-      <ul className="space-y-2">
+      <ul className="space-y-3">
         {question.options.map((opt, i) => {
           const selected = answer?.selectedIndex === i;
           const showCorrect = mode === "practice" && answer && !answer.seeded;
@@ -99,8 +99,8 @@ export function QuestionCard({
       </ul>
 
       {mode === "practice" && answer && !answer.seeded && answer.explanation && (
-        <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900" role="status">
-          <strong>Explanation:</strong> {answer.explanation}
+        <div className="mt-5 rounded-2xl border-[3px] border-emerald-300 bg-emerald-50 p-4 text-sm font-semibold text-emerald-900" role="status">
+          <strong className="font-extrabold">Explanation:</strong> {answer.explanation}
         </div>
       )}
     </section>

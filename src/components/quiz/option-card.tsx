@@ -9,10 +9,10 @@ import { cn } from "@/lib/utils";
 const FINGER_GLYPHS = ["☝️", "✌️", "🤟", "🖐", "🖐"];
 
 /**
- * Glassmorphic click-first option card. `role="button"`, keyboard-focusable,
- * with selected / disabled / feedback (correct / incorrect) states. The finger
- * badge is the P6 gesture glyph; `holdProgress` (0..1) drives an accent
- * progress bar when the student holds the matching finger to confirm.
+ * Clay click-first option card. `role="button"`, keyboard-focusable, with
+ * selected / disabled / feedback (correct / incorrect) states. The finger badge
+ * is the P6 gesture glyph; `holdProgress` (0..1) drives an accent progress fill
+ * when the student holds the matching finger to confirm.
  */
 export function OptionCard({
   letter,
@@ -54,16 +54,20 @@ export function OptionCard({
       }}
       aria-pressed={selected}
       className={cn(
-        "relative flex w-full items-center gap-3 overflow-hidden rounded-xl border bg-card/60 px-4 py-3 text-left shadow-sm backdrop-blur transition-all",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
-        !disabled && !selected && !correct && !incorrect && "hover:bg-muted/60 cursor-pointer",
-        selected && !correct && !incorrect && "border-primary bg-primary/10",
-        correct && "border-emerald-400 bg-emerald-50",
-        incorrect && "border-destructive bg-destructive/10",
-        disabled && "opacity-70 cursor-default",
+        "relative flex w-full items-center gap-3.5 overflow-hidden rounded-2xl border-[3px] px-4 py-4 text-left transition-[transform,box-shadow,background-color,border-color] duration-[180ms] ease-out",
+        "focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/40",
+        // Base clay option
+        !selected && !correct && !incorrect && "border-border bg-card shadow-[0_4px_0_var(--border)]",
+        !disabled && !selected && !correct && !incorrect && "cursor-pointer hover:-translate-y-0.5 hover:shadow-[0_6px_0_var(--border)] active:translate-y-0.5 active:shadow-[0_1px_0_var(--border)]",
+        // Selected (gesture/click locked)
+        selected && !correct && !incorrect && "border-accent bg-blue-50 shadow-[0_4px_0_#bfdbfe]",
+        // Feedback
+        correct && "border-emerald-400 bg-emerald-50 shadow-[0_4px_0_#a7f3d0]",
+        incorrect && "border-destructive bg-destructive/10 shadow-[0_4px_0_rgba(220,38,38,0.25)]",
+        disabled && "cursor-default opacity-70",
       )}
     >
-      {/* Hold-progress accent bar (aria-hidden — decorative). */}
+      {/* Hold-progress accent fill (aria-hidden — decorative). */}
       <span
         aria-hidden
         className="absolute inset-y-0 left-0 bg-primary/15 transition-[width] duration-100"
@@ -71,20 +75,20 @@ export function OptionCard({
       />
       <span
         className={cn(
-          "flex size-8 shrink-0 items-center justify-center rounded-full border text-sm font-medium",
+          "relative flex size-10 shrink-0 items-center justify-center rounded-xl border-[3px] font-heading text-base font-semibold",
           correct
             ? "border-emerald-400 bg-emerald-100 text-emerald-800"
             : incorrect
               ? "border-destructive bg-destructive/10 text-destructive"
               : selected
-                ? "border-primary bg-primary/10 text-primary"
-                : "border-muted bg-muted/50 text-muted-foreground",
+                ? "border-accent bg-accent text-accent-foreground"
+                : "border-border bg-muted text-foreground",
         )}
       >
         {letter}
       </span>
-      <span className="relative min-w-0 flex-1 text-sm">{text}</span>
-      <span className="relative shrink-0 text-xs text-muted-foreground" aria-hidden>
+      <span className="relative min-w-0 flex-1 text-base font-bold text-foreground">{text}</span>
+      <span className="relative shrink-0 text-lg" aria-hidden>
         {glyph}
       </span>
     </button>

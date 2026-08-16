@@ -531,7 +531,7 @@ export function PlayClient({
   if (!question) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-8">
-        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
+        <p className="rounded-2xl border-[3px] border-destructive/30 bg-destructive/10 p-4 text-sm font-bold text-destructive" role="alert">
           This quiz has no questions yet. Please try again later.
         </p>
       </div>
@@ -539,30 +539,30 @@ export function PlayClient({
   }
 
   if (phase === "submitted" && result) {
+    const pct = result.total > 0 ? Math.round((result.score / result.total) * 100) : 0;
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8">
-        <div className="mb-6">
-          <h1 className="text-2xl font-semibold">{quiz.title}</h1>
-          <p className="text-sm text-muted-foreground">
-            {isPractice ? "Practice" : "Assessment"}
+      <div className="mx-auto max-w-2xl px-4 py-12">
+        <div className="rounded-[28px] border-[3px] border-border bg-card p-8 text-center shadow-[var(--shadow-clay)] md:p-10" role="status">
+          <p className="text-sm font-extrabold uppercase tracking-wide text-muted-foreground">
+            {isPractice ? "Practice complete" : "Assessment submitted"}
           </p>
-        </div>
-        <div className="rounded-xl border bg-card p-8 text-center" role="status">
-          <p className="text-sm text-muted-foreground">Your score</p>
-          <p className="mt-2 text-5xl font-semibold">
-            {result.score} <span className="text-2xl text-muted-foreground">/ {result.total}</span>
+          <h1 className="mt-1 font-heading text-2xl font-semibold [text-wrap:balance]">{quiz.title}</h1>
+          <p className="mt-6 font-heading text-6xl font-bold text-primary">
+            {result.score}
+            <span className="text-3xl text-muted-foreground"> / {result.total}</span>
           </p>
+          <p className="mt-1 text-sm font-extrabold text-muted-foreground">{pct}% correct</p>
           {isPractice && (
-            <p className="mt-4 text-sm text-muted-foreground">
+            <p className="mx-auto mt-5 max-w-md text-sm font-semibold text-muted-foreground">
               Practice again any time — each attempt creates a new session.
             </p>
           )}
-          <div className="mt-6 flex justify-center gap-3">
-            <Button variant="outline" onClick={() => router.push("/student/quizzes")}>
+          <div className="mt-8 flex flex-wrap justify-center gap-3">
+            <Button variant="outline" size="lg" onClick={() => router.push("/student/quizzes")}>
               Back to quizzes
             </Button>
             {isPractice && (
-              <Button onClick={() => router.push("/student/quizzes")}>Try again</Button>
+              <Button size="lg" onClick={() => router.push("/student/quizzes")}>Try again</Button>
             )}
           </div>
         </div>
@@ -575,17 +575,17 @@ export function PlayClient({
   // out — render a CTA instead.
   if (phase === "dead") {
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8">
-        <div className="mb-6">
-          <h1 className="text-2xl font-semibold">{quiz.title}</h1>
-          <p className="text-sm text-muted-foreground">
+      <div className="mx-auto max-w-2xl px-4 py-12">
+        <div className="rounded-[28px] border-[3px] border-destructive/40 bg-card p-8 text-center shadow-[var(--shadow-clay)] md:p-10" role="alert">
+          <h1 className="font-heading text-2xl font-semibold">{quiz.title}</h1>
+          <p className="mt-1 text-sm font-extrabold uppercase tracking-wide text-muted-foreground">
             {isPractice ? "Practice" : "Assessment"}
           </p>
-        </div>
-        <div className="rounded-xl border bg-card p-8 text-center" role="alert">
-          <p className="text-sm text-destructive">{error ?? "This quiz is no longer available."}</p>
-          <div className="mt-6 flex justify-center gap-3">
-            <Button variant="outline" onClick={() => router.push("/student/quizzes")}>
+          <p className="mx-auto mt-6 max-w-md rounded-2xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-3 text-sm font-bold text-destructive">
+            {error ?? "This quiz is no longer available."}
+          </p>
+          <div className="mt-8 flex justify-center gap-3">
+            <Button variant="outline" size="lg" onClick={() => router.push("/student/quizzes")}>
               Back to quizzes
             </Button>
           </div>
@@ -596,12 +596,16 @@ export function PlayClient({
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">{quiz.title}</h1>
-          <p className="text-sm text-muted-foreground">
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+        <div className="min-w-0">
+          <span className={`inline-block rounded-full border-[3px] px-3.5 py-1 text-xs font-extrabold ${
+            isPractice
+              ? "border-emerald-300 bg-emerald-100 text-emerald-800"
+              : "border-accent/40 bg-blue-100 text-accent"
+          }`}>
             {isPractice ? "Practice" : "Assessment"}
-          </p>
+          </span>
+          <h1 className="mt-2 font-heading text-2xl font-semibold [text-wrap:balance]">{quiz.title}</h1>
         </div>
         <ProgressHud
           current={index + 1}
@@ -610,16 +614,18 @@ export function PlayClient({
         />
       </div>
 
-      {error && (
-        <p className="mb-4 text-sm text-destructive" role="alert">
-          {error}
-        </p>
-      )}
-      {notice && (
-        <p className="mb-4 text-sm text-amber-700" role="status">
-          {notice}
-        </p>
-      )}
+      <div aria-live="polite">
+        {error && (
+          <p className="mb-4 rounded-2xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-3 text-sm font-bold text-destructive" role="alert">
+            {error}
+          </p>
+        )}
+        {notice && (
+          <p className="mb-4 rounded-2xl border-[3px] border-amber-300 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800" role="status">
+            {notice}
+          </p>
+        )}
+      </div>
 
       {/* Persistent hidden video node for the FACE tracker (never conditionally
           mounted — a remount would kill the shared stream). The boot in
@@ -691,29 +697,29 @@ export function PlayClient({
         </GestureLayer>
       </FaceVerifier>
 
-      <div className="mt-6 flex justify-end">
+      <div className="mt-7 flex justify-end">
         {phase === "feedback" && (
           <div className="flex items-center gap-3">
             {gestureActive && question.options.length < MAX_ANSWER_FINGERS && (
-              <span className="text-xs text-muted-foreground" role="status">
+              <span className="text-sm font-bold text-muted-foreground" role="status">
                 or hold ✋
               </span>
             )}
-            <Button onClick={goNext}>
+            <Button size="lg" onClick={goNext}>
               {index + 1 >= questions.length ? "Finish" : "Next"}
             </Button>
           </div>
         )}
         {phase === "submitting" && (
-          <Button disabled>Submitting…</Button>
+          <Button size="lg" disabled>Submitting…</Button>
         )}
         {phase === "timeUp" && (
           // Auto-submit failed (network/abort) — offer an in-page retry so the
           // student isn't stranded on a disabled button.
-          <Button onClick={() => void submitNow()}>Retry submit</Button>
+          <Button size="lg" onClick={() => void submitNow()}>Retry submit</Button>
         )}
         {phase === "locked" && (
-          <Button disabled>Recording…</Button>
+          <Button size="lg" disabled>Recording…</Button>
         )}
       </div>
     </div>
