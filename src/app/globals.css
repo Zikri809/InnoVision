@@ -141,8 +141,29 @@
   * {
     @apply border-border outline-ring/50;
   }
+  html {
+    /* Native UI (scrollbars, form controls) follows the clay theme. */
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
   body {
     @apply bg-background text-foreground font-sans;
+  }
+  /* Anchor targets clear the sticky header when jumped to. */
+  section[id],
+  [id].scroll-target {
+    scroll-margin-top: 96px;
+  }
+  /* Keyboard skip link: visually hidden until focused. */
+  .skip-link {
+    @apply fixed left-4 top-4 z-[100] -translate-y-24 rounded-xl border-[3px] border-border bg-card px-4 py-2.5 font-sans text-sm font-extrabold text-foreground opacity-0 shadow-[var(--shadow-clay)] transition-[transform,opacity] duration-150;
+  }
+  .skip-link:focus-visible {
+    @apply translate-y-0 opacity-100;
+    outline: 3px solid var(--ring);
+    outline-offset: 3px;
   }
 }
 

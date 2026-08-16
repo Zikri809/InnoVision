@@ -23,6 +23,15 @@ export const metadata: Metadata = {
   description: "AI-powered gesture quizzes with face verification",
 };
 
+export const viewport = {
+  // Matches the clay background so mobile chrome + scrollbars blend in.
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#fff7ed" },
+    { media: "(prefers-color-scheme: dark)", color: "#1c0f08" },
+  ],
+  colorScheme: "light dark",
+};
+
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html

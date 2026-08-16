@@ -70,6 +70,7 @@ export default async function Home() {
 
   return (
     <div className="flex min-h-screen flex-col overflow-x-hidden">
+      <a href="#main" className="skip-link">Skip to content</a>
       {/* ===== Nav ===== */}
       <header className="sticky top-0 z-50 border-b-[3px] border-border bg-background/85 backdrop-blur">
         <div className="mx-auto flex h-[74px] w-full max-w-6xl items-center justify-between px-6">
@@ -91,7 +92,7 @@ export default async function Home() {
         </div>
       </header>
 
-      <main className="flex-1">
+      <main id="main" className="flex-1">
         {/* ===== Hero ===== */}
         <section className="relative overflow-hidden py-16 md:py-24">
           {/* decorative blobs */}
@@ -101,7 +102,7 @@ export default async function Home() {
 
           <div className="mx-auto max-w-6xl px-6 text-center">
             <span className="clay-pill clay-pop">Quizzes just got way more fun</span>
-            <h1 className="clay-pop mx-auto mt-6 max-w-3xl font-heading text-[clamp(38px,6.4vw,68px)] font-semibold leading-[1.05] [animation-delay:70ms]">
+            <h1 className="clay-pop mx-auto mt-6 max-w-3xl font-heading text-[clamp(38px,6.4vw,68px)] font-semibold leading-[1.05] [animation-delay:70ms] [text-wrap:balance]">
               Answer with a <span className="text-primary">wave of your hand</span> —{" "}
               <span className="text-accent">no clicks needed!</span>
             </h1>
@@ -172,7 +173,7 @@ export default async function Home() {
           <div className="mx-auto max-w-6xl px-6">
             <div className="mx-auto mb-14 max-w-2xl text-center">
               <span className="clay-pill">Why you&apos;ll love it</span>
-              <h2 className="mt-4 font-heading text-[clamp(30px,4.4vw,44px)] font-semibold">
+              <h2 className="mt-4 font-heading text-[clamp(30px,4.4vw,44px)] font-semibold [text-wrap:balance]">
                 Made for students, loved by teachers
               </h2>
               <p className="mt-3.5 text-[17px] font-semibold text-muted-foreground">
@@ -218,7 +219,7 @@ export default async function Home() {
             <div className="relative overflow-hidden rounded-[32px] border-[3px] border-accent-deep bg-gradient-to-br from-accent to-blue-800 px-8 py-16 text-center text-accent-foreground shadow-[var(--shadow-clay-accent)] md:py-20">
               <div aria-hidden className="pointer-events-none absolute -right-12 -top-16 h-48 w-48 rounded-full bg-white/10" />
               <div aria-hidden className="pointer-events-none absolute -bottom-10 left-[6%] h-32 w-32 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-white/10" />
-              <h2 className="relative font-heading text-[clamp(28px,4.4vw,44px)] font-semibold">
+              <h2 className="relative font-heading text-[clamp(28px,4.4vw,44px)] font-semibold [text-wrap:balance]">
                 Ready to make quizzes the best part of class?
               </h2>
               <p className="relative mx-auto mt-4 max-w-xl text-[17px] font-semibold text-white/90">
