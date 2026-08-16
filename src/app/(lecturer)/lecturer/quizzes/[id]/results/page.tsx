@@ -53,7 +53,7 @@ export default async function LecturerQuizResultsPage({
   // Owner-filtered quiz fetch (no oracle: not-found folds 404).
   const { data: quiz, error: quizError } = await supabase
     .from("quizzes")
-    .select("id, class_id, title, mode, status, time_limit_sec")
+    .select("id, class_id, title, mode, status, time_limit_sec, results_revealed_at, auto_reveal_on_complete")
     .eq("id", id)
     .maybeSingle();
 
@@ -96,7 +96,7 @@ export default async function LecturerQuizResultsPage({
     { count: totalQuestions, error: totalQuestionsError },
   ] = await Promise.all([
       supabase
-        .from("quiz_sessions")
+        .from("lecturer_session_view")
         // GET-envelope columns MINUS verify_nonce (the student replay token).
         .select(
           "id, quiz_id, student_id, mode, status, score, started_at, submitted_at, last_activity_at, face_unavailable_at, face_exempt, face_fail_streak",
@@ -139,7 +139,7 @@ export default async function LecturerQuizResultsPage({
     );
   }
 
-  const sessionRows = sessions ?? [];
+  const sessionRows = (sessions ?? []) as import("@/lib/results/types").ResultsSessionInput[];
   const sessionIds = sessionRows.map((s) => s.id);
   const studentIds = sessionRows.map((s) => s.student_id);
 
@@ -210,6 +210,8 @@ export default async function LecturerQuizResultsPage({
       mode={quiz.mode}
       status={quiz.status}
       timeLimitSec={quiz.time_limit_sec}
+      resultsRevealedAt={quiz.results_revealed_at}
+      autoRevealOnComplete={quiz.auto_reveal_on_complete}
       totalQuestions={totalQuestions ?? 0}
       truncated={sessionRows.length >= RESULTS_SESSION_LIMIT}
       rows={rows}

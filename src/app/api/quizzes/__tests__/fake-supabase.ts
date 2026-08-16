@@ -44,6 +44,12 @@ class FakeQueryBuilder {
     return this;
   }
 
+  /** PostgREST `is` — matches a value OR NULL (Supabase uses `is(col, null)`). */
+  is(col: string, val: unknown): this {
+    this.filters.push({ col, val });
+    return this;
+  }
+
   neq(col: string, val: unknown): this {
     this.filters.push({ col, val, negated: true });
     return this;
@@ -109,7 +115,23 @@ class FakeQueryBuilder {
     else resolve({ data: rows, error: null });
   }
 
+  private _project(out: Row[]): Row[] {
+    if (!this.selectCols) return out;
+    return out.map((r) => {
+      const projected: Row = {};
+      for (const c of this.selectCols!) {
+        if (c in r) projected[c] = r[c];
+      }
+      return projected;
+    });
+  }
+
   private _filtered(rows: Row[]): Row[] {
+    return this._project(this._filterRaw(rows));
+  }
+
+  /** Filter/sort/limit WITHOUT projection — keeps original row references. */
+  private _filterRaw(rows: Row[]): Row[] {
     let out = rows;
     for (const f of this.filters) {
       // Support PostgREST embedded filters (`classes.lecturer_id = x`) used by
@@ -152,16 +174,6 @@ class FakeQueryBuilder {
       });
     }
     if (this.limitN !== undefined) out = out.slice(0, this.limitN);
-    // Project the requested columns (column-level secrecy).
-    if (this.selectCols) {
-      out = out.map((r) => {
-        const projected: Row = {};
-        for (const c of this.selectCols!) {
-          if (c in r) projected[c] = r[c];
-        }
-        return projected;
-      });
-    }
     return out;
   }
 
@@ -190,11 +202,14 @@ class FakeQueryBuilder {
     }
 
     const op = this.op;
-    const targets = this._filtered(tableRows);
+    // WRITE targets must be the ORIGINAL row references (mutating/deleting
+    // projected copies would leave the table rows untouched). `_filterRaw` is
+    // `_filtered` WITHOUT the selectCols projection.
+    const targets = this._filterRaw(tableRows);
 
     if (op.kind === "update") {
       targets.forEach((r) => Object.assign(r, op.row));
-      return { rows: targets, error: null };
+      return { rows: this._project(targets), error: null };
     }
 
     // delete
@@ -237,7 +252,20 @@ export class FakeSupabase {
   };
 
   from(table: string): FakeQueryBuilder {
-    return new FakeQueryBuilder(this, table);
+    // The app now reads sessions/answers through the sealed views
+    // (PLAN_REVEAL_RESULTS v4 §3). The fake models them as the base table
+    // unless a test explicitly seeds the view table (e.g. to simulate the
+    // reveal-gated score). This keeps the route's view-based reads working
+    // with the same in-memory rows.
+    const VIEW_TO_BASE: Record<string, string> = {
+      student_session_view: "quiz_sessions",
+      lecturer_session_view: "quiz_sessions",
+      student_answers_view: "session_answers",
+      lecturer_answers_view: "session_answers",
+      student_quiz_view: "quizzes",
+    };
+    const resolved = VIEW_TO_BASE[table] ?? table;
+    return new FakeQueryBuilder(this, resolved);
   }
 
   // rpc() models the RPCs the routes call:
@@ -481,7 +509,7 @@ export class FakeSupabase {
     );
 
     if (mode === "assessment" && existing) {
-      return { data: { error: "already_answered", is_correct: existing.is_correct }, error: null };
+      return { data: { error: "already_answered" }, error: null };
     }
 
     if (existing) {
@@ -491,7 +519,7 @@ export class FakeSupabase {
       return {
         data:
           mode === "assessment"
-            ? { is_correct: isCorrect }
+            ? { recorded: true }
             : {
                 is_correct: isCorrect,
                 correct_index: question.correct_index,
@@ -513,7 +541,7 @@ export class FakeSupabase {
     return {
       data:
         mode === "assessment"
-          ? { is_correct: isCorrect }
+          ? { recorded: true }
           : {
               is_correct: isCorrect,
               correct_index: question.correct_index,
@@ -545,12 +573,22 @@ export class FakeSupabase {
       (q) => q.quiz_id === session.quiz_id,
     ).length;
 
+    // Reveal gate (PLAN v4): assessment score is NULL until the quiz's
+    // results are released. The fake models the RPC reading the quiz row's
+    // results_revealed_at (auto-reveal aside — route tests seed it directly).
+    const mode = session.mode as string;
+    const quiz = (this.tables["quizzes"] ?? []).find((q) => q.id === session.quiz_id);
+    const revealed =
+      mode !== "assessment" || quiz?.results_revealed_at != null;
+    const payloadScore = revealed ? session.score ?? 0 : null;
+    const payloadTotal = revealed ? total : null;
+
     if (session.status === "completed") {
       return {
         data: {
           session,
-          score: session.score ?? 0,
-          total,
+          score: payloadScore,
+          total: payloadTotal,
           already_submitted: true,
         },
         error: null,
@@ -568,7 +606,10 @@ export class FakeSupabase {
     session.status = "completed";
     session.score = score;
     session.submitted_at = "2026-01-01T00:02:00Z";
-    return { data: { session, score, total }, error: null };
+    return {
+      data: { session, score: revealed ? score : null, total: revealed ? total : null },
+      error: null,
+    };
   }
 
   /** Seed a session row (I-S12 / session route tests). */

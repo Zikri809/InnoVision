@@ -41,20 +41,36 @@ type QuizRow = {
   mode: "practice" | "assessment";
   status: "draft" | "live" | "closed";
   time_limit_sec: number | null;
+  results_revealed_at: string | null;
 };
 
 type AnswerRow = {
   question_id: string;
   selected_index: number;
-  is_correct: boolean;
+  /** Nullable: assessment pre-reveal hides correctness (student_answers_view). */
+  is_correct: boolean | null;
+};
+
+/** One per-question result row from `student_results` (score + breakdown). */
+export type ResultsBreakdownRow = {
+  question_id: string;
+  order_index: number;
+  type: "mcq" | "true_false";
+  prompt: string;
+  options: string[];
+  selected_index: number | null;
+  is_correct: boolean | null;
+  correct_index: number;
+  explanation: string | null;
 };
 
 /**
  * Play page — server component. Reads the student's own session, quiz
  * metadata (student_quiz_view), questions (student_question_view — no
- * correct_index/explanation), and own answers for resume. Computes
- * `initialIndex` + `initialRemainingMs` server-side and passes them to the
- * client engine (the client never imports lib/sessions).
+ * correct_index/explanation), and own answers for resume (student_answers_view
+ * — is_correct reveal-gated). Computes `initialIndex` + `initialRemainingMs`
+ * server-side and passes them to the client engine (the client never imports
+ * lib/sessions).
  *
  * The session is fetched first (its `quiz_id` drives the other queries);
  * then quiz/questions/answers run in parallel with per-query error capture
@@ -92,9 +108,11 @@ export default async function PlayPage({ params }: PageProps) {
 
   if (!isUuid(sessionId)) notFound();
 
-  // 1. Own session (missing / not-owned → notFound, no oracle).
+  // 1. Own session (missing / not-owned → notFound, no oracle). Read via the
+  // student-safe view (score is reveal-gated; the raw quiz_sessions score is
+  // column-revoked from authenticated per PLAN_REVEAL_RESULTS v4).
   const { data: session, error: sessionError } = await supabase
-    .from("quiz_sessions")
+    .from("student_session_view")
     .select("id, quiz_id, student_id, mode, status, started_at, submitted_at, score, face_exempt, face_fail_streak, verify_nonce, face_unavailable_at, last_activity_at")
     .eq("id", sessionId)
     .eq("student_id", user.id)
@@ -115,7 +133,7 @@ export default async function PlayPage({ params }: PageProps) {
     s.status === "completed"
       ? Promise.resolve({ data: [] as AnswerRow[], error: null })
       : supabase
-          .from("session_answers")
+          .from("student_answers_view")
           .select("question_id, selected_index, is_correct")
           .eq("session_id", sessionId);
 
@@ -135,7 +153,7 @@ export default async function PlayPage({ params }: PageProps) {
   const [quizRes, questionsRes, answersRes, faceChecksRes, profileRes] = await Promise.allSettled([
     supabase
       .from("student_quiz_view")
-      .select("id, title, mode, status, time_limit_sec")
+      .select("id, title, mode, status, time_limit_sec, results_revealed_at")
       .eq("id", s.quiz_id)
       .maybeSingle(),
     supabase
@@ -229,12 +247,32 @@ export default async function PlayPage({ params }: PageProps) {
   });
 
   if (s.status === "completed") {
+    // Practice always reveals; assessment only once results_revealed_at set.
+    const revealed = quiz.mode === "practice" || quiz.results_revealed_at != null;
+
+    // Server-side breakdown (student_results is security-definer; re-validates
+    // enrollment + reveal + own-session scope). Reveal-gated: hidden assessment
+    // returns error → no breakdown, no fabricated score.
+    let breakdown: ResultsBreakdownRow[] = [];
+    if (revealed) {
+      const { data: rpcRes, error: rpcErr } = await supabase.rpc("student_results", {
+        p_quiz_id: s.quiz_id,
+      });
+      if (!rpcErr) {
+        const r = rpcRes as { questions?: unknown[] } | null;
+        breakdown = (r?.questions ?? []).map((q) => q as ResultsBreakdownRow);
+      }
+      // On RPC error fall through to the score-only EndScreen (never crash).
+    }
+
     return (
       <EndScreen
         session={s}
         quiz={quiz}
-        score={s.score ?? 0}
+        revealed={revealed}
+        score={revealed ? s.score : null}
         total={questions.length}
+        breakdown={revealed ? breakdown : []}
       />
     );
   }

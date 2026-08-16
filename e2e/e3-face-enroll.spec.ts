@@ -7,6 +7,7 @@ import {
   enrollViaFacePage,
   setFaceVerifyMode,
   passAssessmentGate,
+  revealQuiz,
 } from "./helpers";
 
 const TEST_TIMESTAMP = Date.now();
@@ -73,6 +74,10 @@ test.describe("E3/E3b — face enrollment + assessment gate", () => {
     await publishButton.click();
     await expect(lecturerPage.getByText(/published/i)).toBeVisible();
 
+    // Reveal the assessment results so the EndScreen shows the score (hidden
+    // assessments show the "awaiting release" state instead).
+    await revealQuiz(lecturerPage, CLASS_TITLE, QUIZ_TITLE);
+
     // Student A: register + join + fake face + enroll + start.
     await registerUser(studentPage, STUDENT_A_EMAIL, "student", LECTURER_INVITE_CODE);
     await expect(studentPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
@@ -99,7 +104,7 @@ test.describe("E3/E3b — face enrollment + assessment gate", () => {
     await studentPage.getByRole("button", { name: /Paris/i }).click();
     await expect(studentPage.getByText("Answered", { exact: true })).toBeVisible();
     await studentPage.getByRole("button", { name: "Finish", exact: true }).click();
-    await expect(studentPage.getByText("Your score", { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(studentPage.getByText("Assessment complete", { exact: true })).toBeVisible({ timeout: 10_000 });
 
     await lecturerCtx.close();
     await studentCtx.close();
@@ -219,6 +224,9 @@ test.describe("E3/E3b — face enrollment + assessment gate", () => {
     await publishButton.click();
     await expect(lecturerPage.getByText(/published/i)).toBeVisible();
 
+    // Reveal results so the timer-expiry EndScreen shows the score.
+    await revealQuiz(lecturerPage, CLASS_TITLE, "E13 Timed");
+
     // Student: register + join + enroll + start (fake face).
     await registerUser(studentPage, STUDENT_A_EMAIL, "student", LECTURER_INVITE_CODE);
     await expect(studentPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
@@ -237,7 +245,7 @@ test.describe("E3/E3b — face enrollment + assessment gate", () => {
     await expect(begin).toBeVisible({ timeout: 15_000 });
 
     // Timer (3s) + grace (5s) + margin → EndScreen within ~20s, no deadlock.
-    await expect(studentPage.getByText("Your score", { exact: true })).toBeVisible({ timeout: 20_000 });
+    await expect(studentPage.getByText("Assessment complete", { exact: true })).toBeVisible({ timeout: 20_000 });
     await expect(studentPage.getByText("0", { exact: true }).first()).toBeVisible();
 
     await lecturerCtx.close();

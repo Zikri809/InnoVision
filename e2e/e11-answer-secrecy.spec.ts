@@ -14,9 +14,9 @@ const QUIZ_TITLE = "E11 Assessment";
  * Collects same-origin text responses filtered by content-type (document,
  * text/x-component, application/json) AND by URL (the play page + any
  * /api/sessions/—¦ endpoints) AND only response.ok() responses. Asserts
- * `correct_index` and `explanation` are ABSENT across the entire flow,
- * including the answer response; asserts the assessment answer response
- * contains isCorrect but NOT correctIndex.
+ * `correct_index`/`explanation` are ABSENT across the entire flow, and that
+ * the assessment answer response is KEYLESS (`recorded`, no isCorrect, no
+ * correctIndex) — PLAN_RESEAL_RESULTS v4: correctness is withhold until reveal.
  *
  * (Practice disclosure assertions live in E4, not E11.)
  */
@@ -129,12 +129,14 @@ test.describe("E11 — answer secrecy (assessment)", () => {
     expect(dup.status()).toBe(409);
     const dupBody = await dup.json();
     expect(dupBody.error).toBe("already_answered");
-    expect(dupBody.isCorrect).toBeDefined();
+    // Keyless replay: NO isCorrect (correctness withheld until reveal).
+    expect(dupBody.isCorrect).toBeUndefined();
     expect(JSON.stringify(dupBody)).not.toContain("correctIndex");
     expect(JSON.stringify(dupBody)).not.toContain("correct_index");
     expect(JSON.stringify(dupBody)).not.toContain("explanation");
     await studentPage.getByRole("button", { name: "Finish", exact: true }).click();
-    await expect(studentPage.getByText("Your score", { exact: true })).toBeVisible({ timeout: 10_000 });
+    // Hidden assessment → "awaiting release" message, NOT the score.
+    await expect(studentPage.getByText(/results will be released by your lecturer/i)).toBeVisible({ timeout: 10_000 });
 
     // ── Assert: no key/explanation across all captured OK responses ──
     expect(capturedBodies.length).toBeGreaterThan(0);
@@ -157,14 +159,15 @@ test.describe("E11 — answer secrecy (assessment)", () => {
       ).toBe(false);
     }
 
-    // The assessment answer response must contain isCorrect but NOT
-    // correctIndex. Find the answer POST responses.
+    // The assessment answer SUCCESS body is a keyless ack: `recorded`, with NO
+    // isCorrect / correctIndex / explanation (correctness withheld until reveal).
     const answerBodies = capturedBodies.filter(
       (c) => c.url.includes("/answer") && c.url.includes("/api/sessions/"),
     );
     expect(answerBodies.length).toBeGreaterThan(0);
     for (const { body } of answerBodies) {
-      expect(body.includes("isCorrect")).toBe(true);
+      expect(body.includes("recorded")).toBe(true);
+      expect(body.includes("isCorrect")).toBe(false);
       expect(body.includes("correctIndex")).toBe(false);
       expect(body.includes("explanation")).toBe(false);
     }

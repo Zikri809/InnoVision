@@ -10,6 +10,7 @@ import {
   openResults,
   resolveServiceClient,
   staleActiveSession,
+  revealQuiz,
 } from "./helpers";
 
 const TEST_TIMESTAMP = Date.now();
@@ -86,6 +87,10 @@ test.describe("E13b — attendance = sessions", () => {
       ],
     });
 
+    // Reveal the assessment results so the completed students' EndScreen shows
+    // the score (hidden assessments show "awaiting release").
+    await revealQuiz(lecturerPage, CLASS_TITLE, QUIZ_TITLE);
+
     // ── 2. Student A: enroll → gate (face check) → answer → submit ──
     await registerUser(studentAPage, STUDENT_A_EMAIL, "student", LECTURER_INVITE_CODE);
     await expect(studentAPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
@@ -104,7 +109,7 @@ test.describe("E13b — attendance = sessions", () => {
     await studentAPage.getByRole("button", { name: /Paris/i }).click();
     await expect(studentAPage.getByText("Answered", { exact: true })).toBeVisible();
     await studentAPage.getByRole("button", { name: "Finish", exact: true }).click();
-    await expect(studentAPage.getByText("Your score", { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(studentAPage.getByText("Assessment complete", { exact: true })).toBeVisible({ timeout: 10_000 });
 
     // ── 3. Student B: unseamed click-first → face_unavailable_at marker ──
     await registerUser(studentBPage, STUDENT_B_EMAIL, "student", LECTURER_INVITE_CODE);
@@ -122,7 +127,7 @@ test.describe("E13b — attendance = sessions", () => {
     await studentBPage.getByRole("button", { name: /Paris/i }).click();
     await expect(studentBPage.getByText("Answered", { exact: true })).toBeVisible();
     await studentBPage.getByRole("button", { name: "Finish", exact: true }).click();
-    await expect(studentBPage.getByText("Your score", { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(studentBPage.getByText("Assessment complete", { exact: true })).toBeVisible({ timeout: 10_000 });
 
     // ── 4. Student C: start + answer Q1, do NOT submit (in-progress) ──
     await registerUser(studentCPage, STUDENT_C_EMAIL, "student", LECTURER_INVITE_CODE);

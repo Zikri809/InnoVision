@@ -12,6 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ClipboardList, Zap, ShieldCheck, Timer, Play, ScanFace, Layers } from "lucide-react";
+import { formatDuration } from "@/lib/format/duration";
 
 type QuizRow = {
   id: string;
@@ -27,11 +28,6 @@ const MODE_LABEL: Record<QuizRow["mode"], string> = {
   practice: "Practice",
   assessment: "Assessment",
 };
-
-function formatLimit(sec: number): string {
-  if (sec % 60 === 0) return `${sec / 60}m`;
-  return `${sec}s`;
-}
 
 /**
  * Student quizzes dashboard — hero header, quick stats, and chunky quiz cards.
@@ -220,7 +216,7 @@ export function StudentQuizzesClient({
                         {q.mode === "assessment" && q.time_limit_sec != null && (
                           <span className="inline-flex items-center gap-1 rounded-full border-[3px] border-border bg-muted px-3 py-1 text-xs font-extrabold tabular-nums text-muted-foreground">
                             <Timer className="h-3.5 w-3.5" aria-hidden />
-                            {formatLimit(q.time_limit_sec)}
+                            {formatDuration(q.time_limit_sec)}
                           </span>
                         )}
                       </div>

@@ -462,6 +462,22 @@ export async function openResults(page: Page, classTitle: string, quizTitle: str
 }
 
 /**
+ * Phase 13: lecturer reveals the assessment's results on the results page.
+ * Opens /lecturer/quizzes/[id]/results, confirms the reveal dialog, and waits
+ * for the "Results revealed" chip. Reveal is ONE-WAY (no un-reveal).
+ */
+export async function revealQuiz(page: Page, classTitle: string, quizTitle: string) {
+  await openResults(page, classTitle, quizTitle);
+  const revealButton = page.getByRole("button", { name: /reveal to students/i });
+  await expect(revealButton).toBeVisible();
+  await revealButton.click();
+  const confirmBtn = page.getByRole("button", { name: /reveal results/i });
+  await expect(confirmBtn).toBeEnabled();
+  await confirmBtn.click();
+  await expect(page.getByText("Results revealed", { exact: true })).toBeVisible({ timeout: 10_000 });
+}
+
+/**
  * Phase 8 service-role client for E2E seeding/cleanup. Two-gated seam:
  *  1. `process.env.NODE_ENV !== "production"` (weak gate — Playwright leaves it
  *     undefined, so it is NOT the real guard).

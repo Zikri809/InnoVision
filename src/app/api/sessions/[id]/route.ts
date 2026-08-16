@@ -10,9 +10,12 @@ type Params = { params: Promise<{ id: string }> };
 // Per-user rate limit on session GETs (flagged-poll + stale-nonce recovery).
 const GET_RATE = { limit: 60, windowMs: 60 * 1000 };
 
-// Shared envelope columns for both roles. `verify_nonce` is deliberately NOT
-// in this list: it is the student's replay token and must never be selected
-// for the lecturer path (a future edit to `envelope` can't leak it).
+// Shared envelope columns. `verify_nonce` is deliberately NOT in the shared
+// list: it is the student's replay token and must never be selected for the
+// lecturer path. The base-table columns `score`/`is_correct` are column-revoked
+// from `authenticated` (PLAN_REVEAL_RESULTS v4 §3) — ALL reads go through the
+// owner-privilege views below, which re-expose them only under the correct
+// predicate.
 const ENVELOPE_COLS =
   "id, status, quiz_id, mode, started_at, submitted_at, score, face_exempt, face_fail_streak, face_unavailable_at, last_activity_at, student_id";
 const OWN_COLS = `${ENVELOPE_COLS}, verify_nonce`;
@@ -23,6 +26,10 @@ const OWN_COLS = `${ENVELOPE_COLS}, verify_nonce`;
  * AuthZ: the OWN student reads their session; the quiz LECTURER reads any of
  * the quiz's sessions (P8 status reads + unlock/exempt UI). Missing/not-owned
  * → 404 (no oracle).
+ *
+ * Reads go through the sealed views: `student_session_view` (score reveal-gated
+ * for assessment) and `lecturer_session_view` (full score for the quiz's
+ * lecturer).
  *
  * Envelope: `{ id, status, quiz_id, mode, started_at, submitted_at, score,
  * face_exempt, face_fail_streak, face_unavailable_at, last_activity_at }` +
@@ -46,23 +53,22 @@ export async function GET(_request: Request, { params }: Params) {
     return rateLimited("Too many requests. Try again in a minute.");
   }
 
-  // Own-student path: `.eq("student_id", user.id)` → 404 when not the owner.
+  // Own-student path via student_session_view (own-row only, score reveal-gated).
   const own = await supabase
-    .from("quiz_sessions")
+    .from("student_session_view")
     .select(OWN_COLS)
     .eq("id", id)
     .eq("student_id", user.id)
     .maybeSingle();
 
   if (!own.error && own.data) {
-    return Response.json(envelope(own.data), {
+    return Response.json(await studentEnvelope(supabase, own.data), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
   }
 
-  // Lecturer path — only when the caller is the quiz's lecturer. The RLS
-  // policy already filters; the join below adds the role gate. The SELECT
+  // Lecturer path via lecturer_session_view (is_lecturer_of_quiz). The SELECT
   // omits verify_nonce entirely.
   const { data: profile } = await supabase
     .from("profiles")
@@ -71,11 +77,11 @@ export async function GET(_request: Request, { params }: Params) {
     .maybeSingle();
   if (profile?.role === "lecturer") {
     const lect = await supabase
-      .from("quiz_sessions")
+      .from("lecturer_session_view")
       .select(ENVELOPE_COLS)
       .eq("id", id)
       .maybeSingle();
-    if (!lect.error && lect.data) {
+    if (!lect.error && lect.data && typeof lect.data.quiz_id === "string") {
       const isLecturerOfQuiz = await supabase.rpc("is_lecturer_of_quiz", {
         p_quiz_id: lect.data.quiz_id,
       });
@@ -89,6 +95,27 @@ export async function GET(_request: Request, { params }: Params) {
   }
 
   return notFound();
+}
+
+/**
+ * Student envelope: assessment score stays NULL until the quiz's results are
+ * revealed (the lecturer view of the same session is unaffected). The reveal
+ * state is derived from quiz metadata via RLS — no dedicated read needed here.
+ */
+async function studentEnvelope(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  s: Record<string, unknown>,
+) {
+  const row = envelope(s);
+  if (row.mode === "assessment" && row.score != null && typeof row.quiz_id === "string") {
+    const { data: quiz } = await supabase
+      .from("student_quiz_view")
+      .select("id, results_revealed_at")
+      .eq("id", row.quiz_id)
+      .maybeSingle();
+    if (!quiz?.results_revealed_at) row.score = null;
+  }
+  return row;
 }
 
 function envelope(s: Record<string, unknown>) {

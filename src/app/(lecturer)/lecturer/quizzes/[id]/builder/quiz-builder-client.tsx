@@ -3,11 +3,12 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowDown, ArrowLeft, ArrowUp, Pencil, RefreshCw, Timer, Trash2, Wand2 } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, Pencil, Timer, Trash2, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { formatDuration } from "@/lib/format/duration";
 import {
   Select,
   SelectContent,
@@ -24,6 +25,8 @@ import {
 } from "@/components/ui/card";
 import { GenerateFromFileDialog } from "@/components/extract/GenerateFromFileDialog";
 import { SourceTextPreview } from "@/components/extract/SourceTextPreview";
+import { EditQuestionDialog } from "@/components/quiz/edit-question-dialog";
+import { RegenerateQuestionDialog } from "@/components/quiz/regenerate-question-dialog";
 import type { OcrConfig } from "@/lib/extract/types";
 
 type QuizInfo = {
@@ -102,16 +105,17 @@ export function QuizBuilderClient({
   const router = useRouter();
   const isDraft = quiz.status === "draft";
 
-  // Question form state.
+  // Question form state (top card: adding new questions).
   const [draft, setDraft] = useState<QuestionDraft>(emptyDraft);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingQuestion, setEditingQuestion] = useState<QuestionRow | null>(null);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [regeneratingQuestion, setRegeneratingQuestion] = useState<QuestionRow | null>(null);
+  const [regeneratingIndex, setRegeneratingIndex] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [generateOpen, setGenerateOpen] = useState(false);
-  const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
-  const [regenerateInstruction, setRegenerateInstruction] = useState("");
   const [reordering, setReordering] = useState(false);
 
   function setOption(index: number, value: string) {
@@ -138,22 +142,29 @@ export function QuizBuilderClient({
     });
   }
 
-  function startEdit(q: QuestionRow) {
-    setEditingId(q.id);
-    setDraft({
-      type: q.type,
-      prompt: q.prompt,
-      options: [...q.options],
-      correctIndex: q.correct_index,
-      explanation: q.explanation ?? "",
+  function moveOption(index: number, direction: "up" | "down") {
+    setDraft((d) => {
+      const target = direction === "up" ? index - 1 : index + 1;
+      if (target < 0 || target >= d.options.length) return d;
+      const options = [...d.options];
+      [options[index], options[target]] = [options[target], options[index]];
+      // Follow the correct answer through the swap so it keeps pointing at
+      // the same option text.
+      let correctIndex = d.correctIndex;
+      if (correctIndex === index) correctIndex = target;
+      else if (correctIndex === target) correctIndex = index;
+      return { ...d, options, correctIndex };
     });
+  }
+
+  function startEdit(q: QuestionRow, index: number) {
+    setEditingQuestion(q);
+    setEditingIndex(index);
     setError(null);
     setNotice(null);
-    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function resetForm() {
-    setEditingId(null);
     setDraft(emptyDraft);
     setError(null);
     setNotice(null);
@@ -176,11 +187,8 @@ export function QuizBuilderClient({
     };
 
     try {
-      const url = editingId
-        ? `/api/quizzes/${quiz.id}/questions/${editingId}`
-        : `/api/quizzes/${quiz.id}/questions`;
-      const res = await fetch(url, {
-        method: editingId ? "PATCH" : "POST",
+      const res = await fetch(`/api/quizzes/${quiz.id}/questions`, {
+        method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
       });
@@ -190,7 +198,7 @@ export function QuizBuilderClient({
         return;
       }
       resetForm();
-      setNotice(editingId ? "Question updated." : "Question added.");
+      setNotice("Question added.");
       router.refresh();
     } catch {
       setError("Network error saving question.");
@@ -212,7 +220,10 @@ export function QuizBuilderClient({
         setError(body.message ?? body.error ?? "Could not delete the question.");
         return;
       }
-      if (editingId === q.id) resetForm();
+      if (editingQuestion?.id === q.id) {
+        setEditingQuestion(null);
+        setEditingIndex(null);
+      }
       setNotice("Question deleted.");
       router.refresh();
     } catch {
@@ -275,36 +286,6 @@ export function QuizBuilderClient({
     }
   }
 
-  async function handleRegenerate(q: QuestionRow) {
-    if (regeneratingId) return;
-    if (!window.confirm("Regenerate this question with AI? The current version will be replaced.")) return;
-    setRegeneratingId(q.id);
-    setError(null);
-    setNotice(null);
-    try {
-      const res = await fetch("/api/ai/regenerate-question", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          questionId: q.id,
-          ...(regenerateInstruction.trim() ? { instruction: regenerateInstruction.trim() } : {}),
-        }),
-      });
-      const body = await res.json();
-      if (!res.ok) {
-        setError(body.message ?? body.error ?? "Could not regenerate the question.");
-        return;
-      }
-      setNotice("Question regenerated.");
-      setRegenerateInstruction("");
-      router.refresh();
-    } catch {
-      setError("Network error regenerating the question.");
-    } finally {
-      setRegeneratingId(null);
-    }
-  }
-
   return (
     <div className="space-y-6">
       {/* ── Hero band ── */}
@@ -330,7 +311,7 @@ export function QuizBuilderClient({
                 {quiz.mode === "assessment" && quiz.time_limit_sec != null && (
                   <span className="inline-flex items-center gap-1 rounded-full border-[3px] border-border bg-muted px-3 py-1 text-xs font-extrabold tabular-nums text-muted-foreground">
                     <Timer className="h-3.5 w-3.5" aria-hidden />
-                    {quiz.time_limit_sec}s limit
+                    {formatDuration(quiz.time_limit_sec)} limit
                   </span>
                 )}
                 <span className="rounded-full border-[3px] border-border bg-muted px-3 py-1 text-xs font-extrabold text-muted-foreground">
@@ -367,6 +348,39 @@ export function QuizBuilderClient({
         hasQuestions={questions.length > 0}
       />
 
+      <EditQuestionDialog
+        open={editingQuestion !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingQuestion(null);
+            setEditingIndex(null);
+          }
+        }}
+        quizId={quiz.id}
+        question={editingQuestion}
+        questionIndex={editingIndex ?? undefined}
+        onSuccess={() => {
+          setNotice("Question updated.");
+          router.refresh();
+        }}
+      />
+
+      <RegenerateQuestionDialog
+        open={regeneratingQuestion !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRegeneratingQuestion(null);
+            setRegeneratingIndex(null);
+          }
+        }}
+        question={regeneratingQuestion}
+        questionIndex={regeneratingIndex ?? undefined}
+        onSuccess={() => {
+          setNotice("Question regenerated.");
+          router.refresh();
+        }}
+      />
+
       {!isDraft && (
         <div
           role="alert"
@@ -395,14 +409,14 @@ export function QuizBuilderClient({
       {isDraft && (
         <Card className="mb-6">
           <CardHeader>
-            <CardTitle>{editingId ? "Edit question" : "Add question"}</CardTitle>
+            <CardTitle>Add question</CardTitle>
             <CardDescription>
               Multiple choice: 2–5 options (fingers 1–5). True/False: exactly 2.
             </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSave} className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
+              <div className="flex flex-wrap items-center gap-4 sm:gap-6">
                 <div className="space-y-1">
                   <Label htmlFor="q-type">Type</Label>
                   <Select
@@ -421,8 +435,10 @@ export function QuizBuilderClient({
                       );
                     }}
                   >
-                    <SelectTrigger id="q-type" className="w-40">
-                      <SelectValue placeholder="Type" />
+                    <SelectTrigger id="q-type" className="w-44">
+                      <SelectValue placeholder="Type">
+                        {(v) => (v === "true_false" ? "True / False" : "Multiple choice")}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="mcq">Multiple choice</SelectItem>
@@ -433,18 +449,20 @@ export function QuizBuilderClient({
                 <div className="space-y-1">
                   <Label htmlFor="q-correct">Correct answer</Label>
                   <Select
-                    value={String(draft.correctIndex)}
+                    value={String(draft.correctIndex + 1)}
                     onValueChange={(v) =>
-                      setDraft((d) => ({ ...d, correctIndex: Number(v) }))
+                      setDraft((d) => ({ ...d, correctIndex: Number(v) - 1 }))
                     }
                   >
-                    <SelectTrigger id="q-correct" className="w-24">
-                      <SelectValue placeholder="Answer" />
+                    <SelectTrigger id="q-correct" className="w-36">
+                      <SelectValue placeholder="Answer">
+                        {(v) => (v ? `Option ${v}` : "Answer")}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {draft.options.map((_, i) => (
-                        <SelectItem key={i} value={String(i)}>
-                          {i + 1}
+                        <SelectItem key={i} value={String(i + 1)}>
+                          Option {i + 1}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -481,16 +499,46 @@ export function QuizBuilderClient({
                       disabled={draft.type === "true_false"}
                       className="flex-1"
                     />
-                    {draft.type === "mcq" && draft.options.length > 2 && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removeOption(i)}
-                        aria-label={`Remove option ${i + 1}`}
-                      >
-                        <Trash2 className="size-4" />
-                      </Button>
+                    {draft.type === "mcq" && (
+                      <>
+                        {draft.options.length > 1 && (
+                          <div className="flex items-center gap-0.5">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="px-1.5"
+                              onClick={() => moveOption(i, "up")}
+                              disabled={i === 0}
+                              aria-label={`Move option ${i + 1} up`}
+                            >
+                              <ArrowUp className="size-4" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="px-1.5"
+                              onClick={() => moveOption(i, "down")}
+                              disabled={i === draft.options.length - 1}
+                              aria-label={`Move option ${i + 1} down`}
+                            >
+                              <ArrowDown className="size-4" />
+                            </Button>
+                          </div>
+                        )}
+                        {draft.options.length > 2 && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removeOption(i)}
+                            aria-label={`Remove option ${i + 1}`}
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        )}
+                      </>
                     )}
                   </div>
                 ))}
@@ -513,6 +561,10 @@ export function QuizBuilderClient({
 
               <div className="space-y-1">
                 <Label htmlFor="q-explanation">Explanation (optional)</Label>
+                <p className="text-xs font-semibold text-muted-foreground">
+                  Shown to students after they answer — explain why the correct
+                  option is right.
+                </p>
                 <Textarea
                   id="q-explanation"
                   value={draft.explanation}
@@ -527,13 +579,8 @@ export function QuizBuilderClient({
 
               <div className="flex items-center gap-3">
                 <Button type="submit" disabled={saving || !draft.prompt.trim()}>
-                  {saving ? "Saving…" : editingId ? "Save changes" : "Add question"}
+                  {saving ? "Adding…" : "Add question"}
                 </Button>
-                {editingId && (
-                  <Button type="button" variant="ghost" onClick={resetForm}>
-                    Cancel
-                  </Button>
-                )}
               </div>
             </form>
           </CardContent>
@@ -588,61 +635,58 @@ export function QuizBuilderClient({
                     )}
                   </div>
                   {isDraft && (
-                    <div className="flex shrink-0 flex-col items-end gap-1">
-                      <div className="flex items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => startEdit(q)}
-                          aria-label="Edit question"
-                        >
-                          <Pencil className="size-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleMove(q, "up")}
-                          disabled={idx === 0 || reordering}
-                          aria-label="Move up"
-                        >
-                          <ArrowUp className="size-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleMove(q, "down")}
-                          disabled={idx === questions.length - 1 || reordering}
-                          aria-label="Move down"
-                        >
-                          <ArrowDown className="size-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDelete(q)}
-                          aria-label="Delete question"
-                        >
-                        <Trash2 className="size-4" />
-                      </Button>
-                      </div>
+                    <div className="flex shrink-0 items-center gap-1.5">
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => handleRegenerate(q)}
-                        disabled={regeneratingId === q.id}
+                        onClick={() => {
+                          setRegeneratingQuestion(q);
+                          setRegeneratingIndex(idx);
+                        }}
                         aria-label="Regenerate question"
+                        className="h-8 gap-1.5 px-2.5 text-xs font-bold"
                       >
-                        <RefreshCw className={`size-3.5 ${regeneratingId === q.id ? "animate-spin" : ""} mr-1`} />
-                        {regeneratingId === q.id ? "Regenerating…" : "Regenerate"}
+                        <Wand2 className="size-3.5 text-primary" />
+                        Regenerate
                       </Button>
-                      <Input
-                        value={regenerateInstruction}
-                        onChange={(e) => setRegenerateInstruction(e.target.value)}
-                        placeholder="Optional instruction (e.g. make it harder)"
-                        maxLength={500}
-                        aria-label="Regenerate instruction"
-                        className="h-7 w-full text-xs"
-                      />
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => startEdit(q, idx)}
+                        aria-label="Edit question"
+                        className="size-8"
+                      >
+                        <Pencil className="size-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => handleMove(q, "up")}
+                        disabled={idx === 0 || reordering}
+                        aria-label="Move up"
+                        className="size-8"
+                      >
+                        <ArrowUp className="size-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => handleMove(q, "down")}
+                        disabled={idx === questions.length - 1 || reordering}
+                        aria-label="Move down"
+                        className="size-8"
+                      >
+                        <ArrowDown className="size-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => handleDelete(q)}
+                        aria-label="Delete question"
+                        className="size-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
                     </div>
                   )}
                 </li>

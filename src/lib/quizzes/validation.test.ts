@@ -129,7 +129,7 @@ describe("CreateQuizSchema", () => {
   it("rejects empty title and out-of-range time limits", () => {
     expect(CreateQuizSchema.safeParse({ title: "   " }).success).toBe(false);
     expect(CreateQuizSchema.safeParse({ title: "Q", timeLimitSec: 0 }).success).toBe(false);
-    expect(CreateQuizSchema.safeParse({ title: "Q", timeLimitSec: 7201 }).success).toBe(false);
+    expect(CreateQuizSchema.safeParse({ title: "Q", timeLimitSec: 72 * 3600 + 1 }).success).toBe(false);
     expect(CreateQuizSchema.safeParse({ title: "Q", timeLimitSec: 10.5 }).success).toBe(false);
   });
 });

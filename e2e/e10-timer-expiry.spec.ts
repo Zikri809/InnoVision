@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { registerUser, createClass, joinClass } from "./helpers";
+import { registerUser, createClass, joinClass, revealQuiz } from "./helpers";
 
 const TEST_TIMESTAMP = Date.now();
 const LECTURER_API_EMAIL = `lecturer-e10api-${TEST_TIMESTAMP}@innovision.test`;
@@ -96,6 +96,10 @@ test.describe("E10 — timer expiry (API + UI halves)", () => {
     await expect(studentPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
     await joinClass(studentPage, joinCode, CLASS_TITLE);
 
+    // Reveal results up front so the late-submit response carries the score
+    // (assessment scores are otherwise hidden until release).
+    await revealQuiz(lecturerPage, CLASS_TITLE, QUIZ_API_TITLE);
+
     // â”€â”€ Start via page.request â†’ capture started_at from the response â”€â”€
     const startRes = await studentPage.request.post("/api/sessions", {
       data: { quizId },
@@ -158,6 +162,10 @@ test.describe("E10 — timer expiry (API + UI halves)", () => {
       ],
     });
 
+    // Reveal now so the auto-submitted EndScreen shows the score (hidden
+    // assessments show the "awaiting release" state instead).
+    await revealQuiz(lecturerPage, CLASS_TITLE, QUIZ_UI_TITLE);
+
     await registerUser(studentPage, STUDENT_UI_EMAIL, "student", LECTURER_INVITE_CODE);
     await expect(studentPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
     await joinClass(studentPage, joinCode, CLASS_TITLE);
@@ -174,7 +182,7 @@ test.describe("E10 — timer expiry (API + UI halves)", () => {
 
     // The client countdown (10s) hits 0 → auto-submit → EndScreen. Wait up to
     // ~25s for the countdown + submit round trip.
-    await expect(studentPage.getByText("Your score", { exact: true })).toBeVisible({ timeout: 25_000 });
+    await expect(studentPage.getByText("Assessment complete", { exact: true })).toBeVisible({ timeout: 25_000 });
     // The answered score (1) is shown — stronger than a zero-answer auto-submit.
     // The score <p> renders "1 / 2" (with a nested span) — filter by text.
     await expect(

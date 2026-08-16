@@ -11,6 +11,7 @@ import {
   setFacePeriodic,
   waitForFlaggedOverlay,
   captureFaceVerifyPosts,
+  revealQuiz,
 } from "./helpers";
 
 const TEST_TIMESTAMP = Date.now();
@@ -147,12 +148,16 @@ test.describe("E7 — lecturer unlock", () => {
     expect(postUnlockNonce).toMatch(/^[0-9a-f-]{36}$/i);
     verifyCapture.detach();
 
+    // Reveal the assessment so the EndScreen shows the score (hidden
+    // assessments show the "awaiting release" state instead).
+    await revealQuiz(lecturerPage, CLASS_TITLE, QUIZ_TITLE);
+
     // Overlay cleared → answer Q1 → EndScreen.
     await expect(studentPage.getByText("What is 2+2?", { exact: true })).toBeVisible({ timeout: 10_000 });
     await studentPage.getByRole("button", { name: /4/i }).click();
     await expect(studentPage.getByText("Answered", { exact: true })).toBeVisible();
     await studentPage.getByRole("button", { name: "Finish", exact: true }).click();
-    await expect(studentPage.getByText("Your score", { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(studentPage.getByText("Assessment complete", { exact: true })).toBeVisible({ timeout: 10_000 });
 
     await lecturerCtx.close();
     await studentCtx.close();

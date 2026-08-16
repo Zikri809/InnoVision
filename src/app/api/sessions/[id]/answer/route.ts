@@ -101,11 +101,10 @@ export async function POST(request: Request, { params }: Params) {
     return jsonError("time_expired", undefined, 403);
   }
   if (payload?.error === "already_answered") {
-    // Payload passed through, key-mapped only — never synthesized. `isCorrect`
-    // is only present in assessment; the route never adds correctIndex/
-    // explanation here (I10 pins the 409 body).
+    // Payload passed through, key-mapped only — never synthesized. Pre-reveal
+    // the assessment replay carries NO is_correct (keyless; I10 pins the 409).
     return NextResponse.json(
-      { error: "already_answered", isCorrect: payload.is_correct ?? null },
+      { error: "already_answered" },
       { status: 409, headers: { "content-type": "application/json" } },
     );
   }
@@ -113,7 +112,13 @@ export async function POST(request: Request, { params }: Params) {
     return jsonError(String(payload.error), undefined, 400);
   }
 
-  if (payload && "is_correct" in payload && payload.error === undefined) {
+  // Success gate accepts BOTH the practice payload (is_correct) and the
+  // assessment keyless ack (`recorded: true`) — never requires is_correct.
+  if (
+    payload &&
+    payload.error === undefined &&
+    ("is_correct" in payload || payload.recorded === true)
+  ) {
     return NextResponse.json(mapAnswerPayload(payload), {
       status: 200,
       headers: { "content-type": "application/json" },
@@ -125,12 +130,14 @@ export async function POST(request: Request, { params }: Params) {
 }
 
 /**
- * Mechanical snake→camel mapping of the RPC's success payload. The route never
- * decides practice vs assessment — whatever keys the RPC returned are re-keyed
- * as-is. `explanation` is omitted when null (U-T/PLAN §1).
+ * Mechanical snake→camel mapping of the RPC's success payload. Only keys the
+ * RPC actually returned are re-keyed — assessment's keyless ack passes through
+ * as `{ recorded: true }`, never a synthesized correctness.
  */
 function mapAnswerPayload(payload: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = { isCorrect: payload.is_correct };
+  const out: Record<string, unknown> = {};
+  if ("is_correct" in payload) out.isCorrect = payload.is_correct;
+  if ("recorded" in payload) out.recorded = payload.recorded === true;
   if ("correct_index" in payload) out.correctIndex = payload.correct_index;
   if ("explanation" in payload && payload.explanation != null) {
     out.explanation = payload.explanation;

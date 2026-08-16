@@ -31,7 +31,7 @@ type Quiz = {
 type SeedAnswer = {
   question_id: string;
   selected_index: number;
-  is_correct: boolean;
+  is_correct: boolean | null;
 };
 
 export type AnswerState = {
@@ -115,7 +115,7 @@ export function PlayClient({
     for (const a of initialAnswers) {
       seed[a.question_id] = {
         selectedIndex: a.selected_index,
-        isCorrect: a.is_correct,
+        isCorrect: a.is_correct === true,
         seeded: true,
       };
     }
@@ -127,7 +127,7 @@ export function PlayClient({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [remainingMs, setRemainingMs] = useState<number | null>(initialRemainingMs);
-  const [result, setResult] = useState<{ score: number; total: number } | null>(null);
+  const [result, setResult] = useState<{ score: number | null; total: number | null } | null>(null);
   const [holdProgress, setHoldProgress] = useState<HoldProgress | null>(null);
   const [gestureActive, setGestureActive] = useState(false);
   const [faceStatus, setFaceStatus] = useState<FaceStatus>(face?.initialFaceStatus ?? "off");
@@ -279,9 +279,12 @@ export function PlayClient({
           body = await res.json().catch(() => ({}));
         }
 
-        // Shape-validate the SUCCESS body: `isCorrect` must be a boolean, or
-        // the response is malformed and we should NOT fabricate feedback.
-        if (res.ok && typeof body.isCorrect !== "boolean") {
+        // Shape-validate the SUCCESS body: practice requires `isCorrect:boolean`;
+        // assessment 200 is a KEYLESS ack (`recorded:true`, no correctness). If
+        // neither shape matches, the response is malformed — do NOT fabricate.
+        const isPracticeAck = isPractice && typeof body.isCorrect === "boolean";
+        const isAssessmentAck = !isPractice && body.recorded === true;
+        if (res.ok && !isPracticeAck && !isAssessmentAck) {
           setError("Unexpected server response. Refresh to see your answer.");
           setPhaseAndRef("question");
           return;
@@ -289,12 +292,13 @@ export function PlayClient({
 
         if (res.status === 409 && body.error === "already_answered") {
           // Assessment re-answer (e.g. resume racing an in-flight answer):
-          // render the existing feedback and advance.
+          // render answered state from the selected index only — the replay
+          // carries NO correctness pre-reveal (keyless, PLAN v4 §4).
           setAnswers((prev) => ({
             ...prev,
             [question.id]: {
               selectedIndex: optionIndex,
-              isCorrect: Boolean(body.isCorrect),
+              isCorrect: isPractice ? Boolean(body.isCorrect) : false,
             },
           }));
           setPhaseAndRef("feedback");
@@ -387,7 +391,9 @@ export function PlayClient({
           ...prev,
           [question.id]: {
             selectedIndex: optionIndex,
-            isCorrect: Boolean(body.isCorrect),
+            isCorrect: isPractice
+              ? Boolean(body.isCorrect)
+              : false, // assessment: keyless ack — neutral "answered" state
             ...(body.correctIndex !== undefined ? { correctIndex: body.correctIndex as number } : {}),
             ...(body.explanation !== undefined ? { explanation: body.explanation as string } : {}),
           },
@@ -438,9 +444,13 @@ export function PlayClient({
       }
 
       if (res.status === 409 && body.error === "already_submitted") {
-        // Terminal success — render the end state from the payload. The 409
-        // body always carries score/total; fall back to the question count.
-        setResult({ score: (body.score as number) ?? 0, total: (body.total as number) ?? questions.length });
+        // Terminal success — render the end state from the payload. For a
+        // hidden assessment the RPC returns score:null; render the "awaiting
+        // release" submitted card (no fabricated 0/N).
+        setResult({
+          score: typeof body.score === "number" ? body.score : null,
+          total: typeof body.total === "number" ? body.total : questions.length,
+        });
         setPhaseAndRef("submitted");
         router.refresh();
         return;
@@ -481,15 +491,18 @@ export function PlayClient({
         return;
       }
 
-      // Shape-validate the SUCCESS body: score/total must be numbers, or the
-      // response is malformed and we must NOT render a fabricated score.
-      if (typeof body.score !== "number" || typeof body.total !== "number") {
+      // Shape-validate the SUCCESS body: score may be a number (revealed) OR
+      // null (assessment awaiting release); total defaults to question count.
+      if (body.session == null || !("score" in body)) {
         setError("Unexpected server response. Refresh to see your result.");
         setPhaseAndRef(phaseRef.current === "timeUp" ? "timeUp" : "question");
         return;
       }
 
-      setResult({ score: body.score as number, total: body.total as number });
+      setResult({
+        score: typeof body.score === "number" ? body.score : null,
+        total: typeof body.total === "number" ? body.total : questions.length,
+      });
       setPhaseAndRef("submitted");
       // Render the end state immediately (above) THEN refresh to reconcile
       // with the DB (single source of truth when it lands).
@@ -539,19 +552,32 @@ export function PlayClient({
   }
 
   if (phase === "submitted" && result) {
-    const pct = result.total > 0 ? Math.round((result.score / result.total) * 100) : 0;
+    const pct =
+      result.score != null && result.total != null && result.total > 0
+        ? Math.round((result.score / result.total) * 100)
+        : 0;
     return (
       <div className="mx-auto max-w-2xl px-4 py-12">
         <div className="rounded-[28px] border-[3px] border-border bg-card p-8 text-center shadow-[var(--shadow-clay)] md:p-10" role="status">
           <p className="text-sm font-extrabold uppercase tracking-wide text-muted-foreground">
-            {isPractice ? "Practice complete" : "Assessment submitted"}
+            {isPractice ? "Practice complete" : result.score != null ? "Assessment complete" : "Assessment submitted"}
           </p>
           <h1 className="mt-1 font-heading text-2xl font-semibold [text-wrap:balance]">{quiz.title}</h1>
-          <p className="mt-6 font-heading text-6xl font-bold text-primary">
-            {result.score}
-            <span className="text-3xl text-muted-foreground"> / {result.total}</span>
-          </p>
-          <p className="mt-1 text-sm font-extrabold text-muted-foreground">{pct}% correct</p>
+          {result.score != null ? (
+            <>
+              <p className="mt-6 font-heading text-6xl font-bold text-primary">
+                {result.score}
+                <span className="text-3xl text-muted-foreground"> / {result.total}</span>
+              </p>
+              <p className="mt-1 text-sm font-extrabold text-muted-foreground">{pct}% correct</p>
+            </>
+          ) : (
+            <div className="mx-auto mt-6 max-w-md rounded-2xl border-[3px] border-border bg-muted/50 px-5 py-4" role="status">
+              <p className="font-heading text-base font-semibold">
+                Submitted ✓ — results will be released by your lecturer.
+              </p>
+            </div>
+          )}
           {isPractice && (
             <p className="mx-auto mt-5 max-w-md text-sm font-semibold text-muted-foreground">
               Practice again any time — each attempt creates a new session.

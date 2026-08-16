@@ -58,10 +58,10 @@ test.describe("E2b — Regenerate a single question (draft only)", () => {
     await registerUser(page, LECTURER_EMAIL, "lecturer", LECTURER_INVITE_CODE);
     await createDraftQuizWithQuestions(page, "E2b Physics", "Chapter 2: Motion");
 
-    // Register the confirm-dialog handler BEFORE clicking Regenerate.
-    page.on("dialog", (d) => d.accept());
+    // Open the regenerate modal and submit.
     const regenButtons = page.getByRole("button", { name: "Regenerate question" });
     await regenButtons.first().click();
+    await page.getByRole("button", { name: /regenerate with ai/i }).click();
 
     // The mock AI server returns "REPLACED: What is acceleration?".
     await expect(

@@ -92,7 +92,7 @@ const QuizFieldsSchema = z.object({
     .number()
     .int("Time limit must be a whole number of seconds.")
     .min(1, "Time limit must be at least 1 second.")
-    .max(7200, "Time limit must be at most 2 hours.")
+    .max(72 * 3600, "Time limit must be at most 72 hours.")
     .nullable()
     .optional(),
 });
@@ -117,6 +117,13 @@ export type CreateQuizInput = z.infer<typeof CreateQuizSchema>;
 export const UpdateQuizSchema = QuizFieldsSchema.partial();
 
 export type UpdateQuizInput = z.infer<typeof UpdateQuizSchema>;
+
+/** Reveal-settings payload: the assessment auto-reveal toggle. */
+export const RevealSettingsSchema = z.object({
+  autoRevealOnComplete: z.boolean(),
+});
+
+export type RevealSettingsInput = z.infer<typeof RevealSettingsSchema>;
 
 /** Reorder payload: the exact ordered set of question ids (draft only). */
 export const ReorderSchema = z.object({

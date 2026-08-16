@@ -370,8 +370,8 @@ describe("I-S11 — submit RPC not_owner → 404", () => {
   });
 });
 
-describe("I7 — assessment answer happy path → { isCorrect } only, no key", () => {
-  it("returns isCorrect and NO correctIndex/explanation", async () => {
+describe("I7 — assessment answer happy path → keyless ack, no correctness", () => {
+  it("returns { recorded: true } and NO isCorrect/correctIndex/explanation", async () => {
     const ctx = playContext({ mode: "assessment" });
     ctx.client.seedSession({
       id: "00000000-0000-4000-8000-0000000000aa",
@@ -385,7 +385,8 @@ describe("I7 — assessment answer happy path → { isCorrect } only, no key", (
     });
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual({ isCorrect: true });
+    expect(body).toEqual({ recorded: true });
+    expect("isCorrect" in body).toBe(false);
     expect("correctIndex" in body).toBe(false);
     expect("explanation" in body).toBe(false);
   });
@@ -465,8 +466,8 @@ describe("I9b — RPC session_not_active → 409", () => {
   });
 });
 
-describe("I10 — assessment re-answer → 409 already_answered with payload passthrough", () => {
-  it("returns 409 { error: 'already_answered', isCorrect } and no key", async () => {
+describe("I10 — assessment re-answer → 409 already_answered, keyless (no isCorrect)", () => {
+  it("returns 409 { error: 'already_answered' } and no correctness", async () => {
     const ctx = playContext({ mode: "assessment" });
     ctx.client.seedSession({
       id: "00000000-0000-4000-8000-0000000000aa",
@@ -487,7 +488,8 @@ describe("I10 — assessment re-answer → 409 already_answered with payload pas
     });
     expect(res.status).toBe(409);
     const body = await res.json();
-    expect(body).toEqual({ error: "already_answered", isCorrect: true });
+    expect(body).toEqual({ error: "already_answered" });
+    expect("isCorrect" in body).toBe(false);
     expect("correctIndex" in body).toBe(false);
     expect("explanation" in body).toBe(false);
   });
@@ -592,8 +594,8 @@ describe("I12 — submit happy path → 200 with completed session + score", () 
   });
 });
 
-describe("I-S15 — submit with no answers → 200 score 0", () => {
-  it("returns score 0 / total N", async () => {
+describe("I-S15 — submit with no answers → 200 score 0 (revealed)", () => {
+  it("returns score 0 / total N when the assessment is revealed", async () => {
     const ctx = playContext();
     ctx.client.seedSession({
       id: "00000000-0000-4000-8000-0000000000aa",
@@ -602,6 +604,8 @@ describe("I-S15 — submit with no answers → 200 score 0", () => {
       mode: "assessment",
       status: "active",
     });
+    // Reveal the quiz → the submit RPC returns the score.
+    ctx.client.tables["quizzes"]![0].results_revealed_at = "2026-01-01T00:00:00Z";
     const res = await submit.POST(req(), {
       params: Promise.resolve({ id: "00000000-0000-4000-8000-0000000000aa" }),
     });
@@ -610,10 +614,50 @@ describe("I-S15 — submit with no answers → 200 score 0", () => {
     expect(body.score).toBe(0);
     expect(body.total).toBe(3);
   });
+
+  it("returns score null / total null for a hidden assessment", async () => {
+    const ctx = playContext();
+    ctx.client.seedSession({
+      id: "00000000-0000-4000-8000-0000000000aa",
+      quiz_id: QUIZ_C,
+      student_id: STUDENT_ID,
+      mode: "assessment",
+      status: "active",
+    });
+    // NOT revealed → score/total are null (PLAN v4 §5).
+    const res = await submit.POST(req(), {
+      params: Promise.resolve({ id: "00000000-0000-4000-8000-0000000000aa" }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.score).toBeNull();
+    expect(body.total).toBeNull();
+  });
 });
 
-describe("I13 — submit already submitted → 409 already_submitted, score unchanged", () => {
-  it("returns 409 with the existing payload", async () => {
+describe("I13 — submit already submitted → 409 already_submitted, score reveal-gated", () => {
+  it("returns 409 with the revealed score", async () => {
+    const ctx = playContext();
+    ctx.client.seedSession({
+      id: "00000000-0000-4000-8000-0000000000aa",
+      quiz_id: QUIZ_C,
+      student_id: STUDENT_ID,
+      mode: "assessment",
+      status: "completed",
+      score: 2,
+      submitted_at: "2026-01-01T00:02:00Z",
+    });
+    ctx.client.tables["quizzes"]![0].results_revealed_at = "2026-01-01T00:00:00Z";
+    const res = await submit.POST(req(), {
+      params: Promise.resolve({ id: "00000000-0000-4000-8000-0000000000aa" }),
+    });
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toBe("already_submitted");
+    expect(body.score).toBe(2);
+  });
+
+  it("returns 409 with score null for a hidden assessment", async () => {
     const ctx = playContext();
     ctx.client.seedSession({
       id: "00000000-0000-4000-8000-0000000000aa",
@@ -630,7 +674,8 @@ describe("I13 — submit already submitted → 409 already_submitted, score unch
     expect(res.status).toBe(409);
     const body = await res.json();
     expect(body.error).toBe("already_submitted");
-    expect(body.score).toBe(2);
+    expect(body.score).toBeNull();
+    expect(body.total).toBeNull();
   });
 });
 

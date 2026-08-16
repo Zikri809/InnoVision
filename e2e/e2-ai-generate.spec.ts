@@ -83,15 +83,26 @@ test.describe("E2 — AI quiz from a PDF is editable and publishable", () => {
       lecturerPage.getByText("Which unit is force measured in?", { exact: true }),
     ).toBeVisible();
 
-    // ── 4. Edit one question → publish → edited text persists ──
+    // ── 4. Edit one question (with cancel + save test) → publish ──
     const editButtons = lecturerPage.getByRole("button", { name: "Edit question" });
     await editButtons.first().click();
+
+    // 4a. Test cancel: discard edits and ensure original question is unchanged.
     const promptBox = lecturerPage.getByRole("textbox", { name: "Question" });
-    await promptBox.fill("What is velocity in a straight line?");
+    await promptBox.fill("Dirty discard prompt");
+    await lecturerPage.getByRole("button", { name: /cancel/i }).click();
+    await expect(lecturerPage.getByRole("heading", { name: /edit question/i })).not.toBeVisible();
+    await expect(lecturerPage.getByText("What is velocity?", { exact: true })).toBeVisible();
+
+    // 4b. Test save: reopen dialog, save changes, and verify persistence.
+    await editButtons.first().click();
+    await expect(lecturerPage.getByRole("heading", { name: /edit question/i })).toBeVisible();
+    await lecturerPage.getByRole("textbox", { name: "Question" }).fill("What is velocity in a straight line?");
     await lecturerPage.getByRole("button", { name: /save changes/i }).click();
     await expect(
       lecturerPage.getByText("What is velocity in a straight line?", { exact: true }),
     ).toBeVisible();
+    await expect(lecturerPage.getByRole("heading", { name: /edit question/i })).not.toBeVisible();
 
     const publishButton = lecturerPage.getByRole("button", { name: /publish/i });
     await expect(publishButton).toBeEnabled();

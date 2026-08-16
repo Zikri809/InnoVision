@@ -247,10 +247,10 @@ async function main() {
     const second = await clientS1.rpc("answer_question", {
       p_session_id: sessionId, p_question_id: q1.id, p_selected_index: q1.correct_index === 0 ? 1 : 0,
     });
-    const answers = await clientS1.from("session_answers").select("question_id, selected_index, is_correct")
+    const answers = await clientA.from("lecturer_answers_view").select("question_id, selected_index, is_correct")
       .eq("session_id", sessionId).eq("question_id", q1.id);
     record("D1b assessment re-answer → already_answered, first answer unchanged",
-      first.data?.is_correct === true &&
+      first.data?.recorded === true &&
         second.data?.error === "already_answered" &&
         (answers.data ?? []).length === 1 &&
         answers.data[0].selected_index === q1.correct_index &&
@@ -356,7 +356,7 @@ async function main() {
       p_question_id: q1.id,
       p_selected_index: q1.correct_index === 0 ? 1 : 0,
     });
-    const rows = await clientS1.from("session_answers").select("selected_index, is_correct, answered_at")
+    const rows = await clientS1.from("student_answers_view").select("selected_index, is_correct, answered_at")
       .eq("session_id", sessionId).eq("question_id", q1.id);
     record("D9 practice duplicate answer → upsert (updated), one row",
       first.data?.is_correct === true &&
@@ -382,20 +382,37 @@ async function main() {
       p_question_id: qs[1].id,
       p_selected_index: qs[1].correct_index === 0 ? 1 : 0,
     });
-    const stored = await clientS1.from("session_answers").select("question_id, is_correct")
+    const stored = await clientA.from("lecturer_answers_view").select("question_id, is_correct")
       .eq("session_id", sessionId);
-    const submit = await clientS1.rpc("submit_session", { p_session_id: sessionId });
-    const shapeAssessment = r1.data && "is_correct" in r1.data && !("correct_index" in r1.data);
-    record("D44 assessment: grading + stored is_correct + score/total + shape {is_correct}",
-      r1.data?.is_correct === true &&
-        r2.data?.is_correct === false &&
+
+    // Assessment answers are KEYLESS pre-reveal ('recorded' ack, no is_correct).
+    const submitHidden = await clientS1.rpc("submit_session", { p_session_id: sessionId });
+    const shapeAssessment = r1.data && "recorded" in r1.data && !("is_correct" in r1.data);
+    const hiddenShape =
+      submitHidden.data?.score === null && submitHidden.data?.total === null;
+    record("D44 assessment: stored is_correct + keyless ack + hidden submit",
+      r1.data?.recorded === true &&
+        r2.data?.recorded === true &&
         (stored.data ?? []).length === 2 &&
         stored.data.find((a) => a.question_id === qs[0].id)?.is_correct === true &&
         stored.data.find((a) => a.question_id === qs[1].id)?.is_correct === false &&
-        submit.data?.score === 1 && submit.data?.total === 3 &&
-        submit.data?.session?.status === "completed" &&
+        Boolean(hiddenShape) &&
+        submitHidden.data?.session?.status === "completed" &&
         Boolean(shapeAssessment),
-      `submit=${JSON.stringify(submit.data)} shape=${JSON.stringify(r1.data)}`);
+      `submitHidden=${JSON.stringify(submitHidden.data)} shape=${JSON.stringify(r1.data)}`);
+
+    // Reveal → re-submit (already_submitted) now returns the numeric score.
+    const { error: revealErr } = await clientA
+      .from("quizzes")
+      .update({ results_revealed_at: new Date().toISOString() })
+      .eq("id", quiz.id);
+    assertNoError("D44 reveal", { error: revealErr });
+    const submitRevealed = await clientS1.rpc("submit_session", { p_session_id: sessionId });
+    record("D44 post-reveal submit → score/total returned",
+      submitRevealed.data?.score === 1 &&
+        submitRevealed.data?.total === 3 &&
+        submitRevealed.data?.already_submitted === true,
+      JSON.stringify(submitRevealed.data));
 
     // Practice shape includes correct_index + explanation.
     const pQuiz = await makeQuiz({ title: "D44 Practice Shape", mode: "practice" });
@@ -476,13 +493,22 @@ async function main() {
     });
     const lateAnswers = await clientS1.from("session_answers").select("question_id")
       .eq("session_id", sessionId);
+    const submitHidden = await clientS1.rpc("submit_session", { p_session_id: sessionId });
+
+    // Reveal then re-submit → the stored (hidden → shown) score surfaces.
+    const { error: revealErr } = await clientA
+      .from("quizzes")
+      .update({ results_revealed_at: new Date().toISOString() })
+      .eq("id", quiz.id);
+    assertNoError("D45 reveal", { error: revealErr });
     const submit = await clientS1.rpc("submit_session", { p_session_id: sessionId });
     record("D45 late answer → time_expired, NO answer row; late submit SUCCEEDS",
       late.data?.error === "time_expired" &&
         (lateAnswers.data ?? []).length === 1 && // only the in-time answer
+        submitHidden.data?.score === null && // hidden pre-reveal
         submit.data?.score === 1 && submit.data?.total === 3 &&
         submit.data?.session?.status === "completed",
-      `late=${JSON.stringify(late.data)} answerRows=${(lateAnswers.data ?? []).length} submit=${JSON.stringify(submit.data)}`);
+      `late=${JSON.stringify(late.data)} answerRows=${(lateAnswers.data ?? []).length} hidden=${JSON.stringify(submitHidden.data)} submit=${JSON.stringify(submit.data)}`);
   }
 
   // ── D46: RLS cross-student + answer-after-submit → session_not_active ──
@@ -588,6 +614,136 @@ async function main() {
         (anonAnswers.data ?? []).length === 0 &&
         (anonView.data ?? []).length === 0,
       `sessions=${(anonSessions.data ?? []).length} answers=${(anonAnswers.data ?? []).length} view=${(anonView.data ?? []).length}`);
+  }
+
+  // ── D48: student_results matrix (PLAN v4 §6) ────────────────────
+  {
+    const quiz = await makeQuiz({ title: "D48 Results", mode: "assessment" });
+    const qs = await addQuestions(quiz.id, QUESTION_TEMPLATE);
+    await publish(quiz.id);
+
+    // Enrolled student S1 answers + submits.
+    const start = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
+    const sessionId = start.data.session.id;
+    await clientS1.rpc("answer_question", {
+      p_session_id: sessionId, p_question_id: qs[0].id, p_selected_index: qs[0].correct_index,
+    });
+    await clientS1.rpc("submit_session", { p_session_id: sessionId });
+
+    // Hidden → not_revealed (single no-oracle).
+    const hidden = await clientS1.rpc("student_results", { p_quiz_id: quiz.id });
+    record("D48 hidden assessment → student_results not_revealed",
+      hidden.data?.error === "not_revealed", JSON.stringify(hidden.data));
+
+    // Reveal → score + breakdown (questions, options, selected_index,
+    // correct_index, explanation — D10-safe POST-reveal disclosure).
+    const { error: revealErr } = await clientA
+      .from("quizzes")
+      .update({ results_revealed_at: new Date().toISOString() })
+      .eq("id", quiz.id);
+    assertNoError("D48 reveal", { error: revealErr });
+    const revealed = await clientS1.rpc("student_results", { p_quiz_id: quiz.id });
+    const js = revealed.data?.questions ?? [];
+    record("D48 revealed → score/total + ordered breakdown",
+      revealed.data?.score === 1 &&
+        revealed.data?.total === 3 &&
+        Array.isArray(js) && js.length === 3 &&
+        js.every((q, i) => q.order_index === i) &&
+        js.some((q) => q.correct_index !== undefined) &&
+        js.some((q) => typeof q.explanation === "string"),
+      JSON.stringify(revealed.data));
+
+    // Non-enrolled S2 → not_revealed even post-reveal.
+    const nonEnrolled = await clientS2.rpc("student_results", { p_quiz_id: quiz.id });
+    record("D48 non-enrolled student → student_results not_revealed",
+      nonEnrolled.data?.error === "not_revealed", JSON.stringify(nonEnrolled.data));
+  }
+
+  // ── D49: practice student_results → most recent completed session ──
+  {
+    const quiz = await makeQuiz({ title: "D49 Practice Results", mode: "practice" });
+    await addQuestions(quiz.id, QUESTION_TEMPLATE);
+    await publish(quiz.id);
+    const sA = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
+    await clientS1.rpc("submit_session", { p_session_id: sA.data.session.id });
+    const sB = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
+    const qs = (await clientA.from("questions").select("id, correct_index").eq("quiz_id", quiz.id).order("order_index")).data;
+    await clientS1.rpc("answer_question", {
+      p_session_id: sB.data.session.id, p_question_id: qs[0].id, p_selected_index: qs[0].correct_index,
+    });
+    await clientS1.rpc("submit_session", { p_session_id: sB.data.session.id });
+    const res = await clientS1.rpc("student_results", { p_quiz_id: quiz.id });
+    record("D49 practice → most recent completed session (score from session 2)",
+      res.data?.score === 1 && res.data?.total === 3,
+      JSON.stringify(res.data));
+  }
+
+  // ── D50: one-way reveal trigger ────────────────────────────────
+  {
+    const quiz = await makeQuiz({ title: "D50 One-Way", mode: "assessment" });
+    await addQuestions(quiz.id, QUESTION_TEMPLATE);
+    await publish(quiz.id);
+    const { error: revealErr } = await clientA
+      .from("quizzes")
+      .update({ results_revealed_at: new Date().toISOString() })
+      .eq("id", quiz.id);
+    assertNoError("D50 first reveal", { error: revealErr });
+
+    // Changing the revealed timestamp → trigger raises reveal_once_only.
+    const { error: revertErr } = await clientA
+      .from("quizzes")
+      .update({ results_revealed_at: new Date().toISOString() })
+      .eq("id", quiz.id);
+    record("D50 reveal is one-way (trigger rejects a change from non-null)",
+      revertErr != null &&
+        (revertErr.message?.includes("reveal_once_only") ||
+          revertErr.message?.includes("revert")),
+      revertErr?.message ?? "no error");
+
+    // Same-value no-op passes (idempotent).
+    const row = (await clientA.from("quizzes").select("results_revealed_at").eq("id", quiz.id)).data?.[0];
+    const { error: sameErr } = await clientA
+      .from("quizzes")
+      .update({ results_revealed_at: row.results_revealed_at })
+      .eq("id", quiz.id);
+    record("D50 same-value reveal update is a no-op (idempotent)",
+      !sameErr, sameErr?.message ?? "");
+  }
+
+  // ── D51: auto-reveal fires exactly once on the LAST submit ────
+  {
+    const quiz = await makeQuiz({ title: "D51 AutoReveal", mode: "assessment" });
+    const qs = await addQuestions(quiz.id, QUESTION_TEMPLATE);
+    await publish(quiz.id);
+    // Lecturer enables auto_reveal_on_complete (live quiz — editable flag).
+    const { error: flagErr } = await clientA
+      .from("quizzes")
+      .update({ auto_reveal_on_complete: true })
+      .eq("id", quiz.id);
+    assertNoError("D51 flag", { error: flagErr });
+
+    // Two enrolled students S1 + S3 both start; S3 finishes LAST → reveal fires.
+    const s1 = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
+    const s3 = await clientS3.rpc("start_quiz_session", { p_quiz_id: quiz.id });
+    const q1 = qs[0];
+    await clientS1.rpc("answer_question", {
+      p_session_id: s1.data.session.id, p_question_id: q1.id, p_selected_index: q1.correct_index,
+    });
+    const sub1 = await clientS1.rpc("submit_session", { p_session_id: s1.data.session.id });
+    const s1RevealState = (await clientA.from("quizzes").select("results_revealed_at").eq("id", quiz.id)).data?.[0];
+    record("D51 first submit: active session remains → NOT revealed",
+      sub1.data?.score === null && s1RevealState?.results_revealed_at == null,
+      `score=${sub1.data?.score} revealed=${s1RevealState?.results_revealed_at ?? "null"}`);
+
+    // S3 answers correctly too — score 1 is what the auto-reveal must surface.
+    await clientS3.rpc("answer_question", {
+      p_session_id: s3.data.session.id, p_question_id: q1.id, p_selected_index: q1.correct_index,
+    });
+    const sub3 = await clientS3.rpc("submit_session", { p_session_id: s3.data.session.id });
+    const s3State = (await clientA.from("quizzes").select("results_revealed_at").eq("id", quiz.id)).data?.[0];
+    record("D51 last submit → auto-reveal fires, score returned in same response",
+      sub3.data?.score === 1 && s3State?.results_revealed_at != null,
+      `score=${sub3.data?.score} revealed=${s3State?.results_revealed_at ?? "null"}`);
   }
 
   // ── Summary ──────────────────────────────────────────────────

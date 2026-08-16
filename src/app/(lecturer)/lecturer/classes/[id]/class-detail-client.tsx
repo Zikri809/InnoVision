@@ -20,7 +20,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Check, Copy } from "lucide-react";
+import { formatDuration } from "@/lib/format/duration";
 
 type ClassInfo = {
   id: string;
@@ -86,11 +87,23 @@ export function ClassDetailClient({
   const router = useRouter();
   const [title, setTitle] = useState("");
   const [mode, setMode] = useState<"practice" | "assessment">("practice");
-  const [timeLimitSec, setTimeLimitSec] = useState("");
+  const [hours, setHours] = useState("");
+  const [minutes, setMinutes] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   // Ref lock guards against a fast double-click before React re-renders.
   const submitLock = useRef(false);
+
+  async function copyJoinCode() {
+    try {
+      await navigator.clipboard.writeText(cls.join_code);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setError("Could not copy the join code.");
+    }
+  }
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -105,7 +118,10 @@ export function ClassDetailClient({
         body: JSON.stringify({
           title,
           mode,
-          timeLimitSec: timeLimitSec === "" ? null : Number(timeLimitSec),
+          timeLimitSec:
+            hours === "" && minutes === ""
+              ? null
+              : Number(hours || 0) * 3600 + Number(minutes || 0) * 60,
         }),
       });
       const body = await res.json();
@@ -114,7 +130,8 @@ export function ClassDetailClient({
         return;
       }
       setTitle("");
-      setTimeLimitSec("");
+      setHours("");
+      setMinutes("");
       router.refresh();
     } catch {
       setError("Network error creating quiz.");
@@ -146,9 +163,24 @@ export function ClassDetailClient({
             {/* Join code */}
             <div className="rounded-2xl border-[3px] border-border bg-card px-5 py-4 text-center shadow-[var(--shadow-clay-sm)]">
               <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted-foreground">Join code</p>
-              <p className="mt-0.5 font-heading text-2xl font-bold tracking-[0.3em] text-primary">
-                {cls.join_code}
-              </p>
+              <div className="mt-0.5 flex items-center justify-center gap-2">
+                <p className="font-heading text-2xl font-bold tracking-[0.3em] text-primary">
+                  {cls.join_code}
+                </p>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={copyJoinCode}
+                  aria-label={copied ? "Join code copied" : "Copy join code"}
+                >
+                  {copied ? (
+                    <Check className="size-4" aria-hidden />
+                  ) : (
+                    <Copy className="size-4" aria-hidden />
+                  )}
+                </Button>
+              </div>
             </div>
           </div>
         </div>
@@ -191,20 +223,43 @@ export function ClassDetailClient({
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1">
-                <Label htmlFor="quiz-time-limit" className="sr-only">
-                  Time limit (seconds)
-                </Label>
-                <Input
-                  id="quiz-time-limit"
-                  type="number"
-                  min={1}
-                  max={7200}
-                  placeholder="Time limit (s)"
-                  value={timeLimitSec}
-                  onChange={(e) => setTimeLimitSec(e.target.value)}
-                  className="w-40"
-                />
+              <div className="flex items-end gap-1.5">
+                <div className="space-y-1">
+                  <Label htmlFor="quiz-time-hours" className="sr-only">
+                    Time limit (hours)
+                  </Label>
+                  <Input
+                    id="quiz-time-hours"
+                    type="number"
+                    min={0}
+                    max={72}
+                    placeholder="0"
+                    value={hours}
+                    onChange={(e) =>
+                      setHours(Math.max(0, Math.min(72, Number(e.target.value) || 0)).toString())
+                    }
+                    className="w-16 text-center placeholder:text-center [appearance:textfield] [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  />
+                </div>
+                <span aria-hidden className="pb-2.5 text-xs font-extrabold text-muted-foreground">h</span>
+                <div className="space-y-1">
+                  <Label htmlFor="quiz-time-minutes" className="sr-only">
+                    Time limit (minutes)
+                  </Label>
+                  <Input
+                    id="quiz-time-minutes"
+                    type="number"
+                    min={0}
+                    max={59}
+                    placeholder="0"
+                    value={minutes}
+                    onChange={(e) =>
+                      setMinutes(Math.max(0, Math.min(59, Number(e.target.value) || 0)).toString())
+                    }
+                    className="w-16 text-center placeholder:text-center [appearance:textfield] [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  />
+                </div>
+                <span aria-hidden className="pb-2.5 text-xs font-extrabold text-muted-foreground">min</span>
               </div>
             </div>
             <div className="flex items-center justify-between gap-3">
@@ -243,7 +298,7 @@ export function ClassDetailClient({
                     <div className="flex shrink-0 items-center gap-3">
                       {q.mode === "assessment" && q.time_limit_sec != null && (
                         <span className="text-xs font-bold tabular-nums text-muted-foreground">
-                          {q.time_limit_sec}s
+                          {formatDuration(q.time_limit_sec)}
                         </span>
                       )}
                       <span

@@ -4,10 +4,12 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { ArrowLeft } from "lucide-react";
+import { formatDuration } from "@/lib/format/duration";
+import { ArrowLeft, Check, Megaphone } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
@@ -83,6 +85,8 @@ export function ResultsDashboardClient({
   mode,
   status,
   timeLimitSec,
+  resultsRevealedAt,
+  autoRevealOnComplete,
   totalQuestions,
   truncated,
   rows,
@@ -93,6 +97,8 @@ export function ResultsDashboardClient({
   mode: string;
   status: string;
   timeLimitSec: number | null;
+  resultsRevealedAt: string | null;
+  autoRevealOnComplete: boolean;
   totalQuestions: number;
   truncated: boolean;
   rows: ResultsSessionRow[];
@@ -114,6 +120,63 @@ export function ResultsDashboardClient({
   // Reset confirm dialog.
   const [resetRow, setResetRow] = useState<string | null>(null);
   const [resetCooled, setResetCooled] = useState(false);
+
+  // Reveal (one-way, assessment only). Confirm dialog + revealing state.
+  const [revealOpen, setRevealOpen] = useState(false);
+  const [revealing, setRevealing] = useState(false);
+  const [autoReveal, setAutoReveal] = useState(autoRevealOnComplete);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [revealError, setRevealError] = useState<string | null>(null);
+
+  const isAssessment = mode === "assessment";
+  const revealed = resultsRevealedAt != null;
+
+  async function handleReveal() {
+    if (revealing) return;
+    setRevealing(true);
+    setRevealError(null);
+    try {
+      const res = await fetch(`/api/quizzes/${quizId}/reveal`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setRevealError(body.message ?? body.error ?? "Could not reveal the results.");
+        return;
+      }
+      setRevealOpen(false);
+      router.refresh();
+    } catch {
+      setRevealError("Network error revealing results.");
+    } finally {
+      setRevealing(false);
+    }
+  }
+
+  async function handleAutoRevealToggle(next: boolean) {
+    if (settingsSaving) return;
+    setSettingsSaving(true);
+    setRevealError(null);
+    try {
+      const res = await fetch(`/api/quizzes/${quizId}/reveal-settings`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ autoRevealOnComplete: next }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setRevealError(body.message ?? body.error ?? "Could not update the setting.");
+        return;
+      }
+      setAutoReveal(next);
+    } catch {
+      setRevealError("Network error updating the setting.");
+    } finally {
+      setSettingsSaving(false);
+    }
+  }
 
   const attempted = rows.length;
   const summary = rows.reduce(
@@ -215,7 +278,7 @@ export function ResultsDashboardClient({
           <h1 className="mt-3 font-heading text-3xl font-semibold [text-wrap:balance]">{quizTitle}</h1>
           <p className="mt-2 text-sm font-semibold text-muted-foreground">
             {mode === "assessment" ? "Assessment" : "Practice"} · {status === "live" ? "Live" : status === "closed" ? "Closed" : "Draft"}
-            {timeLimitSec != null ? ` · ${timeLimitSec}s limit` : ""} · {totalQuestions} questions
+            {timeLimitSec != null ? ` · ${formatDuration(timeLimitSec)} limit` : ""} · {totalQuestions} questions
           </p>
 
           {/* summary stat tiles */}
@@ -239,6 +302,60 @@ export function ResultsDashboardClient({
           </div>
         </div>
       </section>
+
+      {isAssessment && (
+        <Card className="mb-6">
+          <CardContent>
+            {revealed ? (
+              <div className="flex items-center gap-3">
+                <span className="inline-flex items-center gap-2 rounded-full border-[3px] border-emerald-300 bg-emerald-100 px-3.5 py-1 text-xs font-extrabold text-emerald-800">
+                  <Check className="size-3.5" aria-hidden />
+                  Results revealed
+                </span>
+                <p className="text-sm font-semibold text-muted-foreground">
+                  Students can now see their score and answer breakdown.
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="flex min-w-0 items-start gap-3">
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-primary/10 text-primary">
+                    <Megaphone className="size-5" aria-hidden />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="font-heading text-base font-semibold">Results are hidden</p>
+                    <p className="mt-0.5 text-sm font-semibold text-muted-foreground">
+                      {rows.length === 0
+                        ? "No submissions yet. Reveal any time to release scores."
+                        : `${roster.length - completed} of ${roster.length} enrolled students haven't submitted yet.`}
+                    </p>
+                    <label className="mt-2 flex cursor-pointer items-center gap-2 text-sm font-semibold text-foreground">
+                      <Checkbox
+                        checked={autoReveal}
+                        disabled={settingsSaving}
+                        onCheckedChange={(v: boolean) => void handleAutoRevealToggle(v)}
+                      />
+                      Release automatically once every student has finished
+                    </label>
+                    <p className="mt-1 text-xs font-semibold text-muted-foreground">
+                      Auto-reveal fires on the last submit; if nobody finishes, it never
+                      fires (reveal manually any time).
+                    </p>
+                  </div>
+                </div>
+                <Button variant="default" onClick={() => setRevealOpen(true)}>
+                  Reveal to students
+                </Button>
+              </div>
+            )}
+            {revealError && (
+              <p className="mt-3 rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm font-bold text-destructive" role="alert">
+                {revealError}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {truncated && (
         <p className="rounded-2xl border-[3px] border-dashed border-border bg-card px-4 py-3 text-sm font-semibold text-muted-foreground" role="status">
@@ -292,6 +409,12 @@ export function ResultsDashboardClient({
                       )}
                     </div>
                     <div className="flex shrink-0 items-center gap-2.5">
+                      <Link
+                        href={`/lecturer/quizzes/${row.quiz_id}/results/${row.id}`}
+                        className="text-xs font-extrabold text-primary hover:underline"
+                      >
+                        Answers
+                      </Link>
                       <span className={`rounded-full border-[3px] px-2.5 py-0.5 text-xs font-extrabold ${STATUS_CLASS[row.displayStatus]}`}>
                         {STATUS_LABEL[row.displayStatus]}
                       </span>
@@ -332,7 +455,7 @@ export function ResultsDashboardClient({
                   )}
 
                   {expanded[row.id] && (
-                    <div className="mb-3 rounded-2xl border-[3px] border-border bg-muted/40 p-4">
+                    <div className="mb-3 space-y-3 rounded-2xl border-[3px] border-border bg-muted/40 p-4">
                       {row.integrityTimeline.length === 0 && row.legacyHistory.length === 0 && (
                         <p className="text-sm font-semibold text-muted-foreground">No integrity events recorded.</p>
                       )}
@@ -449,6 +572,27 @@ export function ResultsDashboardClient({
               }}
             >
               {busyRows.has(resetRow ?? '') ? "Resetting…" : "Reset attempt"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reveal confirm dialog (one-way, cannot be undone) */}
+      <Dialog open={revealOpen} onOpenChange={(open) => { if (!open) setRevealOpen(false); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reveal answers for all {roster.length} enrolled students?</DialogTitle>
+            <DialogDescription>
+              This cannot be undone. Students who haven&apos;t submitted will see
+              results after they finish.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRevealOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="default" disabled={revealing} onClick={() => void handleReveal()}>
+              {revealing ? "Revealing…" : "Reveal results"}
             </Button>
           </DialogFooter>
         </DialogContent>

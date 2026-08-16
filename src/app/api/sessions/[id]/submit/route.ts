@@ -33,9 +33,11 @@ const SUBMIT_RATE = { limit: 10, windowMs: 60 * 1000 };
  *  - `not_owner` → 404
  *  - `session_not_active` → 409
  *  - `already_submitted` → 409 `{ error: "already_submitted", session, score,
- *    total }` (idempotent re-submit; no score change — I13)
+ *    total }` (idempotent re-submit; no score change — I13). For a hidden
+ *    assessment, `score` is `null` (awaiting release).
  *  - transport error → 503
- *  - success → 200 `{ session, score, total }`
+ *  - success → 200 `{ session, score, total }` — `score`/`total` are `null`
+ *    for an assessment that has not been released yet.
  */
 export async function POST(_request: Request, { params }: Params) {
   const supabase = await createClient();
@@ -83,9 +85,11 @@ export async function POST(_request: Request, { params }: Params) {
     );
   }
 
-  if (payload && payload.session && typeof payload.score === "number") {
+  // Success gate accepts BOTH a revealed score (number) and a hidden
+  // assessment (`score: null` — awaiting release). Never 500 on null.
+  if (payload && payload.session && "score" in payload) {
     return NextResponse.json(
-      { session: payload.session, score: payload.score, total: payload.total ?? 0 },
+      { session: payload.session, score: payload.score ?? null, total: payload.total ?? null },
       { status: 200, headers: { "content-type": "application/json" } },
     );
   }
