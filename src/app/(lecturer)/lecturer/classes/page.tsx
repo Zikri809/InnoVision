@@ -49,5 +49,24 @@ export default async function LecturerClassesPage() {
     );
   }
 
-  return <ClassesPageClient classes={classes ?? []} />;
+  // Quiz counts per class (for the stat tiles + class cards). Lecturer-owned
+  // quizzes are RLS-visible to the owner, so a single grouped fetch is enough.
+  const classIds = (classes ?? []).map((c) => c.id);
+  const countByClass = new Map<string, number>();
+  if (classIds.length > 0) {
+    const { data: quizRows } = await supabase
+      .from("quizzes")
+      .select("class_id")
+      .in("class_id", classIds);
+    for (const q of quizRows ?? []) {
+      if (q.class_id) countByClass.set(q.class_id, (countByClass.get(q.class_id) ?? 0) + 1);
+    }
+  }
+
+  const cards = (classes ?? []).map((c) => ({
+    ...c,
+    quizCount: countByClass.get(c.id) ?? 0,
+  }));
+
+  return <ClassesPageClient classes={cards} />;
 }

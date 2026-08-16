@@ -46,12 +46,31 @@ export default async function StudentClassesPage() {
     );
   }
 
+  // Live-quiz counts per enrolled class (student_quiz_view exposes only LIVE
+  // quizzes from enrolled classes — exactly what the stat tiles should show).
+  const classIds = (classes ?? []).map((c) => c.id).filter(Boolean) as string[];
+  const countByClass = new Map<string, number>();
+  if (classIds.length > 0) {
+    const { data: quizRows } = await supabase
+      .from("student_quiz_view")
+      .select("class_id")
+      .in("class_id", classIds);
+    for (const q of quizRows ?? []) {
+      if (q.class_id) countByClass.set(q.class_id, (countByClass.get(q.class_id) ?? 0) + 1);
+    }
+  }
+
   // The view's generated types mark columns nullable (views can't express
   // NOT NULL to the type generator); the underlying classes columns are NOT
   // NULL, so narrow to the non-null shape the client expects.
   const rows = (classes ?? [])
     .filter((c) => c.id && c.title && c.created_at)
-    .map((c) => ({ id: c.id!, title: c.title!, created_at: c.created_at! }));
+    .map((c) => ({
+      id: c.id!,
+      title: c.title!,
+      created_at: c.created_at!,
+      quizCount: countByClass.get(c.id!) ?? 0,
+    }));
 
   return <StudentClassesClient classes={rows} />;
 }

@@ -67,7 +67,7 @@ export function AppShell({
         </div>
       </header>
 
-      <main id="main" className="mx-auto w-full max-w-6xl flex-1 px-6 py-8">
+      <main id="main" className="mx-auto w-full max-w-6xl flex-1 px-6 py-8 md:py-10">
         {children}
       </main>
     </div>
