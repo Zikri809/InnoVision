@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { UserNav } from "@/components/auth/user-nav";
 import { StudentQuizzesClient } from "./student-quizzes-client";
 
 const QUIZ_LIST_LIMIT = 200;
@@ -14,7 +13,7 @@ export default async function StudentQuizzesPage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role, consent_given_at, face_enrollment_status")
+    .select("role, face_enrollment_status")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -79,12 +78,9 @@ export default async function StudentQuizzesPage() {
     }));
 
   return (
-    <>
-      <header className="flex items-center justify-between border-b px-6 py-3">
-        <span className="font-semibold">InnoVision</span>
-        <UserNav email={user.email ?? ""} consentGiven={Boolean(profile.consent_given_at)} />
-      </header>
-      <StudentQuizzesClient quizzes={quizzesWithClass} enrolled={profile.face_enrollment_status === "enrolled"} />
-    </>
+    <StudentQuizzesClient
+      quizzes={quizzesWithClass}
+      enrolled={profile.face_enrollment_status === "enrolled"}
+    />
   );
 }

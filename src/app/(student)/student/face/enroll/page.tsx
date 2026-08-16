@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { UserNav } from "@/components/auth/user-nav";
 import { FaceEnrollClient } from "./face-enroll-client";
 
 /**
@@ -38,15 +37,9 @@ export default async function FaceEnrollPage() {
   if (profile.role !== "student") redirect("/lecturer/classes");
 
   return (
-    <>
-      <header className="flex items-center justify-between border-b px-6 py-3">
-        <span className="font-semibold">InnoVision</span>
-        <UserNav email={user.email ?? ""} consentGiven={Boolean(profile.consent_given_at)} />
-      </header>
-      <FaceEnrollClient
-        consentGiven={Boolean(profile.consent_given_at)}
-        enrolled={profile.face_enrollment_status === "enrolled"}
-      />
-    </>
+    <FaceEnrollClient
+      consentGiven={Boolean(profile.consent_given_at)}
+      enrolled={profile.face_enrollment_status === "enrolled"}
+    />
   );
 }

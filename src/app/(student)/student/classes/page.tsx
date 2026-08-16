@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { UserNav } from "@/components/auth/user-nav";
 import { StudentClassesClient } from "./student-classes-client";
 
 const CLASS_LIST_LIMIT = 200;
@@ -14,7 +13,7 @@ export default async function StudentClassesPage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role, consent_given_at")
+    .select("role")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -54,13 +53,5 @@ export default async function StudentClassesPage() {
     .filter((c) => c.id && c.title && c.created_at)
     .map((c) => ({ id: c.id!, title: c.title!, created_at: c.created_at! }));
 
-  return (
-    <>
-      <header className="flex items-center justify-between border-b px-6 py-3">
-        <span className="font-semibold">InnoVision</span>
-        <UserNav email={user.email ?? ""} consentGiven={Boolean(profile.consent_given_at)} />
-      </header>
-      <StudentClassesClient classes={rows} />
-    </>
-  );
+  return <StudentClassesClient classes={rows} />;
 }

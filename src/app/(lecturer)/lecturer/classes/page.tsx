@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { UserNav } from "@/components/auth/user-nav";
 import { ClassesPageClient } from "./classes-client";
 
 const CLASS_LIST_LIMIT = 200;
@@ -16,7 +15,7 @@ export default async function LecturerClassesPage() {
   // retry state instead of redirecting to the other role (which would loop).
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role, consent_given_at")
+    .select("role")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -50,13 +49,5 @@ export default async function LecturerClassesPage() {
     );
   }
 
-  return (
-    <>
-      <header className="flex items-center justify-between border-b px-6 py-3">
-        <span className="font-semibold">InnoVision</span>
-        <UserNav email={user.email ?? ""} consentGiven={Boolean(profile.consent_given_at)} />
-      </header>
-      <ClassesPageClient classes={classes ?? []} />
-    </>
-  );
+  return <ClassesPageClient classes={classes ?? []} />;
 }
