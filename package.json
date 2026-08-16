@@ -27,7 +27,8 @@
     "compreface:stop": "docker compose stop compreface-postgres compreface-core compreface-api",
     "compreface:cleanup": "node scripts/compreface-cleanup.mjs",
     "vendor:mediapipe": "node scripts/vendor-mediapipe.mjs",
-    "verify:mediapipe": "node scripts/verify-mediapipe.mjs"
+    "verify:mediapipe": "node scripts/verify-mediapipe.mjs",
+    "seed:demo": "node scripts/seed-demo.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
