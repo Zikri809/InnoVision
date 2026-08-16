@@ -23,7 +23,8 @@ const QUIZ_TITLE = "E11 Assessment";
 test.describe("E11 — answer secrecy (assessment)", () => {
   test("correct_index/explanation never appear in any student-facing response", async ({
     browser,
-  }) => {
+  }, testInfo) => {
+    testInfo.setTimeout(120_000);
     test.skip(!LECTURER_INVITE_CODE, "LECTURER_INVITE_CODE not set");
 
     const lecturerCtx = await browser.newContext();

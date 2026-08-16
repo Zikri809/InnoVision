@@ -4,6 +4,7 @@ import { isUuid } from "@/lib/classes/roster";
 import { firstUnansweredIndex, remainingMs } from "@/lib/sessions/timer";
 import { PlayClient } from "@/components/quiz/play-client";
 import { EndScreen } from "@/components/quiz/end-screen";
+import type { FaceStatus } from "@/lib/face/types";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +28,10 @@ type SessionRow = {
   started_at: string;
   submitted_at: string | null;
   score: number | null;
+  face_exempt: boolean;
+  face_fail_streak: number;
+  verify_nonce: string;
+  face_unavailable_at: string | null;
   last_activity_at: string;
 };
 
@@ -90,7 +95,7 @@ export default async function PlayPage({ params }: PageProps) {
   // 1. Own session (missing / not-owned → notFound, no oracle).
   const { data: session, error: sessionError } = await supabase
     .from("quiz_sessions")
-    .select("id, quiz_id, student_id, mode, status, started_at, submitted_at, score, last_activity_at")
+    .select("id, quiz_id, student_id, mode, status, started_at, submitted_at, score, face_exempt, face_fail_streak, verify_nonce, face_unavailable_at, last_activity_at")
     .eq("id", sessionId)
     .eq("student_id", user.id)
     .maybeSingle();
@@ -114,7 +119,20 @@ export default async function PlayPage({ params }: PageProps) {
           .select("question_id, selected_index, is_correct")
           .eq("session_id", sessionId);
 
-  const [quizRes, questionsRes, answersRes] = await Promise.allSettled([
+  // P7: `exists(face_checks)` → hasFaceChecks (the assessment gate is NOT
+  // bypassable by reload — `'ready'` requires ≥1 recorded check) + own-profile
+  // presence booleans (consent / enrollment) for the gate UI.
+  const faceChecksPromise = supabase
+    .from("face_checks")
+    .select("id", { count: "exact", head: true })
+    .eq("session_id", sessionId);
+  const profilePromise = supabase
+    .from("profiles")
+    .select("consent_given_at, face_enrollment_status")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  const [quizRes, questionsRes, answersRes, faceChecksRes, profileRes] = await Promise.allSettled([
     supabase
       .from("student_quiz_view")
       .select("id, title, mode, status, time_limit_sec")
@@ -127,6 +145,8 @@ export default async function PlayPage({ params }: PageProps) {
       .order("order_index", { ascending: true })
       .order("created_at", { ascending: true }),
     answersPromise,
+    faceChecksPromise,
+    profilePromise,
   ]);
 
   if (quizRes.status === "rejected" || quizRes.value.error) {
@@ -141,6 +161,14 @@ export default async function PlayPage({ params }: PageProps) {
     console.error("Play answers fetch error:", answersRes.status === "rejected" ? answersRes.reason : answersRes.value.error);
     return errorPanel();
   }
+  if (faceChecksRes.status === "rejected" || faceChecksRes.value.error) {
+    console.error("Play face-checks fetch error:", faceChecksRes.status === "rejected" ? faceChecksRes.reason : faceChecksRes.value.error);
+    return errorPanel();
+  }
+  if (profileRes.status === "rejected" || profileRes.value.error) {
+    console.error("Play profile fetch error:", profileRes.status === "rejected" ? profileRes.reason : profileRes.value.error);
+    return errorPanel();
+  }
 
   const quiz = quizRes.value.data as QuizRow | null;
   if (!quiz) notFound();
@@ -150,6 +178,24 @@ export default async function PlayPage({ params }: PageProps) {
   // casts narrow to the non-null shape the client expects (same workaround as
   // student-quizzes/page.tsx).
   const questions = (questionsRes.value.data ?? []) as QuestionRow[];
+
+  // P7: seeding precedence (PLAN_PHASE7 §2) — completed → EndScreen;
+  // flagged → 'flagged'; paused → 'paused'; faceExempt → 'exempt' (only when
+  // active); !hasFaceChecks → 'gate'; else 'ready'.
+  const hasFaceChecks = (faceChecksRes.value.count ?? 0) > 0;
+  const ownProfile = profileRes.value.data as { consent_given_at: string | null; face_enrollment_status: string | null } | null;
+  const consentGiven = Boolean(ownProfile?.consent_given_at);
+  // pending_review must NOT count as enrolled (the gate blocks it).
+  const enrolled = ownProfile?.face_enrollment_status === "enrolled";
+
+  let initialFaceStatus: FaceStatus = "off";
+  if (s.mode === "assessment") {
+    if (s.status === "flagged") initialFaceStatus = "flagged";
+    else if (s.status === "paused") initialFaceStatus = "paused";
+    else if (s.face_exempt && s.status === "active") initialFaceStatus = "exempt";
+    else if (!hasFaceChecks) initialFaceStatus = "gate";
+    else initialFaceStatus = "ready";
+  }
 
   // Defensive: the RPC copies mode at start; direct service-role writes are
   // trusted, but this closes drift.
@@ -201,6 +247,14 @@ export default async function PlayPage({ params }: PageProps) {
       initialAnswers={answeredRows}
       initialIndex={initialIndex}
       initialRemainingMs={initialRemainingMs}
+      face={{
+        enrolled,
+        consentGiven,
+        faceExempt: s.face_exempt,
+        initialNonce: s.verify_nonce,
+        initialFaceStatus,
+        hasFaceChecks,
+      }}
     />
   );
 }

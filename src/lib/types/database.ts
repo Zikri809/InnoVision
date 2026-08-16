@@ -34,6 +34,41 @@ export type Database = {
   }
   public: {
     Tables: {
+      audit_events: {
+        Row: {
+          action: string
+          actor_id: string | null
+          created_at: string
+          id: string
+          metadata: Json | null
+          subject_id: string
+        }
+        Insert: {
+          action: string
+          actor_id?: string | null
+          created_at?: string
+          id?: string
+          metadata?: Json | null
+          subject_id: string
+        }
+        Update: {
+          action?: string
+          actor_id?: string | null
+          created_at?: string
+          id?: string
+          metadata?: Json | null
+          subject_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "audit_events_actor_id_fkey"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       class_enrollments: {
         Row: {
           class_id: string
@@ -106,11 +141,56 @@ export type Database = {
           },
         ]
       }
+      face_checks: {
+        Row: {
+          checked_at: string
+          distance: number | null
+          frame_hash: string | null
+          id: string
+          matched: boolean
+          session_id: string
+          suspected_replay: boolean
+          too_frequent: boolean
+          trigger: Database["public"]["Enums"]["face_check_trigger"]
+        }
+        Insert: {
+          checked_at?: string
+          distance?: number | null
+          frame_hash?: string | null
+          id?: string
+          matched: boolean
+          session_id: string
+          suspected_replay?: boolean
+          too_frequent?: boolean
+          trigger: Database["public"]["Enums"]["face_check_trigger"]
+        }
+        Update: {
+          checked_at?: string
+          distance?: number | null
+          frame_hash?: string | null
+          id?: string
+          matched?: boolean
+          session_id?: string
+          suspected_replay?: boolean
+          too_frequent?: boolean
+          trigger?: Database["public"]["Enums"]["face_check_trigger"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "face_checks_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "quiz_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           consent_given_at: string | null
           created_at: string
-          face_embedding: string | null
+          face_deletion_pending: boolean
+          face_enrollment_status: string | null
           full_name: string | null
           id: string
           role: Database["public"]["Enums"]["user_role"]
@@ -118,7 +198,8 @@ export type Database = {
         Insert: {
           consent_given_at?: string | null
           created_at?: string
-          face_embedding?: string | null
+          face_deletion_pending?: boolean
+          face_enrollment_status?: string | null
           full_name?: string | null
           id: string
           role: Database["public"]["Enums"]["user_role"]
@@ -126,7 +207,8 @@ export type Database = {
         Update: {
           consent_given_at?: string | null
           created_at?: string
-          face_embedding?: string | null
+          face_deletion_pending?: boolean
+          face_enrollment_status?: string | null
           full_name?: string | null
           id?: string
           role?: Database["public"]["Enums"]["user_role"]
@@ -188,6 +270,7 @@ export type Database = {
         Row: {
           face_exempt: boolean
           face_fail_streak: number
+          face_unavailable_at: string | null
           id: string
           last_activity_at: string
           mode: Database["public"]["Enums"]["quiz_mode"]
@@ -202,6 +285,7 @@ export type Database = {
         Insert: {
           face_exempt?: boolean
           face_fail_streak?: number
+          face_unavailable_at?: string | null
           id?: string
           last_activity_at?: string
           mode: Database["public"]["Enums"]["quiz_mode"]
@@ -216,6 +300,7 @@ export type Database = {
         Update: {
           face_exempt?: boolean
           face_fail_streak?: number
+          face_unavailable_at?: string | null
           id?: string
           last_activity_at?: string
           mode?: Database["public"]["Enums"]["quiz_mode"]
@@ -363,6 +448,44 @@ export type Database = {
       }
     }
     Views: {
+      lecturer_audit_view: {
+        Row: {
+          action: string | null
+          actor_id: string | null
+          created_at: string | null
+          event_quiz_id: string | null
+          event_session_id: string | null
+          id: string | null
+          subject_id: string | null
+        }
+        Insert: {
+          action?: string | null
+          actor_id?: string | null
+          created_at?: string | null
+          event_quiz_id?: never
+          event_session_id?: never
+          id?: string | null
+          subject_id?: string | null
+        }
+        Update: {
+          action?: string | null
+          actor_id?: string | null
+          created_at?: string | null
+          event_quiz_id?: never
+          event_session_id?: never
+          id?: string | null
+          subject_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "audit_events_actor_id_fkey"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       student_class_view: {
         Row: {
           created_at: string | null
@@ -540,6 +663,14 @@ export type Database = {
         }
       }
       can_student_view_quiz: { Args: { p_quiz_id: string }; Returns: boolean }
+      enroll_face: {
+        Args: { p_duplicate_similarity: number; p_duplicate_subject: string }
+        Returns: Json
+      }
+      exempt_face_session: {
+        Args: { p_reason: string; p_session_id: string }
+        Returns: Json
+      }
       is_enrolled_in_class: { Args: { p_class_id: string }; Returns: boolean }
       is_lecturer: { Args: never; Returns: boolean }
       is_lecturer_of_class: { Args: { p_class_id: string }; Returns: boolean }
@@ -549,6 +680,21 @@ export type Database = {
         Returns: boolean
       }
       join_class: { Args: { code: string }; Returns: Json }
+      pause_session: { Args: { p_session_id: string }; Returns: Json }
+      record_face_check: {
+        Args: {
+          p_frame: string
+          p_nonce: string
+          p_second_similarity: number
+          p_second_subject: string
+          p_session_id: string
+          p_similarity: number
+          p_subject: string
+          p_trigger: Database["public"]["Enums"]["face_check_trigger"]
+        }
+        Returns: Json
+      }
+      reject_face_enrollment: { Args: { p_student_id: string }; Returns: Json }
       reorder_questions: {
         Args: { p_ordered_ids: string[]; p_quiz_id: string }
         Returns: undefined
@@ -579,10 +725,17 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      report_face_unavailable: { Args: { p_session_id: string }; Returns: Json }
+      reset_session: { Args: { p_session_id: string }; Returns: Json }
+      revoke_face_consent: { Args: never; Returns: Json }
+      safe_audit_uuid: { Args: { p_value: string }; Returns: string }
+      self_recover_session: { Args: { p_session_id: string }; Returns: Json }
       start_quiz_session: { Args: { p_quiz_id: string }; Returns: Json }
       submit_session: { Args: { p_session_id: string }; Returns: Json }
+      unlock_session: { Args: { p_session_id: string }; Returns: Json }
     }
     Enums: {
+      face_check_trigger: "start" | "question" | "periodic"
       question_type: "mcq" | "true_false"
       quiz_mode: "practice" | "assessment"
       quiz_status: "draft" | "live" | "closed"
@@ -718,6 +871,7 @@ export const Constants = {
   },
   public: {
     Enums: {
+      face_check_trigger: ["start", "question", "periodic"],
       question_type: ["mcq", "true_false"],
       quiz_mode: ["practice", "assessment"],
       quiz_status: ["draft", "live", "closed"],

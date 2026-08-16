@@ -98,7 +98,7 @@ create policy "Users insert own profile"
 ```
 
 - The `insert` policy is redundant (the trigger creates the profile on signup) and lets any user insert a profile row for their own id with **any role**.
-- The `update` policy (`with check (auth.uid() = id)`) also allows a student to set `role = 'lecturer'` and forge `face_embedding` later.
+- The `update` policy (`with check (auth.uid() = id)`) also allows a student to set `role = 'lecturer'` and forge `face_enrollment_status` later.
 
 **Fix:**
 - Drop the `insert` policy (trigger owns creation).
@@ -138,7 +138,7 @@ Fine for Playwright tests, but never seed real data with it and keep test creds 
 - **Answer secrecy:** questions must never expose `correct_index` to a client-readable policy/view (planned in PLAN §1). Verify on read.
 - **One-attempt enforcement** relies on a partial unique index + security-definer RPC — the security-definer function must validate its own authorization (caller is a lecturer? session belongs to caller?) rather than trusting RLS, since `security definer` bypasses RLS.
 - **Face endpoints** (`/api/face/enroll|verify|self-recover|unlock`): every mutation must re-check the session owner / lecturer role server-side, since `security definer` and client-callable routes bypass the page-level auth guard.
-- **Storage:** private `quiz-sources` bucket with lecturer-owner RLS only (PLAN §1). Face photos never stored — embeddings only.
+- **Storage:** private `quiz-sources` bucket with lecturer-owner RLS only (PLAN §1). Face photos never stored — frames are ephemeral; face data lives only in the self-hosted CompreFace registry (auth.uid() = subject), and consent revocation sets `face_deletion_pending` + best-effort deletion.
 - **Rate limiting / abuse:** no rate limiting exists yet; enrollment and verify endpoints are prime abuse targets at demo/class scale.
 
 ## Phase 2 additions (2026-08-09)
@@ -225,3 +225,20 @@ All fixes verified against live local Supabase + the running app.
 ### Notes
 - `.env.local` (gitignored) was refreshed with current local anon/service keys after the DB reset; the previous `AI_API_KEY` value was lost in the refresh — re-add it when AI-generation routes (Phase 4) are built. Only affects future AI features, not auth.
 - HIGH-2 (consent enforcement at the DB layer) is mitigated for Phase 1 but **must** be enforced server-side in `/api/face/enroll` (Phase 7) — the current fix moves the write server-side but does not yet add a DB-level consent gate.
+
+---
+
+## Phase 8 (Results & attendance) — security review
+
+Additions audited (PLAN_PHASE8 §2 D2/D4/D9, §9): `reset_session` RPC + `lecturer_audit_view` (migration `0011_results.sql`), `DELETE /api/sessions/[id]/reset`, and the lecturer results RSC/UI.
+
+**Checked — grants:**
+- `reset_session(uuid)` — `revoke execute … from public, anon; grant execute … to authenticated`. Lecturer role + quiz ownership enforced **inside** the RPC (single locked `select … for update` with `is_lecturer_of_quiz` in the `WHERE` — a guessed foreign id is never row-locked, `not_owner` folds non-existent/not-owned, no oracle). Mode gate → `not_assessment` for practice. The 0008 dead `DELETE` policy on `quiz_sessions` remains unused (session writes stay RPC-only).
+- `lecturer_audit_view` — security barrier, `security_invoker = false` (do NOT flip; base table has no authenticated grants), curated projection (scalars only — **no raw `metadata`**, so `face_enroll` status / `flagged_sessions` / exempt reasons never reach lecturer reads). Predicate: quiz-attributable rows via `is_lecturer_of_quiz(event_quiz_id)` (survive self-unenroll); legacy NULL-`event_quiz_id` rows via current class membership (subject-granular, documented trade-off). `revoke all … from anon, authenticated; grant select … to authenticated`. Raw `audit_events` stays service-role-only (D-view probe asserts lecturer direct SELECT → denied).
+- Reset route: `requireLecturer` → CSRF → rate-limit (10/min) → RPC; `if (error) → 503` + `payload.ok === true` shape-assert (a failed reset can never return a false 200); `mapFaceError` maps `not_owner`→404 / `not_lecturer`→403 / `not_assessment`→400. No body → no Zod.
+- Secrecy: the results RSC uses explicit `.select(...)` projections (GET-envelope **minus `verify_nonce`**); `session_answers` unread (D10 — no `correct_index`/`explanation` surface); `ResultsSessionRow` has no such fields (type-level backstop); E13b asserts their absence on the rendered DOM.
+- Verified live: `node scripts/verify-results.mjs` **18/18** (incl. authZ student/foreign-lecturer/anon/practice, cross-class isolation, self-unenroll trail survival, projection key-absence, concurrent answer+reset race).
+
+**Docs resolution:** TESTING.md / PLAN.md P8 gate row `E13 → E13b` (P7's timer-gate E13 keeps its id).
+
+**Residual (documented, accepted — P7-scope, not P8):** the P7 `unlock_session`/`exempt_face_session` RPC routes return `nextNonce` (the student's rotated `verify_nonce`) in their 200 body. The P8 dashboard is the first caller to exercise them, so the nonce now reaches a lecturer browser. This is inert as a privilege path — a lecturer is never the session owner, so `record_face_check`/`answer_question` reject them with `not_owner` (`student_id = auth.uid()` is required) — but it is inconsistent with the "verify_nonce never travels to the lecturer" discipline (P7 `GET /api/sessions/[id]` omits it). Fixing it means editing those audited P7 routes (strip `nextNonce` from the lecturer-facing 200 body) — deliberately out of P8 scope; tracked as a follow-up (PLAN_PHASE8 §5).

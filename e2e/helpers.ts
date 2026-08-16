@@ -1,6 +1,7 @@
 import { type Page } from "@playwright/test";
 import { expect } from "@playwright/test";
 import { fakeHandTrackerInit } from "./fake-hand-tracker";
+import { fakeFaceInit } from "./fake-face-tracker";
 
 export const E2E_PASSWORD = "testpass123";
 
@@ -83,6 +84,7 @@ export async function createQuizWithQuestions(
   opts: {
     classTitle: string;
     quizTitle: string;
+    mode?: "practice" | "assessment";
     questions: QuestionInput[];
     publish?: boolean;
   },
@@ -94,6 +96,10 @@ export async function createQuizWithQuestions(
 
   // Create the quiz.
   await page.getByLabel("Quiz title").fill(opts.quizTitle);
+  if (opts.mode === "assessment") {
+    await page.getByLabel("Mode").click();
+    await page.getByRole("option", { name: "Assessment" }).click();
+  }
   await page.getByRole("button", { name: /new quiz/i }).click();
   await expect(page.getByText(opts.quizTitle, { exact: true })).toBeVisible();
   await page.getByText(opts.quizTitle, { exact: true }).click();
@@ -276,5 +282,226 @@ export async function expectNoAnswerPost(
   });
   expect(leaked, `no answer POST should target index ${forIndex}`).toBe(false);
   return capture.bodies;
+}
+
+// ── Phase 7 face helpers ─────────────────────────────────────────────
+
+/**
+ * Install the fake face tracker (BOTH addInitScript for future full loads AND
+ * page.evaluate for the current SPA document — mirrors installFakeHandTracker).
+ * Must be called BEFORE the student clicks Start.
+ */
+export async function installFakeFaceTracker(page: Page) {
+  await page.addInitScript(fakeFaceInit);
+  await page.evaluate(fakeFaceInit);
+}
+
+/** Set the fake face verify mode: 'match' (V) or 'mismatch' (−V). */
+export async function setFaceVerifyMode(page: Page, mode: "match" | "mismatch") {
+  await page.evaluate((m) => {
+    const ctrl = (window as unknown as {
+      __INNOVISION_FAKE_FACE_CONTROL__?: { setVerifyMode(m: string): void };
+    }).__INNOVISION_FAKE_FACE_CONTROL__;
+    if (!ctrl) throw new Error("fake face control not installed");
+    ctrl.setVerifyMode(m);
+  }, mode);
+}
+
+/** Trigger a blink via the fake face control (resolves waitForBlink). */
+export async function triggerFaceBlink(page: Page) {
+  await page.evaluate(() => {
+    const ctrl = (window as unknown as {
+      __INNOVISION_FAKE_FACE_CONTROL__?: { triggerBlink(): void };
+    }).__INNOVISION_FAKE_FACE_CONTROL__;
+    if (!ctrl) throw new Error("fake face control not installed");
+    ctrl.triggerBlink();
+  });
+}
+
+/** Override the periodic cadence (E12 deterministic observation). */
+export async function setFacePeriodic(page: Page, opts: { minMs: number; maxMs: number }) {
+  await page.evaluate((o) => {
+    const ctrl = (window as unknown as {
+      __INNOVISION_FAKE_FACE_CONTROL__?: { setFacePeriodic(o: { minMs: number; maxMs: number }): void };
+    }).__INNOVISION_FAKE_FACE_CONTROL__;
+    if (!ctrl) throw new Error("fake face control not installed");
+    ctrl.setFacePeriodic(o);
+  }, opts);
+}
+
+/** Enroll via the face-enroll page (consent + 3-angle capture + submit). */
+export async function enrollViaFacePage(page: Page) {
+  await page.goto("/student/face/enroll");
+  // Consent (if not already given via registration).
+  const consentBtn = page.getByRole("button", { name: "I consent", exact: true });
+  if (await consentBtn.isVisible().catch(() => false)) {
+    await consentBtn.click();
+    await expect(page.getByText("Biometric consent", { exact: false }).first()).toBeVisible();
+  }
+  // Wait for the enroll panel to settle (the boot microtask flips `available`;
+  // a button-only `isVisible()` can race the unavailable panel). Either the
+  // capture button or the already-enrolled state appears.
+  const startBtn = page.getByRole("button", { name: "Start capture", exact: true });
+  await expect(startBtn.or(page.getByText("Face already enrolled", { exact: false }))).toBeVisible({
+    timeout: 15_000,
+  });
+  if (await startBtn.isVisible().catch(() => false)) {
+    await startBtn.click();
+    // 3 guided angles (front → left → right); one blink per angle.
+    for (let i = 0; i < 3; i++) {
+      await expect(page.getByText(/Blink now|Waiting for you to blink/)).toBeVisible({ timeout: 10_000 });
+      await triggerFaceBlink(page);
+      // The capture advances between angles; wait for the next blink prompt
+      // (or the redirect after the final angle).
+      if (i < 2) {
+        await page
+          .getByText(/Blink now|Waiting for you to blink|Turn your head/)
+          .first()
+          .waitFor({ state: "visible", timeout: 10_000 });
+      }
+    }
+    // Capture completes (3 angles) → redirect to /student/quizzes.
+    await page.waitForURL(/\/student\/quizzes/, { timeout: 15_000 });
+  } else {
+    // Already enrolled — nothing to do.
+    await expect(page.getByText("Face already enrolled", { exact: false })).toBeVisible();
+  }
+}
+
+/** Pass the assessment gate: click Begin (beginGate waits for liveness), then trigger the blink. */
+export async function passAssessmentGate(page: Page) {
+  const begin = page.getByRole("button", { name: "Begin assessment", exact: true });
+  await expect(begin).toBeEnabled({ timeout: 15_000 });
+  await begin.click();
+  // beginGate runs blink liveness first — the fake resolves it via triggerBlink.
+  await triggerFaceBlink(page);
+  // Gate disappears → the quiz content mounts.
+  await expect(page.getByRole("button", { name: "Begin assessment", exact: true })).toBeHidden({
+    timeout: 10_000,
+  });
+}
+
+/** Capture face-verify POST bodies (`/api/face/verify`). */
+export function captureFaceVerifyPosts(page: Page) {
+  const bodies: string[] = [];
+  const listener = (req: { url(): string; method(): string; postData(): string | null }) => {
+    if (req.url().includes("/api/face/verify") && req.method() === "POST") {
+      bodies.push(req.postData() ?? "");
+    }
+  };
+  page.on("request", listener);
+  return {
+    bodies,
+    detach() {
+      page.off("request", listener);
+    },
+  };
+}
+
+/** Wait for the paused overlay (face mismatch → blink recovery). */
+export async function waitForPauseOverlay(page: Page) {
+  await expect(page.getByText("Face check paused", { exact: true })).toBeVisible({ timeout: 15_000 });
+}
+
+/** Click "Blink to recover", then trigger the fake blink to recover from paused. */
+export async function recoverFromPause(page: Page) {
+  const btn = page.getByRole("button", { name: "Blink to recover", exact: true });
+  await expect(btn).toBeVisible({ timeout: 10_000 });
+  await btn.click();
+  // runRecovery calls waitForBlink — resolve it via the fake.
+  await triggerFaceBlink(page);
+  // The paused overlay clears once recovered.
+  await expect(page.getByText("Face check paused", { exact: true })).toBeHidden({ timeout: 10_000 });
+}
+
+/** Wait for the flagged overlay (3 fails → lecturer decision). */
+export async function waitForFlaggedOverlay(page: Page) {
+  await expect(page.getByText("Assessment flagged", { exact: true })).toBeVisible({ timeout: 20_000 });
+}
+
+// ── Phase 8 results/attendance helpers ──────────────────────────────────
+
+/**
+ * Phase 8: create an UNTIMED assessment quiz with questions and publish it.
+ * Wraps `createQuizWithQuestions` with the assessment mode (the raw helper
+ * defaults to practice — used by E4/E8/E9/E9c; effort-2 builds the mode here).
+ */
+export async function createAssessmentAndPublish(
+  page: Page,
+  opts: {
+    classTitle: string;
+    quizTitle: string;
+    questions: QuestionInput[];
+  },
+) {
+  await createQuizWithQuestions(page, {
+    classTitle: opts.classTitle,
+    quizTitle: opts.quizTitle,
+    mode: "assessment",
+    questions: opts.questions,
+    publish: true,
+  });
+}
+
+/**
+ * Phase 8: open the Results dashboard for a quiz from the lecturer's class
+ * list. The Results link is only rendered for non-draft quizzes, so callers
+ * must publish first. Navigates deterministically: My Classes → class → quiz
+ * builder → Results (the header link is only present on the builder).
+ */
+export async function openResults(page: Page, classTitle: string, quizTitle: string) {
+  // Return to the class list first (the caller may be on the builder).
+  await page.goto("/lecturer/classes");
+  await expect(page.getByRole("heading", { name: "My Classes" })).toBeVisible();
+  await page.getByText(classTitle, { exact: true }).click();
+  await expect(page).toHaveURL(/\/lecturer\/classes\/[^/]+$/);
+  await page.getByText(quizTitle, { exact: true }).click();
+  await expect(page).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
+  await page.getByRole("link", { name: "Results", exact: true }).click();
+  await expect(page).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/results/);
+}
+
+/**
+ * Phase 8 service-role client for E2E seeding/cleanup. Two-gated seam:
+ *  1. `process.env.NODE_ENV !== "production"` (weak gate — Playwright leaves it
+ *     undefined, so it is NOT the real guard).
+ *  2. Equality check that the service URL host is in the explicit allow-list
+ *     `{127.0.0.1, localhost}` (NOT a substring match). This is the real gate.
+ * App code never references this; only E2E specs do.
+ */
+export function resolveServiceClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceKey) return null;
+  const host: string = new URL(url).hostname.toLowerCase();
+  if (host !== "127.0.0.1" && host !== "localhost") {
+    console.warn(`resolveServiceClient: refusing non-local host "${host}"`);
+    return null;
+  }
+  // Dynamic import to avoid pulling supabase-js into the spec's static graph
+  // when the environment can't support it.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { createClient } = require("@supabase/supabase-js") as typeof import("@supabase/supabase-js");
+  return createClient(url, serviceKey, { auth: { persistSession: false } });
+}
+
+/**
+ * Phase 8: deterministically mark an existing assessment session as abandoned
+ * (E13b's D-student). MUST be an UPDATE (never INSERT — the partial unique
+ * index `one_assessment_attempt` forbids a second assessment session for an
+ * existing (quiz, student)). Returns the admin client so callers can reuse the
+ * same connection for cleanup; returns null when the seam is unavailable (the
+ * spec skips the abandoned sub-assertion — belt-and-braces).
+ */
+export async function staleActiveSession(
+  admin: ReturnType<typeof resolveServiceClient> | null,
+  { sessionId, lastActivityAt }: { sessionId: string; lastActivityAt: string },
+) {
+  if (!admin) return null;
+  const { error } = await admin
+    .from("quiz_sessions")
+    .update({ last_activity_at: lastActivityAt, status: "active" })
+    .eq("id", sessionId);
+  return error ? null : sessionId;
 }
 

@@ -2,19 +2,19 @@ project_id = "innovision"
 
 [api]
 enabled = true
-port = 54321
+port = 58021
 schemas = ["public", "graphql_public"]
 extra_search_path = ["public", "extensions"]
 max_rows = 1000
 
 [db]
-port = 54322
-shadow_port = 54320
+port = 58022
+shadow_port = 58020
 major_version = 17
 
 [db.pooler]
 enabled = true
-port = 54329
+port = 58029
 pool_mode = "transaction"
 default_pool_size = 20
 max_client_conn = 100
@@ -31,3 +31,16 @@ enable_anonymous_sign_ins = false
 enable_signup = true
 double_confirm_changes = true
 enable_confirmations = false
+
+[studio]
+enabled = true
+port = 58023
+api_url = "http://127.0.0.1:58021"
+
+[analytics]
+enabled = false
+port = 58027
+
+[edge_runtime]
+enabled = true
+port = 58025

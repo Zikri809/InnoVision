@@ -7,10 +7,14 @@ import {
   assertFakeHandTrackerInstalled,
   completeCalibration,
   playGestureSequence,
-  fakeHandFrame,
   captureAnswerPosts,
+  installFakeFaceTracker,
+  enrollViaFacePage,
+  setFaceVerifyMode,
+  triggerFaceBlink,
+  passAssessmentGate,
 } from "./helpers";
-import { HOLD_MS, PAUSE_CLEAR_MS } from "../src/lib/gestures/constants";
+import { HOLD_MS } from "../src/lib/gestures/constants";
 
 const TEST_TIMESTAMP = Date.now();
 const LECTURER_EMAIL = `lecturer-e9b-${TEST_TIMESTAMP}@innovision.test`;
@@ -20,25 +24,22 @@ const CLASS_TITLE = "E9b Hand Loss";
 const QUIZ_TITLE = "E9b Assessment";
 
 /**
- * E9b (Phase 6) — hand lost → auto-pause (U-G6 end-to-end), UNTIMED assessment.
+ * E9b (Phase 7 rework) — hand lost → SERVER-side pause (P7), UNTIMED,
+ * `testInfo.setTimeout(120_000)`.
  *
- *  1. Student starts + calibrates; Q1: hold finger 2 for 300ms, then hand
- *     absent for 10.5s.
- *  2. Warn chip appears ~3.3s; pause overlay appears ~10.3s.
- *  3. WHILE PAUSED: a full hold (finger 2, HOLD_MS + 150) is played → assert NO
- *     answer POST. This is the real "answers blocked" proof: the PAUSE_CLEAR_MS
- *     stabilization window (1500ms > 950ms hold) keeps the overlay up for the
- *     entire hold — a single present frame cannot unlock, and a hold started
- *     while paused cannot fire the instant input unblocks.
- *  4. Recovery: a continuous present hand held for PAUSE_CLEAR_MS clears the
- *     overlay; then a fresh full hold POSTs the answer and resolves 200 (a
- *     DB-paused session would 409 `session_not_active` — this pins "no DB
- *     status change" since no GET /api/sessions/[id] exists).
+ *  1. Install fake-face → `enrollViaFacePage` → `passAssessmentGate` → hand-loss
+ *     sequence → `onPause` → pause route → await pause response, then GET
+ *     `paused` → answers blocked: zero gesture answer POSTs while paused + a
+ *     direct `page.request` answer → 409.
+ *  2. Hand returns mid-pause → a held gesture must NOT fire (`sessionPaused`).
+ *  3. Blink → self-recover → active → fresh hold → answer 200.
+ *
+ * NOTE: the hand-loss pause (P6 client overlay) is now the server-side
+ * `paused` status via `POST /api/sessions/[id]/pause`; recovery is via the
+ * face blink → `self_recover_session`, not the P6 client-only 200 path.
  */
-test.describe("E9b — hand lost → auto-pause (client-side, recoverable)", () => {
-  test("answers are blocked while paused and recover without a DB status change", async ({
-    browser,
-  }, testInfo) => {
+test.describe("E9b — hand lost → server pause → blink recovery → answer", () => {
+  test("answers are blocked while server-paused and recover via blink", async ({ browser }, testInfo) => {
     testInfo.setTimeout(120_000);
     test.skip(!LECTURER_INVITE_CODE, "LECTURER_INVITE_CODE not set");
 
@@ -52,8 +53,6 @@ test.describe("E9b — hand lost → auto-pause (client-side, recoverable)", () 
     await expect(lecturerPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
     const joinCode = await createClass(lecturerPage, CLASS_TITLE);
 
-    // createQuizWithQuestions creates a practice quiz by default; build the
-    // assessment manually (mode select) to match E5's pattern.
     await lecturerPage.getByText(CLASS_TITLE, { exact: true }).click();
     await expect(lecturerPage).toHaveURL(/\/lecturer\/classes\/[^/]+$/);
     await lecturerPage.getByLabel("Quiz title").fill(QUIZ_TITLE);
@@ -81,24 +80,33 @@ test.describe("E9b — hand lost → auto-pause (client-side, recoverable)", () 
     await publishButton.click();
     await expect(lecturerPage.getByText(/published/i)).toBeVisible();
 
-    // ── Student: register + join + fake tracker + start ──
+    // ── Student: register + join + fake face + fake hand + enroll + start ──
     await registerUser(studentPage, STUDENT_EMAIL, "student", LECTURER_INVITE_CODE);
     await expect(studentPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
     await joinClass(studentPage, joinCode, CLASS_TITLE);
 
-    await studentPage.getByRole("link", { name: /available quizzes/i }).click();
-    await expect(studentPage).toHaveURL(/\/student\/quizzes/);
-    await expect(studentPage.getByText(QUIZ_TITLE, { exact: true })).toBeVisible();
-
+    // Install BOTH seams BEFORE Start (face for the pipeline, hand for gestures).
+    await installFakeFaceTracker(studentPage);
     await installFakeHandTracker(studentPage);
+    await enrollViaFacePage(studentPage);
+
+    // enrollViaFacePage redirects to /student/quizzes — verify the quiz is live.
+    await expect(studentPage.getByText(QUIZ_TITLE, { exact: true })).toBeVisible();
     await studentPage.getByRole("button", { name: "Start", exact: true }).click();
     await expect(studentPage).toHaveURL(/\/play\/[0-9a-f-]+/);
     await assertFakeHandTrackerInstalled(studentPage);
-    await completeCalibration(studentPage);
 
+    // Pass the assessment gate (face match).
+    await setFaceVerifyMode(studentPage, "match");
+    await passAssessmentGate(studentPage);
+
+    // Calibrate the hand tracker.
+    await completeCalibration(studentPage);
     await expect(studentPage.getByText("What is 2+2?", { exact: true })).toBeVisible();
 
-    // ── 1. Brief hold (finger 2, 300ms) then hand lost for 10.5s ──
+    const sessionId = studentPage.url().split("/play/")[1];
+
+    // ── 1. Brief hold, then hand lost for 10.5s → server pause ──
     const blockedCapture = captureAnswerPosts(studentPage);
     await playGestureSequence(studentPage, [
       { fingers: 2, holdMs: 300 },
@@ -109,39 +117,61 @@ test.describe("E9b — hand lost → auto-pause (client-side, recoverable)", () 
     await expect(
       studentPage.getByText("Keep your hand visible to answer", { exact: true }),
     ).toBeVisible({ timeout: 8_000 });
-    // Pause overlay ~10.3s after loss.
-    await expect(
-      studentPage.getByText("Hand tracking paused", { exact: true }),
-    ).toBeVisible({ timeout: 15_000 });
 
-    // ── 2. While paused, a FULL hold must NOT answer (stabilization window) ──
+    // The hand-loss pause route fires → server status becomes 'paused'.
+    // Await the pause response (the pipeline POSTs /pause on hand loss).
+    const pauseRes = studentPage.waitForResponse(
+      (res) => res.url().includes("/pause") && res.request().method() === "POST",
+    );
+    const pauseResponse = await pauseRes;
+    expect(pauseResponse.status()).toBe(200);
+
+    // Then GET paused (server-truth).
+    await expect
+      .poll(
+        async () => {
+          const res = await studentPage.evaluate(async (sid) => {
+            const r = await fetch(`/api/sessions/${sid}`, { method: "GET" });
+            return (await r.json()).status;
+          }, sessionId);
+          return res;
+        },
+        { timeout: 10_000 },
+      )
+      .toBe("paused");
+
+    // ── 2. While paused, a full hold must NOT answer (`sessionPaused`) ──
     await playGestureSequence(studentPage, [{ fingers: 2, holdMs: HOLD_MS + 150 }]);
     await studentPage.waitForTimeout(1_500);
-    // Still paused (the hold completed entirely while blocked).
-    await expect(
-      studentPage.getByText("Hand tracking paused", { exact: true }),
-    ).toBeVisible();
     const blockedBodies = blockedCapture.bodies.filter((b) => b.includes("selectedIndex"));
     expect(blockedBodies.length).toBe(0);
+
+    // Direct server answer → 409 session_not_active (blocked proof).
+    const directAnswer = await studentPage.request.post(`/api/sessions/${sessionId}/answer`, {
+      data: { questionId: "00000000-0000-4000-8000-000000000000", selectedIndex: 0 },
+    });
+    expect(directAnswer.status()).toBe(409);
     blockedCapture.detach();
 
-    // Drop the hand so the stabilization counter resets (the while-paused hold
-    // kept the hand continuously present; without this drop, the re-show below
-    // would clear the overlay instantly instead of after PAUSE_CLEAR_MS).
-    await playGestureSequence(studentPage, [{ present: false, fingers: 0, holdMs: 100 }]);
+    // ── 3. Blink → self-recover → active → fresh hold → answer 200 ──
+    await setFaceVerifyMode(studentPage, "match");
+    await triggerFaceBlink(studentPage);
 
-    // ── 3. Recovery: re-show + hold → overlay clears after PAUSE_CLEAR_MS ──
-    await fakeHandFrame(studentPage, true, 2);
-    await studentPage.waitForTimeout(PAUSE_CLEAR_MS + 300);
-    await expect(
-      studentPage.getByText("Hand tracking paused", { exact: true }),
-    ).toBeHidden({ timeout: 5_000 });
-    // Drop to a fist to reset the hold accumulator before the fresh recovery
-    // hold (PAUSE_CLEAR_MS+300 leaves ~300ms carryover, not enough to latch,
-    // but a fist makes the recovery hold deterministically fresh).
-    await playGestureSequence(studentPage, [{ present: true, fingers: 0, holdMs: 100 }]);
+    // The pipeline self-recovers (blink → self_recover_session → active).
+    await expect
+      .poll(
+        async () => {
+          const res = await studentPage.evaluate(async (sid) => {
+            const r = await fetch(`/api/sessions/${sid}`, { method: "GET" });
+            return (await r.json()).status;
+          }, sessionId);
+          return res;
+        },
+        { timeout: 10_000 },
+      )
+      .toBe("active");
 
-    // ── 4. Fresh hold → answer POST resolves 200 (not 409 session_not_active) ──
+    // Fresh hold → answer POST resolves 200.
     const recoveryRes = studentPage.waitForResponse(
       (res) => res.url().includes("/answer") && res.request().method() === "POST",
     );
@@ -149,10 +179,7 @@ test.describe("E9b — hand lost → auto-pause (client-side, recoverable)", () 
     const res = await recoveryRes;
     expect(res.status()).toBe(200);
 
-    // The quiz continues (feedback chip visible — the answer was recorded).
-    await expect(studentPage.getByText("Answered", { exact: true })).toBeVisible({
-      timeout: 10_000,
-    });
+    await expect(studentPage.getByText("Answered", { exact: true })).toBeVisible({ timeout: 10_000 });
 
     await lecturerCtx.close();
     await studentCtx.close();

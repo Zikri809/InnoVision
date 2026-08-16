@@ -415,14 +415,15 @@ async function main() {
   record("MED-2 insert with status=live → trigger error", Boolean(insertLiveErr),
     insertLiveErr?.message ?? "unexpectedly inserted live quiz");
 
-  // ── MED-3: lecturer cannot read student face_embedding ───────
-  // (Round-2: the roster view replaced the broad profiles policy; direct
-  // profiles SELECT is self-only, so a lecturer sees 0 rows for a student.)
+  // ── MED-3: lecturer cannot read student face enrollment status ──
+  // (Round-2/CompreFace: `face_embedding` was dropped; the sensitive marker is
+  // now `face_enrollment_status`. The roster view replaced the broad profiles
+  // policy; direct profiles SELECT is self-only, so a lecturer sees 0 rows.)
   const { data: aProfileRead } = await clientA
     .from("profiles")
-    .select("id, full_name, face_embedding")
+    .select("id, full_name, face_enrollment_status")
     .eq("id", studentS1.id);
-  record("MED-3 lecturer cannot read student profile/embedding", (aProfileRead ?? []).length === 0,
+  record("MED-3 lecturer cannot read student profile/enrollment-status", (aProfileRead ?? []).length === 0,
     `A sees ${(aProfileRead ?? []).length} profile rows (expect 0)`);
 
   const { data: aRoster } = await clientA
@@ -430,7 +431,7 @@ async function main() {
     .select("student_id, full_name")
     .eq("class_id", clsA.id);
   record("MED-3 lecturer roster view shows names only", (aRoster ?? []).some((r) => r.student_id === studentS1.id)
-    && !("face_embedding" in (aRoster?.[0] ?? {})),
+    && !("face_enrollment_status" in (aRoster?.[0] ?? {})),
     JSON.stringify(aRoster ?? []));
 
   const { error: liveToDraftErr } = await clientA

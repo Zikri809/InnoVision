@@ -35,8 +35,17 @@ const MODE_LABEL: Record<QuizRow["mode"], string> = {
  *    show a "Resume" action (a student who navigated away mid-assessment can
  *    get back in); if completed, show "You've already taken this assessment".
  *  - 404 → "This quiz is no longer available".
+ *
+ * P7: when the student is NOT enrolled for face verification, an enroll banner
+ * links to /student/face/enroll (assessment quizzes require enrollment).
  */
-export function StudentQuizzesClient({ quizzes }: { quizzes: QuizRow[] }) {
+export function StudentQuizzesClient({
+  quizzes,
+  enrolled,
+}: {
+  quizzes: QuizRow[];
+  enrolled: boolean;
+}) {
   const router = useRouter();
   // Ref lock guards against a fast double-click before React re-renders.
   const submitLock = useRef(false);
@@ -106,6 +115,25 @@ export function StudentQuizzesClient({ quizzes }: { quizzes: QuizRow[] }) {
         <p className="mb-4 text-sm text-destructive" role="alert">
           {error}
         </p>
+      )}
+
+      {!enrolled && (
+        <div className="mb-4 rounded-lg border border-amber-300/40 bg-amber-50 p-4">
+          <p className="text-sm font-medium text-amber-800">
+            Face enrollment recommended
+          </p>
+          <p className="mt-1 text-xs text-amber-700">
+            Assessment quizzes use face verification. Enroll now so you&apos;re
+            ready when an assessment opens.
+          </p>
+          <Button
+            className="mt-3"
+            variant="outline"
+            onClick={() => router.push("/student/face/enroll")}
+          >
+            Enroll your face
+          </Button>
+        </div>
       )}
 
       {quizzes.length === 0 ? (

@@ -26,3 +26,12 @@ export type SessionStatus = Database["public"]["Enums"]["session_status"];
 export type QuizSession = Database["public"]["Tables"]["quiz_sessions"]["Row"];
 
 export type SessionAnswer = Database["public"]["Tables"]["session_answers"]["Row"];
+
+export type FaceCheckTrigger = Database["public"]["Enums"]["face_check_trigger"];
+
+export type FaceCheck = Database["public"]["Tables"]["face_checks"]["Row"];
+
+export type AuditEvent = Database["public"]["Tables"]["audit_events"]["Row"];
+
+export type LecturerAuditEvent =
+  Database["public"]["Views"]["lecturer_audit_view"]["Row"];

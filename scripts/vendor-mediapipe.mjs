@@ -1,5 +1,5 @@
-// Phase 6 — vendor the MediaPipe runtime + hand-landmarker model into `public/`
-// so the app is self-hosted (venue Wi-Fi blocks Google CDN) and CI is
+// Phase 6 + 7 — vendor the MediaPipe runtime + hand/face landmarker models into
+// `public/` so the app is self-hosted (venue Wi-Fi blocks Google CDN) and CI is
 // network-free/deterministic.
 //
 // What it does:
@@ -7,9 +7,10 @@
 //     (exits 1 with instructions if missing — run `npm i` first).
 //  2. Always (re)copies `vision_bundle.mjs` → `public/mediapipe/` and the
 //     `wasm/` directory → `public/mediapipe/wasm/` (idempotent overwrite).
-//  3. Downloads `hand_landmarker.task` → `public/models/` ONLY if absent; the
-//     bytes are verified against a hardcoded SHA-256 (fail loudly on
-//     mismatch/non-file/content-type). Writes `public/models/MANIFEST.json`.
+//  3. Downloads `hand_landmarker.task` + `face_landmarker.task` →
+//     `public/models/` ONLY if absent; the bytes are verified against hardcoded
+//     SHA-256 hashes (fail loudly on mismatch/non-file/content-type). Writes
+//     `public/models/MANIFEST.json`.
 //  4. Verifies the vendored bundle makes NO external network calls
 //     (`https://` occurrences must only be comments; a non-comment URL is a
 //     hard failure).
@@ -31,13 +32,19 @@ const PUBLIC_MODELS = path.join(ROOT, "public", "models");
 
 const BUNDLE_REL = "mediapipe/vision_bundle.mjs";
 const WASM_DIR = "wasm";
-const MODEL_REL = "models/hand_landmarker.task";
-const MODEL_URL =
+const HAND_MODEL_REL = "models/hand_landmarker.task";
+const FACE_LANDMARKER_REL = "models/face_landmarker.task";
+const HAND_MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
-const MODEL_VERSION = "float16/1";
-// Hardcoded SHA-256 of hand_landmarker.task at MODEL_URL (verified once at
+const FACE_LANDMARKER_URL =
+  "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
+const HAND_MODEL_VERSION = "float16/1";
+const FACE_LANDMARKER_VERSION = "float16/1";
+// Hardcoded SHA-256 of hand_landmarker.task at HAND_MODEL_URL (verified once at
 // vendoring time; the committed bytes + verify-mediapipe.mjs enforce it in CI).
-const MODEL_SHA256 = "FBC2A30080C3C557093B5DDFC334698132EB341044CCEE322CCF8BCF3607CDE1";
+const HAND_MODEL_SHA256 = "FBC2A30080C3C557093B5DDFC334698132EB341044CCEE322CCF8BCF3607CDE1";
+// Hardcoded SHA-256 of face_landmarker.task at FACE_LANDMARKER_URL.
+const FACE_LANDMARKER_SHA256 = "64184E229B263107BC2B804C6625DB1341FF2BB731874B0BCC2FE6544E0BC9FF";
 const PACKAGE_VERSION = "1.0.1";
 
 // The stock MediaPipe bundle embeds a Google telemetry logger that POSTs to
@@ -134,23 +141,41 @@ fs.writeFileSync(path.join(ROOT, "public", ...BUNDLE_REL.split("/")), bundlePatc
 copyDir(path.join(PKG_ROOT, WASM_DIR), path.join(PUBLIC_MEDIAPIPE, WASM_DIR));
 console.log(`Copied vision_bundle.mjs (telemetry-neutralized) + wasm/ → public/${BUNDLE_REL.split("/")[0]}/`);
 
-// ── 2. Download model only if absent; always verify SHA-256 ────────────────
+// ── 2. Download models only if absent; always verify SHA-256 ────────────────
 fs.mkdirSync(PUBLIC_MODELS, { recursive: true });
-const modelDest = path.join(ROOT, "public", ...MODEL_REL.split("/"));
-if (!fs.existsSync(modelDest)) {
-  console.log(`Downloading hand_landmarker.task …`);
-  await download(MODEL_URL, modelDest);
-  console.log("Download complete.");
-} else {
-  console.log("hand_landmarker.task already present — skipping download.");
+
+async function ensureModel(rel, url, sha256, label) {
+  const dest = path.join(ROOT, "public", ...rel.split("/"));
+  if (!fs.existsSync(dest)) {
+    console.log(`Downloading ${label} …`);
+    await download(url, dest);
+    console.log("Download complete.");
+  } else {
+    console.log(`${label} already present — skipping download.`);
+  }
+  const hash = sha256File(dest).toUpperCase();
+  if (hash !== sha256) {
+    fail(
+      `${label} SHA-256 mismatch.\n  expected: ${sha256}\n  actual:   ${hash}\n` +
+        "The model changed or is corrupt. Do NOT commit it — fix the download, then re-run.",
+    );
+    return null;
+  }
+  return hash;
 }
-const modelHash = sha256File(modelDest).toUpperCase();
-if (modelHash !== MODEL_SHA256) {
-  fail(
-    `hand_landmarker.task SHA-256 mismatch.\n  expected: ${MODEL_SHA256}\n  actual:   ${modelHash}\n` +
-      "The model changed or is corrupt. Do NOT commit it — fix the download, then re-run.",
-  );
-}
+
+const handModelHash = await ensureModel(
+  HAND_MODEL_REL,
+  HAND_MODEL_URL,
+  HAND_MODEL_SHA256,
+  "hand_landmarker.task",
+);
+const faceLandmarkerHash = await ensureModel(
+  FACE_LANDMARKER_REL,
+  FACE_LANDMARKER_URL,
+  FACE_LANDMARKER_SHA256,
+  "face_landmarker.task",
+);
 
 // ── 3. Build the manifest over the two pinned directories ──────────────────
 const manifest = {
@@ -180,10 +205,15 @@ manifest.files[BUNDLE_REL] = {
   version: PACKAGE_VERSION,
 };
 addDirToManifest("mediapipe/wasm", path.join(PUBLIC_MEDIAPIPE, WASM_DIR));
-manifest.files[MODEL_REL] = {
-  sha256: modelHash,
-  sourceUrl: MODEL_URL,
-  version: MODEL_VERSION,
+manifest.files[HAND_MODEL_REL] = {
+  sha256: handModelHash,
+  sourceUrl: HAND_MODEL_URL,
+  version: HAND_MODEL_VERSION,
+};
+manifest.files[FACE_LANDMARKER_REL] = {
+  sha256: faceLandmarkerHash,
+  sourceUrl: FACE_LANDMARKER_URL,
+  version: FACE_LANDMARKER_VERSION,
 };
 
 fs.writeFileSync(
@@ -212,6 +242,6 @@ if (failures > 0) {
 
 const wasmFiles = fs.readdirSync(path.join(PUBLIC_MEDIAPIPE, WASM_DIR)).filter((f) => f.endsWith(".wasm"));
 console.log(
-  `\nVendored OK:\n  ${BUNDLE_REL}\n  mediapipe/wasm/ (${wasmFiles.length} .wasm files)\n  ${MODEL_REL} (${modelHash})\n  MANIFEST.json written.`,
+  `\nVendored OK:\n  ${BUNDLE_REL}\n  mediapipe/wasm/ (${wasmFiles.length} .wasm files)\n  ${HAND_MODEL_REL} (${handModelHash})\n  ${FACE_LANDMARKER_REL} (${faceLandmarkerHash})\n  MANIFEST.json written.`,
 );
 console.log("Commit public/mediapipe/ + public/models/, then run `node scripts/verify-mediapipe.mjs`.");

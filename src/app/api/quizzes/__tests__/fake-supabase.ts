@@ -32,6 +32,7 @@ class FakeQueryBuilder {
   private limitN?: number;
   private countExact = false;
   private op?: Op;
+  private selectCols?: string[];
 
   constructor(
     private client: FakeSupabase,
@@ -58,8 +59,14 @@ class FakeQueryBuilder {
     return this;
   }
 
-  select(_cols?: string, opts?: { count?: string; head?: boolean }): this {
+  select(cols?: string, opts?: { count?: string; head?: boolean }): this {
     if (opts?.count === "exact") this.countExact = true;
+    // Project the requested columns (a `select("a, b")` drops the rest) so
+    // tests can pin column-level secrecy (e.g. the GET session route omitting
+    // verify_nonce for lecturers). `*` / empty keeps all columns.
+    if (cols && cols.trim() !== "*") {
+      this.selectCols = cols.split(",").map((c) => c.trim()).filter(Boolean);
+    }
     return this;
   }
 
@@ -145,6 +152,16 @@ class FakeQueryBuilder {
       });
     }
     if (this.limitN !== undefined) out = out.slice(0, this.limitN);
+    // Project the requested columns (column-level secrecy).
+    if (this.selectCols) {
+      out = out.map((r) => {
+        const projected: Row = {};
+        for (const c of this.selectCols!) {
+          if (c in r) projected[c] = r[c];
+        }
+        return projected;
+      });
+    }
     return out;
   }
 
@@ -229,6 +246,11 @@ export class FakeSupabase {
   //  - start_quiz_session / answer_question / submit_session: route-mapping
   //    stubs (see header comment) modeling real semantics at the level the
   //    routes branch on.
+  //  - face RPCs (enroll_face / record_face_check / self_recover_session /
+  //    pause_session / unlock_session / exempt_face_session /
+  //    report_face_unavailable / revoke_face_consent): route-mapping stubs —
+  //    must stay in lockstep with migration 0009_face.sql; the authoritative
+  //    RPC-semantics checks are scripts/verify-face.mjs.
   //  - reorder_questions / others: return the pre-seeded rpcResult.
   async rpc(name: string, args?: Record<string, unknown>) {
     if (name === "start_quiz_session") {
@@ -239,6 +261,44 @@ export class FakeSupabase {
     }
     if (name === "submit_session") {
       return this._submitSession(args);
+    }
+    if (name === "record_face_check") {
+      return this._recordFaceCheck(args);
+    }
+    if (name === "enroll_face") {
+      return this._enrollFace(args);
+    }
+    if (name === "self_recover_session") {
+      return this._selfRecoverSession(args);
+    }
+    if (name === "pause_session") {
+      return this._pauseSession(args);
+    }
+    if (name === "unlock_session") {
+      return this._unlockSession(args);
+    }
+    if (name === "exempt_face_session") {
+      return this._exemptFaceSession(args);
+    }
+    if (name === "report_face_unavailable") {
+      return this._reportFaceUnavailable(args);
+    }
+    if (name === "reset_session") {
+      return this._resetSession(args);
+    }
+    if (name === "revoke_face_consent") {
+      return this._revokeFaceConsent();
+    }
+    if (name === "reject_face_enrollment") {
+      return this._rejectFaceEnrollment(args);
+    }
+    if (name === "is_lecturer_of_quiz") {
+      // Mirror the SQL helper (0004): gate on the quiz's CLASS ownership, not
+      // quiz.created_by (class ownership is what RLS + reset_session enforce).
+      const quizId = String(args?.p_quiz_id);
+      const quiz = (this.tables["quizzes"] ?? []).find((q) => q.id === quizId);
+      const cls = quiz ? (this.tables["classes"] ?? []).find((c) => c.id === quiz.class_id) : undefined;
+      return { data: cls?.lecturer_id === this.user?.id, error: null };
     }
     if (name === "append_question") {
       const questions = this.tables["questions"] ?? [];
@@ -497,7 +557,8 @@ export class FakeSupabase {
       };
     }
 
-    if (session.status !== "active") {
+    // P7 redefined submit_session: `active`/`paused` submit; `flagged` rejects.
+    if (session.status === "flagged") {
       return { data: { error: "session_not_active" }, error: null };
     }
 
@@ -551,6 +612,387 @@ export class FakeSupabase {
   /** Seed a fake stored file for storage.download (I16b). */
   seedStorageFile(path: string, bytes: Uint8Array) {
     this.storageFiles[path] = bytes;
+  }
+
+  // ── Phase 7 face helpers ──────────────────────────────────────────
+  /** Seed a profile with consent/enrollment (face tests). */
+  seedProfile(row: Row) {
+    this.tables["profiles"] ??= [];
+    const idx = this.tables["profiles"].findIndex((p) => p.id === row.id);
+    if (idx >= 0) this.tables["profiles"][idx] = { ...this.tables["profiles"][idx], ...row };
+    else this.tables["profiles"].push(row);
+  }
+
+  /** Seed a face_checks row (window tests). */
+  seedFaceCheck(row: Row) {
+    this.tables["face_checks"] ??= [];
+    this.tables["face_checks"].push(row);
+  }
+
+  /** Seed an audit_events row. */
+  seedAuditEvent(row: Row) {
+    this.tables["audit_events"] ??= [];
+    this.tables["audit_events"].push(row);
+  }
+
+  // ── Phase 7 face RPC stubs (route-mapping only; see header comment) ──
+
+  /** enroll_face — consent gate + status derive from CompreFace metadata + audit. */
+  private async _enrollFace(args?: Record<string, unknown>) {
+    if (this.rpcResult.data !== null || this.rpcResult.error !== null) return this.rpcResult;
+    const studentId = this.user?.id ?? "";
+    const profile = (this.tables["profiles"] ?? []).find((p) => p.id === studentId);
+    if (!profile) return { data: { error: "not_student" }, error: null };
+    if (!profile.consent_given_at) return { data: { error: "consent_required" }, error: null };
+
+    // live_assessment: ever-enrolled + an in-progress assessment session.
+    const ever = profile.face_enrollment_status != null ||
+      (this.tables["audit_events"] ?? []).some(
+        (a) => a.actor_id === studentId && (a.action === "face_enroll" || a.action === "face_reenroll"),
+      );
+    const live = (this.tables["quiz_sessions"] ?? []).some(
+      (s) => s.student_id === studentId && s.mode === "assessment" && ["active", "paused", "flagged"].includes(s.status as string),
+    );
+    if (live && ever) return { data: { error: "live_assessment" }, error: null };
+
+    // Derive status from CompreFace duplicate-check metadata (mirror 0010):
+    // similarity ≥ 0.45 against a DIFFERENT subject → pending_review. SQL uses
+    // `coalesce(p_duplicate_subject,'') <> auth.uid()::text` — a NULL/empty
+    // subject with high similarity is `pending_review` (never self-clean).
+    const dupSim = args?.p_duplicate_similarity == null ? 0 : Number(args?.p_duplicate_similarity);
+    const dupSubject = args?.p_duplicate_subject == null ? "" : String(args?.p_duplicate_subject);
+    const status = dupSim >= 0.45 && dupSubject !== studentId ? "pending_review" : "enrolled";
+
+    profile.face_enrollment_status = status;
+    // Lockstep with 0010_compreface.sql: a successful enroll also clears any
+    // leftover consent-revoke deletion-pending marker.
+    profile.face_deletion_pending = false;
+    this.tables["audit_events"] ??= [];
+    this.tables["audit_events"].push({
+      id: randomUuid(),
+      actor_id: studentId,
+      subject_id: studentId,
+      action: ever ? "face_reenroll" : "face_enroll",
+      metadata: { status },
+      created_at: "2026-01-01T00:00:00Z",
+    });
+    return { data: { ok: true, status }, error: null };
+  }
+
+  /**
+   * record_face_check — models the FLAT last-5 window at the level the routes
+   * branch on (success shape + error keys). The authoritative window logic is
+   * verify-face.mjs (SQL); this stub mirrors `evaluateFaceCheck` semantics.
+   */
+  private async _recordFaceCheck(args?: Record<string, unknown>) {
+    if (this.rpcResult.data !== null || this.rpcResult.error !== null) return this.rpcResult;
+    const sessionId = String(args?.p_session_id);
+    const studentId = this.user?.id ?? "";
+    const sessions = this.tables["quiz_sessions"] ?? [];
+    const session = sessions.find((s) => s.id === sessionId && s.student_id === studentId);
+    if (!session) return { data: { error: "not_owner" }, error: null };
+
+    const profile = (this.tables["profiles"] ?? []).find((p) => p.id === studentId);
+    if (!profile?.consent_given_at) return { data: { error: "consent_required" }, error: null };
+    if (session.mode !== "assessment") return { data: { error: "not_assessment" }, error: null };
+
+    // quiz_not_live parity: quiz must be live.
+    const quiz = (this.tables["quizzes"] ?? []).find((q) => q.id === session.quiz_id);
+    if (!quiz || quiz.status !== "live") return { data: { error: "quiz_not_live" }, error: null };
+
+    if (session.status === "completed") return { data: { error: "session_not_active" }, error: null };
+    if (session.face_exempt) {
+      return {
+        data: {
+          matched: true,
+          distance: null,
+          sessionStatus: session.status,
+          nextNonce: session.verify_nonce,
+          faceFailStreak: session.face_fail_streak,
+        },
+        error: null,
+      };
+    }
+    if (session.status === "paused" || session.status === "flagged") {
+      return { data: { error: "session_not_active" }, error: null };
+    }
+
+    // Enrollment required (mirror 0010: face_enrollment_status, not a dropped
+    // embedding column). pending_review does NOT count as enrolled.
+    if (!profile.face_enrollment_status || profile.face_enrollment_status === "pending_review") {
+      return { data: { error: "not_enrolled" }, error: null };
+    }
+
+    const nonce = String(args?.p_nonce ?? "");
+    if (session.verify_nonce !== nonce) return { data: { error: "nonce_mismatch" }, error: null };
+
+    // Compute `matched` from CompreFace metadata + SQL constants (mirror 0010):
+    // p_subject must equal the caller's uid AND similarity ≥ 0.5 AND (top −
+    // second) ≥ 0.15. No `p_matched` parameter exists — never caller-supplied.
+    const subject = String(args?.p_subject ?? "");
+    const similarity = Number(args?.p_similarity ?? 0);
+    const secondSimilarity = args?.p_second_similarity == null
+      ? null
+      : Number(args?.p_second_similarity);
+    const marginOk = secondSimilarity == null || similarity - secondSimilarity >= 0.15;
+    const matched = subject === studentId && similarity >= 0.5 && marginOk;
+    const distance = 1 - similarity;
+
+    // Advisory flags: suspected_replay = the same frame hash as the previous
+    // check (server-computed sha256 of the frame, never caller-supplied);
+    // too_frequent = a previous check exists.
+    const checks = (this.tables["face_checks"] ?? []).filter((c) => c.session_id === sessionId);
+    const frameHash = `h-${String(args?.p_frame ?? "")}`;
+    const prevHash = checks[checks.length - 1]?.frame_hash;
+    const suspectedReplay = frameHash !== "h-" && frameHash === prevHash;
+    const tooFrequent = checks.length > 0;
+
+    this.tables["face_checks"] ??= [];
+    this.tables["face_checks"].push({
+      id: randomUuid(),
+      session_id: sessionId,
+      checked_at: "2026-01-01T00:00:00Z",
+      matched,
+      distance,
+      trigger: args?.p_trigger ?? "periodic",
+      suspected_replay: suspectedReplay,
+      too_frequent: tooFrequent,
+      frame_hash: frameHash,
+    });
+
+    // FLAT last-5 window (mirrors lib/face/streak + SQL).
+    const recent = [...checks, { matched }].slice(-5);
+    let fails = 0;
+    for (const c of recent) if (!c.matched) fails++;
+
+    let status: "active" | "paused" | "flagged";
+    if (matched) status = "active";
+    else if (fails >= 3) status = "flagged";
+    else status = "paused";
+
+    const nextNonce = randomUuid();
+    session.status = status;
+    session.face_fail_streak = matched ? 0 : fails;
+    session.verify_nonce = nextNonce;
+
+    return {
+      data: {
+        matched,
+        distance,
+        sessionStatus: status,
+        nextNonce,
+        faceFailStreak: matched ? 0 : fails,
+      },
+      error: null,
+    };
+  }
+
+  private async _selfRecoverSession(args?: Record<string, unknown>) {
+    if (this.rpcResult.data !== null || this.rpcResult.error !== null) return this.rpcResult;
+    const sessionId = String(args?.p_session_id);
+    const studentId = this.user?.id ?? "";
+    const session = (this.tables["quiz_sessions"] ?? []).find(
+      (s) => s.id === sessionId && s.student_id === studentId,
+    );
+    if (!session) return { data: { error: "not_owner" }, error: null };
+    if (session.status === "completed") return { data: { error: "session_not_active" }, error: null };
+    if (session.status === "flagged") return { data: { error: "flagged" }, error: null };
+    if (session.status === "active") return { data: { sessionStatus: "active" }, error: null };
+    session.status = "active";
+    session.face_fail_streak = 0;
+    const nextNonce = randomUuid();
+    session.verify_nonce = nextNonce;
+    this.tables["audit_events"] ??= [];
+    this.tables["audit_events"].push({
+      id: randomUuid(),
+      actor_id: studentId,
+      subject_id: studentId,
+      action: "self_recover",
+      metadata: null,
+      created_at: "2026-01-01T00:00:00Z",
+    });
+    return { data: { sessionStatus: "active", nextNonce }, error: null };
+  }
+
+  private async _pauseSession(args?: Record<string, unknown>) {
+    if (this.rpcResult.data !== null || this.rpcResult.error !== null) return this.rpcResult;
+    const sessionId = String(args?.p_session_id);
+    const studentId = this.user?.id ?? "";
+    const session = (this.tables["quiz_sessions"] ?? []).find(
+      (s) => s.id === sessionId && s.student_id === studentId,
+    );
+    if (!session) return { data: { error: "not_owner" }, error: null };
+    if (session.mode !== "assessment") return { data: { error: "not_assessment" }, error: null };
+    if (session.status === "completed" || session.status === "flagged") {
+      return { data: { error: "session_not_active" }, error: null };
+    }
+    if (session.status === "active") session.status = "paused";
+    return { data: { sessionStatus: "paused" }, error: null };
+  }
+
+  private async _unlockSession(args?: Record<string, unknown>) {
+    if (this.rpcResult.data !== null || this.rpcResult.error !== null) return this.rpcResult;
+    const sessionId = String(args?.p_session_id);
+    if (this.profileRole !== "lecturer") return { data: { error: "not_lecturer" }, error: null };
+    const session = (this.tables["quiz_sessions"] ?? []).find((s) => s.id === sessionId);
+    if (!session) return { data: { error: "not_owner" }, error: null };
+    if (session.status === "completed") return { data: { error: "session_not_active" }, error: null };
+    session.status = "active";
+    session.face_fail_streak = 0;
+    const nextNonce = randomUuid();
+    session.verify_nonce = nextNonce;
+    this.tables["audit_events"] ??= [];
+    this.tables["audit_events"].push({
+      id: randomUuid(),
+      actor_id: this.user?.id,
+      subject_id: session.student_id,
+      action: "unlock",
+      metadata: null,
+      created_at: "2026-01-01T00:00:00Z",
+    });
+    return { data: { sessionStatus: "active", nextNonce }, error: null };
+  }
+
+  private async _exemptFaceSession(args?: Record<string, unknown>) {
+    if (this.rpcResult.data !== null || this.rpcResult.error !== null) return this.rpcResult;
+    const sessionId = String(args?.p_session_id);
+    if (this.profileRole !== "lecturer") return { data: { error: "not_lecturer" }, error: null };
+    const session = (this.tables["quiz_sessions"] ?? []).find((s) => s.id === sessionId);
+    if (!session) return { data: { error: "not_owner" }, error: null };
+    if (session.status === "completed") return { data: { error: "session_not_active" }, error: null };
+    session.face_exempt = true;
+    session.status = "active";
+    session.face_fail_streak = 0;
+    const nextNonce = randomUuid();
+    session.verify_nonce = nextNonce;
+    this.tables["audit_events"] ??= [];
+    this.tables["audit_events"].push({
+      id: randomUuid(),
+      actor_id: this.user?.id,
+      subject_id: session.student_id,
+      action: "exempt_face",
+      metadata: { reason: args?.p_reason },
+      created_at: "2026-01-01T00:00:00Z",
+    });
+    return { data: { sessionStatus: "active", nextNonce }, error: null };
+  }
+
+  private async _reportFaceUnavailable(args?: Record<string, unknown>) {
+    if (this.rpcResult.data !== null || this.rpcResult.error !== null) return this.rpcResult;
+    const sessionId = String(args?.p_session_id);
+    const studentId = this.user?.id ?? "";
+    const session = (this.tables["quiz_sessions"] ?? []).find(
+      (s) => s.id === sessionId && s.student_id === studentId,
+    );
+    if (!session) return { data: { error: "not_owner" }, error: null };
+    if (session.mode !== "assessment") return { data: { error: "not_assessment" }, error: null };
+    if (!session.face_unavailable_at) session.face_unavailable_at = "2026-01-01T00:00:00Z";
+    return { data: { ok: true }, error: null };
+  }
+
+  /**
+   * reset_session — lecturer deletes an assessment session (D2/D9, migration
+   * 0011). Gated on ROLE + QUIZ OWNERSHIP (mirrors the `is_lecturer_of_quiz`
+   * SQL helper — resolved via `quizzes.class_id → classes.lecturer_id`, NOT
+   * `quiz.created_by`; the SQL gates on class ownership). On success it deletes
+   * the row AND its session_answers/face_checks children (cascade), then
+   * pushes the audit_events row INLINE (like the other RPC stubs — never the
+   * test-only `seedAuditEvent` seam).
+   */
+  private async _resetSession(args?: Record<string, unknown>) {
+    // House stub discipline: the seeded rpcResult seam overrides the stub so
+    // the transport-error route test has an injection point.
+    if (this.rpcResult.data !== null || this.rpcResult.error !== null) return this.rpcResult;
+    const sessionId = String(args?.p_session_id);
+    if (this.profileRole !== "lecturer") return { data: { error: "not_lecturer" }, error: null };
+    const session = (this.tables["quiz_sessions"] ?? []).find((s) => s.id === sessionId);
+    if (!session) return { data: { error: "not_owner" }, error: null };
+    // Ownership gate (mirror is_lecturer_of_quiz): the quiz's CLASS must be
+    // owned by the caller — not the quiz's created_by column.
+    const quiz = (this.tables["quizzes"] ?? []).find((q) => q.id === session.quiz_id);
+    const cls = quiz ? (this.tables["classes"] ?? []).find((c) => c.id === quiz.class_id) : undefined;
+    if (!quiz || !cls || cls.lecturer_id !== this.user?.id) {
+      return { data: { error: "not_owner" }, error: null };
+    }
+    if (session.mode !== "assessment") {
+      return { data: { error: "not_assessment" }, error: null };
+    }
+
+    const deleted: Row = { ...session };
+    // Cascade delete the children then the session row itself.
+    this.tables["session_answers"] = (this.tables["session_answers"] ?? []).filter(
+      (a) => a.session_id !== sessionId,
+    );
+    this.tables["face_checks"] = (this.tables["face_checks"] ?? []).filter(
+      (c) => c.session_id !== sessionId,
+    );
+    this.tables["quiz_sessions"] = (this.tables["quiz_sessions"] ?? []).filter(
+      (s) => s.id !== sessionId,
+    );
+
+    this.tables["audit_events"] ??= [];
+    this.tables["audit_events"].push({
+      id: randomUuid(),
+      actor_id: this.user?.id,
+      subject_id: session.student_id,
+      action: "session_reset",
+      metadata: { session_id: sessionId, quiz_id: session.quiz_id },
+      created_at: "2026-01-01T00:00:00Z",
+    });
+
+    return {
+      data: {
+        ok: true,
+        deleted_session_id: sessionId,
+        student_id: deleted.student_id,
+        quiz_id: deleted.quiz_id,
+      },
+      error: null,
+    };
+  }
+
+  private async _revokeFaceConsent() {
+    if (this.rpcResult.data !== null || this.rpcResult.error !== null) return this.rpcResult;
+    const studentId = this.user?.id ?? "";
+    const profile = (this.tables["profiles"] ?? []).find((p) => p.id === studentId);
+    if (!profile) return { data: { error: "not_student" }, error: null };
+    profile.consent_given_at = null;
+    profile.face_enrollment_status = null;
+    profile.face_deletion_pending = true;
+    const flagged: Row[] = (this.tables["quiz_sessions"] ?? []).filter(
+      (s) => s.student_id === studentId && s.mode === "assessment" && ["active", "paused"].includes(s.status as string),
+    );
+    for (const s of flagged) s.status = "flagged";
+    this.tables["audit_events"] ??= [];
+    this.tables["audit_events"].push({
+      id: randomUuid(),
+      actor_id: studentId,
+      subject_id: studentId,
+      action: "consent_revoked",
+      metadata: { flagged_sessions: flagged.map((s) => s.id) },
+      created_at: "2026-01-01T00:00:00Z",
+    });
+    return { data: { ok: true, flagged_sessions: flagged.map((s) => s.id) }, error: null };
+  }
+
+  /** reject_face_enrollment (lecturer-only) — clears a pending_review status. */
+  private async _rejectFaceEnrollment(args?: Record<string, unknown>) {
+    if (this.rpcResult.data !== null || this.rpcResult.error !== null) return this.rpcResult;
+    if (this.profileRole !== "lecturer") return { data: { error: "not_lecturer" }, error: null };
+    const studentId = String(args?.p_student_id ?? "");
+    const profile = (this.tables["profiles"] ?? []).find((p) => p.id === studentId);
+    if (!profile) return { data: { error: "not_owner" }, error: null };
+    profile.face_enrollment_status = null;
+    this.tables["audit_events"] ??= [];
+    this.tables["audit_events"].push({
+      id: randomUuid(),
+      actor_id: this.user?.id,
+      subject_id: studentId,
+      action: "face_enroll_rejected",
+      metadata: null,
+      created_at: "2026-01-01T00:00:00Z",
+    });
+    return { data: { ok: true }, error: null };
   }
 
   storage = {

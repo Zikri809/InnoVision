@@ -11,24 +11,23 @@
 
 | Layer | Tool | What it proves | Runs |
 |---|---|---|---|
-| **Unit** | Vitest | Pure logic: cosine similarity, finger-count, hold-to-confirm state, Zod schema, extraction cascade, timer math | Every commit, <5s |
+| **Unit** | Vitest | Pure logic: cosine similarity (pre-CompreFace) → frame schema, finger-count, hold-to-confirm state, Zod schema, extraction cascade, timer math | Every commit, <5s |
 | **DB / RLS** | SQL tests against a local Supabase (`supabase start`) | One-attempt uniqueness, RLS isolation, answer-secrecy view, RPC atomicity | Every commit |
 | **API / integration** | Vitest + route-handler invocation + MSW (mock OpenAI-compatible endpoint) | Grading, face verify streaks, AI generate with retry, OCR route | Every commit |
 | **E2E** | Playwright (+ fake webcam via `--use-fake-device-for-media-stream` / custom `getUserMedia` stub) | Full lecturer→student→assessment flow, gesture sim, face sim | Pre-merge / pre-demo |
 
-**Mocking strategy for vision:** MediaPipe models can't load in CI reliably. All vision code is behind interfaces (`IFaceEmbedder`, `IHandTracker`) — unit tests use fakes; E2E injects a **deterministic fake embedder** (returns stored embedding for "correct face", shifted embedding for "wrong face") and a **fake hand tracker** (scripted finger counts). Real-model smoke test is manual-only.
+**Mocking strategy for vision:** MediaPipe models can't load in CI reliably. All vision code is behind interfaces (`IFaceTracker`, `IHandTracker`) — unit tests use fakes; E2E injects a **deterministic fake face tracker** (returns `FAKE_FRAME_MATCH`/`FAKE_FRAME_MISMATCH` frame markers that the route-level CompreFace mock maps to match/mismatch) and a **fake hand tracker** (scripted finger counts). Real-model smoke test is manual-only. CompreFace is mocked server-side (`COMPREFACE_MOCK_ENABLED=1`) — E2E never needs the Docker container.
 
 ---
 
 ## 2. Unit Tests (Vitest)
 
-### 2.1 Face / cosine (`lib/face`)
+### 2.1 Face (`lib/face`) — CompreFace migration
+> **Status: MIGRATED to CompreFace** (2026). U-F1–U-F3 (cosine) were DELETED with `cosine.ts`; U-F4 is now the frame schema. The matching/threshold/margin logic lives in the `record_face_check` SQL (migration `0010`) + route tests (I-margin) + `verify-face.mjs` (D-level). Blink liveness (U-F5), the FLAT window (U-F6), and recovery (U-F7) are unchanged.
 | # | Case | Expected |
 |---|---|---|
-| U-F1 | `cosineSimilarity` identical vectors | returns ~1.0 |
-| U-F2 | orthogonal vectors | returns ~0 |
-| U-F3 | `isMatch(distance, FACE_MATCH_THRESHOLD=0.6)` boundary — **similarity threshold 0.6 → match ⇔ distance ≤ 0.4** | distance 0.39 → match; distance 0.41 → **no match** (a 0.59-distance face is only 41% similar and must NOT match) |
-| U-F4 | embedding validation | rejects wrong length (≠ model dims, e.g. 192), non-finite, empty |
+| U-F3 | **verify threshold boundary** (CompreFace migration — replaces cosine boundary) | route test: CompreFace mock returns similarity at `FACE_SIMILARITY_MIN`; `matched` flips at the threshold |
+| U-F4 | frame validation | rejects empty / non-string / wrong frame count (3 for enroll) |
 | U-F5 | blink-liveness state machine | no-blink → `pending`; blink within window → `passed`; timeout → `failed` |
 | U-F6 | **fail-streak sliding window (flat count, all triggers equal)** | 3 fails in last 5 checks → `flagged`; 3 fails spread over 8 checks → no flag |
 | U-F7 | **paused → self-recovery via liveness** | `paused` session + successful blink re-pass → status `active`, streak reset |
@@ -90,6 +89,10 @@
 | U-T6 | `firstUnansweredIndex` + `remainingMs` | all answered → -1; mid-list resume; untimed → null; timed → correct ms |
 
 > **U-T4 (abandoned derived state) is a P8 gate** — P5 does not implement or test it; `last_activity_at` is schema completeness only.
+>
+> **P8 unit suffixes (non-gate):** U-T4b (`summarizeFaceChecks`), U-T4c (`buildIntegrityTimeline` attribution + sort), U-T4d (`assembleResultsRows` comparator + roster-miss + legacy-history placement) — all in `src/lib/results/derive.test.ts`.
+>
+> **P8 live-DB probes (new, in `verify-results.mjs`):** `D13-reset` (reset → ok + attributable `session_reset` audit row), `I21-D` (reset frees the one-attempt slot + cascade vs the real DB), `D-view` (lecturer_audit_view predicate/projection: cross-class isolation, self-unenroll, key-absence — incl. the documented legacy cross-lecturer visibility trade-off).
 
 ### 2.6 Session validation (`lib/sessions`)
 | # | Case | Expected |
@@ -116,7 +119,7 @@
 | D8 | Lecturer reads other lecturer's class/quiz | denied |
 | D9 | Duplicate answer insert (same session+question, practice) | upsert allowed; assessment variant covered by D1b |
 | D10 | `face_checks` insert as the session's student | allowed; as another student → denied |
-| D11 | profile `face_embedding` update | allowed for self; **re-enrollment writes an `audit_events` row** |
+| D11 | profile `face_enrollment_status` update | allowed for self via `enroll_face`; **re-enrollment writes an `audit_events` row**; direct PATCH blocked (column-level revoke + guard trigger) |
 | D12 | `quiz-sources` storage | lecturer reads own file; other users denied |
 | D13 | **`audit_events` written on privileged actions** | unlock / exempt-face / session-reset / re-enroll each write a row with correct `actor_id`, `subject_id`, `action` |
 | D14 | **`verify_nonce` rotation** | successful verify rotates nonce; replayed request with the old nonce → 409 |
@@ -133,7 +136,7 @@
 | D25 | **Cascade delete (P3 hardening)** | delete a quiz WITH questions; delete a class containing one | succeeds (cascade); no `quiz_not_found` |
 | D26 | **Join-code secrecy (P3 hardening)** | enrolled student reads `classes` directly | 0 rows (owner-only); `student_class_view` exposes `id/title/created_at` only |
 | D27 | **Quiz column secrecy (P3 hardening)** | enrolled student reads `quizzes` directly | 0 rows (owner-only); `student_quiz_view` exposes live quiz metadata only (no `source_file_url`/`created_by`) |
-| D28 | **Biometric secrecy (P3 hardening)** | lecturer reads enrolled student's `profiles` | 0 rows (self-only); `student_roster_view` exposes names only (no `face_embedding`) |
+| D28 | **Biometric secrecy (P3 hardening)** | lecturer reads enrolled student's `profiles` | 0 rows (self-only); `student_roster_view` exposes names only (no `face_enrollment_status`) |
 | D29 | **Quiz starts draft (P3 hardening)** | `INSERT quizzes SET status='live'` | trigger error `quiz_must_start_draft` (D21 holds on every write path) |
 | D30 | **Question immutability (P3 hardening)** | `UPDATE questions SET quiz_id=...` on a live quiz | trigger error `question_quiz_id_immutable` |
 | D31 | **Metadata edit-lock (P3 hardening)** | `UPDATE quizzes SET title/mode/time_limit` on a live/closed quiz | trigger error `quiz_not_draft_edit` |
@@ -162,15 +165,23 @@
 | # | Route | Case | Expected |
 |---|---|---|---|
 | I1 | `POST /api/face/enroll` | no consent yet | 403 (consent gate) |
-| I2 | enroll | valid 192-dim embedding | stored; returns ok |
-| I3 | enroll | wrong dims / NaN | 400 |
-| I4 | `POST /api/face/verify` | matching embedding | `{matched:true}`, streak reset, **new `nextNonce` returned** |
+| I2 | enroll | 3 base64 JPEG frames (front/left/right), pose valid | CompreFace subject + `face_enrollment_status='enrolled'`; returns ok |
+| I3 | enroll | empty / oversized / wrong-count frame | 400 / 413 |
+| I4 | `POST /api/face/verify` | matching frame (self subject, similarity ≥ 0.5 + margin) | `{matched:true}`, streak reset, **new `nextNonce` returned** |
 | I5 | verify | 3 fails in window | session → `flagged`, returns `sessionStatus:'flagged'` |
 | I5b | verify | single fail | session → `paused` (not flagged) |
 | I5c | verify | replayed old nonce | 409 (anti-replay) |
 | I6 | verify | session not `active` (already submitted) | 409 |
 | I6b | `POST /api/face/self-recover` | paused session + liveness re-pass | `active`, streak reset |
 | I6c | self-recover | **flagged** session | **403** — lecturer-only unlock |
+| I-dup | enroll | CompreFace recognize returns a different subject (sim ≥ 0.45) | `pending_review` status |
+| I-margin | verify | top−second gap < 0.15 | no match (lookalike rejected) |
+| I-threshold | verify | similarity exactly `FACE_SIMILARITY_MIN` (0.50) vs 0.49 | matched flips at the boundary |
+| I4b | verify | **empty-framed no-face sentinel** | fail row (paused), CompreFace NOT called, never a pass |
+| I-compreface-down | verify/enroll | CompreFace `compreface_unavailable` / HTTP `compreface_error` | 503 with distinct error keys |
+| I-pose | enroll | out-of-range yaw | 400 `pose_invalid` |
+| I-health | GET `/api/face/health` | CompreFace up / down | `{ available: true/false }` |
+| I-exempt | verify | `face_exempt=true` | `{matched:true, distance:null}`, no nonce rotation |
 | I7 | `POST /api/sessions/[id]/answer` | assessment, correct answer | `{isCorrect:true}`, **no `correctIndex` in body** |
 | I8 | answer | practice mode | returns `isCorrect` + `correctIndex` |
 | I9 | answer | **after time limit (+grace)** | 403 `time_expired` |
@@ -235,7 +246,7 @@
 
 ## 5. E2E Tests (Playwright)
 
-> Webcam is faked: Playwright launches with a stub `getUserMedia` + injected fake `IFaceEmbedder`/`IHandTracker` so tests are deterministic. Real-device run is a separate manual checklist (§7).
+> Webcam is faked: Playwright launches with a stub `getUserMedia` + injected fake `IFaceTracker`/`IHandTracker` so tests are deterministic. Real-device run is a separate manual checklist (§7).
 >
 > **P6 gesture seam mechanism:** the fake hand tracker is injected via a **`window.__INNOVISION_FAKE_HAND_TRACKER__` / `__INNOVISION_FAKE_HAND_CONTROL__` global** installed by `e2e/fake-hand-tracker.ts` (`installFakeHandTracker` = `addInitScript` + an immediate in-document evaluate, because the student Start→`/play` flow is SPA navigation and `addInitScript` alone is not retroactive to the already-loaded document). App code reads it only through the typed accessor `getFakeHandTracker()` in `lib/gestures/fake-seam.ts`, and the `NODE_ENV !== "production"` gate lives in the GestureLayer boot effect — so the seam never reaches production builds. The real MediaPipe path (bundle + WASM + model → live feed) is manual-only (§7).
 
@@ -255,10 +266,12 @@
 | E7 | **Flagged → lecturer-only unlock** | E6 flagged state → student tries self-recover (still flagged) → lecturer unlocks / marks face-exempt | only lecturer action clears it; student resumes; override audited |
 | E8 | **Gesture answering (simulated)** | practice quiz → inject finger sequence `2 (hold 900ms)` → `4 (hold 900ms)` | correct options selected in order, hold-to-confirm fired once each. **P6 impl**: also palm-next (hold 5 → auto-advance) + hold-once (replay while disarmed → no POST) |
 | E9 | **Gesture accidental-lock guard** | hold 2 fingers, change to 3 mid-hold | selection resets, no premature answer (U-G4 end-to-end). **P6 impl**: 400ms finger-2 then finger-3 hold → no `selectedIndex:1`, then `selectedIndex:2` via `waitForRequest` |
-| E9b | **Hand lost → auto-pause** | assessment → hide hand >10s | quiz → `paused` (not flagged); answers blocked (U-G6 end-to-end). **P6 impl**: client-side pause overlay (no DB status change — recovery answer POST resolves 200, not 409); a full hold while paused is blocked by the `PAUSE_CLEAR_MS` stabilization window; re-show + hold clears after `PAUSE_CLEAR_MS` then answers recover. *The blink-liveness recovery half is exercised by E6/E7 in P7, so P6 and P7 stay order-independent.* |
+| E9b | **Hand lost → auto-pause (server-side, P7 rework)** | assessment (fake face + fake hand) → hide hand >10s | quiz → `paused` (not flagged); **await the `/pause` POST response (200), then GET `paused` (server-truth)**; answers blocked: zero gesture answer POSTs while paused + a direct `page.request` answer → **409 `session_not_active`**; a held gesture while paused must NOT fire (`sessionPaused`); hand returns mid-pause → blink → `self_recover_session` → `active` → fresh hold → answer POST resolves **200**. *The P6 client-only 200 path is replaced: recovery is now 409/blink via the server state machine.* |
 | E10 | **Timer expiry (P5)** | **API half**: assessment `time_limit_sec=5`; wait until `started_at + 10s + 2s` (deadline = limit + grace, anchored to the start-session response) → `page.request` answer | 403 `time_expired`; then submit → 200 `{ session, score: 0, total }` (late-submit acceptance + late-answer rejection pinned). **UI half**: separate 10s assessment → client countdown hits 0 → auto-submit → EndScreen with the ANSWERED score |
-| E11 | **Answer secrecy (P5, assessment only)** | collect same-origin text responses filtered by content-type + URL + `response.ok()` across the whole flow (incl. answer responses) | `correct_index`/`explanation` absent everywhere; assessment answer body has `isCorrect` but NOT `correctIndex`. (Practice disclosure lives in E4.) || E12 | **Continuous verify mid-quiz** | assessment → fake embedder matches at start, **mismatches at Q3** | quiz pauses/flags at Q3, not silently passes (cadence works) |
-| E13 | **Attendance = session** | 3 students take quiz → lecturer opens results | 3 sessions listed with scores + face-check timelines; abandoned sessions shown as "abandoned" |
+| E11 | **Answer secrecy (P5, assessment only)** | collect same-origin text responses filtered by content-type + URL + `response.ok()` across the whole flow (incl. answer responses) | `correct_index`/`explanation` absent everywhere; assessment answer body has `isCorrect` but NOT `correctIndex`. (Practice disclosure lives in E4.) |
+| E12 | **Continuous verify mid-quiz (P7, UNTIMED)** | assessment → fake embedder matches at start → reload-before-Begin (gate re-renders) → Q1 → Q-transition verify → Q2 → `setFacePeriodic({minMs:2000,maxMs:3000})` → `expect.poll` a real `trigger:'periodic'` within 5s → mismatch anchored after Q2 feedback → Q3 transition fails → pause overlay AND GET `paused` → blocked-answer proof: direct server answer → **409** + `expectNoAnswerPost` zero-POST | quiz pauses/flags at Q3, not silently passes (cadence works; the gate is not bypassable by reload) |
+| E13 | **Timer-gate pin (P7)** | TIMED assessment (`timeLimitSec≈3`); the student starts and lands in the gate; **liveness withheld (no Begin)** | the gate can only be exited by timer expiry; EndScreen with `0 / N` within ~`timeLimitSec + grace + margin` (≈20s), no deadlock |
+| E13b | **Attendance = session (P8)** | 4 students take quiz (A/B completed, C in-progress, D abandoned) → lecturer opens results | 4 sessions listed with scores + face-check timelines; abandoned shown as "abandoned"; A's row has ≥1 face check; B's row shows the camera-unavailable marker; no `verify_nonce`/`correct_index` on the rendered DOM |
 
 ---
 
@@ -287,8 +300,8 @@ The critical guarantees the demo lives or dies by, and where each is proven:
 
 | Guarantee | Covered by |
 |---|---|
-| Embedding dims enforced (192) | I3, U-F4 |
-| Distance semantics correct (match ⇔ distance ≤ 1 − threshold) | U-F3, I4 |
+| Embedding dims enforced (192) → **CompreFace: frame schema + body-size caps (413) + empty-frame no-face sentinel** | I3, I4b |
+| Similarity/margin re-derived in SQL (match ⇔ sim ≥ 0.5 ∧ margin ≥ 0.15) | I-threshold, I-margin, U-F3 |
 | GLM-OCR availability probe | U-E4, manual #3 |
 | One-attempt race closed | D1, E5 |
 | Assessment re-answer rejected / answer idempotency | D1b, D9, I10 |
@@ -331,8 +344,8 @@ The build is **gated**: each phase below must (a) deliver its feature, (b) pass 
 | **P4 Extraction + AI generation** ★ | U-A1–U-A11 · U-E1–U-E12 · I14–I19 · I-A1–I-A14 · D34–D40 · E2, E2b | Real chapter PDF (incl. scanned via Tesseract) → editable, publishable quiz; invalid AI output inserts **zero** rows; vision-OCR route returns text + stores nothing, batches under body limit |
 | **P5 Play screen (click-first)** | U-T1–U-T3, U-T5–U-T6 · U-S1–U-S4 · D1, D1b, D2–D4, D7, D9, D42–D47 · I7–I13, I-S1–I-S12, I-S14–I-S15 · E4 (resume+replay), E5, E10 (API+UI), E11 | Full quiz playable with mouse; one-attempt enforced; timer enforced server-side; re-answer rules correct per mode; `correct_index`/`explanation` never leak to students |
 | **P6 Gesture layer** ✅ | U-G1–U-G7 · E8, E9, E9b | Full quiz playable hands-free; mid-hold change and hand-loss behave; hand-loss auto-pauses (client-side overlay; DB pause + blink recovery proven in P7) |
-| **P7 Face pipeline** | U-F1–U-F7c · D10, D11, D13, D14 · I1–I6c, I22 · E3, E3b, E6, E7, E12 | Enroll → gate → continuous verify (30–45s cadence proven by fake clock); wrong face at Q3 → paused → flagged; self-recovery only from paused; lecturer-only unlock; nonce replay rejected |
-| **P8 Results & attendance** | U-T4 · I21 · E5b, E13 | Dashboard shows attendance (incl. abandoned — derivation pinned by U-T4), scores, face-check timeline; unlock/exempt/reset audited; reset releases the one-attempt slot |
+| **P7 Face pipeline** ✅ | U-F3–U-F7c · D10, D11, D13, D14 · I1–I6c, I22 · E3, E3b, E6, E7, E12, E13 · E9b rework | Enroll → gate → continuous verify (30–45s cadence proven by fake clock + E12 periodic observation); wrong face at Q3 → paused → flagged; self-recovery only from paused; lecturer-only unlock; nonce replay rejected; hand-loss pause is server-side (409/blink recovery); gate not bypassable by reload; timer-gate auto-submits score-0 |
+| **P8 Results & attendance** | U-T4 · I21 · E5b, E13b | Dashboard shows attendance (incl. abandoned — derivation pinned by U-T4), scores, face-check timeline; unlock/exempt/reset audited (audit rows verified via D13); reset releases the one-attempt slot |
 | **P9 Hardening & deploy** | Full suite (all gates above) + manual checklist §7 | Demo URL live; self-hosted models load on venue Wi-Fi; Supabase awake |
 
 **Demo-killer tests** (if any is red → do not demo): **D1, E5, E6, E7, E8, E12**.

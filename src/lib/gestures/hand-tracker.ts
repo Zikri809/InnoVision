@@ -1,5 +1,10 @@
 import type { HandFrame, IHandTracker, Landmark } from "./types";
 import { landmarksToHandFrame } from "./finger-count";
+import {
+  acquireCameraStream,
+  releaseCameraStream,
+  resolveStream,
+} from "@/lib/vision/camera";
 
 /**
  * Browser-only MediaPipe glue (Phase 6).
@@ -56,6 +61,7 @@ export class HandLandmarkerTracker implements IHandTracker {
   private readonly video: HTMLVideoElement;
   private readonly canvas: HTMLCanvasElement;
   private landmarker: MediaPipeHandLandmarker | null = null;
+  private cameraToken: number | null = null;
   private rafId: number | null = null;
   private disposed = false;
   private lastFrameAt = 0;
@@ -71,13 +77,16 @@ export class HandLandmarkerTracker implements IHandTracker {
     onFrame: (frame: HandFrame) => void,
     onError?: (err: Error) => void,
   ): Promise<void> {
-    // 1. Camera (guarded; max-bounded resolution). `video.play()` is awaited
-    //    and the canvas backing store is sized to the real stream.
-    const stream = await this.acquireCamera();
+    // 1. Camera via the SHARED stream manager (Phase 7) — this module is NOT
+    //    the track-stop owner. `stop()` releases the ref; camera.ts stops the
+    //    tracks only when the last consumer releases.
+    this.cameraToken = await acquireCameraStream();
     if (this.disposed) {
-      stopStreamTracks(stream);
+      releaseCameraStream(this.cameraToken);
+      this.cameraToken = null;
       return;
     }
+    const stream = resolveStream(this.cameraToken);
 
     this.video.srcObject = stream;
     this.video.muted = true;
@@ -87,7 +96,7 @@ export class HandLandmarkerTracker implements IHandTracker {
       this.video.onloadedmetadata = this.loadedMetadataHandler;
     });
     if (this.disposed) {
-      stopStreamTracks(stream);
+      this.releaseCamera();
       return;
     }
     await this.video.play();
@@ -132,27 +141,21 @@ export class HandLandmarkerTracker implements IHandTracker {
       this.loadedMetadataHandler = null;
     }
     this.closeLandmarker();
-    const stream = this.video.srcObject as MediaStream | null;
-    if (stream) {
-      stopStreamTracks(stream);
-      this.video.srcObject = null;
-    }
+    this.releaseCamera();
     const ctx = this.canvas.getContext("2d");
     ctx?.clearRect(0, 0, this.canvas.width, this.canvas.height);
   }
 
-  private async acquireCamera(): Promise<MediaStream> {
-    if (!navigator.mediaDevices?.getUserMedia) {
-      throw new Error("This browser does not support webcam access.");
+  private releaseCamera(): void {
+    if (this.cameraToken !== null) {
+      // camera.ts is the ONLY place tracks stop (refcounted; last release
+      // stops the shared stream). NEVER call track.stop() here.
+      releaseCameraStream(this.cameraToken);
+      this.cameraToken = null;
     }
-    return navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: {
-        facingMode: "user",
-        width: { max: CAMERA_WIDTH_MAX, ideal: CAMERA_WIDTH_MAX },
-        height: { max: CAMERA_HEIGHT_MAX, ideal: CAMERA_HEIGHT_MAX },
-      },
-    });
+    if (this.video.srcObject) {
+      this.video.srcObject = null;
+    }
   }
 
   private async loadVision(): Promise<VisionModule> {
@@ -256,12 +259,5 @@ export class HandLandmarkerTracker implements IHandTracker {
       // MediaPipe close() may throw if the graph is already torn down.
     }
     this.landmarker = null;
-  }
-}
-
-function stopStreamTracks(stream: MediaStream | null): void {
-  if (!stream) return;
-  for (const track of stream.getTracks()) {
-    track.stop();
   }
 }

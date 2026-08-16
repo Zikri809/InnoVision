@@ -331,6 +331,14 @@ export function QuizBuilderClient({
               Generate from file
             </Button>
           )}
+          {!isDraft && (
+            <Link
+              href={`/lecturer/quizzes/${quiz.id}/results`}
+              className="ml-auto text-sm text-muted-foreground hover:underline"
+            >
+              Results
+            </Link>
+          )}
         </div>
       </div>
 

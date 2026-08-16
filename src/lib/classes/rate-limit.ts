@@ -12,7 +12,7 @@
  * gate.
  */
 
-type Bucket = { timestamps: number[] };
+type Bucket = { timestamps: number[]; windowMs: number };
 
 const buckets = new Map<string, Bucket>();
 const MAX_BUCKETS = 10_000;
@@ -27,9 +27,12 @@ export function rateLimit(
 
   if (!bucket) {
     if (buckets.size >= MAX_BUCKETS) {
-      // Sweep stale buckets to stay under the cap.
+      // Sweep stale buckets to stay under the cap. Each bucket is pruned by
+      // ITS OWN windowMs — using the incoming request's window would silently
+      // reset other routes' limits mid-flood (a 60s bucket swept with a small
+      // window loses recent hits at the exact moment the backstop is needed).
       for (const [k, b] of buckets) {
-        b.timestamps = b.timestamps.filter((t) => now - t < opts.windowMs);
+        b.timestamps = b.timestamps.filter((t) => now - t < b.windowMs);
         if (b.timestamps.length === 0) buckets.delete(k);
       }
       // If still at cap after sweeping, evict the oldest-accessed bucket.
@@ -38,12 +41,12 @@ export function rateLimit(
         if (oldest !== undefined) buckets.delete(oldest);
       }
     }
-    bucket = { timestamps: [] };
+    bucket = { timestamps: [], windowMs: opts.windowMs };
     buckets.set(key, bucket);
   }
 
-  // Drop entries outside the window.
-  bucket.timestamps = bucket.timestamps.filter((t) => now - t < opts.windowMs);
+  // Drop entries outside THIS bucket's window.
+  bucket.timestamps = bucket.timestamps.filter((t) => now - t < bucket.windowMs);
 
   if (bucket.timestamps.length >= opts.limit) {
     return false;
@@ -64,5 +67,5 @@ export function _resetRateLimiter(): void {
  */
 export function _seedRateLimit(key: string, count: number): void {
   const now = Date.now();
-  buckets.set(key, { timestamps: Array.from({ length: count }, () => now) });
+  buckets.set(key, { timestamps: Array.from({ length: count }, () => now), windowMs: 60_000 });
 }

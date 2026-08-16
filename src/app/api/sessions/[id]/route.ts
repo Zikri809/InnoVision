@@ -1,0 +1,109 @@
+import { createClient } from "@/lib/supabase/server";
+import { isUuid } from "@/lib/classes/roster";
+import { rateLimit } from "@/lib/classes/rate-limit";
+import { notFound, rateLimited } from "@/lib/http";
+
+export const dynamic = "force-dynamic";
+
+type Params = { params: Promise<{ id: string }> };
+
+// Per-user rate limit on session GETs (flagged-poll + stale-nonce recovery).
+const GET_RATE = { limit: 60, windowMs: 60 * 1000 };
+
+// Shared envelope columns for both roles. `verify_nonce` is deliberately NOT
+// in this list: it is the student's replay token and must never be selected
+// for the lecturer path (a future edit to `envelope` can't leak it).
+const ENVELOPE_COLS =
+  "id, status, quiz_id, mode, started_at, submitted_at, score, face_exempt, face_fail_streak, face_unavailable_at, last_activity_at, student_id";
+const OWN_COLS = `${ENVELOPE_COLS}, verify_nonce`;
+
+/**
+ * GET /api/sessions/[id] — read the session envelope.
+ *
+ * AuthZ: the OWN student reads their session; the quiz LECTURER reads any of
+ * the quiz's sessions (P8 status reads + unlock/exempt UI). Missing/not-owned
+ * → 404 (no oracle).
+ *
+ * Envelope: `{ id, status, quiz_id, mode, started_at, submitted_at, score,
+ * face_exempt, face_fail_streak, face_unavailable_at, last_activity_at }` +
+ * `verify_nonce` for the own student ONLY (the lecturer SELECT never fetches
+ * the nonce).
+ */
+export async function GET(_request: Request, { params }: Params) {
+  const supabase = await createClient();
+  const { id } = await params;
+
+  if (!isUuid(id)) return notFound();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return notFound();
+
+  // Rate-limit BEFORE the profile read (cheap, and an unauthenticated caller
+  // with a session cookie is still throttled).
+  if (!rateLimit(`session-get:${user.id}`, GET_RATE)) {
+    return rateLimited("Too many requests. Try again in a minute.");
+  }
+
+  // Own-student path: `.eq("student_id", user.id)` → 404 when not the owner.
+  const own = await supabase
+    .from("quiz_sessions")
+    .select(OWN_COLS)
+    .eq("id", id)
+    .eq("student_id", user.id)
+    .maybeSingle();
+
+  if (!own.error && own.data) {
+    return Response.json(envelope(own.data), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  // Lecturer path — only when the caller is the quiz's lecturer. The RLS
+  // policy already filters; the join below adds the role gate. The SELECT
+  // omits verify_nonce entirely.
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .maybeSingle();
+  if (profile?.role === "lecturer") {
+    const lect = await supabase
+      .from("quiz_sessions")
+      .select(ENVELOPE_COLS)
+      .eq("id", id)
+      .maybeSingle();
+    if (!lect.error && lect.data) {
+      const isLecturerOfQuiz = await supabase.rpc("is_lecturer_of_quiz", {
+        p_quiz_id: lect.data.quiz_id,
+      });
+      if (isLecturerOfQuiz.data === true) {
+        return Response.json(envelope(lect.data), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+    }
+  }
+
+  return notFound();
+}
+
+function envelope(s: Record<string, unknown>) {
+  return {
+    id: s.id,
+    status: s.status,
+    quiz_id: s.quiz_id,
+    mode: s.mode,
+    started_at: s.started_at,
+    submitted_at: s.submitted_at,
+    score: s.score,
+    face_exempt: s.face_exempt,
+    face_fail_streak: s.face_fail_streak,
+    face_unavailable_at: s.face_unavailable_at,
+    last_activity_at: s.last_activity_at,
+    ...(s.verify_nonce !== undefined ? { verify_nonce: s.verify_nonce } : {}),
+  };
+}

@@ -49,6 +49,10 @@ export default defineConfig({
         AI_API_KEY: "test-key",
         AI_MODEL: "gpt-4o-mini",
         OCR_VISION_MODEL: "gpt-4o-mini",
+        // CompreFace mock mode — E2E must NOT require a running Docker container.
+        COMPREFACE_BASE_URL: "http://localhost:8000",
+        COMPREFACE_API_KEY: "test-key",
+        COMPREFACE_MOCK_ENABLED: "1",
       },
     },
   ],

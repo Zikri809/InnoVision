@@ -15,10 +15,14 @@ export default defineConfig({
         "src/lib/extract/**",
         "src/lib/sessions/**",
         "src/lib/gestures/**",
+        "src/lib/face/**",
+        "src/lib/results/**",
+        "src/lib/vision/camera.ts",
         "src/app/api/ai/**",
         "src/app/api/ocr/**",
         "src/app/api/quizzes/**",
         "src/app/api/sessions/**",
+        "src/app/api/face/**",
       ],
       // Per-file gates. Browser-only files (tesseract/vision/glm-ocr render
       // loops, pdf.js worker load) are exercised by the E2E suite, not the
@@ -55,6 +59,10 @@ export default defineConfig({
         // and excluded from the report entirely — no 0-threshold keys needed.
         "src/lib/sessions/timer.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/lib/sessions/validation.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        // P8: pure results derivation (Node-unit-tested, U-T4 + U-T4b/c/d).
+        // constants.ts/types.ts have no meaningful executable surface (mirrors
+        // the lib/face constants/types precedent — omitted from thresholds).
+        "src/lib/results/derive.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         // P6: pure gesture logic (Node-unit-tested, U-G1..U-G7). The browser
         // MediaPipe glue (hand-tracker.ts) is E2E/manual-only — 0-key precedent
         // (mirrors tesseract/vision/glm-ocr). constants/types/fake-seam have no
@@ -64,9 +72,32 @@ export default defineConfig({
         "src/lib/gestures/hand-loss.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/lib/gestures/fake-seam.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/lib/gestures/hand-tracker.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
+        // P7: pure face logic (Node-unit-tested, U-F1..U-F7c + I22). The
+        // browser MediaPipe glue (face-tracker.ts) is E2E/manual-only — 0-key
+        // precedent (mirrors hand-tracker). constants/types have no meaningful
+        // executable surface. The server-only CompreFace client is I/O glue
+        // exercised via route tests (vi.mock) — 0-key.
+        "src/lib/face/schemas.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        "src/lib/face/liveness.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        "src/lib/face/streak.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        "src/lib/face/recovery.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        "src/lib/face/cadence.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        "src/lib/face/outcome.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        "src/lib/face/rpc-mapping.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        "src/lib/face/fake-seam.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        "src/lib/face/face-tracker.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
+        "src/lib/face/server/compreface-client.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
+        "src/lib/vision/camera.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        "src/app/api/face/**/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
+        "src/app/api/sessions/[id]/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
+        "src/app/api/sessions/[id]/pause/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
+        "src/app/api/sessions/[id]/exempt-face/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
+        "src/app/api/sessions/[id]/face-unavailable/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
         "src/app/api/sessions/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
         "src/app/api/sessions/[id]/answer/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
         "src/app/api/sessions/[id]/submit/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
+        // P8: session reset route (I21) — mirrors the sibling session routes.
+        "src/app/api/sessions/[id]/reset/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
       },
     },
   },

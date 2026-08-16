@@ -57,3 +57,6 @@ next-env.d.ts
 
 # graphify (local code-graph cache/artifacts; regenerate with `graphify update .`)
 /graphify-out/
+
+# CompreFace (defensive — named volumes are used, but protect against a future bind-mount switch)
+/compreface-data/

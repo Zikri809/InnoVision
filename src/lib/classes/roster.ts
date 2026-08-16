@@ -21,7 +21,7 @@ export type RosterEntry = {
  * in one place. `enrolled_at` is a string (ISO) from PostgREST.
  *
  * The view projects ONLY student_id/full_name/enrolled_at — it can never
- * expose biometric data (face_embedding) or other profile columns to a
+ * expose biometric data (face_enrollment_status) or other profile columns to a
  * lecturer (security audit MED-3). Direct `profiles` SELECT is self-only.
  */
 export const ROSTER_LIMIT = 100;

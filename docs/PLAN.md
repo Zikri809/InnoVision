@@ -12,7 +12,7 @@
 |---|---|
 | AI provider | `openai` npm SDK with `baseURL` override → works with OpenAI, OpenRouter, Gemini-compatible endpoint, Ollama. Config via env: `AI_BASE_URL`, `AI_API_KEY`, `AI_MODEL` |
 | Question types (gesture-friendly) | **`mcq`** (2–5 options → finger count) and **`true_false`** (1 finger = true, 2 = false). Nothing else for MVP |
-| Face stack | **MediaPipe Face Embedder** (same `tasks-vision` bundle already used for hands) → **192-dim** embedding (validated against model config, not hardcoded). Stored as **`vector(192)` via pgvector** (Postgres enforces dims; app-level check is defense-in-depth). Distance semantics: pgvector cosine **distance** `<=>` (lower = more similar); `FACE_MATCH_THRESHOLD` is a **similarity** threshold (~0.6, tunable via env) → **match ⇔ `distance ≤ 1 − threshold`** |
+| Face stack | **CompreFace (self-hosted Docker, InsightFace/ArcFace)** — server-side detection/alignment/embedding/matching via REST. The browser sends webcam frames to Next.js routes → CompreFace `/recognize`. Subject registry keyed by `auth.uid()`. Threshold + margin rule (0.5 similarity + 0.15 gap) as SQL constants. **Superseded the pre-migration MediaPipe client-side embedding approach** (see `PLAN_PHASE7_COMPREFACE_MIGRATION.md`). |
 | Gesture stack | **MediaPipe Hand Landmarker** (ported from `Sample Code/index.html`) |
 | Liveness | **Face Landmarker blendshapes** — require one blink at enrollment + at assessment start (basic anti-photo-spoof). Also used for self-recovery from `paused` state (see §1) |
 | Verification cadence | At start + **every question transition** + **periodic check every 30–45s (uniform jitter), only while a question is displayed; skipped while `paused`/`flagged`** |
@@ -28,8 +28,11 @@
 -- profiles (extends Supabase auth.users)
 profiles: id (uuid PK → auth.users), role ('lecturer'|'student'),
           full_name, consent_given_at (timestamptz, null until consent),
-          face_embedding (vector(192), null until enrolled), created_at
--- pgvector: Postgres enforces dims; cosine distance via <=> operator
+          face_enrollment_status (text, null until enrolled — 'enrolled'|'pending_review'),
+          face_deletion_pending (bool), created_at
+-- CompreFace (self-hosted Docker) is the face-data registry (auth.uid() = subject);
+-- no face vectors/embeddings are stored in Postgres (migration 0010 dropped the
+-- old pgvector `face_embedding` column).
 
 classes: id, lecturer_id → profiles, title, join_code (6-char, unique), created_at
 
@@ -71,13 +74,14 @@ session_answers: id, session_id, question_id,
 -- assessment. Grading is server-side only.
 
 face_checks: id, session_id, checked_at, matched (bool),
-             distance (float4), trigger ('start'|'question'|'periodic')
--- distance = cosine distance (lower = more similar); match ⇔
--- distance ≤ 1 − FACE_MATCH_THRESHOLD
+             distance (float4), trigger ('start'|'question'|'periodic'),
+             frame_hash (text)  -- server-computed sha256 (suspected_replay advisory)
+-- distance = 1 − CompreFace similarity (lower = more similar); match ⇔
+-- similarity ≥ 0.5 AND (top − second) ≥ 0.15 (SQL constants in migration 0010)
 
 audit_events: id, actor_id → profiles, subject_id (uuid),
-              action (text),  -- 'face_reenroll'|'unlock'|'exempt_face'|
-                              -- 'session_reset'|'force_close'
+              action (text),  -- 'face_enroll'|'face_reenroll'|'face_enroll_rejected'|
+                              -- 'consent_revoked'|'unlock'|'exempt_face'|'session_reset'
               metadata (jsonb), created_at
 ```
 
@@ -87,9 +91,9 @@ audit_events: id, actor_id → profiles, subject_id (uuid),
 - **Answer secrecy (BOTH modes):** client fetches questions via view/RPC that **omits `correct_index`** for practice *and* assessment (a student can read the network tab before starting). Grading is server-side only; practice additionally returns `correctIndex` *after* the answer is submitted.
 - **Server-side timer:** `answer_question` rejects when `clock_timestamp() > started_at + time_limit_sec + grace`, where `grace` is a **SQL constant `interval '5 seconds'`** in the RPC (never caller-supplied — a caller can't pass a larger grace). `TIMER_GRACE_SEC` (env, default **5s**) mirrors it for the client/JS layer only — it is NOT an enforcement knob. Client timer is UX-only, never trusted. **Submit is ALLOWED past the deadline** (deviation pinned by D45/E10): the timer's job is stopping answers, not stranding a late auto-submit.
 - **RLS:** lecturers → own classes/quizzes/sessions only; students → enrolled classes, own sessions, own profile row. `correct_index` never exposed via any client-readable policy.
-- **Re-enrollment audit:** updating `face_embedding` writes an `audit_events` row (who/when); during a live assessment window it requires lecturer approval (closes proxy-attendance hole).
+- **Re-enrollment audit:** `enroll_face` writes an `audit_events` row (who/when) with the derived status; during a live assessment window re-enrollment requires the ever-enrolled gate (`live_assessment` blocks a revoke→re-enroll face swap).
 - **Abandoned sessions:** a session still `active`/`paused` after the quiz closes (or after 2h of no `last_activity_at` updates) is rendered as **"abandoned"** in the results dashboard — no status migration needed, it's derived at read time.
-- **Storage:** private bucket `quiz-sources` (PDF/DOCX/PPTX/images), RLS: lecturer-owner only. Face photos are **never stored** — embedding computed in-browser, only the float array is uploaded.
+- **Storage:** private bucket `quiz-sources` (PDF/DOCX/PPTX/images), RLS: lecturer-owner only. Face data lives ONLY in the self-hosted CompreFace registry (`auth.uid()` = subject); frames are ephemeral (never stored in Postgres). Consent revocation sets `face_deletion_pending` + best-effort CompreFace subject deletion (retriable).
 
 ---
 
@@ -100,8 +104,8 @@ audit_events: id, actor_id → profiles, subject_id (uuid),
 | `/api/ai/generate-quiz` | POST | Input: `{ quizId, extractedText?, useVisionOcr? }`. If `extractedText` provided (client did extraction/OCR) → use directly. Else server-side native parse. Validates with Zod → inserts questions as **draft**. `maxDuration = 60` |
 | `/api/ai/regenerate-question` | POST | Input: `{ questionId, instruction? }` → regenerate single question |
 | `/api/ocr/vision` | POST | Input: `{ images: base64[] }` (page renders from client) → vision LLM → returns concatenated markdown text. Images never stored. **Batched client-side: max 3 pages per request** (~4 MB body, under the Vercel 4.5 MB limit); client sends batches sequentially and concatenates |
-| `/api/face/enroll` | POST | Input: `{ embedding: number[] }` → validate dims, store on own profile (requires `consent_given_at` first). Writes `audit_events('face_reenroll')` if replacing an existing embedding; during a live assessment window requires lecturer approval |
-| `/api/face/verify` | POST | Input: `{ sessionId, embedding, trigger, nonce }` → reject 409 if `nonce ≠ quiz_sessions.verify_nonce` (anti-replay, rotated on every successful verify) → server computes cosine **distance** (`<=>`) vs stored embedding → `matched = distance ≤ 1 − FACE_MATCH_THRESHOLD` → writes `face_checks` → **sliding-window flag: 3 fails in last 5 checks (flat count, all triggers equal)** → `status='flagged'`. Single fail → `status='paused'` (self-recoverable). Skipped when `face_exempt=true`. Rejected when session is `completed`. Returns `{ matched, distance, sessionStatus, nextNonce }` |
+| `/api/face/enroll` | POST | Input: `{ frames: string[] }` — 3 base64 JPEG frames (front / left / right), CompreFace migration. Route runs per-frame pose validation (`/detect`), a duplicate-identity check (`/recognize`, best non-self match ≥ `FACE_SUSPICION_MIN` 0.45 → `pending_review`), then `addSubjectExample(uid, frame)` and the `enroll_face` RPC (GUC-guarded; derives `enrolled`/`pending_review` from the duplicate metadata — no `p_status` param). Requires `consent_given_at` first. Old/deletion-pending CompreFace subjects are deleted before re-enrollment; partial enrollments are rolled back best-effort |
+| `/api/face/verify` | POST | Input: `{ sessionId, frame, trigger, nonce }` (base64 JPEG frame, CompreFace migration) → reject 409 if `nonce ≠ quiz_sessions.verify_nonce` (anti-replay, rotated on every successful verify) → the route calls CompreFace `/recognize`, passes the raw metadata (`p_subject`/`p_similarity`/`p_second_*`) to `record_face_check`, which computes `matched` from SQL constants (similarity ≥ 0.5 AND margin ≥ 0.15) → writes `face_checks` → **sliding-window flag: 3 fails in last 5 checks (flat count, all triggers equal)** → `status='flagged'`. Single fail → `status='paused'` (self-recoverable). Skipped when `face_exempt=true`. Rejected when session is `completed`. Returns `{ matched, distance, sessionStatus, nextNonce }` |
 | `/api/face/self-recover` | POST | Student self-service, **`paused` sessions only**: `{ sessionId }` after client-side blink-liveness re-pass → reset streak, rotate nonce, set `active`. **No-op (403) on `flagged` sessions — flagged requires the lecturer.** Audited |
 | `/api/face/unlock` | POST | **Lecturer-only**: `{ sessionId }` → reset streak, rotate nonce, set `active`. Writes `audit_events('unlock')` |
 | `/api/sessions/[id]/exempt-face` | POST | Lecturer-only supervisor override: `{ sessionId, reason }` → sets `face_exempt=true`, writes `audit_events('exempt_face')` (demo fallback for bad webcams) |
@@ -109,6 +113,8 @@ audit_events: id, actor_id → profiles, subject_id (uuid),
 | `/api/sessions/[id]/submit` | POST | **No timer rejection (deviation, D45/E10):** computes score, sets `submitted_at`, `status='completed'`. Idempotent (re-submit returns 409 `already_submitted` with the existing score, no change) |
 | `/api/sessions/[id]/reset` | DELETE | **Lecturer-only**: deletes the session + its answers/face_checks, writes `audit_events('session_reset')` → releases the one-attempt unique slot so the student can retake (demo fallback for dead laptops) |
 | `/api/classes` | POST | Create class; on join-code unique violation, **retry with a new code (up to 3 attempts)** before erroring |
+
+**Phase 7 deviations from this API table (see `PLAN_PHASE7.md` §5):** (a) `GET /api/sessions/[id]` (own-student + quiz-lecturer envelope; `verify_nonce` for the own student ONLY) — added for the flagged poll + stale-nonce recovery; (b) `POST /api/sessions/[id]/pause` — the P6 client-only hand-loss pause moves server-side; (c) `POST /api/face/consent` (`{consent:true|false}` — revoke is session-coupled: flags in-progress assessments, deletes face_checks only for own completed sessions, audited; re-consent does NOT un-flag); (d) `POST /api/sessions/[id]/face-unavailable` — records `face_unavailable_at` (idempotent). Also: `submit_session` now accepts `paused` and REJECTS `flagged` (lecturer decision precedes score finalization).
 
 **AI generation contract** (Zod schema, strict)
 
@@ -207,7 +213,7 @@ app/
 │   ├── login/page.tsx
 │   └── register/page.tsx          # role select + consent checkbox
 ├── (onboarding)/
-│   └── face-enroll/page.tsx       # students: consent → blink liveness → 5-frame capture
+│   └── face-enroll/page.tsx       # students: consent → blink liveness → 3-angle capture
 ├── (lecturer)/lecturer/
 │   ├── classes/page.tsx           # list + create (join code shown)
 │   ├── classes/[id]/page.tsx      # roster, quizzes in class
@@ -230,7 +236,7 @@ lib/
 │   ├── glm-ocr.ts                 # local GLM-OCR via Ollama (opt-in upgrade, probe-gated)
 │   ├── vision.ts                  # page render → /api/ocr/vision (cloud opt-in)
 │   └── pipeline.ts                # cascade logic (§3.2)
-├── face/{embedder.ts, cosine.ts, liveness.ts}
+├── face/{schemas.ts, liveness.ts, streak.ts, cadence.ts, outcome.ts, fake-seam.ts}
 ├── gestures/{hand-tracker.ts, finger-count.ts, hold-confirm.ts}
 └── supabase/{client.ts, server.ts, middleware.ts}
 
@@ -250,9 +256,10 @@ components/
 
 ```
 <video> ──► HandLandmarker  → finger count → hold-confirm (800ms) → answer
-        ──► FaceEmbedder    → embedding → POST /api/face/verify
+        ──► Frame capture  → base64 JPEG → POST /api/face/verify
         │                     (start / each Q transition / every 30–45s jittered,
-        │                      only while question displayed, skipped when paused)
+        │                      only while question displayed, skipped when paused;
+        │                      CompreFace migration — server-side recognize/matching)
         ──► FaceLandmarker  → blink detection (start + paused self-recovery)
 ```
 
@@ -260,7 +267,7 @@ components/
 |---|---|
 | `QuizEngine` | State machine: `loading → faceGate → question → locked → feedback → next → submit → end` (+ `paused` / `flagged` overlays). Owns session ID **and `verify_nonce`** (rotated per verify), fetches questions (no answers), calls answer API |
 | `GestureLayer` | Ports `renderHandTracking` + finger logic from sample; emits `onSelect(index)`. 1–5 fingers = option, hold-to-confirm fills progress ring |
-| `FaceVerifier` | Runs embedder on the same video at verification triggers; status chip (🟢 verified / 🔴 re-check). On **`paused`** (single fail / hand lost) → overlay with **"re-verify (blink)"** self-recovery. On **`flagged`** (3-in-5 window) → hard overlay: "Lecturer notified — wait for unlock", **no self-service path** |
+| `FaceVerifier` | Captures a webcam FRAME and POSTs it to `/api/face/verify` at verification triggers (CompreFace migration); status chip (🟢 verified / 🔴 re-check). On **`paused`** (single fail / hand lost) → overlay with **"re-verify (blink)"** self-recovery. On **`flagged`** (3-in-5 window) → hard overlay: "Lecturer notified — wait for unlock", **no self-service path** |
 | `OptionCard` | Glassmorphic card + finger badge (☝️✌️🤟🖐) + progress bar, as React |
 | `AssessmentGate` | Pre-start screen: consent recap → blink liveness → first face verify → "Begin" |
 
@@ -285,7 +292,7 @@ components/
 | 4 | **Extraction + AI generation** ★ | P3 | Upload → native/OCR cascade → generate → **review/edit/reorder/regenerate** → publish | AI quiz from a real chapter PDF (incl. scanned PDF via free OCR) is editable and publishable |
 | 5 | **Play screen (click-first)** | P3 (P4 optional) | QuizEngine, practice + assessment modes, one-attempt RPC, server timer (+grace), per-question grading, EndScreen | Full quiz playable with mouse; assessment locks retry; answers never leak `correct_index` |
 | 6 | **Gesture layer** | P5 | Port Hand Landmarker, hold-to-confirm, calibration screen | Full quiz playable hands-free; accidental-lock guard holds |
-| 7 | **Face pipeline** | P5 (P6 optional) | Consent → enrollment (blink + 5 frames) → assessment gate → continuous verify (start / Q-transition / 30–45s jittered) + paused/flagged split | Wrong face at Q3 → paused, then flagged after 3-in-5; lecturer-only unlock |
+| 7 | **Face pipeline** | P5 (P6 optional) | Consent → enrollment (blink + 3-angle capture) → assessment gate → continuous verify (start / Q-transition / 30–45s jittered) + paused/flagged split | Wrong face at Q3 → paused, then flagged after 3-in-5; lecturer-only unlock |
 | 8 | **Results & attendance** | P5 + P7 | Lecturer dashboard: sessions = attendance (incl. **"abandoned"** derived state), scores, face-check timeline, flags, **unlock + face-exempt + session-reset buttons** (all audited), source-text preview in builder | Lecturer sees who attended + integrity status; can reset a dead-laptop attempt |
 | 9 | **Hardening & deploy** | P1–P8 | RLS audit, error states, model preloading (self-hosted `/public/models`), Vercel deploy | Demo-ready URL + full manual checklist (TESTING §7) green |
 
@@ -301,8 +308,8 @@ components/
 | 4 | U-A1–U-A7 · U-E1–U-E7 · I14–I19 · E2 |
 | 5 | U-T1–U-T3 · D1, D1b, D2, D3, D4, D7, D9 · I7–I13 · E4, E5, E10, E11 |
 | 6 | U-G1–U-G7 · E8, E9, E9b |
-| 7 | U-F1–U-F7c · D10, D11, D13, D14 · I1–I6c, I22 · E3, E3b, E6, E7, E12 |
-| 8 | U-T4 · I21 · E5b, E13 (audit rows verified via D13) |
+| 7 | U-F3–U-F7c · D10, D11, D13, D14 · I1–I6c, I22 · E3, E3b, E6, E7, E12 |
+| 8 | U-T4 · I21 · E5b, E13b (audit rows verified via D13) |
 | 9 | Full suite + manual checklist (TESTING §7) |
 
 **Demo-killer tests** (subset of the above — if any is red, do not demo): **D1, E5, E6, E7, E8, E12**.
@@ -325,7 +332,9 @@ OLLAMA_BASE_URL=http://localhost:11434   # ROOT URL (no /v1); probe: /api/tags,
                                          # completions: /v1/chat/completions
 OCR_GLM_MODEL=glm-ocr
 OCR_VISION_MODEL=gpt-4o-mini
-FACE_MATCH_THRESHOLD=0.6          # SIMILARITY threshold; match ⇔ cosine distance ≤ 1 − 0.6 = 0.4
+COMPREFACE_BASE_URL=http://localhost:8000   # self-hosted CompreFace (Docker)
+COMPREFACE_API_KEY=                          # server-only; see docs/COMPREFACE_SETUP.md
+COMPREFACE_MOCK_ENABLED=0                    # 1 = E2E/unit-test mock mode (never in prod)
 TIMER_GRACE_SEC=5                 # server-side grace on time-limit enforcement
 ```
 
@@ -342,4 +351,4 @@ Vercel notes: AI route sets `maxDuration=60` — on the Hobby plan **60s is the 
 5. **Sparse slide decks → weak AI questions** — slides are diagrams+bullets, so extracted text can be thin; builder shows a **source-text preview** so the lecturer sees why before blaming the AI.
 6. **Free-tier Supabase pauses after 7 days inactivity** — reopen the project before demo day.
 7. **Demo-room reality** — 20 laptops + fluorescent lighting degrades both hand and face tracking; the click fallback + supervisor override are the safety net.
-8. **Client-computed embeddings are replayable/forgable** — a student can capture their own enrollment embedding from the network tab and replay it (or hand it to a proxy). Liveness (blink) only guards enrollment + assessment start + paused-recovery. **MVP mitigation:** per-session `verify_nonce` rotated on every successful verify — a replayed captured request 409s once the nonce moves on, forcing any proxy to relay in real time. **Post-MVP:** challenge-response liveness on periodic checks.
+8. **Direct-RPC face forgery (CompreFace migration residual).** A student can call `record_face_check` / `enroll_face` directly via PostgREST with forged CompreFace metadata for their OWN uid (`p_subject = auth.uid()`, high similarity) — the RPC trusts the metadata (it cannot call CompreFace). This is the same threat model as the pre-migration embedding-replay risk (a student could forge a matching embedding). **Mitigation:** the `p_subject = auth.uid()` check prevents impersonation; the FLAT window + blink liveness + lecturer review catch sustained forgery; the nonce rotates per check. **Post-MVP:** challenge-response liveness on periodic checks.

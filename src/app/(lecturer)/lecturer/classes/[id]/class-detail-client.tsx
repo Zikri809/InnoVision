@@ -212,17 +212,17 @@ export function ClassDetailClient({
             <ul className="divide-y">
               {quizzes.map((q) => (
                 <li key={q.id}>
-                  <Link
-                    href={`/lecturer/quizzes/${q.id}/builder`}
-                    className="flex items-center justify-between rounded-lg px-2 py-3 transition-colors hover:bg-muted/50"
-                  >
-                    <div className="flex items-center gap-3">
+                  <div className="flex items-center justify-between rounded-lg px-2 py-3">
+                    <Link
+                      href={`/lecturer/quizzes/${q.id}/builder`}
+                      className="flex min-w-0 items-center gap-3 rounded transition-colors hover:bg-muted/50"
+                    >
                       <span className="font-medium">{q.title}</span>
                       <span className="rounded bg-muted px-2 py-0.5 text-xs">
                         {MODE_LABEL[q.mode]}
                       </span>
-                    </div>
-                    <div className="flex items-center gap-3">
+                    </Link>
+                    <div className="flex shrink-0 items-center gap-3">
                       {q.mode === "assessment" && q.time_limit_sec != null && (
                         <span className="text-xs text-muted-foreground">
                           {q.time_limit_sec}s
@@ -233,8 +233,16 @@ export function ClassDetailClient({
                       >
                         {STATUS_LABEL[q.status]}
                       </span>
+                      {q.status !== "draft" && (
+                        <Link
+                          href={`/lecturer/quizzes/${q.id}/results`}
+                          className="text-xs text-muted-foreground hover:underline"
+                        >
+                          Results
+                        </Link>
+                      )}
                     </div>
-                  </Link>
+                  </div>
                 </li>
               ))}
             </ul>

@@ -14,7 +14,7 @@ export default async function StudentQuizzesPage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role, consent_given_at")
+    .select("role, consent_given_at, face_enrollment_status")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -84,7 +84,7 @@ export default async function StudentQuizzesPage() {
         <span className="font-semibold">InnoVision</span>
         <UserNav email={user.email ?? ""} consentGiven={Boolean(profile.consent_given_at)} />
       </header>
-      <StudentQuizzesClient quizzes={quizzesWithClass} />
+      <StudentQuizzesClient quizzes={quizzesWithClass} enrolled={profile.face_enrollment_status === "enrolled"} />
     </>
   );
 }

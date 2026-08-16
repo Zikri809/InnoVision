@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>InnoVision — Redesign Options</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:'Inter',system-ui,sans-serif;background:#0b0b12;color:#e8e8f0;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 20px}
+  h1{font-size:clamp(26px,4vw,40px);font-weight:700;letter-spacing:-.02em;text-align:center}
+  p{color:#9a97ad;margin:12px 0 40px;text-align:center;max-width:560px}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:22px;max-width:1060px;width:100%}
+  a.card{display:block;background:#15151f;border:1px solid #26263a;border-radius:18px;padding:26px;text-decoration:none;color:inherit;transition:transform .2s,border-color .2s,box-shadow .2s}
+  a.card:hover{transform:translateY(-4px);border-color:#3d3d5c;box-shadow:0 18px 44px -18px rgba(0,0,0,.7)}
+  .sw{display:flex;gap:8px;margin-bottom:18px}
+  .sw i{width:26px;height:26px;border-radius:8px;display:block;border:1px solid rgba(255,255,255,.12)}
+  .num{font-size:12px;font-weight:700;letter-spacing:.14em;color:#8a87a0}
+  h2{font-size:20px;font-weight:600;margin:6px 0 8px}
+  .desc{font-size:14px;color:#9a97ad;line-height:1.55;margin:0;text-align:left}
+  .open{margin-top:18px;font-size:13px;font-weight:600;color:#7c9dff}
+</style>
+</head>
+<body>
+  <h1>InnoVision — UI Redesign Options</h1>
+  <p>Three visual directions, each grounded in a generated design system. Open each one full-screen to compare, then tell me which to pursue.</p>
+  <div class="cards">
+    <a class="card" href="./option-1-edtech.html">
+      <div class="sw"><i style="background:#2563EB"></i><i style="background:#EA580C"></i><i style="background:#F8FAFC"></i><i style="background:#1E293B"></i></div>
+      <div class="num">OPTION 1</div>
+      <h2>Refined EdTech SaaS</h2>
+      <p class="desc">Clean, trustworthy, professional. Trust-blue + orange CTA, Plus Jakarta Sans, soft depth. Built for lecturer & student confidence.</p>
+      <div class="open">Open preview →</div>
+    </a>
+    <a class="card" href="./option-2-futuristic.html">
+      <div class="sw"><i style="background:#7C3AED"></i><i style="background:#22D3EE"></i><i style="background:#070512"></i><i style="background:#EC4899"></i></div>
+      <div class="num">OPTION 2</div>
+      <h2>Futuristic / AI-Forward</h2>
+      <p class="desc">Dark, immersive glassmorphism. Purple→cyan gradients, glow accents, Space Grotesk. Leans hard into the AI + gesture tech.</p>
+      <div class="open">Open preview →</div>
+    </a>
+    <a class="card" href="./option-3-playful.html">
+      <div class="sw"><i style="background:#F97316"></i><i style="background:#2563EB"></i><i style="background:#FFF7ED"></i><i style="background:#FB923C"></i></div>
+      <div class="num">OPTION 3</div>
+      <h2>Playful / Student-Friendly</h2>
+      <p class="desc">Soft-3D claymorphism. Chunky rounded shapes, playful orange + blue, Fredoka/Nunito. Gamified, fun, approachable.</p>
+      <div class="open">Open preview →</div>
+    </a>
+  </div>
+</body>
+</html>

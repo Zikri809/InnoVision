@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>InnoVision — Option 2: Futuristic / AI-Forward</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#070512; --bg2:#0d0a1f;
+    --surface:rgba(255,255,255,.04); --surface2:rgba(255,255,255,.06);
+    --border:rgba(255,255,255,.09); --border-hi:rgba(255,255,255,.18);
+    --text:#EAE8F5; --muted:#9B97B8;
+    --primary:#7C3AED; --primary-hi:#A78BFA;
+    --cyan:#22D3EE; --pink:#EC4899;
+    --grad:linear-gradient(120deg,#7C3AED,#22D3EE);
+    --grad2:linear-gradient(120deg,#EC4899,#7C3AED);
+    --ring:#22D3EE;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    font-family:'Inter',system-ui,sans-serif;
+    background:var(--bg); color:var(--text); line-height:1.6;
+    -webkit-font-smoothing:antialiased; overflow-x:hidden;
+  }
+  h1,h2,h3,.gro{font-family:'Space Grotesk',sans-serif;letter-spacing:-.02em}
+  .container{max-width:1180px;margin:0 auto;padding:0 24px}
+  a{text-decoration:none;color:inherit}
+
+  /* ambient background */
+  .orb{position:fixed;border-radius:50%;filter:blur(90px);opacity:.5;pointer-events:none;z-index:0}
+  .orb1{width:520px;height:520px;background:radial-gradient(circle,#7C3AED55,transparent 70%);top:-140px;left:-120px}
+  .orb2{width:460px;height:460px;background:radial-gradient(circle,#22D3EE44,transparent 70%);top:20%;right:-140px}
+  .orb3{width:420px;height:420px;background:radial-gradient(circle,#EC489933,transparent 70%);bottom:-120px;left:30%}
+  .grid-overlay{
+    position:fixed;inset:0;z-index:0;pointer-events:none;
+    background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);
+    background-size:56px 56px;
+    mask-image:radial-gradient(ellipse 80% 60% at 50% 0%,#000 40%,transparent 100%);
+  }
+  main,header,footer{position:relative;z-index:1}
+
+  .btn{
+    display:inline-flex;align-items:center;gap:8px;padding:13px 26px;border-radius:12px;
+    font-weight:600;font-size:15px;cursor:pointer;border:none;font-family:'Inter',sans-serif;
+    transition:transform .2s ease,box-shadow .25s ease,background .2s ease;
+  }
+  .btn-grad{background:var(--grad);color:#fff;box-shadow:0 0 24px rgba(124,58,237,.4)}
+  .btn-grad:hover{transform:translateY(-2px);box-shadow:0 0 40px rgba(34,211,238,.5)}
+  .btn-ghost{background:var(--surface);color:var(--text);border:1px solid var(--border);backdrop-filter:blur(10px)}
+  .btn-ghost:hover{background:var(--surface2);border-color:var(--border-hi)}
+  .btn:focus-visible{outline:2px solid var(--ring);outline-offset:3px}
+
+  /* glass */
+  .glass{
+    background:var(--surface);border:1px solid var(--border);
+    backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+    border-radius:20px;
+  }
+
+  /* NAV */
+  header{position:sticky;top:0;z-index:50;border-bottom:1px solid var(--border);background:rgba(7,5,18,.6);backdrop-filter:blur(16px)}
+  nav{display:flex;align-items:center;justify-content:space-between;height:70px}
+  .logo{display:flex;align-items:center;gap:11px;font-family:'Space Grotesk';font-weight:700;font-size:20px}
+  .logo-mark{width:36px;height:36px;border-radius:10px;background:var(--grad);display:grid;place-items:center;font-weight:700;font-size:17px;color:#fff;box-shadow:0 0 20px rgba(124,58,237,.5)}
+  .nav-links{display:flex;gap:30px;align-items:center}
+  .nav-links a{color:var(--muted);font-weight:500;font-size:15px;transition:color .2s}
+  .nav-links a:hover{color:var(--text)}
+  @media(max-width:820px){.nav-links{display:none}}
+
+  /* HERO */
+  .hero{padding:110px 0 90px;text-align:center;position:relative}
+  .pill{
+    display:inline-flex;align-items:center;gap:9px;padding:7px 16px;border-radius:999px;
+    background:var(--surface);border:1px solid var(--border);backdrop-filter:blur(10px);
+    font-size:13px;font-weight:500;color:var(--muted);margin-bottom:28px;
+  }
+  .pill .pulse{width:8px;height:8px;border-radius:50%;background:var(--cyan);box-shadow:0 0 12px var(--cyan);animation:pulse 2s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+  h1{font-size:clamp(40px,6.4vw,72px);font-weight:700;line-height:1.05;max-width:880px;margin:0 auto 22px}
+  .gt{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{font-size:19px;color:var(--muted);max-width:660px;margin:0 auto 38px;font-weight:300}
+  .hero-cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+
+  /* HUD mock */
+  .hud{margin:70px auto 0;max-width:960px;padding:6px;background:linear-gradient(120deg,rgba(124,58,237,.4),rgba(34,211,238,.4));border-radius:24px}
+  .hud-inner{background:var(--bg2);border-radius:20px;overflow:hidden;border:1px solid var(--border)}
+  .hud-top{display:flex;justify-content:space-between;align-items:center;padding:14px 22px;border-bottom:1px solid var(--border);font-size:12px;color:var(--muted);letter-spacing:.12em;text-transform:uppercase}
+  .live{color:var(--cyan);display:flex;align-items:center;gap:7px}
+  .hud-body{display:grid;grid-template-columns:1fr 300px;gap:0}
+  @media(max-width:760px){.hud-body{grid-template-columns:1fr}}
+  .hud-q{padding:30px;border-right:1px solid var(--border);text-align:left}
+  .q-tag{font-size:11px;letter-spacing:.15em;color:var(--primary-hi);text-transform:uppercase;font-weight:600}
+  .q-text{font-family:'Space Grotesk';font-size:21px;font-weight:600;margin:10px 0 22px}
+  .opts{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .opt{padding:16px;border-radius:12px;border:1px solid var(--border);background:var(--surface);font-weight:500;font-size:14px;color:var(--muted);display:flex;align-items:center;gap:11px;transition:all .2s}
+  .opt .k{width:26px;height:26px;border-radius:8px;border:1px solid var(--border-hi);display:grid;place-items:center;font-size:12px;font-weight:600}
+  .opt.sel{border-color:var(--cyan);color:var(--text);background:rgba(34,211,238,.08);box-shadow:0 0 24px rgba(34,211,238,.18)}
+  .opt.sel .k{background:var(--cyan);color:#04121a;border-color:var(--cyan)}
+  .hud-side{padding:26px;background:rgba(255,255,255,.015);text-align:left}
+  .cam{aspect-ratio:4/3;border-radius:12px;background:linear-gradient(160deg,#17122e,#0b0819);border:1px solid var(--border);position:relative;overflow:hidden;margin-bottom:16px}
+  .cam::after{content:"";position:absolute;inset:14px;border:1.5px solid rgba(34,211,238,.5);border-radius:8px;border-style:dashed}
+  .scan{position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--cyan),transparent);animation:scan 2.6s linear infinite;top:20%}
+  @keyframes scan{0%{top:14%}50%{top:82%}100%{top:14%}}
+  .verif{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--muted)}
+  .verif b{color:var(--cyan);font-weight:600}
+  .bar{height:5px;border-radius:99px;background:var(--surface2);overflow:hidden;margin-top:8px}
+  .bar i{display:block;height:100%;width:96%;background:var(--grad);border-radius:99px}
+
+  /* SECTIONS */
+  section{padding:90px 0}
+  .sec-head{text-align:center;max-width:660px;margin:0 auto 56px}
+  .sec-tag{font-size:13px;letter-spacing:.16em;text-transform:uppercase;font-weight:600;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+  h2{font-size:clamp(30px,4.4vw,46px);font-weight:700;margin:12px 0 16px}
+  .sec-sub{color:var(--muted);font-size:17px;font-weight:300}
+
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+  @media(max-width:880px){.grid3{grid-template-columns:1fr}}
+  .gcard{padding:30px;transition:transform .3s ease,border-color .3s ease,box-shadow .3s ease;position:relative;overflow:hidden}
+  .gcard::before{content:"";position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(34,211,238,.6),transparent);opacity:0;transition:opacity .3s}
+  .gcard:hover{transform:translateY(-5px);border-color:var(--border-hi);box-shadow:0 20px 50px -20px rgba(124,58,237,.4)}
+  .gcard:hover::before{opacity:1}
+  .gicon{width:50px;height:50px;border-radius:13px;background:var(--surface2);border:1px solid var(--border-hi);display:grid;place-items:center;font-size:22px;margin-bottom:20px}
+  .gcard h3{font-size:19px;font-weight:600;margin-bottom:10px}
+  .gcard p{color:var(--muted);font-size:14.5px;font-weight:300}
+
+  /* stats */
+  .stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;text-align:center}
+  @media(max-width:880px){.stats-grid{grid-template-columns:repeat(2,1fr)}}
+  .stat{padding:30px 16px}
+  .stat-num{font-family:'Space Grotesk';font-size:44px;font-weight:700;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .stat-label{color:var(--muted);font-size:13px;margin-top:6px;letter-spacing:.04em}
+
+  /* CTA */
+  .cta{padding:80px 40px;text-align:center;position:relative;overflow:hidden;border-radius:28px}
+  .cta::before{content:"";position:absolute;inset:0;background:radial-gradient(600px 300px at 50% 0%,rgba(124,58,237,.25),transparent 70%);pointer-events:none}
+  .cta h2{position:relative}
+  .cta p{color:var(--muted);max-width:520px;margin:0 auto 32px;font-size:17px;position:relative;font-weight:300}
+
+  footer{padding:46px 0;border-top:1px solid var(--border);color:var(--muted);font-size:14px}
+  .foot{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px}
+
+  .reveal{opacity:0;transform:translateY(24px);animation:fadeUp .7s cubic-bezier(.2,.7,.3,1) forwards}
+  .d1{animation-delay:.08s}.d2{animation-delay:.16s}.d3{animation-delay:.24s}.d4{animation-delay:.36s}
+  @keyframes fadeUp{to{opacity:1;transform:none}}
+  @media (prefers-reduced-motion: reduce){
+    *{animation:none!important;transition:none!important}
+    .reveal{opacity:1;transform:none}
+    .scan{display:none}
+  }
+</style>
+</head>
+<body>
+<div class="orb orb1"></div><div class="orb orb2"></div><div class="orb orb3"></div>
+<div class="grid-overlay"></div>
+
+<header>
+  <div class="container">
+    <nav>
+      <div class="logo"><div class="logo-mark">IV</div> InnoVision</div>
+      <div class="nav-links">
+        <a href="#features">Platform</a>
+        <a href="#stats">Integrity</a>
+        <a href="#cta">Access</a>
+      </div>
+      <div style="display:flex;gap:10px">
+        <a class="btn btn-ghost" href="#">Sign in</a>
+        <a class="btn btn-grad" href="#">Launch</a>
+      </div>
+    </nav>
+  </div>
+</header>
+
+<main>
+<!-- HERO -->
+<section class="hero" style="padding-top:110px">
+  <div class="container">
+    <span class="pill reveal"><span class="pulse"></span> NEURAL GESTURE ENGINE · ONLINE</span>
+    <h1 class="reveal d1">Answer with your hands.<br><span class="gt">Verified by AI vision.</span></h1>
+    <p class="sub reveal d2">InnoVision fuses real-time hand-tracking and continuous facial verification into a single, seamless assessment experience — no downloads, no invasive proctoring.</p>
+    <div class="hero-cta reveal d3">
+      <a class="btn btn-grad" href="#cta">Initialize free trial</a>
+      <a class="btn btn-ghost" href="#features">Explore the platform</a>
+    </div>
+
+    <div class="hud reveal d4">
+      <div class="hud-inner">
+        <div class="hud-top">
+          <span>SESSION // BIO-104 · ASSESSMENT</span>
+          <span class="live"><span class="pulse" style="width:7px;height:7px;border-radius:50%;background:var(--cyan);box-shadow:0 0 10px var(--cyan)"></span>LIVE</span>
+        </div>
+        <div class="hud-body">
+          <div class="hud-q">
+            <div class="q-tag">Question 04 / 12</div>
+            <div class="q-text">Which data structure operates on FIFO ordering?</div>
+            <div class="opts">
+              <div class="opt"><span class="k">A</span> Stack</div>
+              <div class="opt sel"><span class="k">B</span> Queue ✋</div>
+              <div class="opt"><span class="k">C</span> Tree</div>
+              <div class="opt"><span class="k">D</span> Graph</div>
+            </div>
+          </div>
+          <div class="hud-side">
+            <div class="cam"><div class="scan"></div></div>
+            <div class="verif">
+              <span style="width:9px;height:9px;border-radius:50%;background:#22c55e;box-shadow:0 0 10px #22c55e"></span>
+              <span><b>Identity verified</b> · Liveness OK</span>
+            </div>
+            <div class="bar"><i></i></div>
+            <div style="font-size:11px;color:var(--muted);margin-top:8px;letter-spacing:.06em">GESTURE: 2 FINGERS · HELD 1.2s</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section id="features">
+  <div class="container">
+    <div class="sec-head">
+      <div class="sec-tag">Core Systems</div>
+      <h2>Vision intelligence, engineered for assessment</h2>
+      <p class="sec-sub">A full-stack AI pipeline that turns any webcam into a secure, gesture-driven exam interface.</p>
+    </div>
+    <div class="grid3">
+      <div class="glass gcard"><div class="gicon">✋</div><h3>Neural Hand Tracking</h3><p>MediaPipe landmark detection reads finger-count gestures and hold-to-confirm input with sub-frame precision.</p></div>
+      <div class="glass gcard"><div class="gicon">👁️</div><h3>Continuous Face Verify</h3><p>Periodic identity matching plus blink-liveness detection confirms the enrolled student — silently, in the background.</p></div>
+      <div class="glass gcard"><div class="gicon">⚡</div><h3>Generative Quiz Engine</h3><p>Feed it lecture documents. The OCR + LLM pipeline drafts structured questions in seconds, ready for your review.</p></div>
+      <div class="glass gcard"><div class="gicon">📡</div><h3>Integrity Telemetry</h3><p>A live timeline of attendance, scores, and verification events — with one-click unlock, exempt, and session reset.</p></div>
+      <div class="glass gcard"><div class="gicon">🎯</div><h3>Adaptive Practice</h3><p>Unlimited low-stakes attempts with instant feedback let students master material before the graded run.</p></div>
+      <div class="glass gcard"><div class="gicon">🔐</div><h3>Zero-Install Security</h3><p>Fully browser-based. Students join with a code, enroll their face once, and they're cleared for every assessment.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- STATS -->
+<section id="stats">
+  <div class="container">
+    <div class="grid3 stats-grid" style="grid-template-columns:repeat(4,1fr)">
+      <div class="glass stat"><div class="stat-num">99.2%</div><div class="stat-label">VERIFY ACCURACY</div></div>
+      <div class="glass stat"><div class="stat-num">3×</div><div class="stat-label">FASTER AUTHORING</div></div>
+      <div class="glass stat"><div class="stat-num">&lt;40ms</div><div class="stat-label">GESTURE LATENCY</div></div>
+      <div class="glass stat"><div class="stat-num">100%</div><div class="stat-label">BROWSER-NATIVE</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section id="cta">
+  <div class="container">
+    <div class="glass cta">
+      <h2>Step into the future of <span class="gt">assessment</span></h2>
+      <p>Deploy gesture-based, AI-verified quizzes to your classroom in minutes.</p>
+      <a class="btn btn-grad" href="#">Request access</a>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="container foot">
+    <div class="logo" style="font-size:16px"><div class="logo-mark" style="width:28px;height:28px;font-size:14px">IV</div> InnoVision</div>
+    <div>© 2025 InnoVision · Neural assessment interface</div>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -8,6 +8,10 @@ import { GestureLayer } from "@/components/vision/gesture-layer";
 import { Button } from "@/components/ui/button";
 import { MAX_ANSWER_FINGERS } from "@/lib/gestures/constants";
 import type { HoldProgress } from "@/lib/gestures/types";
+import { FaceVerifier } from "@/components/face/face-verifier";
+import { useFacePipeline, type FacePipelinePhase } from "@/components/face/use-face-pipeline";
+import { useFaceTracker } from "@/components/face/use-face-tracker";
+import type { FaceStatus } from "@/lib/face/types";
 
 type Question = {
   id: string;
@@ -50,6 +54,9 @@ type Phase =
 
 const FETCH_TIMEOUT_MS = 15_000;
 
+/** D13 — a lecturer reset the session mid-flight (answer/verify/submit → 404). */
+const RESET_DEAD_MSG = "This attempt was reset by your lecturer — ask them to restart you.";
+
 /** Phases where the pause overlay is suppressed so the timeUp Retry-submit stays reachable. */
 const BLOCK_INPUT_PHASES: Phase[] = ["timeUp", "submitting", "submitted", "dead"];
 
@@ -83,6 +90,7 @@ export function PlayClient({
   initialAnswers,
   initialIndex,
   initialRemainingMs,
+  face,
 }: {
   sessionId: string;
   quiz: Quiz;
@@ -90,6 +98,14 @@ export function PlayClient({
   initialAnswers: SeedAnswer[];
   initialIndex: number;
   initialRemainingMs: number | null;
+  face?: {
+    enrolled: boolean;
+    consentGiven: boolean;
+    faceExempt: boolean;
+    initialNonce: string;
+    initialFaceStatus: FaceStatus;
+    hasFaceChecks: boolean;
+  };
 }) {
   const router = useRouter();
 
@@ -114,6 +130,8 @@ export function PlayClient({
   const [result, setResult] = useState<{ score: number; total: number } | null>(null);
   const [holdProgress, setHoldProgress] = useState<HoldProgress | null>(null);
   const [gestureActive, setGestureActive] = useState(false);
+  const [faceStatus, setFaceStatus] = useState<FaceStatus>(face?.initialFaceStatus ?? "off");
+  const [faceUnavailable, setFaceUnavailable] = useState(false);
 
   // Locks: one answer in flight at a time; no submit while answering.
   const submitLock = useRef(false);
@@ -129,6 +147,63 @@ export function PlayClient({
   const isPractice = quiz.mode === "practice";
   const question = questions[Math.min(index, questions.length - 1)];
   const answered = answers[question?.id];
+
+  // ── Face pipeline (Phase 7) ─────────────────────────────────────
+  // Availability is evaluated BEFORE enrollment/consent (boot failure →
+  // 'unavailable' → passthrough regardless of enrolled/consentGiven).
+  const faceTracker = useFaceTracker({
+    enabled: quiz.mode === "assessment" && Boolean(face),
+    onUnavailable: () => setFaceUnavailable(true),
+  });
+
+  const pipeline = useFacePipeline({
+    sessionId,
+    quizMode: quiz.mode,
+    enrolled: face?.enrolled ?? false,
+    consentGiven: face?.consentGiven ?? false,
+    faceExempt: face?.faceExempt ?? false,
+    initialNonce: face?.initialNonce ?? "",
+    initialFaceStatus: face?.initialFaceStatus ?? "off",
+    questionId: question?.id ?? null,
+    questionVisible: phase === "question" || phase === "locked",
+    phase,
+    onHandLossPause: () => {
+      // The server pause POST happens in the hook; here we keep the gesture
+      // layer from emitting input while paused (sessionPaused gate).
+    },
+    onPhaseChange: (p: FacePipelinePhase) => {
+      // A session completed server-side (e.g. another tab's timer / flagged
+      // poll) must move the quiz to the terminal state.
+      if (p === "submitted" || p === "dead") setPhaseAndRef(p);
+    },
+    onReset: () => {
+      // D13 — the pipeline observed a 404 on a verify POST: the session was
+      // reset by a lecturer mid-flight. Terminal dead screen (no retry).
+      setError(RESET_DEAD_MSG);
+      setPhaseAndRef("dead");
+    },
+    onFaceStatus: (s) => setFaceStatus(s),
+  });
+
+  // Pass the tracker to the pipeline once booted.
+  useEffect(() => {
+    pipeline.setTracker(faceTracker.trackerRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [faceTracker.available]);
+
+  // If the tracker is unavailable, force the pipeline to passthrough.
+  useEffect(() => {
+    if (faceUnavailable && quiz.mode === "assessment" && faceStatus !== "unavailable") {
+      pipeline.setStatusBoth("unavailable");
+      // Record the gap once (idempotent server-side).
+      void fetch(`/api/sessions/${sessionId}/face-unavailable`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      }).catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [faceUnavailable]);
 
   // Monotonic countdown — UX only, never trusted (the RPC is authoritative).
   // Re-runs whenever remainingMs changes (each tick) so the `<= 0` branch can
@@ -241,6 +316,42 @@ export function PlayClient({
         }
 
         if (res.status === 409 && body.error === "session_not_active") {
+          // Mirror the 403 time_expired pattern: the server is authoritative.
+          // GET the real status and branch (PLAN_PHASE7 §2):
+          //  - paused → 'question' (recoverable — the face pipeline will
+          //    blink-recover; the answer can be re-tried).
+          //  - flagged → stay 'timeUp' when alreadyTimeUp (the flagged overlay
+          //    must not be replaced by a dead-end); else 'question' + overlay.
+          //  - completed/gone → 'dead'.
+          const alreadyTimeUp = phaseRef.current === "timeUp";
+          let realStatus: string | undefined;
+          try {
+            const statusRes = await fetch(`/api/sessions/${sessionId}`, { method: "GET" });
+            realStatus = (await statusRes.json().catch(() => ({}))).status;
+          } catch {
+            // network — fall through to the conservative branch below
+          }
+          if (realStatus === "paused") {
+            setError("This session is paused. Recover your face check to continue.");
+            setPhaseAndRef("question");
+            return;
+          }
+          if (realStatus === "flagged") {
+            if (alreadyTimeUp) {
+              // Stay in timeUp; the flagged overlay + Retry-submit stay visible.
+              setError("This session is flagged for review.");
+              setPhaseAndRef("timeUp");
+            } else {
+              setError("This session is flagged for review.");
+              setPhaseAndRef("question");
+            }
+            return;
+          }
+          if (realStatus === "completed") {
+            setPhaseAndRef("dead");
+            return;
+          }
+          // Unknown/gone → dead (terminal).
           setError("This session is no longer active.");
           setPhaseAndRef("dead");
           return;
@@ -248,6 +359,14 @@ export function PlayClient({
 
         if (res.status === 409 && body.error === "quiz_not_live") {
           setError("This quiz is no longer available.");
+          setPhaseAndRef("dead");
+          return;
+        }
+
+        if (res.status === 404) {
+          // D13 — the session was reset by a lecturer mid-flight (or is
+          // otherwise gone). Terminal dead screen, no retry, no re-submit.
+          setError(RESET_DEAD_MSG);
           setPhaseAndRef("dead");
           return;
         }
@@ -328,7 +447,24 @@ export function PlayClient({
       }
 
       if (res.status === 409 && body.error === "session_not_active") {
-        setError("This session is no longer active. Refresh to see its current state.");
+        // Submit from `flagged` → 409 (lecturer decision precedes score
+        // finalization). Per PLAN_PHASE7 §2: if already timeUp, STAY timeUp
+        // (Retry-submit + flagged overlay; the flagged poll survives timeUp);
+        // else → 'question' + overlay.
+        if (phaseRef.current === "timeUp") {
+          setError("This session is flagged for review. A lecturer must unlock it.");
+          setPhaseAndRef("timeUp");
+        } else {
+          setError("This session is flagged for review. A lecturer must unlock it.");
+          setPhaseAndRef("question");
+        }
+        return;
+      }
+
+      if (res.status === 404) {
+        // D13 — the session was reset by a lecturer mid-flight. Terminal dead
+        // screen, no retry, no re-submit.
+        setError(RESET_DEAD_MSG);
         setPhaseAndRef("dead");
         return;
       }
@@ -341,7 +477,7 @@ export function PlayClient({
               ? body.error
               : "Could not submit the quiz.",
         );
-        setPhaseAndRef(phase === "timeUp" ? "timeUp" : "question");
+        setPhaseAndRef(phaseRef.current === "timeUp" ? "timeUp" : "question");
         return;
       }
 
@@ -349,7 +485,7 @@ export function PlayClient({
       // response is malformed and we must NOT render a fabricated score.
       if (typeof body.score !== "number" || typeof body.total !== "number") {
         setError("Unexpected server response. Refresh to see your result.");
-        setPhaseAndRef(phase === "timeUp" ? "timeUp" : "question");
+        setPhaseAndRef(phaseRef.current === "timeUp" ? "timeUp" : "question");
         return;
       }
 
@@ -364,7 +500,9 @@ export function PlayClient({
       } else {
         setError("Network error submitting the quiz. Please submit again.");
       }
-      setPhaseAndRef(phase === "timeUp" ? "timeUp" : "question");
+      // phaseRef, not the render closure: a timeUp auto-submit that failed must
+      // stay timeUp (Retry-submit reachable; the remainingMs guard terminates).
+      setPhaseAndRef(phaseRef.current === "timeUp" ? "timeUp" : "question");
     } finally {
       submitLock.current = false;
       clearTimeout(timeout);
@@ -483,27 +621,75 @@ export function PlayClient({
         </p>
       )}
 
-      <GestureLayer
-        mode={quiz.mode}
-        optionCount={question.options.length}
-        questionId={question.id}
-        armed={phase === "question" && !answered}
-        nextArmed={phase === "feedback"}
-        blockInput={BLOCK_INPUT_PHASES.includes(phase)}
-        onSelect={(i) => selectOption(i)}
-        onNext={() => goNext()}
-        onHoldProgress={setHoldProgress}
-        onStatusChange={(s) => setGestureActive(s === "active")}
+      {/* Persistent hidden video node for the FACE tracker (never conditionally
+          mounted — a remount would kill the shared stream). The boot in
+          useFaceTracker hard-fails to `unavailable` without a bound <video>,
+          so this node is REQUIRED for the assessment face pipeline to run. */}
+      <video
+        ref={faceTracker.videoRef}
+        className="hidden"
+        autoPlay
+        playsInline
+        muted
+        aria-hidden
+      />
+
+      <FaceVerifier
+        status={faceStatus}
+        phase={phase}
+        enrolled={face?.enrolled ?? false}
+        consentGiven={face?.consentGiven ?? false}
+        remainingMs={remainingMs}
+        onBegin={() => {
+          void pipeline.beginGate();
+        }}
+        onConsent={() => {
+          // Consent granted at the gate: persist server-side AND tell the
+          // pipeline so `consentGivenRef` agrees (otherwise Begin would keep
+          // re-blocking on the client-side guard until a reload).
+          void fetch("/api/face/consent", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ consent: true }),
+          })
+            .then((r) => {
+              if (r.ok) pipeline.markConsentGiven();
+            })
+            .catch(() => {});
+        }}
+        onRecover={() => {
+          void pipeline.runRecovery();
+        }}
+        onCheckAgain={() => {
+          void pipeline.checkAgain();
+        }}
       >
-        <QuestionCard
-          question={question}
-          answer={answered}
+        <GestureLayer
           mode={quiz.mode}
-          disabled={phase !== "question"}
-          holdProgress={holdProgress}
-          onSelect={selectOption}
-        />
-      </GestureLayer>
+          optionCount={question.options.length}
+          questionId={question.id}
+          armed={phase === "question" && !answered}
+          nextArmed={phase === "feedback"}
+          blockInput={BLOCK_INPUT_PHASES.includes(phase) || faceStatus === "paused" || faceStatus === "recovering" || faceStatus === "flagged"}
+          sessionPaused={faceStatus === "paused" || faceStatus === "recovering" || faceStatus === "flagged"}
+          onPause={() => {
+            void pipeline.handLossPause();
+          }}
+          onSelect={(i) => selectOption(i)}
+          onNext={() => goNext()}
+          onHoldProgress={setHoldProgress}
+          onStatusChange={(s) => setGestureActive(s === "active")}
+        >
+          <QuestionCard
+            question={question}
+            answer={answered}
+            mode={quiz.mode}
+            disabled={phase !== "question"}
+            holdProgress={holdProgress}
+            onSelect={selectOption}
+          />
+        </GestureLayer>
+      </FaceVerifier>
 
       <div className="mt-6 flex justify-end">
         {phase === "feedback" && (

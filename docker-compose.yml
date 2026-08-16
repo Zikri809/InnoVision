@@ -1,0 +1,64 @@
+# CompreFace — self-hosted face recognition service (detection, alignment,
+# embedding, matching all server-side). Runs alongside `supabase start`; the
+# Next.js API routes call it over loopback only (127.0.0.1:8000), so classroom
+# WiFi can never reach it (PLAN_PHASE7_COMPREFACE_MIGRATION §1, §7).
+#
+# Follows the official exadel/CompreFace compose layout. Network aliases map the
+# plan's `compreface-*` names onto the names the CompreFace API image resolves
+# by default (`comprehend-*`) — belt-and-braces for both naming conventions.
+# Named volumes only (never bind mounts) so biometric data is never committed.
+name: innovision
+
+services:
+  compreface-postgres:
+    image: postgres:12
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: compreface
+      POSTGRES_PASSWORD: compreface
+      POSTGRES_DB: compreface
+    volumes:
+      - compreface-postgres-data:/var/lib/postgresql/data
+    networks:
+      default:
+        aliases:
+          - comprehend-postgres-db
+    # NOT host-bound — internal to the compose network only.
+
+  compreface-core:
+    image: exadel/compreface-core:0.7.1
+    restart: unless-stopped
+    environment:
+      PYTHONUNBUFFERED: "1"
+    # ML worker ports (3000/3100) stay internal — the API reaches the core via
+    # the compose network, never via published host ports.
+    networks:
+      default:
+        aliases:
+          - comprehend-core
+
+  compreface-api:
+    image: exadel/compreface-api:0.7.1
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000" # loopback-only: Next.js API routes call CompreFace here
+    environment:
+      POSTGRES_URL: jdbc:postgresql://compreface-postgres:5432/compreface
+      POSTGRES_USER: compreface
+      POSTGRES_PASSWORD: compreface
+      SPRING_PROFILES_ACTIVE: dev
+      ML_PORT: "3000"
+      ML_KERAS_PORT: "3100"
+    depends_on:
+      - compreface-postgres
+      - compreface-core
+    volumes:
+      - compreface-api-logs:/tmp
+    networks:
+      default:
+        aliases:
+          - comprehend-api
+
+volumes:
+  compreface-postgres-data:
+  compreface-api-logs:

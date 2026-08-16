@@ -1,0 +1,67 @@
+import { z } from "zod";
+
+/**
+ * Zod schemas for the face API surface (PLAN_PHASE7_COMPREFACE_MIGRATION Step 3).
+ *
+ * CompreFace migration: the wire payload is a base64 JPEG FRAME, not a 192-dim
+ * embedding. `frameSchema` is the single contract owner — a non-empty string
+ * capped at `MAX_FRAME_BASE64_CHARS` (~150 KB; the route returns 413 on
+ * overflow). Both the enroll and verify routes validate through it.
+ */
+
+export const frameSchema = z
+  .string("Frame must be a base64 image string.")
+  .min(1, "Frame must not be empty.");
+// NOTE: no `.max()` here — an oversized frame is rejected by the ROUTE with
+// 413 (payloadTooLarge), not a 400 Zod error. A Zod max would fire first and
+// the explicit 413 check (L21 DoS guard) would be unreachable.
+
+/** Enrollment: exactly one frame per guided angle (front/left/right). */
+export const EnrollSchema = z.object({
+  frames: z.array(frameSchema).length(3, "Enrollment requires exactly 3 frames (front, left, right)."),
+});
+
+export type EnrollInput = z.infer<typeof EnrollSchema>;
+
+/**
+ * Verify frame — allows the EMPTY string as the client's "no face captured"
+ * sentinel. The verify route detects `""` and short-circuits CompreFace,
+ * passing `p_subject=''` + `p_similarity=0` so the RPC records a FAIL row
+ * (the null-capture edge is integrity-conservative — never a silent pass).
+ * Enrollment frames stay non-empty via `frameSchema`.
+ */
+export const verifyFrameSchema = z.string("Frame must be a base64 image string.");
+
+export const VerifySchema = z.object({
+  sessionId: z.string().uuid("sessionId must be a valid UUID."),
+  frame: verifyFrameSchema,
+  trigger: z.enum(["start", "question", "periodic"], {
+    message: "trigger must be start, question, or periodic.",
+  }),
+  nonce: z.string().uuid("nonce must be a valid UUID."),
+});
+
+export type VerifyInput = z.infer<typeof VerifySchema>;
+
+/** Shared UUID param schema for face routes that take a session id. */
+export const SessionIdSchema = z.object({
+  sessionId: z.string().uuid("sessionId must be a valid UUID."),
+});
+
+export type SessionIdInput = z.infer<typeof SessionIdSchema>;
+
+export const ExemptSchema = z.object({
+  reason: z
+    .string()
+    .trim()
+    .min(1, "A reason is required to exempt a session.")
+    .max(500, "Reason must be at most 500 characters."),
+});
+
+export type ExemptInput = z.infer<typeof ExemptSchema>;
+
+export const ConsentSchema = z.object({
+  consent: z.boolean("consent must be a boolean."),
+});
+
+export type ConsentInput = z.infer<typeof ConsentSchema>;

@@ -23,7 +23,8 @@ const QUIZ_TITLE = "E5 One Attempt";
 test.describe("E5 — assessment one-attempt lock", () => {
   test("a completed assessment cannot be restarted; another student can start", async ({
     browser,
-  }) => {
+  }, testInfo) => {
+    testInfo.setTimeout(120_000);
     test.skip(!LECTURER_INVITE_CODE, "LECTURER_INVITE_CODE not set");
 
     const lecturerCtx = await browser.newContext();

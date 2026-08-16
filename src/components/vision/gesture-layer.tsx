@@ -56,6 +56,8 @@ export function GestureLayer({
   armed,
   nextArmed,
   blockInput,
+  sessionPaused,
+  onPause,
   onSelect,
   onNext,
   onHoldProgress,
@@ -68,6 +70,10 @@ export function GestureLayer({
   armed: boolean;
   nextArmed: boolean;
   blockInput: boolean;
+  /** Server-side pause gate (P7): while true, the frame handler emits NO input. */
+  sessionPaused?: boolean;
+  /** P7: called when the hand-loss monitor fires `pause` (server-side pause). */
+  onPause?: () => void;
   onSelect: (index: number) => void;
   onNext: () => void;
   onHoldProgress: (p: HoldProgress | null) => void;
@@ -117,6 +123,9 @@ export function GestureLayer({
   // `handLost` is mirrored separately and written synchronously so the frame
   // handler's "block input while paused" gate is airtight (no render lag).
   const handLostRef = useRef<HandLost>(null);
+  // P7: server-pause mirror (reassigned in the latest-ref effect below).
+  const sessionPausedRef = useRef(Boolean(sessionPaused));
+  const onPauseRef = useRef(onPause);
   const frameHandlerRef = useRef<(frame: HandFrame) => void>(() => {});
   const onSelectRef = useRef(onSelect);
   const onNextRef = useRef(onNext);
@@ -153,6 +162,8 @@ export function GestureLayer({
     onNextRef.current = onNext;
     onHoldRef.current = onHoldProgress;
     onStatusChangeRef.current = onStatusChange;
+    sessionPausedRef.current = Boolean(sessionPaused);
+    onPauseRef.current = onPause;
     stateRef.current = { optionCount, questionId, armed, nextArmed, scanning, status };
 
     frameHandlerRef.current = (frame) => {
@@ -170,8 +181,10 @@ export function GestureLayer({
         return;
       }
 
-      // 0. Status gate — single enforcement point.
-      if (s.status !== "active") {
+      // 0. Status gate — single enforcement point. `sessionPaused` (P7) blocks
+      //    ALL finger input even if the hand is visible: a re-shown hand can't
+      //    answer a server-paused session before blink-recovery.
+      if (s.status !== "active" || sessionPausedRef.current) {
         answerHoldRef.current.reset();
         nextHoldRef.current.reset();
         emitHold(null);
@@ -184,6 +197,9 @@ export function GestureLayer({
         const res = lossRef.current.update(frame.handPresent, now);
         if (res.pause) {
           setHandLostState("paused");
+          // P7: the hand-loss pause is server-side — notify the pipeline,
+          // which POSTs /api/sessions/[id]/pause and flips status to paused.
+          onPauseRef.current?.();
         } else if (res.warn && handLostRef.current !== "paused") {
           setHandLostState("warn");
         } else if (frame.handPresent && handLostRef.current === "warn") {
