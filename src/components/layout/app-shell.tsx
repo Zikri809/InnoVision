@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { AppUserMenu } from "./app-user-menu";
+import { AppNavLink } from "./app-nav-link";
 
 type NavLink = { href: string; label: string };
 
@@ -52,13 +53,7 @@ export function AppShell({
 
             <nav aria-label="Primary" className="flex items-center gap-1.5">
               {links.map((l) => (
-                <Link
-                  key={l.href}
-                  href={l.href}
-                  className="rounded-xl px-3.5 py-2 text-[15px] font-bold text-muted-foreground transition-colors hover:bg-orange-100/70 hover:text-primary"
-                >
-                  {l.label}
-                </Link>
+                <AppNavLink key={l.href} href={l.href} label={l.label} />
               ))}
             </nav>
           </div>
