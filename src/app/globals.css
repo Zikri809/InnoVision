@@ -8,8 +8,8 @@
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --font-heading: var(--font-heading);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -46,75 +46,95 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+
+  /* Clay design tokens — see design-system/innovision/MASTER.md */
+  --color-primary-deep: var(--primary-deep);
+  --color-accent-deep: var(--accent-deep);
+  --shadow-clay: 6px 6px 0 rgba(194, 65, 12, 0.14);
+  --shadow-clay-accent: 6px 6px 0 rgba(29, 78, 216, 0.14);
+  --shadow-clay-in: inset 0 -4px 0 rgba(194, 65, 12, 0.1), inset 0 3px 0 rgba(255, 255, 255, 0.8);
+  --shadow-btn-primary: 0 5px 0 var(--primary-deep);
+  --shadow-btn-accent: 0 5px 0 var(--accent-deep);
+  --shadow-clay-sm: 0 4px 0 var(--border);
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  /* === InnoVision Clay (Option 3 — Playful) ===
+     Warm cream background, playful orange primary, trust-blue accent.
+     Master reference: design-system/innovision/MASTER.md */
+  --background: #fff7ed;             /* warm cream */
+  --foreground: #7c2d12;             /* deep warm brown (4.5:1 on cream & white) */
+  --card: #ffffff;
+  --card-foreground: #7c2d12;
+  --popover: #ffffff;
+  --popover-foreground: #7c2d12;
+  --primary: #f97316;                /* playful orange */
+  --primary-foreground: #ffffff;
+  --primary-deep: #c2410c;           /* orange 3D base / shadow edge */
+  --secondary: #fb923c;              /* soft orange */
+  --secondary-foreground: #7c2d12;
+  --muted: #f5efe9;                  /* warm neutral */
+  --muted-foreground: #78716c;       /* warm gray-brown */
+  --accent: #2563eb;                 /* trust blue (CTA) */
+  --accent-foreground: #ffffff;
+  --accent-deep: #1d4fd7;            /* blue 3D base / shadow edge */
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+  --border: #fed7aa;                 /* soft peach — used at 3px, never 1px */
+  --input: #fed7aa;
+  --ring: #2563eb;                   /* visible blue focus */
+  --radius: 1rem;                    /* chunky clay base radius (16px) */
+  --chart-1: #f97316;
+  --chart-2: #2563eb;
+  --chart-3: #fb923c;
+  --chart-4: #60a5fa;
+  --chart-5: #c2410c;
+  --sidebar: #fff7ed;
+  --sidebar-foreground: #7c2d12;
+  --sidebar-primary: #f97316;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ffedd5;
+  --sidebar-accent-foreground: #7c2d12;
+  --sidebar-border: #fed7aa;
+  --sidebar-ring: #2563eb;
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  /* Warm clay dark mode — deep brown, never pure black/gray */
+  --background: #1c0f08;
+  --foreground: #ffedd5;
+  --card: #2a170c;
+  --card-foreground: #ffedd5;
+  --popover: #2a170c;
+  --popover-foreground: #ffedd5;
+  --primary: #fb923c;
+  --primary-foreground: #2a170c;
+  --primary-deep: #7c2d12;
+  --secondary: #3a2313;
+  --secondary-foreground: #ffedd5;
+  --muted: #3a2313;
+  --muted-foreground: #d6a37a;
+  --accent: #60a5fa;
+  --accent-foreground: #1c0f08;
+  --accent-deep: #1d4fd7;
+  --destructive: #f87171;
+  --destructive-foreground: #1c0f08;
+  --border: rgba(254, 215, 170, 0.22);
+  --input: rgba(254, 215, 170, 0.28);
+  --ring: #60a5fa;
+  --chart-1: #fb923c;
+  --chart-2: #60a5fa;
+  --chart-3: #f97316;
+  --chart-4: #3b82f6;
+  --chart-5: #fdba74;
+  --sidebar: #2a170c;
+  --sidebar-foreground: #ffedd5;
+  --sidebar-primary: #fb923c;
+  --sidebar-primary-foreground: #2a170c;
+  --sidebar-accent: #3a2313;
+  --sidebar-accent-foreground: #ffedd5;
+  --sidebar-border: rgba(254, 215, 170, 0.22);
+  --sidebar-ring: #60a5fa;
 }
 
 @layer base {
@@ -122,9 +142,110 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans;
   }
-  html {
-    @apply font-sans;
+}
+
+/* === Clay component utilities ===
+   The 5 rules of clay: 3px borders, hard offset shadows (no blur),
+   chunky radii, soft-press buttons, warm tints. */
+@layer components {
+  /* Shared clay-button base (not used directly; provides the tactile press) */
+  .clay-btn,
+  .clay-btn-primary,
+  .clay-btn-accent,
+  .clay-btn-ghost {
+    @apply inline-flex cursor-pointer select-none items-center justify-center gap-2 rounded-2xl border-[3px] px-6 py-3 font-sans text-base font-extrabold transition-[transform,box-shadow] duration-[180ms] ease-out;
+  }
+  .clay-btn:active,
+  .clay-btn-primary:active,
+  .clay-btn-accent:active,
+  .clay-btn-ghost:active {
+    transform: translateY(3px);
+  }
+  .clay-btn:focus-visible,
+  .clay-btn-primary:focus-visible,
+  .clay-btn-accent:focus-visible,
+  .clay-btn-ghost:focus-visible {
+    outline: 3px solid var(--ring);
+    outline-offset: 3px;
+  }
+
+  .clay-btn {
+    @apply border-transparent;
+  }
+  .clay-btn-primary {
+    @apply border-transparent bg-primary text-primary-foreground;
+    box-shadow: var(--shadow-btn-primary);
+  }
+  .clay-btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 7px 0 var(--primary-deep);
+  }
+  .clay-btn-primary:active {
+    box-shadow: 0 2px 0 var(--primary-deep);
+  }
+  .clay-btn-accent {
+    @apply border-transparent bg-accent text-accent-foreground;
+    box-shadow: var(--shadow-btn-accent);
+  }
+  .clay-btn-accent:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 7px 0 var(--accent-deep);
+  }
+  .clay-btn-accent:active {
+    box-shadow: 0 2px 0 var(--accent-deep);
+  }
+  .clay-btn-ghost {
+    @apply border-border bg-card text-foreground;
+    box-shadow: 0 5px 0 var(--border);
+  }
+  .clay-btn-ghost:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 7px 0 var(--border);
+  }
+  .clay-btn-ghost:active {
+    box-shadow: 0 2px 0 var(--border);
+  }
+
+  /* Clay card: thick border + hard offset shadow */
+  .clay-card {
+    @apply rounded-[22px] border-[3px] border-border bg-card text-card-foreground;
+    box-shadow: var(--shadow-clay);
+  }
+
+  /* Eyebrow pill / badge */
+  .clay-pill {
+    @apply inline-flex items-center gap-2 rounded-full border-[3px] border-border bg-card px-4 py-1.5 font-sans text-sm font-extrabold text-primary;
+    box-shadow: var(--shadow-clay-sm);
+  }
+}
+
+/* Clay entrance: springy pop with overshoot (respects reduced-motion) */
+@keyframes clay-pop {
+  from {
+    opacity: 0;
+    transform: translateY(22px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.clay-pop {
+  animation: clay-pop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .clay-pop {
+    animation: none;
   }
 }
