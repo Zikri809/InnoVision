@@ -107,9 +107,9 @@ export function ClassesPageClient({ classes }: { classes: LecturerClassCard[] })
       </section>
 
       {/* ── Create + list ── */}
-      <section className="grid gap-6 lg:grid-cols-[340px_1fr]">
+      <section className="grid items-start gap-6 lg:grid-cols-[340px_1fr]">
         {/* Create card */}
-        <Card className="h-fit">
+        <Card className="lg:sticky lg:top-24">
           <CardHeader>
             <div className="mb-1 grid h-11 w-11 place-items-center rounded-2xl bg-orange-100 text-primary">
               <Plus className="h-5 w-5" aria-hidden />
@@ -150,18 +150,32 @@ export function ClassesPageClient({ classes }: { classes: LecturerClassCard[] })
 
         {/* Class cards */}
         <div>
-          <h2 className="mb-4 font-heading text-xl font-semibold">My classes</h2>
+          <div className="mb-4 flex items-baseline justify-between">
+            <h2 className="font-heading text-xl font-semibold">My classes</h2>
+            {classes.length > 0 && (
+              <span className="text-sm font-extrabold text-muted-foreground">
+                {classes.length} {classes.length === 1 ? "class" : "classes"}
+              </span>
+            )}
+          </div>
+
           {classes.length === 0 ? (
-            <p className="rounded-2xl border-[3px] border-dashed border-border bg-card p-10 text-center text-sm font-semibold text-muted-foreground">
-              You have no classes yet — create your first one to get started.
-            </p>
+            <div className="grid place-items-center rounded-[28px] border-[3px] border-dashed border-border bg-card/60 px-8 py-16 text-center">
+              <span className="grid h-14 w-14 place-items-center rounded-2xl bg-orange-100 text-primary">
+                <Plus className="h-7 w-7" aria-hidden />
+              </span>
+              <p className="mt-4 font-heading text-lg font-semibold">No classes yet</p>
+              <p className="mt-1 max-w-xs text-sm font-semibold text-muted-foreground">
+                Create your first class on the left to start building quizzes for your students.
+              </p>
+            </div>
           ) : (
-            <ul className="grid gap-4 sm:grid-cols-2">
+            <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(240px,1fr))]">
               {classes.map((c) => (
                 <li key={c.id}>
                   <Link
                     href={`/lecturer/classes/${c.id}`}
-                    className="group block rounded-[22px] border-[3px] border-border bg-card p-5 shadow-[var(--shadow-clay)] transition-[transform,box-shadow] duration-200 hover:-translate-y-1 hover:shadow-[8px_10px_0_rgba(194,65,12,0.16)]"
+                    className="group flex h-full flex-col rounded-[22px] border-[3px] border-border bg-card p-5 shadow-[var(--shadow-clay)] transition-[transform,box-shadow] duration-200 hover:-translate-y-1 hover:shadow-[8px_10px_0_rgba(194,65,12,0.16)]"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-orange-100 font-heading text-lg font-bold text-primary">
@@ -174,7 +188,7 @@ export function ClassesPageClient({ classes }: { classes: LecturerClassCard[] })
                     <h3 className="mt-3.5 font-heading text-lg font-semibold leading-snug [text-wrap:balance]">
                       {c.title}
                     </h3>
-                    <div className="mt-3 flex items-center justify-between">
+                    <div className="mt-auto flex items-center justify-between pt-3">
                       <span className="text-xs font-extrabold text-muted-foreground">
                         {c.quizCount} {c.quizCount === 1 ? "quiz" : "quizzes"}
                       </span>
@@ -185,6 +199,20 @@ export function ClassesPageClient({ classes }: { classes: LecturerClassCard[] })
                   </Link>
                 </li>
               ))}
+
+              {/* Balancing "new class" tile — keeps the grid intentional at any count. */}
+              <li>
+                <button
+                  type="button"
+                  onClick={() => document.getElementById("class-title")?.focus()}
+                  className="flex h-full min-h-[164px] w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-[22px] border-[3px] border-dashed border-border bg-transparent p-5 text-muted-foreground transition-[border-color,color,transform] duration-200 hover:-translate-y-1 hover:border-primary hover:text-primary"
+                >
+                  <span className="grid h-10 w-10 place-items-center rounded-2xl border-[3px] border-current">
+                    <Plus className="h-5 w-5" aria-hidden />
+                  </span>
+                  <span className="text-sm font-extrabold">New class</span>
+                </button>
+              </li>
             </ul>
           )}
         </div>
