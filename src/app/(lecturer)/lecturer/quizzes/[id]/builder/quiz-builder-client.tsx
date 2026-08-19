@@ -1,14 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowDown, ArrowLeft, ArrowUp, Pencil, Timer, Trash2, Wand2 } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, Check, Pencil, Settings2, Timer, Trash2, Wand2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDuration } from "@/lib/format/duration";
+import { TITLE_MAX } from "@/lib/quizzes/validation";
+import { MODE_CLASS, MODE_LABEL, STATUS_CLASS, STATUS_LABEL } from "@/lib/quizzes/labels";
 import {
   Select,
   SelectContent,
@@ -27,9 +29,10 @@ import { GenerateFromFileDialog } from "@/components/extract/GenerateFromFileDia
 import { SourceTextPreview } from "@/components/extract/SourceTextPreview";
 import { EditQuestionDialog } from "@/components/quiz/edit-question-dialog";
 import { RegenerateQuestionDialog } from "@/components/quiz/regenerate-question-dialog";
+import { EditQuizDialog } from "@/components/quiz/edit-quiz-dialog";
 import type { OcrConfig } from "@/lib/extract/types";
 
-type QuizInfo = {
+export type QuizInfo = {
   id: string;
   class_id: string;
   class_title: string;
@@ -69,28 +72,6 @@ const emptyDraft: QuestionDraft = {
   explanation: "",
 };
 
-const STATUS_LABEL: Record<QuizInfo["status"], string> = {
-  draft: "Draft",
-  live: "Live",
-  closed: "Closed",
-};
-
-const STATUS_CLASS: Record<QuizInfo["status"], string> = {
-  draft: "border-border bg-muted text-muted-foreground",
-  live: "border-emerald-300 bg-emerald-100 text-emerald-800",
-  closed: "border-destructive/40 bg-destructive/10 text-destructive",
-};
-
-const MODE_LABEL: Record<QuizInfo["mode"], string> = {
-  practice: "Practice",
-  assessment: "Assessment",
-};
-
-const MODE_CLASS: Record<QuizInfo["mode"], string> = {
-  practice: "border-emerald-300 bg-emerald-100 text-emerald-800",
-  assessment: "border-accent/40 bg-blue-100 text-accent",
-};
-
 export function QuizBuilderClient({
   quiz,
   questions,
@@ -104,6 +85,109 @@ export function QuizBuilderClient({
 }) {
   const router = useRouter();
   const isDraft = quiz.status === "draft";
+
+  // Title editing state
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(quiz.title);
+  const [savingTitle, setSavingTitle] = useState(false);
+  const editTitleBtnRef = useRef<HTMLButtonElement>(null);
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  const titleSubmitLock = useRef(false);
+
+  // Settings dialog state & refs
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsBtnRef = useRef<HTMLButtonElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+
+  function handleDialogClose(open: boolean) {
+    setSettingsOpen(open);
+    if (!open) {
+      requestAnimationFrame(() => {
+        if (document.activeElement === document.body) {
+          if (isDraft && settingsBtnRef.current) {
+            settingsBtnRef.current.focus();
+          } else {
+            headingRef.current?.focus();
+          }
+        }
+      });
+    }
+  }
+
+  // Focus & select input text on edit start
+  useEffect(() => {
+    if (editingTitle && titleInputRef.current) {
+      titleInputRef.current.focus();
+      titleInputRef.current.select();
+    }
+  }, [editingTitle]);
+
+  function startTitleEdit() {
+    setTitleDraft(quiz.title);
+    setEditingTitle(true);
+    setError(null);
+    setNotice(null);
+  }
+
+  function cancelTitleEdit() {
+    setEditingTitle(false);
+    setTitleDraft(quiz.title);
+    setError(null);
+    editTitleBtnRef.current?.focus();
+  }
+
+  async function handleTitleSave(e?: React.FormEvent) {
+    if (e) e.preventDefault();
+    if (savingTitle || titleSubmitLock.current) return;
+
+    const trimmed = titleDraft.trim();
+    if (!trimmed) {
+      setError("Quiz title is required.");
+      return;
+    }
+    if (trimmed.length > TITLE_MAX) {
+      setError(`Quiz title must be at most ${TITLE_MAX} characters.`);
+      return;
+    }
+    if (trimmed === quiz.title) {
+      cancelTitleEdit();
+      return;
+    }
+
+    titleSubmitLock.current = true;
+    setSavingTitle(true);
+    setError(null);
+    setNotice(null);
+
+    try {
+      const res = await fetch(`/api/quizzes/${quiz.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: trimmed }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(body.message ?? body.error ?? "Could not update quiz title.");
+        if (res.status === 409) {
+          setEditingTitle(false);
+          router.refresh();
+        } else if (res.status === 404) {
+          setEditingTitle(false);
+          router.push(`/lecturer/classes/${quiz.class_id}`);
+        }
+        return;
+      }
+      setEditingTitle(false);
+      setNotice("Quiz title updated.");
+      router.refresh();
+      editTitleBtnRef.current?.focus();
+    } catch {
+      setError("Network error updating quiz title.");
+    } finally {
+      titleSubmitLock.current = false;
+      setSavingTitle(false);
+    }
+  }
 
   // Question form state (top card: adding new questions).
   const [draft, setDraft] = useState<QuestionDraft>(emptyDraft);
@@ -192,7 +276,7 @@ export function QuizBuilderClient({
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const body = await res.json();
+      const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(body.message ?? body.error ?? "Could not save the question.");
         return;
@@ -272,7 +356,7 @@ export function QuizBuilderClient({
       const res = await fetch(`/api/quizzes/${quiz.id}/publish`, {
         method: "POST",
       });
-      const body = await res.json();
+      const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(body.message ?? body.error ?? "Could not publish the quiz.");
         return;
@@ -299,22 +383,173 @@ export function QuizBuilderClient({
             <ArrowLeft className="h-4 w-4" aria-hidden /> {quiz.class_title}
           </Link>
           <div className="mt-3 flex flex-wrap items-center justify-between gap-4">
-            <div className="min-w-0">
-              <h1 className="font-heading text-3xl font-semibold [text-wrap:balance]">{quiz.title}</h1>
+            <div className="min-w-0 flex-1">
+              {editingTitle && isDraft ? (
+                <form
+                  onSubmit={handleTitleSave}
+                  className="space-y-2"
+                  aria-label="Edit quiz title"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="relative min-w-[240px] max-w-lg flex-1">
+                      <Input
+                        ref={titleInputRef}
+                        value={titleDraft}
+                        onChange={(e) => setTitleDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") {
+                            e.preventDefault();
+                            cancelTitleEdit();
+                          }
+                        }}
+                        maxLength={TITLE_MAX}
+                        disabled={savingTitle}
+                        placeholder="Quiz title…"
+                        aria-label="Quiz title"
+                        aria-required="true"
+                        aria-invalid={Boolean(error && !titleDraft.trim())}
+                        className="h-11 font-heading text-lg font-semibold pr-16 bg-white/90 dark:bg-card/90"
+                      />
+                      <span
+                        aria-hidden
+                        className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-bold text-muted-foreground"
+                      >
+                        {titleDraft.length}/{TITLE_MAX}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        type="submit"
+                        size="sm"
+                        disabled={savingTitle || !titleDraft.trim()}
+                        className="h-10 px-3.5 gap-1.5 font-bold"
+                      >
+                        {savingTitle ? (
+                          "Saving…"
+                        ) : (
+                          <>
+                            <Check className="size-4" aria-hidden />
+                            Save
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={cancelTitleEdit}
+                        disabled={savingTitle}
+                        className="h-10 px-3"
+                      >
+                        <X className="size-4 mr-1" aria-hidden />
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                  <p className="text-xs font-semibold text-muted-foreground">
+                    Press <kbd className="rounded-lg border-[2px] border-border bg-muted px-1.5 py-0.5 font-mono text-[11px] font-bold shadow-[0_2px_0_var(--border)]">Enter</kbd> to save, <kbd className="rounded-lg border-[2px] border-border bg-muted px-1.5 py-0.5 font-mono text-[11px] font-bold shadow-[0_2px_0_var(--border)]">Esc</kbd> to cancel.
+                  </p>
+                </form>
+              ) : (
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <h1
+                    ref={headingRef}
+                    tabIndex={-1}
+                    className="font-heading text-3xl font-semibold outline-none [text-wrap:balance]"
+                  >
+                    {quiz.title}
+                  </h1>
+                  {isDraft && (
+                    <div className="flex items-center gap-1">
+                      <Button
+                        ref={editTitleBtnRef}
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={startTitleEdit}
+                        disabled={savingTitle || publishing || settingsOpen}
+                        aria-label={`Rename quiz: ${quiz.title}`}
+                        title="Rename title (inline)"
+                        className="relative size-9 rounded-xl text-muted-foreground hover:text-primary hover:bg-white/60 dark:hover:bg-card/60 transition-colors before:absolute before:-inset-1 before:content-['']"
+                      >
+                        <Pencil className="size-4" aria-hidden="true" />
+                      </Button>
+                      <Button
+                        ref={settingsBtnRef}
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => {
+                          cancelTitleEdit();
+                          setSettingsOpen(true);
+                        }}
+                        disabled={savingTitle || publishing}
+                        aria-label="Edit quiz settings"
+                        title="Edit title, mode, and time limit"
+                        aria-haspopup="dialog"
+                        aria-expanded={settingsOpen}
+                        className="relative size-9 rounded-xl text-muted-foreground hover:text-primary hover:bg-white/60 dark:hover:bg-card/60 transition-colors before:absolute before:-inset-1 before:content-['']"
+                      >
+                        <Settings2 className="size-4" aria-hidden="true" />
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="mt-3 flex flex-wrap items-center gap-2.5">
-                <span className={`rounded-full border-[3px] px-3 py-1 text-xs font-extrabold ${STATUS_CLASS[quiz.status]}`}>
+                <span className={`inline-flex items-center justify-center h-8 rounded-full border-[3px] px-3.5 text-xs font-extrabold select-none cursor-default ${STATUS_CLASS[quiz.status]}`}>
                   {STATUS_LABEL[quiz.status]}
                 </span>
-                <span className={`rounded-full border-[3px] px-3 py-1 text-xs font-extrabold ${MODE_CLASS[quiz.mode]}`}>
-                  {MODE_LABEL[quiz.mode]}
-                </span>
-                {quiz.mode === "assessment" && quiz.time_limit_sec != null && (
-                  <span className="inline-flex items-center gap-1 rounded-full border-[3px] border-border bg-muted px-3 py-1 text-xs font-extrabold tabular-nums text-muted-foreground">
-                    <Timer className="h-3.5 w-3.5" aria-hidden />
-                    {formatDuration(quiz.time_limit_sec)} limit
+
+                {isDraft ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      cancelTitleEdit();
+                      setSettingsOpen(true);
+                    }}
+                    disabled={savingTitle || publishing}
+                    aria-haspopup="dialog"
+                    aria-expanded={settingsOpen}
+                    aria-label={`Quiz mode: ${MODE_LABEL[quiz.mode]}. Click to edit settings.`}
+                    className={`relative inline-flex items-center justify-center gap-1.5 h-8 rounded-full border-[3px] px-3.5 text-xs font-extrabold cursor-pointer transition-[transform,box-shadow] duration-150 hover:-translate-y-0.5 hover:shadow-[var(--shadow-clay-sm)] active:translate-y-0 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/70 disabled:pointer-events-none disabled:opacity-60 before:absolute before:-inset-1.5 before:content-[''] ${MODE_CLASS[quiz.mode]}`}
+                  >
+                    <span>{MODE_LABEL[quiz.mode]}</span>
+                    <Pencil className="size-3 opacity-60" aria-hidden="true" />
+                  </button>
+                ) : (
+                  <span className={`inline-flex items-center justify-center h-8 rounded-full border-[3px] px-3.5 text-xs font-extrabold select-none cursor-default ${MODE_CLASS[quiz.mode]}`}>
+                    {MODE_LABEL[quiz.mode]}
                   </span>
                 )}
-                <span className="rounded-full border-[3px] border-border bg-muted px-3 py-1 text-xs font-extrabold text-muted-foreground">
+
+                {quiz.mode === "assessment" && quiz.time_limit_sec != null && (
+                  isDraft ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        cancelTitleEdit();
+                        setSettingsOpen(true);
+                      }}
+                      disabled={savingTitle || publishing}
+                      aria-haspopup="dialog"
+                      aria-expanded={settingsOpen}
+                      aria-label={`Time limit: ${formatDuration(quiz.time_limit_sec)}. Click to edit settings.`}
+                      className="relative inline-flex items-center justify-center gap-1.5 h-8 rounded-full border-[3px] border-border bg-muted px-3.5 text-xs font-extrabold tabular-nums text-muted-foreground cursor-pointer transition-[transform,box-shadow] duration-150 hover:-translate-y-0.5 hover:shadow-[var(--shadow-clay-sm)] active:translate-y-0 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/70 disabled:pointer-events-none disabled:opacity-60 before:absolute before:-inset-1.5 before:content-['']"
+                    >
+                      <Timer className="size-3.5" aria-hidden="true" />
+                      <span>{formatDuration(quiz.time_limit_sec)} limit</span>
+                      <Pencil className="size-3 opacity-60" aria-hidden="true" />
+                    </button>
+                  ) : (
+                    <span className="inline-flex items-center justify-center gap-1.5 h-8 rounded-full border-[3px] border-border bg-muted px-3.5 text-xs font-extrabold tabular-nums text-muted-foreground select-none cursor-default">
+                      <Timer className="size-3.5" aria-hidden="true" />
+                      {formatDuration(quiz.time_limit_sec)} limit
+                    </span>
+                  )
+                )}
+
+                <span className="inline-flex items-center justify-center h-8 rounded-full border-[3px] border-border bg-muted px-3.5 text-xs font-extrabold text-muted-foreground select-none cursor-default">
                   {questions.length} {questions.length === 1 ? "question" : "questions"}
                 </span>
               </div>
@@ -338,6 +573,24 @@ export function QuizBuilderClient({
       </section>
 
       <SourceTextPreview text={quiz.source_text} />
+
+      <EditQuizDialog
+        open={settingsOpen}
+        onOpenChange={handleDialogClose}
+        quiz={quiz}
+        onSuccess={() => {
+          setNotice("Quiz settings updated.");
+          router.refresh();
+        }}
+        onError={(status, message) => {
+          setError(message);
+          if (status === 409) {
+            router.refresh();
+          } else if (status === 404) {
+            router.push(`/lecturer/classes/${quiz.class_id}`);
+          }
+        }}
+      />
 
       <GenerateFromFileDialog
         quizId={quiz.id}
@@ -418,7 +671,7 @@ export function QuizBuilderClient({
             <form onSubmit={handleSave} className="space-y-4">
               <div className="flex flex-wrap items-center gap-4 sm:gap-6">
                 <div className="space-y-1">
-                  <Label htmlFor="q-type">Type</Label>
+                  <Label htmlFor="q-type">Question Type</Label>
                   <Select
                     value={draft.type}
                     onValueChange={(v) => {
@@ -435,28 +688,28 @@ export function QuizBuilderClient({
                       );
                     }}
                   >
-                    <SelectTrigger id="q-type" className="w-44">
-                      <SelectValue placeholder="Type">
-                        {(v) => (v === "true_false" ? "True / False" : "Multiple choice")}
+                    <SelectTrigger id="q-type" className="w-full sm:w-44">
+                      <SelectValue placeholder="Select type">
+                        {(v) => (v === "true_false" ? "True / False" : "Multiple Choice")}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="mcq">Multiple choice</SelectItem>
+                      <SelectItem value="mcq">Multiple Choice</SelectItem>
                       <SelectItem value="true_false">True / False</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-1">
-                  <Label htmlFor="q-correct">Correct answer</Label>
+                  <Label htmlFor="q-correct">Correct Answer</Label>
                   <Select
                     value={String(draft.correctIndex + 1)}
                     onValueChange={(v) =>
                       setDraft((d) => ({ ...d, correctIndex: Number(v) - 1 }))
                     }
                   >
-                    <SelectTrigger id="q-correct" className="w-36">
-                      <SelectValue placeholder="Answer">
-                        {(v) => (v ? `Option ${v}` : "Answer")}
+                    <SelectTrigger id="q-correct" className="w-full sm:w-36">
+                      <SelectValue placeholder="Select answer">
+                        {(v) => (v ? `Option ${v}` : "Select answer")}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
@@ -471,7 +724,7 @@ export function QuizBuilderClient({
               </div>
 
               <div className="space-y-1">
-                <Label htmlFor="q-prompt">Question</Label>
+                <Label htmlFor="q-prompt">Question Prompt</Label>
                 <Textarea
                   id="q-prompt"
                   value={draft.prompt}
@@ -487,7 +740,13 @@ export function QuizBuilderClient({
                 <Label>Options</Label>
                 {draft.options.map((opt, i) => (
                   <div key={i} className="flex items-center gap-2">
-                    <span className="w-8 text-center text-sm text-muted-foreground">
+                    <span
+                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl font-heading text-xs font-extrabold transition-colors shadow-xs ${
+                        draft.correctIndex === i
+                          ? "border-[2px] border-emerald-500 bg-emerald-100 dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-200"
+                          : "border-[2px] border-border bg-muted/60 text-muted-foreground"
+                      }`}
+                    >
                       {i + 1}
                     </span>
                     <Input
@@ -506,8 +765,7 @@ export function QuizBuilderClient({
                             <Button
                               type="button"
                               variant="ghost"
-                              size="sm"
-                              className="px-1.5"
+                              size="icon-sm"
                               onClick={() => moveOption(i, "up")}
                               disabled={i === 0}
                               aria-label={`Move option ${i + 1} up`}
@@ -517,8 +775,7 @@ export function QuizBuilderClient({
                             <Button
                               type="button"
                               variant="ghost"
-                              size="sm"
-                              className="px-1.5"
+                              size="icon-sm"
                               onClick={() => moveOption(i, "down")}
                               disabled={i === draft.options.length - 1}
                               aria-label={`Move option ${i + 1} down`}
@@ -531,7 +788,7 @@ export function QuizBuilderClient({
                           <Button
                             type="button"
                             variant="ghost"
-                            size="sm"
+                            size="icon-sm"
                             onClick={() => removeOption(i)}
                             aria-label={`Remove option ${i + 1}`}
                           >
@@ -560,7 +817,7 @@ export function QuizBuilderClient({
               </div>
 
               <div className="space-y-1">
-                <Label htmlFor="q-explanation">Explanation (optional)</Label>
+                <Label htmlFor="q-explanation" className="font-extrabold">Explanation (Optional)</Label>
                 <p className="text-xs font-semibold text-muted-foreground">
                   Shown to students after they answer — explain why the correct
                   option is right.
@@ -573,7 +830,7 @@ export function QuizBuilderClient({
                   }
                   rows={2}
                   maxLength={2000}
-                  placeholder="Explain why this is correct (shown after answering)…"
+                  placeholder="Explain why the correct answer is right (shown after answering)…"
                 />
               </div>
 
@@ -613,15 +870,15 @@ export function QuizBuilderClient({
           ) : (
             <ul className="divide-y divide-border">
               {questions.map((q, idx) => (
-                <li key={q.id} className="flex items-start justify-between gap-4 py-4">
-                  <div className="min-w-0">
+                <li key={q.id} className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 sm:gap-4 py-4">
+                  <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="font-heading text-sm font-semibold text-muted-foreground">{idx + 1}.</span>
                       <span className="rounded-full border-[3px] border-border bg-muted px-2.5 py-0.5 text-xs font-extrabold text-foreground">
-                        {q.type === "mcq" ? "MCQ" : "T/F"}
+                        {q.type === "mcq" ? "MCQ" : "True / False"}
                       </span>
                       <span className="text-xs font-bold text-muted-foreground">
-                        Answer: {q.correct_index + 1}
+                        Answer: Option {q.correct_index + 1}
                       </span>
                     </div>
                     <p className="mt-1.5 font-heading text-base font-semibold">{q.prompt}</p>
@@ -630,12 +887,12 @@ export function QuizBuilderClient({
                     </p>
                     {q.explanation && (
                       <p className="mt-1.5 text-xs font-semibold text-muted-foreground">
-                        {q.explanation}
+                        <strong className="font-extrabold text-foreground">Explanation:</strong> {q.explanation}
                       </p>
                     )}
                   </div>
                   {isDraft && (
-                    <div className="flex shrink-0 items-center gap-1.5">
+                    <div className="flex flex-wrap items-center gap-1.5 self-end sm:self-start sm:shrink-0">
                       <Button
                         variant="outline"
                         size="sm"

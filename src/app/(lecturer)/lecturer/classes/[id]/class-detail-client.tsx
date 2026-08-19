@@ -45,27 +45,10 @@ type QuizRow = {
   created_at: string;
 };
 
-const STATUS_LABEL: Record<QuizRow["status"], string> = {
-  draft: "Draft",
-  live: "Live",
-  closed: "Closed",
-};
-
-const STATUS_CLASS: Record<QuizRow["status"], string> = {
-  draft: "border-border bg-muted text-muted-foreground",
-  live: "border-emerald-300 bg-emerald-100 text-emerald-800",
-  closed: "border-destructive/40 bg-destructive/10 text-destructive",
-};
-
-const MODE_LABEL: Record<QuizRow["mode"], string> = {
-  practice: "Practice",
-  assessment: "Assessment",
-};
-
-const MODE_CLASS: Record<QuizRow["mode"], string> = {
-  practice: "border-emerald-300 bg-emerald-100 text-emerald-800",
-  assessment: "border-accent/40 bg-blue-100 text-accent",
-};
+import { HOURS_MAX, MINUTES_MAX, hmToSeconds } from "@/lib/quizzes/time-limit";
+import { TITLE_MAX } from "@/lib/quizzes/validation";
+import { MODE_CLASS, MODE_LABEL, STATUS_CLASS, STATUS_LABEL } from "@/lib/quizzes/labels";
+import type { QuizMode } from "@/lib/types/aliases";
 
 const DATE_FMT = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" });
 
@@ -91,17 +74,26 @@ export function ClassDetailClient({
   const [minutes, setMinutes] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copyError, setCopyError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
   // Ref lock guards against a fast double-click before React re-renders.
   const submitLock = useRef(false);
 
+  function blockNonNumeric(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (["e", "E", "+", "-", "."].includes(e.key)) {
+      e.preventDefault();
+    }
+  }
+
   async function copyJoinCode() {
+    setCopyError(null);
     try {
       await navigator.clipboard.writeText(cls.join_code);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
     } catch {
-      setError("Could not copy the join code.");
+      setCopyError("Could not copy the join code.");
     }
   }
 
@@ -112,19 +104,21 @@ export function ClassDetailClient({
     submitLock.current = true;
     setCreating(true);
     try {
+      const timeLimitSec =
+        mode === "practice"
+          ? null
+          : (hours === "" && minutes === "" ? null : hmToSeconds(Number(hours) || 0, Number(minutes) || 0));
+
       const res = await fetch(`/api/classes/${cls.id}/quizzes`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           title,
           mode,
-          timeLimitSec:
-            hours === "" && minutes === ""
-              ? null
-              : Number(hours || 0) * 3600 + Number(minutes || 0) * 60,
+          timeLimitSec,
         }),
       });
-      const body = await res.json();
+      const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(body.message ?? body.error ?? "Failed to create quiz.");
         return;
@@ -181,6 +175,11 @@ export function ClassDetailClient({
                   )}
                 </Button>
               </div>
+              {copyError && (
+                <p className="mt-1 text-xs font-bold text-destructive" role="alert">
+                  {copyError}
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -204,18 +203,25 @@ export function ClassDetailClient({
                   id="quiz-title"
                   placeholder="e.g. Chapter 1 Quiz"
                   value={title}
+                  disabled={creating}
                   onChange={(e) => setTitle(e.target.value)}
                   required
-                  maxLength={200}
+                  maxLength={TITLE_MAX}
                 />
               </div>
               <div className="space-y-1">
                 <Label htmlFor="quiz-mode" className="sr-only">
                   Mode
                 </Label>
-                <Select value={mode} onValueChange={(v) => setMode(v as "practice" | "assessment")}>
-                  <SelectTrigger id="quiz-mode" className="w-40">
-                    <SelectValue placeholder="Mode" />
+                <Select
+                  value={mode}
+                  onValueChange={(v) => setMode(v as "practice" | "assessment")}
+                  disabled={creating}
+                >
+                  <SelectTrigger id="quiz-mode" className="w-full sm:w-40">
+                    <SelectValue placeholder="Select mode">
+                      {(v) => MODE_LABEL[v as QuizMode] ?? (v === "assessment" ? "Assessment" : "Practice")}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="practice">Practice</SelectItem>
@@ -232,12 +238,27 @@ export function ClassDetailClient({
                     id="quiz-time-hours"
                     type="number"
                     min={0}
-                    max={72}
+                    max={HOURS_MAX}
                     placeholder="0"
                     value={hours}
-                    onChange={(e) =>
-                      setHours(Math.max(0, Math.min(72, Number(e.target.value) || 0)).toString())
-                    }
+                    disabled={creating || mode === "practice"}
+                    onFocus={(e) => e.target.select()}
+                    onKeyDown={blockNonNumeric}
+                    aria-describedby="quiz-create-time-helper"
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === "") {
+                        setHours("");
+                        return;
+                      }
+                      const num = Number(val);
+                      if (Number.isNaN(num)) return;
+                      const clamped = Math.max(0, Math.min(HOURS_MAX, Math.trunc(num)));
+                      setHours(String(clamped));
+                      if (clamped === HOURS_MAX) {
+                        setMinutes("");
+                      }
+                    }}
                     className="w-16 text-center placeholder:text-center [appearance:textfield] [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                   />
                 </div>
@@ -250,20 +271,32 @@ export function ClassDetailClient({
                     id="quiz-time-minutes"
                     type="number"
                     min={0}
-                    max={59}
+                    max={MINUTES_MAX}
                     placeholder="0"
                     value={minutes}
-                    onChange={(e) =>
-                      setMinutes(Math.max(0, Math.min(59, Number(e.target.value) || 0)).toString())
-                    }
+                    disabled={creating || mode === "practice" || Number(hours) === HOURS_MAX}
+                    onFocus={(e) => e.target.select()}
+                    onKeyDown={blockNonNumeric}
+                    aria-describedby="quiz-create-time-helper"
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === "") {
+                        setMinutes("");
+                        return;
+                      }
+                      const num = Number(val);
+                      if (Number.isNaN(num)) return;
+                      const clamped = Math.max(0, Math.min(MINUTES_MAX, Math.trunc(num)));
+                      setMinutes(String(clamped));
+                    }}
                     className="w-16 text-center placeholder:text-center [appearance:textfield] [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                   />
                 </div>
                 <span aria-hidden className="pb-2.5 text-xs font-extrabold text-muted-foreground">min</span>
               </div>
             </div>
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-xs font-semibold text-muted-foreground">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <p id="quiz-create-time-helper" className="text-xs font-semibold text-muted-foreground">
                 Leave the time limit empty for an untimed quiz.
               </p>
               <Button type="submit" disabled={creating || !title.trim()}>
@@ -288,9 +321,9 @@ export function ClassDetailClient({
                   <div className="flex items-center justify-between gap-3 rounded-xl px-2 py-3">
                     <Link
                       href={`/lecturer/quizzes/${q.id}/builder`}
-                      className="flex min-w-0 items-center gap-3 rounded transition-colors hover:text-primary"
+                      className="flex min-w-0 items-center gap-3 rounded-xl transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/70"
                     >
-                      <span className="font-heading text-base font-semibold">{q.title}</span>
+                      <span className="truncate font-heading text-base font-semibold">{q.title}</span>
                       <span className={`rounded-full border-[3px] px-2.5 py-0.5 text-xs font-extrabold ${MODE_CLASS[q.mode]}`}>
                         {MODE_LABEL[q.mode]}
                       </span>

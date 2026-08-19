@@ -41,13 +41,23 @@ async function createTimedAssessment(
   await expect(page).toHaveURL(/\/lecturer\/classes\/[^/]+$/);
   await page.getByLabel("Quiz title").fill(opts.quizTitle);
   await page.getByLabel("Mode").click();
-  await page.getByRole("option", { name: "Assessment" }).click();
-  await page.getByLabel("Time limit (seconds)").fill(String(opts.timeLimitSec));
   await page.getByRole("button", { name: /new quiz/i }).click();
   await expect(page.getByText(opts.quizTitle, { exact: true })).toBeVisible();
   await page.getByText(opts.quizTitle, { exact: true }).click();
   await expect(page).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
   const quizId = page.url().split("/builder")[0].split("/").pop()!;
+
+  // Sub-minute test limits (e.g. 5s/10s) set via direct PATCH
+  await page.evaluate(
+    async ({ qid, limit }) => {
+      await fetch(`/api/quizzes/${qid}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ timeLimitSec: limit }),
+      });
+    },
+    { qid: quizId, limit: opts.timeLimitSec },
+  );
 
   for (const q of opts.questions) {
     await page.getByRole("textbox", { name: "Question" }).fill(q.prompt);

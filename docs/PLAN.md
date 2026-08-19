@@ -10,7 +10,7 @@
 
 | Decision | Choice |
 |---|---|
-| AI provider | `openai` npm SDK with `baseURL` override → works with OpenAI, OpenRouter, Gemini-compatible endpoint, Ollama. Config via env: `AI_BASE_URL`, `AI_API_KEY`, `AI_MODEL` |
+| AI provider | `openai` npm SDK with `baseURL` override → works with OpenAI, OpenRouter, Gemini-compatible endpoint, local vLLM. Config via env: `AI_BASE_URL`, `AI_API_KEY`, `AI_MODEL` |
 | Question types (gesture-friendly) | **`mcq`** (2–5 options → finger count) and **`true_false`** (1 finger = true, 2 = false). Nothing else for MVP |
 | Face stack | **CompreFace (self-hosted Docker, InsightFace/ArcFace)** — server-side detection/alignment/embedding/matching via REST. The browser sends webcam frames to Next.js routes → CompreFace `/recognize`. Subject registry keyed by `auth.uid()`. Threshold + margin rule (0.5 similarity + 0.15 gap) as SQL constants. **Superseded the pre-migration MediaPipe client-side embedding approach** (see `PLAN_PHASE7_COMPREFACE_MIGRATION.md`). |
 | Gesture stack | **MediaPipe Hand Landmarker** (ported from `Sample Code/index.html`) |
@@ -158,7 +158,7 @@ interface TextExtractor {
 Implementations:
 - `NativeExtractor` — PDF text layer (`pdfjs-dist`), DOCX (`mammoth`), PPTX (`jszip` + slide-XML text nodes), plain text/markdown passthrough
 - `TesseractExtractor` — **Tesseract.js (WASM) in the lecturer's browser** — **default OCR engine**. Zero setup, runs in any modern browser, works on the deployed Vercel app with no local server. $0
-- `GlmOcrExtractor` — **GLM-OCR via local Ollama** — opt-in **high-accuracy** engine (tables, formulas, messy scans). 1.7 GB. ⚠️ It is a **vision-language chat model, not a strict OCR API** — must be prompted to transcribe, and `ollama pull glm-ocr` may not resolve on stable releases. Only shown as selectable when the **availability probe** (`GET /api/tags`) finds the model locally. Client renders pages to PNG (pdf.js) → local Ollama endpoint → structured text back. $0, offline-capable, no Vercel limits
+- `GlmOcrExtractor` — **GLM-OCR via local Docker (vLLM)** — opt-in **high-accuracy** engine (tables, formulas, messy scans). ~0.9B vision-language model. ⚠️ It is a **vision-language chat model, not a strict OCR API** — must be prompted to transcribe. Runs in the `glm-ocr` compose service (vLLM, OpenAI-compatible API) — the officially recommended production runtime, replacing the unstable native-Ollama path. Only shown as selectable when the **availability probe** (`GET /v1/models`) finds the model locally. Client renders pages to PNG (pdf.js) → local vLLM endpoint → structured text back. $0, offline-capable, no Vercel limits
 - `VisionOcrExtractor` — client renders pages to PNG (pdf.js) → POST `/api/ocr/vision` → cloud multimodal LLM via the OpenAI-compatible endpoint (e.g. gpt-4o-mini, Gemini Flash, Qwen-VL via OpenRouter) → markdown text back. Costs tokens; opt-in only
 
 ### 3.2 Extraction pipeline (cascade)
@@ -173,7 +173,7 @@ Upload file
    ▼ no (scanned doc / image slides)
 [2] OCR engine picker (default = Tesseract, always available):
    ├── TesseractExtractor   → client-side WASM, $0, zero setup (DEFAULT)
-   ├── GlmOcrExtractor      → high accuracy, local Ollama — only shown
+   ├── GlmOcrExtractor      → high accuracy, local Docker/vLLM — only shown
    │     when availability probe finds the model (opt-in upgrade)
    └── VisionOcrExtractor   → cloud vision LLM, costs tokens (opt-in)
    │
@@ -184,7 +184,7 @@ Extracted text (capped ~15k chars) ──► /api/ai/generate-quiz
 ### 3.3 Engine notes
 
 - **Tesseract.js (default):** zero setup, runs in any modern browser, works on the deployed app with nothing installed. Accuracy is weaker on formulas/tables — that's the trade-off for reliability; the UI offers GLM-OCR as the upgrade when it's detected.
-- **GLM-OCR (opt-in upgrade):** `ollama pull glm-ocr` (or vLLM). Runs on CPU (slow, ~30s/page) or GPU (fast, <1s/page). Best accuracy on scanned slides, tables, math formulas. Endpoint: `OLLAMA_BASE_URL` (default `http://localhost:11434`). Only appears in the picker when the probe succeeds.
+- **GLM-OCR (opt-in upgrade):** `docker compose up -d glm-ocr` (vLLM — the officially recommended production runtime; the native-Ollama OpenAI-compat vision endpoint is known to 502). Runs on CPU (slow, ~30s/page) or GPU (fast, <1s/page). Best accuracy on scanned slides, tables, math formulas. Endpoint: `GLM_BASE_URL` (default `http://localhost:11434`). Only appears in the picker when the probe succeeds.
 - **Vision cloud OCR:** best quality without local hardware; per-page images forwarded to the LLM and discarded (never in storage).
 - pdf.js already needed for preview; reuse it to rasterize pages for all OCR engines.
 - Lecturer sees a live progress bar ("page 3/12") — good demo moment.
@@ -194,9 +194,9 @@ Extracted text (capped ~15k chars) ──► /api/ai/generate-quiz
 
 ```env
 OCR_DEFAULT_ENGINE=tesseract              # tesseract | glm | vision
-OLLAMA_BASE_URL=http://localhost:11434    # ROOT URL (no /v1): availability probe hits
-                                          # GET {OLLAMA_BASE_URL}/api/tags; chat completions
-                                          # go to {OLLAMA_BASE_URL}/v1/chat/completions
+GLM_BASE_URL=http://localhost:11434       # ROOT URL (no /v1): availability probe hits
+                                          # GET {GLM_BASE_URL}/v1/models; chat completions
+                                          # go to {GLM_BASE_URL}/v1/chat/completions
 OCR_GLM_MODEL=glm-ocr
 OCR_VISION_MODEL=gpt-4o-mini              # any multimodal model on the AI_BASE_URL provider
 ```
@@ -233,7 +233,7 @@ lib/
 │   ├── types.ts                   # TextExtractor interface
 │   ├── native.ts                  # pdfjs + mammoth + jszip
 │   ├── tesseract.ts               # client-side WASM OCR (default)
-│   ├── glm-ocr.ts                 # local GLM-OCR via Ollama (opt-in upgrade, probe-gated)
+│   ├── glm-ocr.ts                 # local GLM-OCR via Docker/vLLM (opt-in upgrade, probe-gated)
 │   ├── vision.ts                  # page render → /api/ocr/vision (cloud opt-in)
 │   └── pipeline.ts                # cascade logic (§3.2)
 ├── face/{schemas.ts, liveness.ts, streak.ts, cadence.ts, outcome.ts, fake-seam.ts}
@@ -324,11 +324,11 @@ Phases 1–4 are the MVP core (priority: AI-gen flow); 5–7 complete the demo. 
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=        # server-only (grading, face compare)
-AI_BASE_URL=https://api.openai.com/v1   # or openrouter / gemini-compat / ollama
+AI_BASE_URL=https://api.openai.com/v1   # or openrouter / gemini-compat / local vLLM
 AI_API_KEY=
 AI_MODEL=gpt-4o-mini
 OCR_DEFAULT_ENGINE=tesseract
-OLLAMA_BASE_URL=http://localhost:11434   # ROOT URL (no /v1); probe: /api/tags,
+GLM_BASE_URL=http://localhost:11434      # ROOT URL (no /v1); probe: /v1/models,
                                          # completions: /v1/chat/completions
 OCR_GLM_MODEL=glm-ocr
 OCR_VISION_MODEL=gpt-4o-mini
@@ -338,7 +338,7 @@ COMPREFACE_MOCK_ENABLED=0                    # 1 = E2E/unit-test mock mode (neve
 TIMER_GRACE_SEC=5                 # server-side grace on time-limit enforcement
 ```
 
-Vercel notes: AI route sets `maxDuration=60` — on the Hobby plan **60s is the hard cap, not configurable upward** (plan extraction around it, not past it). MediaPipe models (~30MB total across 3 models) **self-hosted from `/public/models`** (committed to repo or fetched via postinstall) — Google CDN is treated as an optimization, not a dependency, because venue/edu Wi-Fi often blocks `storage.googleapis.com`. Supabase free tier covers 20 students easily. GLM-OCR runs on the demo machine (Ollama), never on Vercel.
+Vercel notes: AI route sets `maxDuration=60` — on the Hobby plan **60s is the hard cap, not configurable upward** (plan extraction around it, not past it). MediaPipe models (~30MB total across 3 models) **self-hosted from `/public/models`** (committed to repo or fetched via postinstall) — Google CDN is treated as an optimization, not a dependency, because venue/edu Wi-Fi often blocks `storage.googleapis.com`. Supabase free tier covers 20 students easily. GLM-OCR runs on the demo machine (Docker/vLLM), never on Vercel.
 
 ---
 
@@ -347,7 +347,7 @@ Vercel notes: AI route sets `maxDuration=60` — on the Hobby plan **60s is the 
 1. **Face threshold + bad lighting** — sliding-window flag (3-in-5) reduces false flags; recovery via liveness re-pass self-unlock, and lecturer **face-exempt override** guarantees no student is hard-blocked in the demo room.
 2. **60s serverless cap** — large PPTs may time out; mitigated by client-side extraction (OCR never touches serverless) + 15k-char cap + question-count picker.
 3. **3 MediaPipe models on one stream** — fine on modern laptops, may chug on old ones; hand model gets GPU delegate, face models CPU (they run once per check, not per frame).
-4. **GLM-OCR availability on Ollama is uneven** — it's a vision-language chat model, not a strict OCR API; `ollama pull glm-ocr` may not resolve on stable releases. Mitigation: it's **opt-in only**, gated behind an availability probe; Tesseract is the reliable default, cloud vision is the no-hardware opt-in.
+4. **GLM-OCR availability is hardware-dependent** — it's a vision-language chat model, not a strict OCR API; it needs a local Docker container (vLLM) with the model weights. Mitigation: it's **opt-in only**, gated behind an availability probe; Tesseract is the reliable default, cloud vision is the no-hardware opt-in.
 5. **Sparse slide decks → weak AI questions** — slides are diagrams+bullets, so extracted text can be thin; builder shows a **source-text preview** so the lecturer sees why before blaming the AI.
 6. **Free-tier Supabase pauses after 7 days inactivity** — reopen the project before demo day.
 7. **Demo-room reality** — 20 laptops + fluorescent lighting degrades both hand and face tracking; the click fallback + supervisor override are the safety net.

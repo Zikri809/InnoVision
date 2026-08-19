@@ -124,6 +124,7 @@ export function PlayClient({
   const [phase, setPhase] = useState<Phase>(
     initialIndex < 0 ? "feedback" : "question",
   );
+  const [submissionReason, setSubmissionReason] = useState<"time_up" | "manual" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [remainingMs, setRemainingMs] = useState<number | null>(initialRemainingMs);
@@ -136,7 +137,7 @@ export function PlayClient({
   // Locks: one answer in flight at a time; no submit while answering.
   const submitLock = useRef(false);
   const inFlightAnswer = useRef<Promise<void> | null>(null);
-  // Mirror of `phase` for async callbacks (so a promise resolving later can
+  // Mirror of `phase` in a ref so concurrent handlers (submitNow / handleTimeUp) can
   // tell whether handleTimeUp already moved us into timeUp).
   const phaseRef = useRef<Phase>(initialIndex < 0 ? "feedback" : "question");
   function setPhaseAndRef(p: Phase) {
@@ -206,13 +207,12 @@ export function PlayClient({
   }, [faceUnavailable]);
 
   // Monotonic countdown — UX only, never trusted (the RPC is authoritative).
-  // Re-runs whenever remainingMs changes (each tick) so the `<= 0` branch can
-  // fire handleTimeUp; the interval is torn down and recreated per second,
-  // which is acceptable for a single countdown. Never paused mid-question;
-  // stopped at â‰¤0 or when untimed.
+  // Pauses while the session is paused or flagged so the student doesn't lose
+  // quiz time while waiting for lecturer review or completing blink recovery.
   useEffect(() => {
     if (remainingMs === null) return;
     if (phase === "submitted" || phase === "timeUp") return;
+    if (faceStatus === "flagged" || faceStatus === "paused") return;
     if (remainingMs <= 0) {
       void handleTimeUp();
       return;
@@ -222,10 +222,11 @@ export function PlayClient({
     }, 1000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [remainingMs, phase]);
+  }, [remainingMs, phase, faceStatus]);
 
   async function handleTimeUp() {
     if (phase === "submitted" || phase === "timeUp") return;
+    setSubmissionReason("time_up");
     setPhaseAndRef("timeUp");
     setError(null);
     setNotice("Time's up — submitting your answers.");
@@ -563,6 +564,11 @@ export function PlayClient({
             {isPractice ? "Practice complete" : result.score != null ? "Assessment complete" : "Assessment submitted"}
           </p>
           <h1 className="mt-1 font-heading text-2xl font-semibold [text-wrap:balance]">{quiz.title}</h1>
+          {submissionReason === "time_up" && (
+            <div className="mx-auto mt-3 inline-flex items-center gap-2 rounded-full border-[2px] border-amber-300 bg-amber-50 px-4 py-1.5 text-xs font-bold text-amber-800" role="status">
+              ⏱️ Auto-submitted: The time limit for this assessment expired.
+            </div>
+          )}
           {result.score != null ? (
             <>
               <p className="mt-6 font-heading text-6xl font-bold text-primary">
@@ -653,13 +659,11 @@ export function PlayClient({
         )}
       </div>
 
-      {/* Persistent hidden video node for the FACE tracker (never conditionally
-          mounted — a remount would kill the shared stream). The boot in
-          useFaceTracker hard-fails to `unavailable` without a bound <video>,
-          so this node is REQUIRED for the assessment face pipeline to run. */}
+      {/* Persistent video node for the FACE tracker (kept in-viewport so Chromium
+          maintains active decode loops and never suspends offscreen frames). */}
       <video
         ref={faceTracker.videoRef}
-        className="hidden"
+        className="fixed bottom-0 right-0 h-48 w-64 opacity-0 pointer-events-none -z-50"
         autoPlay
         playsInline
         muted
@@ -723,7 +727,7 @@ export function PlayClient({
         </GestureLayer>
       </FaceVerifier>
 
-      <div className="mt-7 flex justify-end">
+      <div className="mt-7 flex min-h-12 items-center justify-end">
         {phase === "feedback" && (
           <div className="flex items-center gap-3">
             {gestureActive && question.options.length < MAX_ANSWER_FINGERS && (

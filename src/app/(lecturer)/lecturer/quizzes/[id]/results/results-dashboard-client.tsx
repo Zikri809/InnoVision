@@ -379,7 +379,7 @@ export function ResultsDashboardClient({
             <ul className="divide-y divide-border">
               {rows.map((row) => (
                 <li key={row.id}>
-                  <div className="flex items-start justify-between gap-3 py-3.5">
+                  <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2.5 sm:gap-3 py-3.5">
                     <div className="min-w-0">
                       <button
                         type="button"
@@ -408,7 +408,7 @@ export function ResultsDashboardClient({
                         </p>
                       )}
                     </div>
-                    <div className="flex shrink-0 items-center gap-2.5">
+                    <div className="flex flex-wrap shrink-0 items-center gap-2.5 self-start sm:self-auto">
                       <Link
                         href={`/lecturer/quizzes/${row.quiz_id}/results/${row.id}`}
                         className="text-xs font-extrabold text-primary hover:underline"
@@ -425,7 +425,7 @@ export function ResultsDashboardClient({
                   </div>
 
                   {row.displayStatus === "flagged" && row.mode === "assessment" && (
-                    <div className="flex gap-2 pb-3">
+                    <div className="flex flex-wrap gap-2 pb-3">
                       <Button size="sm" variant="outline" disabled={busyRows.has(row.id)} onClick={() => void handleUnlock(row)}>
                         {busyRows.has(row.id) ? "Working…" : "Unlock"}
                       </Button>
@@ -438,7 +438,7 @@ export function ResultsDashboardClient({
                     </div>
                   )}
                   {row.mode === "assessment" && row.displayStatus !== "flagged" && (
-                    <div className="flex gap-2 pb-3">
+                    <div className="flex flex-wrap gap-2 pb-3">
                       <Button size="sm" variant="outline" disabled={busyRows.has(row.id)} onClick={() => setExemptRow(row.id)}>
                         Face-exempt
                       </Button>
@@ -603,17 +603,20 @@ export function ResultsDashboardClient({
 
 function TimelineEvents({ events }: { events: IntegrityEvent[] }) {
   return (
-    <ul className="space-y-1">
+    <ul className="space-y-2">
       {events.map((e) => {
         if (e.kind === "face_check") {
           return (
-            <li key={`${e.kind}-${e.at}-${e.id}`} className="flex items-center justify-between text-xs">
+            <li
+              key={`${e.kind}-${e.at}-${e.id}`}
+              className="flex items-center justify-between rounded-xl border-2 border-border/60 bg-card/80 p-2.5 text-xs font-semibold shadow-[var(--shadow-clay-sm)]"
+            >
               <span className="text-muted-foreground">
                 {formatTime(new Date(e.at).toISOString())} · Face check ({TRIGGER_LABEL[e.trigger] ?? e.trigger})
                 {e.suspectedReplay ? " · replay" : ""}
                 {e.tooFrequent ? " · too frequent" : ""}
               </span>
-              <span className={e.matched ? "text-emerald-700" : "text-destructive"}>
+              <span className={`font-bold ${e.matched ? "text-emerald-600 dark:text-emerald-400" : "text-destructive"}`}>
                 {e.matched ? "Matched" : "Mismatch"}
                 {typeof e.distance === "number" ? ` (${e.distance.toFixed(2)})` : ""}
               </span>
@@ -622,16 +625,22 @@ function TimelineEvents({ events }: { events: IntegrityEvent[] }) {
         }
         if (e.kind === "unavailable") {
           return (
-            <li key={`${e.kind}-${e.at}-${e.id}`} className="flex items-center justify-between text-xs">
+            <li
+              key={`${e.kind}-${e.at}-${e.id}`}
+              className="flex items-center justify-between rounded-xl border-2 border-border/60 bg-card/80 p-2.5 text-xs font-semibold shadow-[var(--shadow-clay-sm)]"
+            >
               <span className="text-muted-foreground">{formatTime(new Date(e.at).toISOString())}</span>
-              <span className="text-amber-700">Camera unavailable</span>
+              <span className="font-bold text-amber-600 dark:text-amber-400">Camera unavailable</span>
             </li>
           );
         }
         return (
-          <li key={`${e.kind}-${e.at}-${e.id}`} className="flex items-center justify-between text-xs">
+          <li
+            key={`${e.kind}-${e.at}-${e.id}`}
+            className="flex items-center justify-between rounded-xl border-2 border-border/60 bg-card/80 p-2.5 text-xs font-semibold shadow-[var(--shadow-clay-sm)]"
+          >
             <span className="text-muted-foreground">{formatTime(new Date(e.at).toISOString())}</span>
-            <span className="text-destructive">{ACTION_LABEL[e.action] ?? e.action}</span>
+            <span className="font-bold text-destructive">{ACTION_LABEL[e.action] ?? e.action}</span>
           </li>
         );
       })}

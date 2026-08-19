@@ -122,7 +122,7 @@ function RegenerateQuestionForm({
         <DialogFooter className="pt-3 border-t-2 border-border/40 mt-1 flex items-center justify-end gap-3">
           <Button
             type="button"
-            variant="ghost"
+            variant="outline"
             onClick={onClose}
             disabled={busy}
           >
@@ -133,7 +133,7 @@ function RegenerateQuestionForm({
             disabled={busy}
             aria-label="Regenerate question"
           >
-            <RefreshCw className={`size-3.5 mr-1.5 ${busy ? "animate-spin" : ""}`} />
+            <RefreshCw className={`size-3.5 ${busy ? "animate-spin" : ""}`} />
             {busy ? "Regenerating…" : "Regenerate with AI"}
           </Button>
         </DialogFooter>

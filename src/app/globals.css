@@ -27,6 +27,7 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -79,7 +80,7 @@
   --accent-foreground: #ffffff;
   --accent-deep: #1d4fd7;            /* blue 3D base / shadow edge */
   --destructive: #dc2626;
-  --destructive-foreground: #ffffff;
+  --destructive-foreground: #fff7ed; /* warm cream */
   --border: #fed7aa;                 /* soft peach — used at 3px, never 1px */
   --input: #fed7aa;
   --ring: #2563eb;                   /* visible blue focus */

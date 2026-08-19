@@ -3,7 +3,14 @@ import { createClient } from "@/lib/supabase/server";
 import { requireClassOwner } from "@/lib/quizzes/guards";
 import { isUuid } from "@/lib/classes/roster";
 import { CreateQuizSchema } from "@/lib/quizzes/validation";
-import { checkSameOrigin } from "@/lib/http";
+import {
+  checkSameOrigin,
+  firstIssueMessage,
+  internalError,
+  invalidBody,
+  invalidJson,
+  notFound,
+} from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +25,7 @@ export async function POST(request: Request, { params }: Params) {
   const { id: classId } = await params;
 
   if (!isUuid(classId)) {
-    return NextResponse.json({ error: "not_found" }, { status: 404 });
+    return notFound();
   }
 
   const owner = await requireClassOwner(supabase, classId);
@@ -32,24 +39,16 @@ export async function POST(request: Request, { params }: Params) {
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json(
-      { error: "invalid_json", message: "Request body must be valid JSON." },
-      { status: 400 },
-    );
+    return invalidJson();
   }
 
   const parsed = CreateQuizSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json(
-      {
-        error: "invalid_body",
-        message: parsed.error.issues[0]?.message ?? "Invalid quiz data.",
-      },
-      { status: 400 },
-    );
+    return invalidBody(firstIssueMessage(parsed.error.issues, "Invalid quiz data."));
   }
 
   const { title, mode, timeLimitSec } = parsed.data;
+  const effectiveTimeLimitSec = mode === "practice" ? null : (timeLimitSec ?? null);
 
   const { data: quiz, error } = await supabase
     .from("quizzes")
@@ -58,7 +57,7 @@ export async function POST(request: Request, { params }: Params) {
       created_by: owner.userId,
       title,
       mode,
-      time_limit_sec: timeLimitSec ?? null,
+      time_limit_sec: effectiveTimeLimitSec,
       status: "draft",
     })
     .select("id, class_id, title, mode, status, time_limit_sec, created_at")
@@ -66,10 +65,18 @@ export async function POST(request: Request, { params }: Params) {
 
   if (error) {
     console.error("Create quiz error:", error);
-    return NextResponse.json(
-      { error: "internal", message: "Could not create the quiz right now." },
-      { status: 503 },
-    );
+    if (error.message?.includes("quizzes_class_id_fkey")) {
+      return notFound();
+    }
+    if (
+      error.message?.includes("quizzes_practice_untimed") ||
+      error.message?.includes("time_limit") ||
+      error.message?.includes("quizzes_title_check") ||
+      error.message?.includes("check constraint")
+    ) {
+      return invalidBody("Invalid quiz configuration.");
+    }
+    return internalError("Could not create the quiz right now.");
   }
 
   return NextResponse.json({ quiz }, { status: 201 });

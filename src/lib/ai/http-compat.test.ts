@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { httpChatCompletions, probeOllamaModel } from "@/lib/ai/http-compat";
+import { httpChatCompletions, probeGlmModel } from "@/lib/ai/http-compat";
 
 describe("httpChatCompletions — browser-only OpenAI-compatible chat", () => {
   it("returns ok with content on a 200 response", async () => {
@@ -13,7 +13,7 @@ describe("httpChatCompletions — browser-only OpenAI-compatible chat", () => {
       }),
     );
     const r = await httpChatCompletions({
-      baseUrl: "http://ollama",
+      baseUrl: "http://localhost:11434",
       model: "glm-ocr",
       messages: [{ role: "user", content: "hi" }],
     });
@@ -25,7 +25,7 @@ describe("httpChatCompletions — browser-only OpenAI-compatible chat", () => {
   it("returns http_error on a non-OK response", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500 }));
     const r = await httpChatCompletions({
-      baseUrl: "http://ollama",
+      baseUrl: "http://localhost:11434",
       model: "glm-ocr",
       messages: [{ role: "user", content: "hi" }],
     });
@@ -37,7 +37,7 @@ describe("httpChatCompletions — browser-only OpenAI-compatible chat", () => {
   it("returns http_error on fetch rejection (network)", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("offline")));
     const r = await httpChatCompletions({
-      baseUrl: "http://ollama",
+      baseUrl: "http://localhost:11434",
       model: "glm-ocr",
       messages: [{ role: "user", content: "hi" }],
     });
@@ -60,7 +60,7 @@ describe("httpChatCompletions — browser-only OpenAI-compatible chat", () => {
       ),
     );
     const r = await httpChatCompletions({
-      baseUrl: "http://ollama",
+      baseUrl: "http://localhost:11434",
       model: "glm-ocr",
       messages: [{ role: "user", content: "hi" }],
       timeoutMs: 10,
@@ -79,7 +79,7 @@ describe("httpChatCompletions — browser-only OpenAI-compatible chat", () => {
       }),
     );
     const r = await httpChatCompletions({
-      baseUrl: "http://ollama",
+      baseUrl: "http://localhost:11434",
       model: "glm-ocr",
       messages: [{ role: "user", content: "hi" }],
     });
@@ -89,16 +89,16 @@ describe("httpChatCompletions — browser-only OpenAI-compatible chat", () => {
   });
 });
 
-describe("probeOllamaModel — Ollama availability probe", () => {
+describe("probeGlmModel — GLM-OCR availability probe", () => {
   it("returns true when the model is listed (with :tag suffix)", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ models: [{ name: "glm-ocr:latest" }] }),
+        json: async () => ({ data: [{ id: "glm-ocr:latest" }] }),
       }),
     );
-    const ok = await probeOllamaModel({ baseUrl: "http://ollama", model: "glm-ocr" });
+    const ok = await probeGlmModel({ baseUrl: "http://localhost:11434", model: "glm-ocr" });
     expect(ok).toBe(true);
     vi.unstubAllGlobals();
   });
@@ -108,24 +108,24 @@ describe("probeOllamaModel — Ollama availability probe", () => {
       "fetch",
       vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ models: [{ name: "glm-ocr" }] }),
+        json: async () => ({ data: [{ id: "glm-ocr" }] }),
       }),
     );
-    const ok = await probeOllamaModel({ baseUrl: "http://ollama", model: "glm-ocr" });
+    const ok = await probeGlmModel({ baseUrl: "http://localhost:11434", model: "glm-ocr" });
     expect(ok).toBe(true);
     vi.unstubAllGlobals();
   });
 
   it("returns false on connection error (ECONNREFUSED)", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("ECONNREFUSED")));
-    const ok = await probeOllamaModel({ baseUrl: "http://127.0.0.1:1", model: "glm-ocr" });
+    const ok = await probeGlmModel({ baseUrl: "http://127.0.0.1:1", model: "glm-ocr" });
     expect(ok).toBe(false);
     vi.unstubAllGlobals();
   });
 
   it("returns false on a non-OK response", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500 }));
-    const ok = await probeOllamaModel({ baseUrl: "http://ollama", model: "glm-ocr" });
+    const ok = await probeGlmModel({ baseUrl: "http://localhost:11434", model: "glm-ocr" });
     expect(ok).toBe(false);
     vi.unstubAllGlobals();
   });
@@ -133,9 +133,9 @@ describe("probeOllamaModel — Ollama availability probe", () => {
   it("returns false on an empty model list", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ models: [] }) }),
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: [] }) }),
     );
-    const ok = await probeOllamaModel({ baseUrl: "http://ollama", model: "glm-ocr" });
+    const ok = await probeGlmModel({ baseUrl: "http://localhost:11434", model: "glm-ocr" });
     expect(ok).toBe(false);
     vi.unstubAllGlobals();
   });
@@ -151,7 +151,7 @@ describe("probeOllamaModel — Ollama availability probe", () => {
         }),
       ),
     );
-    const ok = await probeOllamaModel({ baseUrl: "http://ollama", model: "glm-ocr", timeoutMs: 10 });
+    const ok = await probeGlmModel({ baseUrl: "http://localhost:11434", model: "glm-ocr", timeoutMs: 10 });
     expect(ok).toBe(false);
     vi.unstubAllGlobals();
   });

@@ -102,7 +102,7 @@ function LoginForm() {
                   required
                 />
               </div>
-              <div aria-live="polite">
+              <div aria-live="polite" className={!error ? "hidden" : undefined}>
                 {error && (
                   <p className="rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-3 text-sm font-bold text-destructive" role="alert">
                     {error}

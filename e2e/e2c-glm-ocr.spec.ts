@@ -6,24 +6,24 @@ const LECTURER_EMAIL = `lecturer-glm-${TEST_TIMESTAMP}@innovision.test`;
 const LECTURER_INVITE_CODE = process.env.LECTURER_INVITE_CODE ?? "";
 
 /**
- * E2-GLM — Lecturer: GLM-OCR (local Ollama) extraction → AI generation.
+ * E2-GLM — Lecturer: GLM-OCR (local Docker/vLLM) extraction → AI generation.
  *
  * Unlike E2 (which uses a text-layer PDF), this test uploads a SCANNED image
  * (no native text layer), so the extraction pipeline falls through to the
  * selected OCR engine. It selects GLM-OCR, which runs CLIENT-SIDE in the
- * browser and talks directly to the lecturer's local Ollama
+ * browser and talks directly to the lecturer's local GLM-OCR container
  * (http://localhost:11434/v1/chat/completions). The subsequent quiz
  * generation still hits the mock AI server (AI_BASE_URL), so no real LLM is
  * contacted for question generation.
  *
- * Gated on OLLAMA_BASE_URL being reachable (the GLM engine only appears in
+ * Gated on GLM_BASE_URL being reachable (the GLM engine only appears in
  * the picker when the availability probe succeeds). Skipped otherwise.
  *
- * CI note: GitHub Actions runners do NOT run a local Ollama, so this spec is
- * skipped when `CI` is set (the E2E suite's Playwright config already runs
- * `workers: 1` + `retries: 2` in CI). The GLM-OCR path remains a manual
- * pre-demo checklist item (TESTING §7 #3) and is covered locally by running
- * Ollama on the dev machine.
+ * CI note: GitHub Actions runners do NOT run the GLM-OCR Docker container, so
+ * this spec is skipped when `CI` is set (the E2E suite's Playwright config
+ * already runs `workers: 1` + `retries: 2` in CI). The GLM-OCR path remains a
+ * manual pre-demo checklist item (TESTING §7 #3) and is covered locally by
+ * running `docker compose up -d glm-ocr` on the dev machine.
  */
 test.describe("E2-GLM — GLM-OCR extraction from a scanned image", () => {
   test("lecturer extracts a scanned image with GLM-OCR, then generates", async ({
@@ -31,7 +31,7 @@ test.describe("E2-GLM — GLM-OCR extraction from a scanned image", () => {
   }) => {
     test.setTimeout(180_000);
     test.skip(!LECTURER_INVITE_CODE, "LECTURER_INVITE_CODE not set");
-    test.skip(!!process.env.CI, "GLM-OCR requires local Ollama, not provisioned in CI");
+    test.skip(!!process.env.CI, "GLM-OCR requires the local Docker container, not provisioned in CI");
 
     const ctx = await browser.newContext();
     const page = await ctx.newPage();
@@ -62,7 +62,7 @@ test.describe("E2-GLM — GLM-OCR extraction from a scanned image", () => {
       "e2e/fixtures/scanned-chapter.png",
     );
 
-    // ── 3. Select GLM-OCR (only present when Ollama is reachable) ──
+    // ── 3. Select GLM-OCR (only present when the Docker container is reachable) ──
     // The probe succeeded ("GLM-OCR detected on this machine"); open the
     // dropdown, then pick the GLM option.
     await page.getByRole("combobox", { name: "OCR engine" }).click();

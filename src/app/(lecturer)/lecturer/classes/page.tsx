@@ -22,7 +22,7 @@ export default async function LecturerClassesPage() {
   if (!profile) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-8">
-        <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground" role="alert">
+        <p className="rounded-2xl border-[3px] border-dashed border-border bg-card/60 p-8 text-center text-sm font-semibold text-muted-foreground" role="alert">
           Your profile is still being set up. Please refresh in a moment.
         </p>
       </div>
@@ -42,7 +42,7 @@ export default async function LecturerClassesPage() {
     console.error("Classes fetch error:", error);
     return (
       <div className="mx-auto max-w-3xl px-4 py-8">
-        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
+        <p className="rounded-2xl border-[3px] border-destructive/30 bg-destructive/10 p-4 text-sm font-bold text-destructive" role="alert">
           Could not load your classes right now. Please refresh.
         </p>
       </div>

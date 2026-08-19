@@ -1,15 +1,70 @@
-# CompreFace — self-hosted face recognition service (detection, alignment,
-# embedding, matching all server-side). Runs alongside `supabase start`; the
-# Next.js API routes call it over loopback only (127.0.0.1:8000), so classroom
-# WiFi can never reach it (PLAN_PHASE7_COMPREFACE_MIGRATION §1, §7).
+# Self-hosted AI/vision services that run alongside `supabase start`:
+#   - CompreFace — face recognition (detection, alignment, embedding, matching
+#     all server-side). The Next.js API routes call it over loopback only
+#     (127.0.0.1:8000), so classroom WiFi can never reach it
+#     (PLAN_PHASE7_COMPREFACE_MIGRATION §1, §7).
+#   - glm-ocr — GLM-OCR (Z.ai) served by vLLM with an OpenAI-compatible API.
+#     Replaces the unstable native-Ollama GLM path: vLLM is the officially
+#     recommended production runtime for GLM-OCR (the Ollama OpenAI-compat
+#     vision endpoint is known to 502). The lecturer's browser talks to it over
+#     loopback only (127.0.0.1:11434) — see docs/GLM_OCR_SETUP.md.
 #
-# Follows the official exadel/CompreFace compose layout. Network aliases map the
-# plan's `compreface-*` names onto the names the CompreFace API image resolves
-# by default (`comprehend-*`) — belt-and-braces for both naming conventions.
+# CompreFace layout mirrors the official exadel/CompreFace compose for 1.2.0,
+# which split the admin backend (`compreface-admin`) and the web UI
+# (`compreface-fe` / nginx) out of the inference API (`compreface-api`):
+#   - compreface-fe  serves the admin UI and proxies `/api/v1/*` to admin/api.
+#   - compreface-api is the face recognition/verification engine (no UI).
+# Only `compreface-fe` publishes a port (127.0.0.1:8000); everything else stays
+# internal to the compose network. Network aliases map the plan's `compreface-*`
+# names onto the names the CompreFace API image resolves by default
+# (`comprehend-*`) — belt-and-braces for both naming conventions.
 # Named volumes only (never bind mounts) so biometric data is never committed.
 name: innovision
 
 services:
+  # GLM-OCR via vLLM — OpenAI-compatible `/v1/chat/completions` + `/v1/models`.
+  # The model (zai-org/GLM-OCR, ~0.9B params) is pulled from Hugging Face on
+  # first start (~2.5 GB image + model weights). GPU-accelerated via the NVIDIA
+  # container toolkit; falls back to CPU when no GPU is present (slow, ~30s/page).
+  # Loopback-only: the browser OCR path talks to 127.0.0.1:11434, never the LAN.
+  # Built from docker/glm-ocr/Dockerfile: the stock vLLM image's bundled
+  # Transformers predates the `glm_ocr` architecture, so we layer a
+  # Transformers-from-source install on top (per the official GLM-OCR docs).
+  glm-ocr:
+    build:
+      context: .
+      dockerfile: docker/glm-ocr/Dockerfile
+    image: innovision-glm-ocr:local
+    restart: unless-stopped
+    command:
+      - --model
+      - zai-org/GLM-OCR
+      - --served-model-name
+      - glm-ocr
+      - --port
+      - "11434"
+      - --host
+      - 0.0.0.0
+      - --max-model-len
+      - "8192"
+      - --gpu-memory-utilization
+      - "0.7"
+      - --enforce-eager
+    ports:
+      - "127.0.0.1:11434:11434" # loopback-only: OpenAI-compatible API
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:11434/v1/models"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
   compreface-postgres:
     image: postgres:12
     restart: unless-stopped
@@ -26,10 +81,12 @@ services:
     # NOT host-bound — internal to the compose network only.
 
   compreface-core:
-    image: exadel/compreface-core:0.7.1
+    image: exadel/compreface-core:1.2.0
     restart: unless-stopped
     environment:
-      PYTHONUNBUFFERED: "1"
+      ML_PORT: "3000"
+      UWSGI_PROCESSES: "2"
+      UWSGI_THREADS: "1"
     # ML worker ports (3000/3100) stay internal — the API reaches the core via
     # the compose network, never via published host ports.
     networks:
@@ -38,10 +95,8 @@ services:
           - comprehend-core
 
   compreface-api:
-    image: exadel/compreface-api:0.7.1
+    image: exadel/compreface-api:1.2.0
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:8000:8000" # loopback-only: Next.js API routes call CompreFace here
     environment:
       POSTGRES_URL: jdbc:postgresql://compreface-postgres:5432/compreface
       POSTGRES_USER: compreface
@@ -49,6 +104,9 @@ services:
       SPRING_PROFILES_ACTIVE: dev
       ML_PORT: "3000"
       ML_KERAS_PORT: "3100"
+      SAVE_IMAGES_TO_DB: "true"
+      CONNECTION_TIMEOUT: "10000"
+      READ_TIMEOUT: "60000"
     depends_on:
       - compreface-postgres
       - compreface-core
@@ -58,6 +116,39 @@ services:
       default:
         aliases:
           - comprehend-api
+
+  compreface-admin:
+    image: exadel/compreface-admin:1.2.0
+    restart: unless-stopped
+    environment:
+      POSTGRES_URL: jdbc:postgresql://compreface-postgres:5432/compreface
+      POSTGRES_USER: compreface
+      POSTGRES_PASSWORD: compreface
+      SPRING_PROFILES_ACTIVE: dev
+    depends_on:
+      - compreface-postgres
+      - compreface-api
+    networks:
+      default:
+        aliases:
+          - comprehend-admin
+
+  compreface-fe:
+    image: exadel/compreface-fe:1.2.0
+    restart: unless-stopped
+    environment:
+      CLIENT_MAX_BODY_SIZE: "150m"
+      PROXY_READ_TIMEOUT: "60000ms"
+      PROXY_CONNECT_TIMEOUT: "10000ms"
+    ports:
+      - "127.0.0.1:8000:80" # loopback-only: admin UI + /api/v1 proxy
+    depends_on:
+      - compreface-api
+      - compreface-admin
+    networks:
+      default:
+        aliases:
+          - comprehend-fe
 
 volumes:
   compreface-postgres-data:

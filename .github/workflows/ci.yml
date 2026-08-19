@@ -45,7 +45,7 @@ jobs:
           echo "AI_API_KEY=test-key" >> .env.local
           echo "AI_MODEL=gpt-4o-mini" >> .env.local
           echo "OCR_DEFAULT_ENGINE=tesseract" >> .env.local
-          echo "OLLAMA_BASE_URL=http://localhost:11434" >> .env.local
+          echo "GLM_BASE_URL=http://localhost:11434" >> .env.local
           echo "OCR_GLM_MODEL=glm-ocr" >> .env.local
           echo "OCR_VISION_MODEL=gpt-4o-mini" >> .env.local
 

@@ -13,7 +13,7 @@
 | Post-demo, keep it alive publicly | $0 (free tiers hold at this scale) |
 | Custom domain | **Not needed** — `yourapp.vercel.app` is fine |
 
-**Virtually no cost other than the LLM API — and if you also run quiz generation through a local Ollama model, even that drops to $0.**
+**Virtually no cost other than the LLM API — and if you also run quiz generation through a local vLLM model, even that drops to $0.**
 
 ---
 
@@ -57,7 +57,7 @@
 |---|---|---|
 | Native text extraction (pdfjs/mammoth/jszip) | $0 | First step of the cascade; handles most digital PDFs/DOCX/PPTX |
 | **Tesseract.js (default)** | $0 | WASM in the lecturer's browser; zero setup, works on the deployed app |
-| GLM-OCR via Ollama (opt-in, high accuracy) | $0 | 1.7 GB local model, Apache 2.0; only when lecturer picks it and it's detected locally |
+| GLM-OCR via Docker/vLLM (opt-in, high accuracy) | $0 | ~0.9B local model, MIT/Apache 2.0; only when lecturer picks it and the container is detected locally |
 | Cloud vision OCR (opt-in only) | LLM tokens | Only when lecturer explicitly picks it |
 
 ### 2.5 Things that are NOT needed
@@ -80,7 +80,7 @@
 3. **15k-char cap on extracted text** — bounds every AI generation call regardless of deck size.
 4. **Polling instead of Supabase Realtime** — no connection limits to manage at this scale.
 5. **Vercel + Supabase free tiers** — zero fixed monthly cost until the product outgrows the demo.
-6. **OpenAI-compatible client everywhere** — point `AI_BASE_URL` at a local Ollama model for quiz generation too, and the entire demo runs at $0 with no internet dependency.
+6. **OpenAI-compatible client everywhere** — point `AI_BASE_URL` at a local vLLM model for quiz generation too, and the entire demo runs at $0 with no internet dependency.
 
 ---
 

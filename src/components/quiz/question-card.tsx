@@ -46,7 +46,7 @@ export function QuestionCard({
     <section aria-labelledby="question-prompt">
       <div className="mb-3 flex items-center justify-between gap-3">
         <span className="rounded-full border-[3px] border-border bg-card px-3.5 py-1 text-xs font-extrabold text-muted-foreground">
-          {question.type === "mcq" ? "Multiple choice" : "True / False"}
+          {question.type === "mcq" ? "Multiple Choice" : "True / False"}
         </span>
         {answer && (
           <span

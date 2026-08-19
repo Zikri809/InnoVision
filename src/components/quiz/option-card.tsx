@@ -60,10 +60,10 @@ export function OptionCard({
         !selected && !correct && !incorrect && "border-border bg-card shadow-[0_4px_0_var(--border)]",
         !disabled && !selected && !correct && !incorrect && "cursor-pointer hover:-translate-y-0.5 hover:shadow-[0_6px_0_var(--border)] active:translate-y-0.5 active:shadow-[0_1px_0_var(--border)]",
         // Selected (gesture/click locked)
-        selected && !correct && !incorrect && "border-accent bg-blue-50 shadow-[0_4px_0_#bfdbfe]",
+        selected && !correct && !incorrect && "border-accent bg-blue-50 dark:bg-blue-950/30 shadow-[0_4px_0_#93c5fd] dark:shadow-[0_4px_0_#1d4ed8]",
         // Feedback
-        correct && "border-emerald-400 bg-emerald-50 shadow-[0_4px_0_#a7f3d0]",
-        incorrect && "border-destructive bg-destructive/10 shadow-[0_4px_0_rgba(220,38,38,0.25)]",
+        correct && "border-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 shadow-[0_4px_0_#86efac] dark:shadow-[0_4px_0_#15803d]",
+        incorrect && "border-destructive bg-destructive/10 dark:bg-destructive/20 shadow-[0_4px_0_rgba(220,38,38,0.25)] dark:shadow-[0_4px_0_rgba(220,38,38,0.4)]",
         disabled && "cursor-default opacity-70",
       )}
     >

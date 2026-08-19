@@ -37,8 +37,12 @@ export class BlinkDetector {
   update(left: number, right: number): BlinkState {
     if (this.state !== "pending") return this.state;
 
-    const isOpen = left <= this.eyeOpenMax && right <= this.eyeOpenMax;
-    const isClosed = left >= this.eyeClosedMin && right >= this.eyeClosedMin;
+    const isOpen =
+      (left <= this.eyeOpenMax && right <= this.eyeOpenMax) ||
+      (Math.min(left, right) <= this.eyeOpenMax && (left + right) / 2 <= 0.48);
+    const isClosed =
+      (left >= this.eyeClosedMin && right >= this.eyeClosedMin) ||
+      (Math.max(left, right) >= this.eyeClosedMin && (left + right) / 2 >= 0.45);
 
     if (isOpen) {
       this.wasOpen = true;

@@ -271,18 +271,280 @@ describe("Create quiz route", () => {
     expect(body.quiz.mode).toBe("assessment");
     expect(body.quiz.time_limit_sec).toBe(600);
   });
+
+  it("I-M11 create quiz sanitizes practice mode time limit to null", async () => {
+    ownerContext();
+    const { createQuiz } = await importHandlers();
+    const res = await createQuiz.POST(
+      req({ title: "Practice Quiz", mode: "practice", timeLimitSec: 1200 }),
+      { params: Promise.resolve({ id: CLASS_B }) },
+    );
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.quiz.mode).toBe("practice");
+    expect(body.quiz.time_limit_sec).toBeNull();
+  });
+
+  it("I-M12 create quiz rejects out-of-bounds time limit > 7200", async () => {
+    ownerContext();
+    const { createQuiz } = await importHandlers();
+    const res = await createQuiz.POST(
+      req({ title: "Long Exam", mode: "assessment", timeLimitSec: 7201 }),
+      { params: Promise.resolve({ id: CLASS_B }) },
+    );
+    expect(res.status).toBe(400);
+  });
 });
 
-describe("Quiz PATCH route", () => {
-  it("renames a draft quiz", async () => {
-    ownerContext();
+describe("Quiz PATCH route (I-M1..I-M10)", () => {
+  it("I-M1 PATCH title only on draft assessment preserves mode and time limit", async () => {
+    const ctx = makeOwnerContext();
+    ctx.client.tables["quizzes"][0] = {
+      ...ctx.client.tables["quizzes"][0],
+      mode: "assessment",
+      time_limit_sec: 1800,
+    };
+    fakeHolder.current = ctx.client;
     const { quizRoute } = await importHandlers();
-    const res = await quizRoute.PATCH(req({ title: "Renamed" }), {
+
+    const res = await quizRoute.PATCH(req({ title: "Updated Assessment" }), {
       params: Promise.resolve({ id: QUIZ_C }),
     });
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.quiz.title).toBe("Renamed");
+    expect(body.quiz.title).toBe("Updated Assessment");
+    expect(body.quiz.mode).toBe("assessment");
+    expect(body.quiz.time_limit_sec).toBe(1800);
+  });
+
+  it("I-M2 PATCH mode: practice on timed assessment wipes time_limit_sec to null", async () => {
+    const ctx = makeOwnerContext();
+    ctx.client.tables["quizzes"][0] = {
+      ...ctx.client.tables["quizzes"][0],
+      mode: "assessment",
+      time_limit_sec: 1800,
+    };
+    fakeHolder.current = ctx.client;
+    const { quizRoute } = await importHandlers();
+
+    const res = await quizRoute.PATCH(req({ mode: "practice" }), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.quiz.mode).toBe("practice");
+    expect(body.quiz.time_limit_sec).toBeNull();
+  });
+
+  it("I-M3 PATCH mode: practice with timeLimitSec returns 200 and forces null", async () => {
+    ownerContext();
+    const { quizRoute } = await importHandlers();
+    const res = await quizRoute.PATCH(req({ mode: "practice", timeLimitSec: 600 }), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.quiz.mode).toBe("practice");
+    expect(body.quiz.time_limit_sec).toBeNull();
+  });
+
+  it("I-M4 PATCH mode: assessment with boundary 7200s returns 200", async () => {
+    ownerContext();
+    const { quizRoute } = await importHandlers();
+    const res = await quizRoute.PATCH(req({ mode: "assessment", timeLimitSec: 7200 }), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.quiz.mode).toBe("assessment");
+    expect(body.quiz.time_limit_sec).toBe(7200);
+  });
+
+  it("I-M5 PATCH mode: assessment with timeLimitSec: null returns 200", async () => {
+    ownerContext();
+    const { quizRoute } = await importHandlers();
+    const res = await quizRoute.PATCH(req({ mode: "assessment", timeLimitSec: null }), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.quiz.mode).toBe("assessment");
+    expect(body.quiz.time_limit_sec).toBeNull();
+  });
+
+  it("I-M6 PATCH timeLimitSec: 7201 -> 400 invalid_body", async () => {
+    ownerContext();
+    const { quizRoute } = await importHandlers();
+    const res = await quizRoute.PATCH(req({ timeLimitSec: 7201 }), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("invalid_body");
+  });
+
+  it("I-M7 PATCH timeLimitSec: 30.5 -> 400 invalid_body", async () => {
+    ownerContext();
+    const { quizRoute } = await importHandlers();
+    const res = await quizRoute.PATCH(req({ timeLimitSec: 30.5 }), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("invalid_body");
+  });
+
+  it("I-M8 maps DB trigger error quiz_not_draft_edit to 409", async () => {
+    ownerContext();
+    const { quizRoute } = await importHandlers();
+    currentClient().updateError = "quiz_not_draft_edit: quiz is not draft";
+
+    const res = await quizRoute.PATCH(req({ title: "Renamed" }), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("quiz_not_draft");
+  });
+
+  it("I-M9 maps DB check constraint violation to 400", async () => {
+    ownerContext();
+    const { quizRoute } = await importHandlers();
+    currentClient().updateError = 'check constraint "quizzes_practice_untimed"';
+
+    const res = await quizRoute.PATCH(req({ mode: "practice" }), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("invalid_body");
+  });
+
+  it("I-M10 maps unknown DB error to 503 internal", async () => {
+    ownerContext();
+    const { quizRoute } = await importHandlers();
+    currentClient().updateError = "connection timeout";
+
+    const res = await quizRoute.PATCH(req({ title: "Renamed" }), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe("internal");
+  });
+
+  it("I-M13 rejects malformed JSON body with 400 invalid_json", async () => {
+    ownerContext();
+    const { quizRoute } = await importHandlers();
+
+    const rawReq = new Request("http://localhost", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: "{ unclosed json",
+    });
+
+    const res = await quizRoute.PATCH(rawReq, {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("invalid_json");
+    expect(body.message).toBe("Request body must be valid JSON.");
+  });
+
+  it("I-M14 rejects cross-origin requests with 403 invalid_origin (CSRF protection)", async () => {
+    ownerContext();
+    const { quizRoute } = await importHandlers();
+
+    const csrfReq = new Request("http://localhost/api/quizzes/" + QUIZ_C, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        origin: "https://attacker.evil.com",
+      },
+      body: JSON.stringify({ title: "CSRF Tampered" }),
+    });
+
+    const res = await quizRoute.PATCH(csrfReq, {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error).toBe("invalid_origin");
+    expect(body.message).toBe("Cross-origin request rejected.");
+  });
+
+  it("I-M15 rejects empty PATCH payload {} with 400 invalid_body", async () => {
+    ownerContext();
+    const { quizRoute } = await importHandlers();
+
+    const res = await quizRoute.PATCH(req({}), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("invalid_body");
+    expect(body.message).toBe("No editable fields provided.");
+  });
+
+  it("I-M16 rejects timeLimitSec: 0 with 400 invalid_body and explicit message", async () => {
+    ownerContext();
+    const { quizRoute } = await importHandlers();
+
+    const res = await quizRoute.PATCH(req({ timeLimitSec: 0 }), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("invalid_body");
+    expect(body.message).toMatch(/at least 1 second/i);
+  });
+
+  it("I-M17 accepts lower boundary timeLimitSec: 1 second and persists to DB", async () => {
+    const ctx = makeOwnerContext();
+    ctx.client.tables["quizzes"][0] = {
+      ...ctx.client.tables["quizzes"][0],
+      mode: "assessment",
+      time_limit_sec: 1800,
+    };
+    fakeHolder.current = ctx.client;
+    const { quizRoute } = await importHandlers();
+
+    const res = await quizRoute.PATCH(req({ timeLimitSec: 1 }), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.quiz.time_limit_sec).toBe(1);
+    expect(ctx.client.tables["quizzes"][0].time_limit_sec).toBe(1);
+  });
+
+  it("I-M18 strips injected unauthorized fields (mass assignment / prototype pollution defense)", async () => {
+    const ctx = makeOwnerContext();
+    fakeHolder.current = ctx.client;
+    const { quizRoute } = await importHandlers();
+
+    const maliciousPayload = {
+      title: "Legitimate Title",
+      status: "live",
+      created_by: "00000000-0000-4000-8000-000000000066",
+      source_file_url: "https://evil.com/exploit.pdf",
+    };
+
+    const res = await quizRoute.PATCH(req(maliciousPayload), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.quiz.title).toBe("Legitimate Title");
+    expect(body.quiz.status).toBe("draft");
+    const storedQuiz = ctx.client.tables["quizzes"][0];
+    expect(storedQuiz.title).toBe("Legitimate Title");
+    expect(storedQuiz.status).toBe("draft");
+    expect(storedQuiz.created_by).toBe("00000000-0000-4000-8000-00000000000a");
   });
 
   it("rejects editing a live quiz → 409", async () => {
@@ -294,40 +556,53 @@ describe("Quiz PATCH route", () => {
     expect(res.status).toBe(409);
   });
 
-  it("H2 — title-only PATCH does NOT downgrade an assessment quiz to practice", async () => {
-    // Seed an assessment quiz, then rename it. The mode must stay assessment.
+  it("rejects editing a closed quiz → 409", async () => {
+    ownerContext({ quizStatus: "closed" });
+    const { quizRoute } = await importHandlers();
+    const res = await quizRoute.PATCH(req({ title: "New Title" }), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toBe("quiz_not_draft");
+  });
+
+  it("I-M19 accepts unicode, emojis, and 200-character titles on PATCH", async () => {
     const ctx = makeOwnerContext();
-    ctx.client.tables["quizzes"][0] = {
-      ...ctx.client.tables["quizzes"][0],
-      mode: "assessment",
-      time_limit_sec: 600,
-    };
     fakeHolder.current = ctx.client;
     const { quizRoute } = await importHandlers();
 
-    const res = await quizRoute.PATCH(req({ title: "Renamed" }), {
+    const unicodeTitle = "🧬 Midterm Exam: Cell Biology 🔬 (Spring 2026)";
+    const res = await quizRoute.PATCH(req({ title: unicodeTitle }), {
       params: Promise.resolve({ id: QUIZ_C }),
     });
+
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.quiz.title).toBe("Renamed");
-    expect(body.quiz.mode).toBe("assessment");
-    expect(body.quiz.time_limit_sec).toBe(600);
-
-    // The stored row was not touched for mode/time_limit.
-    const stored = ctx.client.tables["quizzes"][0];
-    expect(stored.mode).toBe("assessment");
-    expect(stored.time_limit_sec).toBe(600);
+    expect(body.quiz.title).toBe(unicodeTitle);
+    expect(ctx.client.tables["quizzes"][0].title).toBe(unicodeTitle);
   });
 
-  it("H2 — empty PATCH body returns 400 (no implicit mode change)", async () => {
+  it("I-M20 rejects cross-origin POST on class quiz creation (CSRF protection)", async () => {
     ownerContext();
-    const { quizRoute } = await importHandlers();
-    const res = await quizRoute.PATCH(req({}), {
-      params: Promise.resolve({ id: QUIZ_C }),
+    const { createQuiz } = await importHandlers();
+
+    const csrfReq = new Request(`http://localhost/api/classes/${CLASS_B}/quizzes`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "https://attacker.evil.com",
+      },
+      body: JSON.stringify({ title: "CSRF Quiz" }),
     });
-    expect(res.status).toBe(400);
+
+    const res = await createQuiz.POST(csrfReq, {
+      params: Promise.resolve({ id: CLASS_B }),
+    });
+
+    expect(res.status).toBe(403);
     const body = await res.json();
-    expect(body.error).toBe("invalid_body");
+    expect(body.error).toBe("invalid_origin");
   });
 });
+

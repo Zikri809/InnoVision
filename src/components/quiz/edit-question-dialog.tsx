@@ -180,13 +180,13 @@ function EditQuestionForm({
                   );
                 }}
               >
-                <SelectTrigger id="edit-q-type" className="w-48">
-                  <SelectValue placeholder="Type">
-                    {(v) => (v === "true_false" ? "True / False" : "Multiple choice")}
+                <SelectTrigger id="edit-q-type" className="w-full sm:w-48">
+                  <SelectValue placeholder="Select type">
+                    {(v) => (v === "true_false" ? "True / False" : "Multiple Choice")}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="mcq">Multiple choice</SelectItem>
+                  <SelectItem value="mcq">Multiple Choice</SelectItem>
                   <SelectItem value="true_false">True / False</SelectItem>
                 </SelectContent>
               </Select>
@@ -201,9 +201,9 @@ function EditQuestionForm({
                   setDraft((d) => ({ ...d, correctIndex: Number(v) - 1 }))
                 }
               >
-                <SelectTrigger id="edit-q-correct" className="w-40">
-                  <SelectValue placeholder="Answer">
-                    {(v) => (v ? `Option ${v}` : "Answer")}
+                <SelectTrigger id="edit-q-correct" className="w-full sm:w-40">
+                  <SelectValue placeholder="Select answer">
+                    {(v) => (v ? `Option ${v}` : "Select answer")}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
@@ -337,7 +337,7 @@ function EditQuestionForm({
           {/* Explanation */}
           <div className="space-y-1.5">
             <Label htmlFor="edit-q-explanation" className="text-xs font-extrabold text-foreground">
-              Explanation <span className="text-muted-foreground font-normal">(optional)</span>
+              Explanation <span className="text-muted-foreground font-normal">(Optional)</span>
             </Label>
             <p className="text-xs font-semibold text-muted-foreground">
               Shown to students after answering to explain why the correct option is right.
@@ -350,7 +350,7 @@ function EditQuestionForm({
               }
               rows={2}
               maxLength={2000}
-              placeholder="Explain why this is correct (shown after answering)…"
+              placeholder="Explain why the correct answer is right (shown after answering)…"
               className="resize-y"
             />
           </div>
@@ -369,7 +369,7 @@ function EditQuestionForm({
         <DialogFooter className="shrink-0 pt-4 border-t-2 border-border/40 mt-3 flex items-center justify-end gap-3">
           <Button
             type="button"
-            variant="ghost"
+            variant="outline"
             onClick={onClose}
             disabled={saving}
           >

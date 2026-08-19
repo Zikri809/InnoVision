@@ -43,14 +43,14 @@ function formatTime(iso: string | null | undefined): string {
 
 // Warm-family correctness styles (sage green / terracotta) that stay inside
 // the clay palette instead of clashing with pure mint/pure red.
-const PILL_CORRECT = "border-[#B8CC9E] bg-[#E9F0DF] text-[#5F7845]";
-const PILL_WRONG = "border-[#E4B0A4] bg-[#FBE4E0] text-[#C4553B]";
-const PILL_NONE = "border-border bg-muted text-muted-foreground";
-const ROW_CORRECT = "bg-[#7A9E5F] text-white";
-const ROW_WRONG = "bg-[#C4553B] text-white";
-const ROW_PLAIN = "border-border bg-muted text-muted-foreground";
-const TINT_CORRECT = "bg-[#F3F7EC]";
-const TINT_WRONG = "bg-[#FDF1EE]";
+const PILL_CORRECT = "border-[2px] border-emerald-300 dark:border-emerald-700/60 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300";
+const PILL_WRONG = "border-[2px] border-destructive/30 bg-destructive/10 text-destructive";
+const PILL_NONE = "border-[2px] border-border bg-muted text-muted-foreground";
+const ROW_CORRECT = "bg-emerald-600 text-white";
+const ROW_WRONG = "bg-destructive text-white";
+const ROW_PLAIN = "border-2 border-border bg-muted text-muted-foreground";
+const TINT_CORRECT = "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-700/60";
+const TINT_WRONG = "bg-destructive/10 border-destructive/30";
 
 /**
  * Lecturer's per-session answer breakdown for one quiz session. Shows each
@@ -134,15 +134,15 @@ export function SessionDetailClient({
                 return (
                   <li
                     key={q.id}
-                    className="overflow-hidden rounded-[22px] border-2 border-[#F0DCC8] bg-card shadow-[var(--shadow-clay-sm)]"
+                    className="overflow-hidden rounded-[22px] border-[3px] border-border bg-card shadow-[var(--shadow-clay-sm)]"
                   >
                     <div className="flex items-start justify-between gap-3 px-5 py-4">
-                      <p className="font-heading text-sm font-bold text-[#7c2d12]">
+                      <p className="font-heading text-sm font-bold text-foreground">
                         <span className="text-muted-foreground">{q.order_index + 1}.</span>{" "}
                         {q.prompt}
                       </p>
                       <span
-                        className={`shrink-0 rounded-full border-2 px-2.5 py-0.5 text-[11px] font-extrabold uppercase tracking-wide ${
+                        className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-extrabold uppercase tracking-wide ${
                           isCorrect ? PILL_CORRECT : isWrong ? PILL_WRONG : PILL_NONE
                         }`}
                       >
@@ -158,8 +158,8 @@ export function SessionDetailClient({
                             className={`flex items-center gap-3 rounded-xl border-2 px-3.5 py-2.5 text-sm ${
                               selected
                                 ? isCorrect
-                                  ? `${TINT_CORRECT} border-[#C9D9B4]`
-                                  : `${TINT_WRONG} border-[#E6B3A8]`
+                                  ? TINT_CORRECT
+                                  : TINT_WRONG
                                 : "border-transparent bg-transparent"
                             }`}
                           >

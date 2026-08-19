@@ -19,10 +19,10 @@ export function AppNavLink({ href, label }: { href: string; label: string }) {
       href={href}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "rounded-xl px-3.5 py-2 text-[15px] font-extrabold transition-[background-color,color,box-shadow,border-color] duration-150",
+        "shrink-0 whitespace-nowrap rounded-xl px-3.5 py-2 text-[15px] font-extrabold transition-[background-color,color,box-shadow,border-color] duration-150",
         active
-          ? "border-[3px] border-primary/40 bg-orange-100 text-primary shadow-[0_3px_0_var(--border)]"
-          : "border-[3px] border-transparent text-muted-foreground hover:bg-orange-100/70 hover:text-primary",
+          ? "border-[3px] border-primary/40 bg-primary/15 text-primary shadow-[0_3px_0_var(--border)] dark:bg-primary/25"
+          : "border-[3px] border-transparent text-muted-foreground hover:bg-primary/10 hover:text-primary",
       )}
     >
       {label}

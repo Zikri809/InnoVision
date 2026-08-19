@@ -118,10 +118,10 @@ export function FaceGate({
         <div className="mt-5 rounded-2xl border-[3px] border-border bg-muted/50 p-5" role="status">
           <p className="font-heading text-base font-semibold">Liveness check</p>
           <p className="mt-1.5 text-sm font-semibold text-muted-foreground">
-            {livenessState === "idle" && "Blink when the camera is ready."}
-            {livenessState === "waiting" && "Waiting for you to blink…"}
-            {livenessState === "passed" && "Blink detected."}
-            {livenessState === "failed" && "No blink detected — try again."}
+            {livenessState === "idle" && "Camera is active. Look at the screen and click Begin."}
+            {livenessState === "waiting" && "Verifying your face… blink naturally."}
+            {livenessState === "passed" && "Blink detected ✓ Starting assessment…"}
+            {livenessState === "failed" && "No blink detected — please blink naturally and click Begin."}
             {status === "paused" && "A face mismatch paused the check. Blink to recover."}
           </p>
         </div>

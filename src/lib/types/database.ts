@@ -180,7 +180,21 @@ export type Database = {
             foreignKeyName: "face_checks_session_id_fkey"
             columns: ["session_id"]
             isOneToOne: false
+            referencedRelation: "lecturer_session_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "face_checks_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
             referencedRelation: "quiz_sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "face_checks_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "student_session_view"
             referencedColumns: ["id"]
           },
         ]
@@ -447,13 +461,74 @@ export type Database = {
             foreignKeyName: "session_answers_session_id_fkey"
             columns: ["session_id"]
             isOneToOne: false
+            referencedRelation: "lecturer_session_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "session_answers_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
             referencedRelation: "quiz_sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "session_answers_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "student_session_view"
             referencedColumns: ["id"]
           },
         ]
       }
     }
     Views: {
+      lecturer_answers_view: {
+        Row: {
+          answered_at: string | null
+          id: string | null
+          is_correct: boolean | null
+          question_id: string | null
+          selected_index: number | null
+          session_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "session_answers_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "questions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "session_answers_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "student_question_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "session_answers_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "lecturer_session_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "session_answers_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "quiz_sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "session_answers_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "student_session_view"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       lecturer_audit_view: {
         Row: {
           action: string | null
@@ -488,6 +563,120 @@ export type Database = {
             columns: ["actor_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      lecturer_session_view: {
+        Row: {
+          face_exempt: boolean | null
+          face_fail_streak: number | null
+          face_unavailable_at: string | null
+          id: string | null
+          last_activity_at: string | null
+          mode: Database["public"]["Enums"]["quiz_mode"] | null
+          quiz_id: string | null
+          score: number | null
+          started_at: string | null
+          status: Database["public"]["Enums"]["session_status"] | null
+          student_id: string | null
+          submitted_at: string | null
+        }
+        Insert: {
+          face_exempt?: boolean | null
+          face_fail_streak?: number | null
+          face_unavailable_at?: string | null
+          id?: string | null
+          last_activity_at?: string | null
+          mode?: Database["public"]["Enums"]["quiz_mode"] | null
+          quiz_id?: string | null
+          score?: number | null
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["session_status"] | null
+          student_id?: string | null
+          submitted_at?: string | null
+        }
+        Update: {
+          face_exempt?: boolean | null
+          face_fail_streak?: number | null
+          face_unavailable_at?: string | null
+          id?: string | null
+          last_activity_at?: string | null
+          mode?: Database["public"]["Enums"]["quiz_mode"] | null
+          quiz_id?: string | null
+          score?: number | null
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["session_status"] | null
+          student_id?: string | null
+          submitted_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quiz_sessions_quiz_id_fkey"
+            columns: ["quiz_id"]
+            isOneToOne: false
+            referencedRelation: "quizzes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quiz_sessions_quiz_id_fkey"
+            columns: ["quiz_id"]
+            isOneToOne: false
+            referencedRelation: "student_quiz_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quiz_sessions_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      student_answers_view: {
+        Row: {
+          answered_at: string | null
+          id: string | null
+          is_correct: boolean | null
+          question_id: string | null
+          selected_index: number | null
+          session_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "session_answers_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "questions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "session_answers_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "student_question_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "session_answers_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "lecturer_session_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "session_answers_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "quiz_sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "session_answers_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "student_session_view"
             referencedColumns: ["id"]
           },
         ]
@@ -658,7 +847,7 @@ export type Database = {
           last_activity_at?: string | null
           mode?: Database["public"]["Enums"]["quiz_mode"] | null
           quiz_id?: string | null
-          score?: number | null
+          score?: never
           started_at?: string | null
           status?: Database["public"]["Enums"]["session_status"] | null
           student_id?: string | null
@@ -673,7 +862,7 @@ export type Database = {
           last_activity_at?: string | null
           mode?: Database["public"]["Enums"]["quiz_mode"] | null
           quiz_id?: string | null
-          score?: number | null
+          score?: never
           started_at?: string | null
           status?: Database["public"]["Enums"]["session_status"] | null
           student_id?: string | null
@@ -689,105 +878,10 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "quiz_sessions_student_id_fkey"
-            columns: ["student_id"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      student_answers_view: {
-        Row: {
-          answered_at: string | null
-          id: string | null
-          is_correct: boolean | null
-          question_id: string | null
-          selected_index: number | null
-          session_id: string | null
-        }
-        Insert: {
-          answered_at?: string | null
-          id?: string | null
-          is_correct?: boolean | null
-          question_id?: string | null
-          selected_index?: number | null
-          session_id?: string | null
-        }
-        Update: {
-          answered_at?: string | null
-          id?: string | null
-          is_correct?: boolean | null
-          question_id?: string | null
-          selected_index?: number | null
-          session_id?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "session_answers_question_id_fkey"
-            columns: ["question_id"]
-            isOneToOne: false
-            referencedRelation: "questions"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "session_answers_session_id_fkey"
-            columns: ["session_id"]
-            isOneToOne: false
-            referencedRelation: "quiz_sessions"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      lecturer_session_view: {
-        Row: {
-          face_exempt: boolean | null
-          face_fail_streak: number | null
-          face_unavailable_at: string | null
-          id: string | null
-          last_activity_at: string | null
-          mode: Database["public"]["Enums"]["quiz_mode"] | null
-          quiz_id: string | null
-          score: number | null
-          started_at: string | null
-          status: Database["public"]["Enums"]["session_status"] | null
-          student_id: string | null
-          submitted_at: string | null
-        }
-        Insert: {
-          face_exempt?: boolean | null
-          face_fail_streak?: number | null
-          face_unavailable_at?: string | null
-          id?: string | null
-          last_activity_at?: string | null
-          mode?: Database["public"]["Enums"]["quiz_mode"] | null
-          quiz_id?: string | null
-          score?: number | null
-          started_at?: string | null
-          status?: Database["public"]["Enums"]["session_status"] | null
-          student_id?: string | null
-          submitted_at?: string | null
-        }
-        Update: {
-          face_exempt?: boolean | null
-          face_fail_streak?: number | null
-          face_unavailable_at?: string | null
-          id?: string | null
-          last_activity_at?: string | null
-          mode?: Database["public"]["Enums"]["quiz_mode"] | null
-          quiz_id?: string | null
-          score?: number | null
-          started_at?: string | null
-          status?: Database["public"]["Enums"]["session_status"] | null
-          student_id?: string | null
-          submitted_at?: string | null
-        }
-        Relationships: [
-          {
             foreignKeyName: "quiz_sessions_quiz_id_fkey"
             columns: ["quiz_id"]
             isOneToOne: false
-            referencedRelation: "quizzes"
+            referencedRelation: "student_quiz_view"
             referencedColumns: ["id"]
           },
           {
@@ -795,48 +889,6 @@ export type Database = {
             columns: ["student_id"]
             isOneToOne: false
             referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      lecturer_answers_view: {
-        Row: {
-          answered_at: string | null
-          id: string | null
-          is_correct: boolean | null
-          question_id: string | null
-          selected_index: number | null
-          session_id: string | null
-        }
-        Insert: {
-          answered_at?: string | null
-          id?: string | null
-          is_correct?: boolean | null
-          question_id?: string | null
-          selected_index?: number | null
-          session_id?: string | null
-        }
-        Update: {
-          answered_at?: string | null
-          id?: string | null
-          is_correct?: boolean | null
-          question_id?: string | null
-          selected_index?: number | null
-          session_id?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "session_answers_question_id_fkey"
-            columns: ["question_id"]
-            isOneToOne: false
-            referencedRelation: "questions"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "session_answers_session_id_fkey"
-            columns: ["session_id"]
-            isOneToOne: false
-            referencedRelation: "quiz_sessions"
             referencedColumns: ["id"]
           },
         ]
@@ -895,7 +947,10 @@ export type Database = {
         Args: { p_session_id: string }
         Returns: boolean
       }
-      is_student_reveal_allowed: { Args: { p_quiz_id: string }; Returns: boolean }
+      is_student_reveal_allowed: {
+        Args: { p_quiz_id: string }
+        Returns: boolean
+      }
       join_class: { Args: { code: string }; Returns: Json }
       pause_session: { Args: { p_session_id: string }; Returns: Json }
       record_face_check: {

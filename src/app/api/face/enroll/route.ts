@@ -106,19 +106,34 @@ export async function POST(request: Request) {
     }
   }
 
-  // 1. Pose validation via CompreFace /detect. Skipped in E2E mock mode (the
-  //    fake tracker returns the same marker for all angles, so yaw is 0).
+  // 1. Pose validation via CompreFace /detect (recognize with pose plugin).
+  //    Skipped in E2E mock mode.
   if (!compreface.isMockMatchFrame(front)) {
-    for (const angle of angles) {
-      const det = await compreface.detect(angle.frame);
+    const detections = await Promise.all(angles.map((a) => compreface.detect(a.frame)));
+    const validDetections: { faces: { yaw: number }[] }[] = [];
+    for (const det of detections) {
       if ("error" in det) return mapFaceError(det) ?? internalError("Something went wrong.");
-      const face = det.faces[0];
-      if (!face) {
+      if (!det.faces || det.faces.length === 0) {
         return mapFaceError({ error: "pose_invalid" }) ?? internalError("Something went wrong.");
       }
-      if (face.yaw < angle.expectedYaw.min || face.yaw > angle.expectedYaw.max) {
-        return mapFaceError({ error: "pose_invalid" }) ?? internalError("Something went wrong.");
-      }
+      validDetections.push(det);
+    }
+    const frontYaw = validDetections[0].faces[0].yaw;
+    const leftYaw = validDetections[1].faces[0].yaw;
+    const rightYaw = validDetections[2].faces[0].yaw;
+
+    // Front: centered (|yaw| <= 30)
+    if (Math.abs(frontYaw) > 30) {
+      return mapFaceError({ error: "pose_invalid" }) ?? internalError("Something went wrong.");
+    }
+    // Side angles: must have a clear head turn (|yaw| >= 10 and <= 75)
+    if (
+      Math.abs(leftYaw) < 10 ||
+      Math.abs(leftYaw) > 75 ||
+      Math.abs(rightYaw) < 10 ||
+      Math.abs(rightYaw) > 75
+    ) {
+      return mapFaceError({ error: "pose_invalid" }) ?? internalError("Something went wrong.");
     }
   }
 

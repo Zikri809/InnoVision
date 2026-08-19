@@ -495,6 +495,110 @@ async function main() {
   record("MED-4 editing live quiz metadata → trigger error", Boolean(metaEditErr),
     metaEditErr?.message ?? "unexpectedly edited live quiz metadata");
 
+  const { error: modeEditErr } = await clientA
+    .from("quizzes")
+    .update({ mode: "assessment" })
+    .eq("id", liveQ.id);
+  record("MED-4b editing live quiz mode → trigger error", Boolean(modeEditErr),
+    modeEditErr?.message ?? "unexpectedly edited live quiz mode");
+
+  const { error: timeEditErr } = await clientA
+    .from("quizzes")
+    .update({ time_limit_sec: 3600 })
+    .eq("id", liveQ.id);
+  record("MED-4b editing live quiz time_limit_sec → trigger error", Boolean(timeEditErr),
+    timeEditErr?.message ?? "unexpectedly edited live quiz time limit");
+
+  // ── D26: quizzes_practice_untimed CHECK constraint (INSERT) ──
+  const { error: insertPracticeTimedErr } = await clientA
+    .from("quizzes")
+    .insert({
+      class_id: clsA.id,
+      created_by: lecturerA.id,
+      title: "Illegal Practice Timed",
+      mode: "practice",
+      time_limit_sec: 600,
+      status: "draft",
+    });
+  record("D26 INSERT practice with time_limit_sec violates CHECK", Boolean(insertPracticeTimedErr),
+    insertPracticeTimedErr?.message ?? "unexpectedly allowed practice quiz with time_limit_sec");
+
+  // ── D27: quizzes_practice_untimed CHECK constraint (UPDATE) ──
+  const { error: updatePracticeTimedErr } = await clientA
+    .from("quizzes")
+    .update({ mode: "practice", time_limit_sec: 1200 })
+    .eq("id", draftQ.id);
+  record("D27 UPDATE draft to practice with time_limit_sec violates CHECK", Boolean(updatePracticeTimedErr),
+    updatePracticeTimedErr?.message ?? "unexpectedly updated practice quiz with time_limit_sec");
+
+  // ── D28: quizzes_time_limit_sec_check (bounds 1..7200) ──
+  const { error: insertOverMaxTimeErr } = await clientA
+    .from("quizzes")
+    .insert({
+      class_id: clsA.id,
+      created_by: lecturerA.id,
+      title: "Illegal Over-Max Timed",
+      mode: "assessment",
+      time_limit_sec: 7201,
+      status: "draft",
+    });
+  record("D28 INSERT assessment with time_limit_sec > 7200 violates CHECK", Boolean(insertOverMaxTimeErr),
+    insertOverMaxTimeErr?.message ?? "unexpectedly allowed assessment quiz with time_limit_sec > 7200");
+
+  const { error: insertZeroTimeErr } = await clientA
+    .from("quizzes")
+    .insert({
+      class_id: clsA.id,
+      created_by: lecturerA.id,
+      title: "Illegal Zero Timed",
+      mode: "assessment",
+      time_limit_sec: 0,
+      status: "draft",
+    });
+  record("D28b INSERT assessment with time_limit_sec = 0 violates CHECK", Boolean(insertZeroTimeErr),
+    insertZeroTimeErr?.message ?? "unexpectedly allowed assessment quiz with time_limit_sec = 0");
+
+  // ── MED-4c: metadata edit-lock on CLOSED quizzes ──────────────
+  const { error: closedMetaEditErr } = await clientA
+    .from("quizzes")
+    .update({ title: "Tampered Closed Title" })
+    .eq("id", quiz1.id); // quiz1 was closed at line 444
+  record("MED-4c editing closed quiz metadata → trigger error", Boolean(closedMetaEditErr),
+    closedMetaEditErr?.message ?? "unexpectedly edited closed quiz metadata");
+
+  // ── D28c/D28d: Valid min (1s) and max (7200s) bounds succeed on DB INSERT ──
+  const { data: minTimedQ, error: minTimedErr } = await clientA
+    .from("quizzes")
+    .insert({
+      class_id: clsA.id,
+      created_by: lecturerA.id,
+      title: "Valid Min Timed (1s)",
+      mode: "assessment",
+      time_limit_sec: 1,
+      status: "draft",
+    })
+    .select("id, time_limit_sec")
+    .single();
+  createdQuizIds.push(minTimedQ?.id);
+  record("D28c INSERT assessment with time_limit_sec = 1 succeeds", !minTimedErr && minTimedQ?.time_limit_sec === 1,
+    minTimedErr?.message ?? "");
+
+  const { data: maxTimedQ, error: maxTimedErr } = await clientA
+    .from("quizzes")
+    .insert({
+      class_id: clsA.id,
+      created_by: lecturerA.id,
+      title: "Valid Max Timed (7200s)",
+      mode: "assessment",
+      time_limit_sec: 7200,
+      status: "draft",
+    })
+    .select("id, time_limit_sec")
+    .single();
+  createdQuizIds.push(maxTimedQ?.id);
+  record("D28d INSERT assessment with time_limit_sec = 7200 succeeds", !maxTimedErr && maxTimedQ?.time_limit_sec === 7200,
+    maxTimedErr?.message ?? "");
+
   // ── D25 (H1 regression): deleting a quiz WITH questions succeeds ──
   // Regression for the cascade-delete trigger bug: questions_draft_only used to
   // raise "quiz_not_found" during ON DELETE CASCADE because the parent quiz is

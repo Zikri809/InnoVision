@@ -36,48 +36,55 @@ export function GestureCalibration({
   return (
     <div className="mx-auto max-w-2xl px-4 pb-8">
       <div className="mb-6">
-        <h1 className="text-2xl font-semibold">Hand gestures</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <h1 className="font-heading text-2xl font-semibold">Hand gestures</h1>
+        <p className="mt-1 text-sm font-semibold text-muted-foreground">
           Hold up one to five fingers and keep them steady to answer. Raise all
           five (open palm) to continue between questions.
         </p>
       </div>
 
-      <div className="overflow-hidden rounded-xl border bg-card">
-        <div className="flex items-center justify-between border-b px-4 py-3">
+      <div className="overflow-hidden rounded-[22px] border-[3px] border-border bg-card shadow-[var(--shadow-clay-sm)]">
+        <div className="flex items-center justify-between border-b-[3px] border-border px-4 py-3">
           <div className="flex items-center gap-3">
             <span
-              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                handDetected ? "bg-emerald-100 text-emerald-800" : "bg-muted text-muted-foreground"
+              className={`inline-flex items-center gap-1.5 rounded-full border-[2px] px-3 py-1 text-xs font-bold ${
+                handDetected ? "border-emerald-400 bg-emerald-100 text-emerald-800" : "border-border bg-muted text-muted-foreground"
               }`}
               role="status"
             >
               <span
-                className={`size-1.5 rounded-full ${handDetected ? "bg-emerald-500" : "bg-muted-foreground/50"}`}
+                className={`size-2 rounded-full ${handDetected ? "bg-emerald-500" : "bg-muted-foreground/50"}`}
                 aria-hidden
               />
               {handDetected ? "Hand detected" : "No hand"}
             </span>
-            <span className="text-xs text-muted-foreground">
+            <span className="text-xs font-bold text-muted-foreground">
               Fingers: {fingerCount}
             </span>
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2 px-4 py-3">
-          {FINGER_GUIDE.map((n) => (
-            <span
-              key={n}
-              className="inline-flex size-8 items-center justify-center rounded-full border text-sm font-medium text-muted-foreground"
-              aria-hidden
-            >
-              {n}
-            </span>
-          ))}
+        <div className="flex flex-wrap gap-2.5 px-4 py-3.5">
+          {FINGER_GUIDE.map((n) => {
+            const active = fingerCount === Number(n);
+            return (
+              <span
+                key={n}
+                className={`inline-flex size-9 items-center justify-center rounded-xl border-[3px] font-heading text-sm font-extrabold transition-all duration-150 ${
+                  active
+                    ? "border-primary bg-primary text-primary-foreground shadow-[0_3px_0_var(--primary-deep)] scale-105"
+                    : "border-border bg-muted text-muted-foreground"
+                }`}
+                aria-hidden
+              >
+                {n}
+              </span>
+            );
+          })}
         </div>
       </div>
 
-      <p role="note" className="mt-4 text-xs text-muted-foreground">
+      <p role="note" className="mt-4 text-xs font-semibold text-muted-foreground">
         {notice}
       </p>
 
@@ -90,7 +97,7 @@ export function GestureCalibration({
         </Button>
       </div>
       {continueDisabled && (
-        <p className="mt-2 text-xs text-muted-foreground" role="status">
+        <p className="mt-2 text-xs font-semibold text-muted-foreground" role="status">
           Waiting for hand tracking to be ready…
         </p>
       )}

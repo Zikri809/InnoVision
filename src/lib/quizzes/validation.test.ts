@@ -105,7 +105,7 @@ describe("QuestionInputSchema (U-Q1..U-Q7)", () => {
   });
 });
 
-describe("CreateQuizSchema", () => {
+describe("CreateQuizSchema (U-M6)", () => {
   it("defaults mode to practice", () => {
     const parsed = CreateQuizSchema.parse({ title: "  My Quiz  " });
     expect(parsed.title).toBe("My Quiz");
@@ -126,19 +126,50 @@ describe("CreateQuizSchema", () => {
     expect(CreateQuizSchema.safeParse({ title: "Q", timeLimitSec: null }).success).toBe(true);
   });
 
-  it("rejects empty title and out-of-range time limits", () => {
+  it("U-M6 rejects empty title and out-of-range time limits (capped at 7200)", () => {
     expect(CreateQuizSchema.safeParse({ title: "   " }).success).toBe(false);
     expect(CreateQuizSchema.safeParse({ title: "Q", timeLimitSec: 0 }).success).toBe(false);
-    expect(CreateQuizSchema.safeParse({ title: "Q", timeLimitSec: 72 * 3600 + 1 }).success).toBe(false);
+    expect(CreateQuizSchema.safeParse({ title: "Q", timeLimitSec: 7201 }).success).toBe(false);
     expect(CreateQuizSchema.safeParse({ title: "Q", timeLimitSec: 10.5 }).success).toBe(false);
   });
 });
 
-describe("UpdateQuizSchema", () => {
-  it("accepts partial updates", () => {
+describe("UpdateQuizSchema (U-M1..U-M5)", () => {
+  it("U-M1 accepts partial updates without injecting mode or timeLimitSec", () => {
     expect(UpdateQuizSchema.safeParse({ title: "Renamed" }).success).toBe(true);
     expect(UpdateQuizSchema.safeParse({ mode: "assessment" }).success).toBe(true);
     expect(UpdateQuizSchema.safeParse({}).success).toBe(true);
+  });
+
+  it("U-M2 accepts maximum boundary 7200 seconds", () => {
+    const res = UpdateQuizSchema.safeParse({ mode: "assessment", timeLimitSec: 7200 });
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data.timeLimitSec).toBe(7200);
+    }
+  });
+
+  it("U-M3 accepts minimum boundary 1 second", () => {
+    const res = UpdateQuizSchema.safeParse({ mode: "assessment", timeLimitSec: 1 });
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data.timeLimitSec).toBe(1);
+    }
+  });
+
+  it("U-M4 rejects timeLimitSec: 0, -1, 7201, 30.5, NaN", () => {
+    expect(UpdateQuizSchema.safeParse({ timeLimitSec: 0 }).success).toBe(false);
+    expect(UpdateQuizSchema.safeParse({ timeLimitSec: -1 }).success).toBe(false);
+    expect(UpdateQuizSchema.safeParse({ timeLimitSec: 7201 }).success).toBe(false);
+    expect(UpdateQuizSchema.safeParse({ timeLimitSec: 30.5 }).success).toBe(false);
+    expect(UpdateQuizSchema.safeParse({ timeLimitSec: NaN }).success).toBe(false);
+  });
+
+  it("U-M5 rejects invalid partial fields (empty title, whitespace, >200 chars)", () => {
+    expect(UpdateQuizSchema.safeParse({ title: "" }).success).toBe(false);
+    expect(UpdateQuizSchema.safeParse({ title: "   " }).success).toBe(false);
+    expect(UpdateQuizSchema.safeParse({ title: "a".repeat(201) }).success).toBe(false);
+    expect(UpdateQuizSchema.safeParse({ mode: "essay" }).success).toBe(false);
   });
 
   it("H2 — does NOT inject mode on a partial update (no mode downgrade)", () => {
@@ -165,9 +196,24 @@ describe("UpdateQuizSchema", () => {
     }
   });
 
-  it("rejects invalid partial fields", () => {
-    expect(UpdateQuizSchema.safeParse({ title: "" }).success).toBe(false);
-    expect(UpdateQuizSchema.safeParse({ mode: "essay" }).success).toBe(false);
+  it("handles title edge cases (trimming, boundary 200 chars, unicode & emojis)", () => {
+    const trimmed = UpdateQuizSchema.safeParse({ title: "   Week 5 Quiz   " });
+    expect(trimmed.success).toBe(true);
+    if (trimmed.success) {
+      expect(trimmed.data.title).toBe("Week 5 Quiz");
+    }
+
+    const exact200 = UpdateQuizSchema.safeParse({ title: "x".repeat(200) });
+    expect(exact200.success).toBe(true);
+    if (exact200.success) {
+      expect(exact200.data.title).toHaveLength(200);
+    }
+
+    const unicodeTitle = UpdateQuizSchema.safeParse({ title: "🧬 Biology 101: Cell Division 🔬 (Midterm)" });
+    expect(unicodeTitle.success).toBe(true);
+    if (unicodeTitle.success) {
+      expect(unicodeTitle.data.title).toBe("🧬 Biology 101: Cell Division 🔬 (Midterm)");
+    }
   });
 });
 

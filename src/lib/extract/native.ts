@@ -11,11 +11,10 @@
  *
  * Bounds (S1 from the P4 plan review): the caller is responsible for capping
  * file size / page count before calling; this module enforces MAX_PARSE_PAGES
- * and the MAX_EXTRACT_CHARS text cap defensively.
+ * defensively.
  */
 
 import {
-  MAX_EXTRACT_CHARS,
   MAX_PARSE_PAGES,
   MAX_ZIP_ENTRIES,
   MAX_ZIP_TOTAL_BYTES,
@@ -248,7 +247,7 @@ export async function nativeExtract(
   }
 
   const joined = pages.join("\n\n");
-  const text = joined.length > MAX_EXTRACT_CHARS ? joined.slice(0, MAX_EXTRACT_CHARS) : joined;
+  const text = joined;
 
   const nonEmpty = pages.filter((p) => charCount(p.trim()) > 0).length;
   const avgPerPage = nonEmpty > 0 ? charCount(text) / nonEmpty : 0;

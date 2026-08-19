@@ -10,7 +10,7 @@ import {
  *
  * PLAN §0 locked decision: `openai` npm SDK with a `baseURL` override, so the
  * same client works with OpenAI, OpenRouter, Gemini-compatible endpoints, and
- * Ollama. Config via env: AI_BASE_URL / AI_API_KEY / AI_MODEL.
+ * local vLLM. Config via env: AI_BASE_URL / AI_API_KEY / AI_MODEL.
  *
  * `import "server-only"` guarantees this module (and the API key) can never be
  * bundled into a client component (S8 from the P4 plan review).
@@ -42,9 +42,10 @@ export type ChatResult =
   | { ok: false; error: "timeout" | "ai_error"; message?: string };
 
 /**
- * One chat-completions round-trip with a hard wall-clock timeout. Routes run
- * under `maxDuration = 60`, so the AI call must never eat the whole budget —
- * a 45s abort leaves time for a clean 503 `timeout` response.
+ * One chat-completions round-trip with a hard wall-clock timeout. Local-only
+ * deployment: the timeout is a generous ceiling (10 min default, clamped by
+ * any caller-provided deadline) so long 30-question generations aren't aborted
+ * mid-stream.
  */
 export async function chatCompletions(opts: {
   client: OpenAI;

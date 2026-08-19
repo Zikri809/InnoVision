@@ -148,7 +148,7 @@
 | D37 | **Source edit-lock (P4)** | status-less `UPDATE quizzes SET source_text/source_file_url` on a live quiz | `quiz_not_draft_edit` (edit-lock fires on any UPDATE) |
 | D38 | **Source secrecy (P4)** | student reads `student_quiz_view` | no `source_text`/`source_file_url`/`created_by`; second lecturer reads 0 rows (owner-only) |
 | D39 | **AI concurrency (P4)** | N concurrent `replace_quiz_questions` on one draft quiz | no errors, valid final state (advisory lock serialization) |
-| D40 | **Source size backstop (P4)** | `source_text` > 15000 via direct SQL | CHECK error |
+| D40 | **Source size (P4)** | `source_text` > 15000 via direct SQL | stored (cap removed) |
 | D42 | **Question view secrecy (P5)** | student reads `student_question_view` for a live quiz | row count == seeded count AND `correct_index`/`explanation` absent from the returned object keys; owner lecturer still reads `correct_index` (D6 stays green) |
 | D43 | **Index bounds (P5)** | `answer_question` with `p_selected_index` ≥ options length (and NULL) | `{error:'invalid_selected_index'}` |
 | D44 | **Real-DB grading (P5)** | answer Q1 correctly + Q2 incorrectly → submit | stored `is_correct` per row; `submit_session` returns `score=1, total=N`; per-mode jsonb shapes (`{is_correct}` vs `{is_correct, correct_index, explanation}`) |
@@ -286,7 +286,7 @@
 
 1. Real webcam: hand tracking selects 1–4 fingers reliably in the **actual demo room lighting** (the fake-tracker E2E proves the state machine; real-lighting reliability is this manual item).
 2. Real face enroll + verify with the presenter and a volunteer "impostor".
-3. GLM-OCR on Ollama (optional high-accuracy path): pull model, confirm the picker entry appears after probe, run one scanned slide deck end-to-end; note per-page latency on the demo machine. Tesseract-only path must work with no Ollama installed. **CI:** the `E2-GLM` Playwright spec is skipped when `CI` is set (GitHub Actions runners don't run local Ollama); it runs only on a dev machine with Ollama reachable (`OLLAMA_BASE_URL`).
+3. GLM-OCR via Docker/vLLM (optional high-accuracy path): `docker compose up -d glm-ocr`, confirm the picker entry appears after probe, run one scanned slide deck end-to-end; note per-page latency on the demo machine. Tesseract-only path must work with no GLM container running. **CI:** the `E2-GLM` Playwright spec is skipped when `CI` is set (GitHub Actions runners don't run the GLM-OCR container); it runs only on a dev machine with the container reachable (`GLM_BASE_URL`).
 4. Wake Supabase free tier (7-day pause) the day before.
 5. 2–3 laptops simultaneously on one assessment — confirm no race on session start.
 6. **Model hosting reachable from the demo room** — confirm `/public/models` (self-hosted MediaPipe files) loads on the venue Wi-Fi; `verify-mediapipe` proves integrity. (P6 vendors + commits the assets; no Google CDN at runtime.)

@@ -16,38 +16,93 @@ import type { Landmark, Handedness, HandFrame } from "./types";
 
 const INDEX_TIP = 8;
 const INDEX_PIP = 6;
+const INDEX_MCP = 5;
+
 const MIDDLE_TIP = 12;
 const MIDDLE_PIP = 10;
+const MIDDLE_MCP = 9;
+
 const RING_TIP = 16;
 const RING_PIP = 14;
+const RING_MCP = 13;
+
 const PINKY_TIP = 20;
 const PINKY_PIP = 18;
+const PINKY_MCP = 17;
+
 const THUMB_TIP = 4;
 const THUMB_MCP = 3;
 
-/** Is the finger at `tip` extended past its `pip` joint (y-axis)? */
+function distSq(a: Landmark, b: Landmark): number {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return dx * dx + dy * dy;
+}
+
+/** Is the finger at `tip` extended past its `pip` and `mcp` joints? */
 export function isFingerExtended(
   landmarks: Landmark[],
   tip: number,
   pip: number,
+  mcp?: number,
 ): boolean {
   const t = landmarks[tip];
   const p = landmarks[pip];
   if (!t || !p) return false;
-  return t.y < p.y;
+
+  // Basic 2D height condition: tip must be higher on the screen (lower y) than PIP
+  if (t.y >= p.y) return false;
+
+  // Geometric uncurl check against MCP knuckle and wrist:
+  // When a finger is curled into the palm (e.g. pinky when showing 3 fingers),
+  // the tip curls back toward the knuckle/wrist, making dist(tip, mcp) <= dist(pip, mcp).
+  // When straight/extended (e.g. showing 4 fingers), dist(tip, mcp) > dist(pip, mcp).
+  if (mcp !== undefined) {
+    const m = landmarks[mcp];
+    if (m && (m.x !== p.x || m.y !== p.y)) {
+      const distTipMcp = distSq(t, m);
+      const distPipMcp = distSq(p, m);
+      if (distTipMcp <= distPipMcp * 1.1) {
+        return false;
+      }
+    }
+  }
+
+  const wrist = landmarks[0];
+  if (wrist && (wrist.x !== p.x || wrist.y !== p.y)) {
+    const distTipWrist = distSq(t, wrist);
+    const distPipWrist = distSq(p, wrist);
+    if (distTipWrist <= distPipWrist * 1.05) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
-/** Is the thumb extended (x-axis, handedness-aware)? */
+/** Is the thumb extended (geometric check against palm/pinky + handedness fallback)? */
 export function isThumbExtended(
   landmarks: Landmark[],
   handedness?: Handedness,
 ): boolean {
-  if (handedness !== "Left" && handedness !== "Right") return false;
   const tip = landmarks[THUMB_TIP];
-  const mcp = landmarks[THUMB_MCP];
-  if (!tip || !mcp) return false;
-  // Raw (non-mirrored) frame: a right hand's thumb points left (-x).
-  return handedness === "Right" ? tip.x < mcp.x : tip.x > mcp.x;
+  const ip = landmarks[THUMB_MCP];
+  const pinkyMcp = landmarks[17];
+  if (!tip || !ip) return false;
+
+  // 1. Geometric distance check against pinky base (landmark 17):
+  //    When thumb is folded across palm, tip (4) is closer to pinky MCP (17) than IP joint (3).
+  //    When thumb is extended outwards/open, tip (4) is further from pinky MCP (17) than IP joint (3).
+  if (pinkyMcp && (pinkyMcp.x !== ip.x || pinkyMcp.y !== ip.y)) {
+    const distTipToPinky = distSq(tip, pinkyMcp);
+    const distIpToPinky = distSq(ip, pinkyMcp);
+    return distTipToPinky > distIpToPinky * 1.08;
+  }
+
+  // 2. Handedness fallback (also supports synthetic landmark fixtures)
+  if (handedness === "Right") return tip.x < ip.x;
+  if (handedness === "Left") return tip.x > ip.x;
+  return false;
 }
 
 /** Count extended fingers (0–5), including the handedness-aware thumb. */
@@ -56,10 +111,10 @@ export function countExtendedFingers(
   handedness?: Handedness,
 ): number {
   let count = 0;
-  if (isFingerExtended(landmarks, INDEX_TIP, INDEX_PIP)) count++;
-  if (isFingerExtended(landmarks, MIDDLE_TIP, MIDDLE_PIP)) count++;
-  if (isFingerExtended(landmarks, RING_TIP, RING_PIP)) count++;
-  if (isFingerExtended(landmarks, PINKY_TIP, PINKY_PIP)) count++;
+  if (isFingerExtended(landmarks, INDEX_TIP, INDEX_PIP, INDEX_MCP)) count++;
+  if (isFingerExtended(landmarks, MIDDLE_TIP, MIDDLE_PIP, MIDDLE_MCP)) count++;
+  if (isFingerExtended(landmarks, RING_TIP, RING_PIP, RING_MCP)) count++;
+  if (isFingerExtended(landmarks, PINKY_TIP, PINKY_PIP, PINKY_MCP)) count++;
   if (isThumbExtended(landmarks, handedness)) count++;
   return count;
 }

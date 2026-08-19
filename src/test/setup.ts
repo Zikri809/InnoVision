@@ -15,5 +15,5 @@ process.env.AI_API_KEY = process.env.AI_API_KEY ?? "test-key";
 process.env.AI_MODEL = process.env.AI_MODEL ?? "gpt-4o-mini";
 process.env.OCR_VISION_MODEL = process.env.OCR_VISION_MODEL ?? "gpt-4o-mini";
 process.env.OCR_DEFAULT_ENGINE = process.env.OCR_DEFAULT_ENGINE ?? "tesseract";
-process.env.OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
+process.env.GLM_BASE_URL = process.env.GLM_BASE_URL ?? "http://localhost:11434";
 process.env.OCR_GLM_MODEL = process.env.OCR_GLM_MODEL ?? "glm-ocr";

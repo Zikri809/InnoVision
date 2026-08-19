@@ -12,11 +12,14 @@ import { isAllowedExtension, MAX_FILE_BYTES, sanitizeStorageFilename } from "@/l
 export function UploadDropzone({
   userId,
   quizId,
+  fileName,
   onUploaded,
   onError,
 }: {
   userId: string;
   quizId: string;
+  /** Name of the file already selected/uploaded, to show in the dropzone. */
+  fileName?: string | null;
   onUploaded: (path: string, file: File) => void;
   onError: (message: string) => void;
 }) {
@@ -76,8 +79,8 @@ export function UploadDropzone({
         setDragOver(false);
         handleFile(e.dataTransfer.files?.[0]);
       }}
-      className={`cursor-pointer rounded-lg border-2 border-dashed p-6 text-center text-sm transition-colors ${
-        dragOver ? "border-primary bg-primary/5" : "border-muted-foreground/30"
+      className={`cursor-pointer rounded-2xl border-[3px] border-dashed p-6 text-center text-sm transition-all duration-150 outline-none focus-visible:ring-4 focus-visible:ring-primary/20 ${
+        dragOver ? "border-primary bg-primary/10 scale-[1.01]" : "border-border bg-card/60 hover:bg-card shadow-[var(--shadow-clay-sm)]"
       }`}
     >
       <input
@@ -88,13 +91,26 @@ export function UploadDropzone({
         onChange={(e) => handleFile(e.target.files?.[0])}
       />
       {uploading ? (
-        <p className="text-muted-foreground">Uploading…</p>
+        <div className="pointer-events-none flex items-center justify-center gap-2 font-bold text-muted-foreground">
+          <span className="size-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          <span>Uploading file…</span>
+        </div>
+      ) : fileName ? (
+        <div className="pointer-events-none">
+          <p className="break-all font-heading font-bold text-foreground">{fileName}</p>
+          <p className="mt-1 text-xs font-semibold text-muted-foreground">
+            File ready. Click to choose a different one, or drop a new file to replace it.
+          </p>
+        </div>
       ) : (
-        <p className="text-muted-foreground">
-          Drop a chapter PDF, slides, or document here, or click to browse.
-          <br />
-          <span className="text-xs">PDF · DOCX · PPTX · TXT · MD · images (≤ 25 MB)</span>
-        </p>
+        <div className="pointer-events-none">
+          <p className="font-semibold text-foreground">
+            Drop a chapter PDF, slides, or document here, or click to browse.
+          </p>
+          <p className="mt-1 text-xs font-medium text-muted-foreground">
+            PDF · DOCX · PPTX · TXT · MD · images (≤ 25 MB)
+          </p>
+        </div>
       )}
     </div>
   );

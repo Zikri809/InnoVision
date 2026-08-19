@@ -465,7 +465,12 @@ export function useFacePipeline(props: FacePipelineProps) {
     // Capture the current question id for the fire-time re-check.
     const questionIdAtStart = lastQuestionIdRef.current;
     try {
-      const frame = await tracker.captureFrame();
+      let frame = await tracker.captureFrame();
+      const startPoll = Date.now();
+      while (!frame && Date.now() - startPoll < 800 && !disposedRef.current) {
+        await new Promise((r) => setTimeout(r, 100));
+        frame = await tracker.captureFrame();
+      }
       if (disposedRef.current) return;
       // Persistent camera-null mid-quiz: indistinguishable from a wrong face by
       // design — POST a sentinel empty frame → CompreFace returns no subject →
@@ -617,17 +622,22 @@ export function useFacePipeline(props: FacePipelineProps) {
   }, []);
 
   // Q-transition trigger: the parent reports the CURRENT question id. When it
-  // CHANGES (and is visible), fire a Q-transition verify — skipping the FIRST
-  // transition (the assessment gate already verified before Q1).
+  // CHANGES (and is visible), fire a Q-transition verify after a settling delay
+  // (1500ms) so the student has completed their gesture/click and is facing the camera.
   useEffect(() => {
     if (!questionVisible || questionId === null) return;
     const prev = lastQuestionIdRef.current;
     lastQuestionIdRef.current = questionId;
     if (prev === null) return; // first question — gate covered it
     if (prev === questionId) return; // same question re-render
-    if (statusRef.current === "ready" && !isTerminalRef.current) {
-      void runVerify("question");
-    }
+
+    const timer = setTimeout(() => {
+      if (statusRef.current === "ready" && !isTerminalRef.current && !disposedRef.current) {
+        void runVerify("question");
+      }
+    }, 1500);
+
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [questionId, questionVisible]);
 

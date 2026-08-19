@@ -1,16 +1,17 @@
 /**
- * GLM-OCR via local Ollama — opt-in high-accuracy engine (PLAN §3.1).
+ * GLM-OCR via local Docker (vLLM) — opt-in high-accuracy engine (PLAN §3.1).
  *
  * ⚠️ GLM-OCR is a vision-language CHAT model, not a strict OCR API — it must
  * be prompted to transcribe. Availability is gated behind `probeGlm()`; the
  * engine picker only shows it when the probe finds the model locally.
  *
  * Client-only by design: the lecturer's browser talks directly to their own
- * Ollama (localhost). The server NEVER proxies this endpoint (SSRF guard).
+ * GLM-OCR container (localhost). The server NEVER proxies this endpoint
+ * (SSRF guard).
  */
 
-import { MAX_EXTRACT_CHARS, MAX_OCR_PAGES, type ExtractionResult } from "@/lib/extract/types";
-import { httpChatCompletions, probeOllamaModel } from "@/lib/ai/http-compat";
+import { MAX_OCR_PAGES, type ExtractionResult } from "@/lib/extract/types";
+import { httpChatCompletions, probeGlmModel } from "@/lib/ai/http-compat";
 import { destroyPdf, loadPdfJs } from "@/lib/extract/pdf";
 
 export type GlmOcrConfig = {
@@ -18,11 +19,11 @@ export type GlmOcrConfig = {
   model: string;
 };
 
-export { probeOllamaModel };
+export { probeGlmModel };
 
 /** Probe wrapper matching the picker's needs (U-E4/U-E8). */
 export async function glmAvailable(cfg: GlmOcrConfig): Promise<boolean> {
-  return probeOllamaModel({ baseUrl: cfg.baseUrl, model: cfg.model });
+  return probeGlmModel({ baseUrl: cfg.baseUrl, model: cfg.model });
 }
 
 /** Rasterize a PDF to base64 PNG pages in the browser. */
@@ -62,9 +63,9 @@ const GLM_TRANSCRIBE_PROMPT =
 const GLM_OCR_BUDGET_MS = 5 * 60_000;
 
 /**
- * OCR a file with the local GLM-OCR model. Images/PDF pages are sent one at a
- * time (vision-language models accept a single image per message). Returns
- * concatenated text with engine='glm'.
+ * OCR a file with the local GLM-OCR model (Docker/vLLM). Images/PDF pages are
+ * sent one at a time (vision-language models accept a single image per
+ * message). Returns concatenated text with engine='glm'.
  */
 export async function glmExtract(
   file: File,
@@ -111,7 +112,6 @@ export async function glmExtract(
 
   let text = parts.join("\n\n").trim();
   text = sanitizeGlmText(text);
-  if (text.length > MAX_EXTRACT_CHARS) text = text.slice(0, MAX_EXTRACT_CHARS);
   return { text, pages: images.length, engine: "glm" };
 }
 

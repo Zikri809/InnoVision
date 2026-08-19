@@ -76,6 +76,20 @@ export function EndScreen({
         </p>
         <h1 className="mt-1 font-heading text-2xl font-semibold [text-wrap:balance]">{quiz.title}</h1>
 
+        {quiz.time_limit_sec != null && session.submitted_at && (
+          (() => {
+            const elapsedSec = (new Date(session.submitted_at).getTime() - new Date(session.started_at).getTime()) / 1000;
+            if (elapsedSec >= quiz.time_limit_sec - 2) {
+              return (
+                <div className="mx-auto mt-3 inline-flex items-center gap-2 rounded-full border-[2px] border-amber-300 bg-amber-50 px-4 py-1.5 text-xs font-bold text-amber-800" role="status">
+                  ⏱️ Auto-submitted: The time limit for this assessment expired.
+                </div>
+              );
+            }
+            return null;
+          })()
+        )}
+
         {revealed && score != null ? (
           <>
             <p className="mt-6 font-heading text-6xl font-bold text-primary">
@@ -126,17 +140,17 @@ export function EndScreen({
                   }`}
                 >
                   <div className="flex items-start justify-between gap-3 px-5 py-4">
-                    <p className="font-heading text-sm font-bold text-[#7c2d12]">
+                    <p className="font-heading text-sm font-bold text-foreground">
                       <span className="text-muted-foreground">{b.order_index + 1}.</span>{" "}
                       {b.prompt}
                     </p>
                     <span
                       className={`shrink-0 rounded-full border-2 px-2.5 py-0.5 text-[11px] font-extrabold uppercase tracking-wide ${
                         isCorrect
-                          ? "border-[#B8CC9E] bg-[#E9F0DF] text-[#5F7845]"
+                          ? "border-emerald-300 dark:border-emerald-700/60 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300"
                           : b.selected_index == null
                             ? "border-border bg-muted text-muted-foreground"
-                            : "border-[#E4B0A4] bg-[#FBE4E0] text-[#C4553B]"
+                            : "border-destructive/30 bg-destructive/10 text-destructive"
                       }`}
                     >
                       {b.selected_index == null ? "Unanswered" : isCorrect ? "Correct" : "Wrong"}
@@ -151,18 +165,18 @@ export function EndScreen({
                           key={i}
                           className={`flex items-center gap-3 rounded-xl border-2 px-3.5 py-2.5 text-sm ${
                             correct
-                              ? `${selected ? "bg-[#F3F7EC]" : "bg-[#F3F7EC]/50"} border-[#C9D9B4]`
+                              ? `${selected ? "bg-emerald-50 dark:bg-emerald-950/30" : "bg-emerald-50/50 dark:bg-emerald-950/15"} border-emerald-300 dark:border-emerald-700/60`
                               : selected
-                                ? "border-[#E6B3A8] bg-[#FDF1EE]"
+                                ? "border-destructive/30 bg-destructive/10"
                                 : "border-transparent bg-transparent"
                           }`}
                         >
                           <span
                             className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-extrabold ${
                               correct
-                                ? "bg-[#7A9E5F] text-white"
+                                ? "bg-emerald-600 text-white"
                                 : selected
-                                  ? "bg-[#C4553B] text-white"
+                                  ? "bg-destructive text-white"
                                   : "border-border bg-muted text-muted-foreground"
                             }`}
                           >
@@ -176,7 +190,7 @@ export function EndScreen({
                             {opt}
                           </span>
                           {correct && !selected && (
-                            <span className="ml-auto shrink-0 text-[11px] font-extrabold text-[#5F7845]">
+                            <span className="ml-auto shrink-0 text-[11px] font-extrabold text-emerald-700 dark:text-emerald-400">
                               Correct answer
                             </span>
                           )}

@@ -7,8 +7,8 @@
  * of truth) via relative imports — Playwright does not resolve the `@/*` alias.
  */
 
-/** Duration a finger must be held steady to confirm an answer (sample default). */
-export const HOLD_MS = 800;
+/** Duration a finger must be held steady to confirm an answer. */
+export const HOLD_MS = 1200;
 
 /** "3-2-1-SCAN" countdown between questions while gestures are active. */
 export const SCAN_COUNTDOWN_MS = 1200;

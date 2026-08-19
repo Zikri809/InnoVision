@@ -178,14 +178,14 @@ export function ClassesPageClient({ classes }: { classes: LecturerClassCard[] })
                     className="group flex h-full flex-col rounded-[22px] border-[3px] border-border bg-card p-5 shadow-[var(--shadow-clay)] transition-[transform,box-shadow] duration-200 hover:-translate-y-1 hover:shadow-[8px_10px_0_rgba(194,65,12,0.16)]"
                   >
                     <div className="flex items-start justify-between gap-3">
-                      <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-orange-100 font-heading text-lg font-bold text-primary">
+                      <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-primary/15 font-heading text-lg font-bold text-primary">
                         {c.title.trim().charAt(0).toUpperCase()}
                       </span>
                       <span className="rounded-full border-[3px] border-border bg-muted px-2.5 py-0.5 font-mono text-xs font-bold tracking-wider text-muted-foreground">
                         {c.join_code}
                       </span>
                     </div>
-                    <h3 className="mt-3.5 font-heading text-lg font-semibold leading-snug [text-wrap:balance]">
+                    <h3 className="mt-3.5 break-words line-clamp-2 font-heading text-lg font-semibold leading-snug [text-wrap:balance]">
                       {c.title}
                     </h3>
                     <div className="mt-auto flex items-center justify-between pt-3">

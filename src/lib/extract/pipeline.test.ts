@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { runExtractionPipeline } from "@/lib/extract/pipeline";
-import { probeOllamaModel } from "@/lib/ai/http-compat";
+import { probeGlmModel } from "@/lib/ai/http-compat";
 import { base64ByteLength, batch, MAX_VISION_PAGES } from "@/lib/extract/types";
 
 // Mock the OCR modules so pipeline-level tests can exercise the GLM/vision
@@ -73,8 +73,8 @@ describe("U-E2c — Tesseract OCR is the fallback for low-density native", () =>
 });
 
 describe("U-E4 — GLM availability probe gating", () => {
-  it("probeOllamaModel returns false when the endpoint is unreachable", async () => {
-    const ok = await probeOllamaModel({
+  it("probeGlmModel returns false when the endpoint is unreachable", async () => {
+    const ok = await probeGlmModel({
       baseUrl: "http://127.0.0.1:1", // nothing listens here
       model: "glm-ocr",
       timeoutMs: 300,
@@ -88,7 +88,7 @@ describe("U-E4 — GLM availability probe gating", () => {
       "fetch",
       vi.fn().mockResolvedValue({ ok: false, status: 500 }),
     );
-    const ok = await probeOllamaModel({ baseUrl: "http://ollama", model: "glm-ocr" });
+    const ok = await probeGlmModel({ baseUrl: "http://localhost:11434", model: "glm-ocr" });
     expect(ok).toBe(false);
     vi.unstubAllGlobals();
   });
@@ -98,10 +98,10 @@ describe("U-E4 — GLM availability probe gating", () => {
       "fetch",
       vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ models: [{ name: "glm-ocr:latest" }] }),
+        json: async () => ({ data: [{ id: "glm-ocr:latest" }] }),
       }),
     );
-    const ok = await probeOllamaModel({ baseUrl: "http://ollama", model: "glm-ocr" });
+    const ok = await probeGlmModel({ baseUrl: "http://localhost:11434", model: "glm-ocr" });
     expect(ok).toBe(true);
     vi.unstubAllGlobals();
   });
@@ -163,6 +163,24 @@ describe("Pipeline engine branching", () => {
     expect(glm.glmExtract).toHaveBeenCalled();
   });
 
+  it("explicit glm runs DIRECTLY even when the file has a dense native text layer", async () => {
+    // A lecturer picks GLM-OCR for accuracy; a partial/embedded native text
+    // layer must not silently win. Regression for the "slide has more words
+    // but only a few got extracted" report.
+    const glm = await import("@/lib/extract/glm-ocr");
+    const dense = "a".repeat(200);
+    const r = await runExtractionPipeline({
+      file: {
+        name: "slides.pdf",
+        arrayBuffer: async () =>
+          new TextEncoder().encode(dense).buffer as ArrayBuffer,
+      } as unknown as File,
+      engine: "glm",
+    });
+    expect(r.engine).toBe("glm");
+    expect(glm.glmExtract).toHaveBeenCalled();
+  });
+
   it("selects vision when engine='vision'", async () => {
     const vision = await import("@/lib/extract/vision");
     const r = await runExtractionPipeline({
@@ -173,7 +191,7 @@ describe("Pipeline engine branching", () => {
     expect(vision.visionExtract).toHaveBeenCalled();
   });
 
-  it("uses dense native text and skips OCR entirely", async () => {
+  it("uses dense native text and skips OCR entirely (default tesseract cascade)", async () => {
     const tesseract = await import("@/lib/extract/tesseract");
     // A dense enough plain text > MIN_CHARS_PER_PAGE → native is usable.
     const dense = "a".repeat(200);
@@ -199,7 +217,7 @@ describe("Pipeline engine branching", () => {
         arrayBuffer: async () =>
           new TextEncoder().encode(dense).buffer as ArrayBuffer,
       } as unknown as File,
-      config: { defaultEngine: "vision", ollamaBaseUrl: "x", glmModel: "y", visionModel: "z" },
+      config: { defaultEngine: "vision", glmBaseUrl: "x", glmModel: "y", visionModel: "z" },
     });
     expect(r.engine).toBe("native");
   });
@@ -233,10 +251,8 @@ describe("Pipeline engine branching", () => {
     ).rejects.toThrow(/unsupported_file_type/);
   });
 
-  it("caps the returned text at MAX_EXTRACT_CHARS (capText is exercised)", async () => {
-    // Dense text > MAX_EXTRACT_CHARS (15k) exercises the capText branch.
-    // Tesseract mock returns 3 chars; force a large string by overriding
-    // the mock for this test only.
+  it("passes OCR text through uncapped", async () => {
+    // The pipeline no longer truncates extracted text (removed the 15k cap).
     const tesseract = await import("@/lib/extract/tesseract");
     const hugeText = "x".repeat(20_000);
     vi.mocked(tesseract.tesseractExtract).mockResolvedValueOnce({
@@ -251,6 +267,6 @@ describe("Pipeline engine branching", () => {
       } as unknown as File,
       engine: "tesseract",
     });
-    expect(r.text.length).toBeLessThanOrEqual(15_000);
+    expect(r.text.length).toBe(20_000);
   });
 });

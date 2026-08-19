@@ -17,7 +17,8 @@ import {
 } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// Local-only deployment — no Vercel 60s function cap (see generate-quiz).
+// export const maxDuration = 60; // (removed for local runs)
 
 const VISION_RATE = { limit: 30, windowMs: 60 * 60 * 1000 };
 

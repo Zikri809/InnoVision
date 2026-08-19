@@ -234,8 +234,14 @@ export function GestureLayer({
       //    question can never be a valid answer, so it is a safe "next" affordance.
       if (s.nextArmed && s.optionCount < MAX_ANSWER_FINGERS && !s.scanning) {
         const nextRes = nextHoldRef.current.update(frame.fingerCount === 5 ? 5 : 0, now);
+        if (frame.fingerCount === 5) {
+          emitHold({ finger: 5, progress: nextRes.progress });
+        } else {
+          emitHold(null);
+        }
         if (nextRes.latched !== undefined) {
           nextHoldRef.current.reset();
+          emitHold(null);
           onNextRef.current();
           return;
         }
@@ -427,11 +433,11 @@ export function GestureLayer({
   let videoContainerClass = "hidden";
   if (status === "calibrating") {
     videoContainerClass =
-      "relative mx-auto mt-8 aspect-video w-full max-w-2xl overflow-hidden rounded-xl border bg-muted";
+      "relative mx-auto mt-8 aspect-video w-full max-w-2xl overflow-hidden rounded-[22px] border-[3px] border-border bg-muted shadow-[var(--shadow-clay)]";
   } else if (status === "active") {
     videoContainerClass = pipCollapsed
       ? "hidden"
-      : "pointer-events-none fixed bottom-4 right-4 z-50 size-40 overflow-hidden rounded-xl border bg-black";
+      : "pointer-events-none fixed top-4 right-4 z-40 size-24 sm:size-32 md:size-40 md:top-auto md:bottom-4 md:right-4 overflow-hidden rounded-2xl border-[3px] border-border bg-black shadow-[var(--shadow-clay-sm)]";
   }
 
   return (
@@ -458,7 +464,7 @@ export function GestureLayer({
             type="button"
             onClick={() => setPipCollapsed(true)}
             aria-label="Hide camera preview"
-            className="pointer-events-auto absolute right-1 top-1 rounded bg-black/60 px-1.5 text-xs text-white hover:bg-black/80"
+            className="pointer-events-auto absolute right-1.5 top-1.5 grid size-7 place-items-center rounded-lg bg-black/70 text-sm font-bold text-white hover:bg-black/90 cursor-pointer"
           >
             ×
           </button>
@@ -469,7 +475,7 @@ export function GestureLayer({
           type="button"
           onClick={() => setPipCollapsed(false)}
           aria-label="Show camera preview"
-          className="fixed bottom-4 right-4 z-50 rounded-full border bg-card px-2 py-1 text-xs text-muted-foreground shadow-sm hover:bg-muted"
+          className="fixed top-4 right-4 z-40 md:top-auto md:bottom-4 md:right-4 rounded-full border-[3px] border-border bg-card px-3 py-1.5 text-xs font-bold text-foreground shadow-[var(--shadow-clay-sm)] hover:bg-muted cursor-pointer"
         >
           Show camera
         </button>
@@ -503,7 +509,7 @@ export function GestureLayer({
         <>
           {handLost === "warn" && (
             <div
-              className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-800"
+              className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-full border-[3px] border-amber-300 bg-amber-100 px-4 py-1.5 text-xs font-extrabold text-amber-800 shadow-[var(--shadow-clay-sm)]"
               role="status"
             >
               Keep your hand visible to answer
@@ -511,12 +517,12 @@ export function GestureLayer({
           )}
           {handLost === "paused" && !blockInput && (
             <div
-              className="fixed inset-0 z-40 flex items-center justify-center bg-background/80 p-4"
+              className="fixed inset-0 z-[60] flex items-center justify-center bg-background/80 p-4"
               role="alert"
             >
-              <div className="rounded-xl border bg-card p-6 text-center shadow-lg">
-                <p className="text-sm font-medium">Hand tracking paused</p>
-                <p className="mt-2 text-sm text-muted-foreground">
+              <div className="rounded-2xl border-[3px] border-border bg-card p-6 text-center shadow-[var(--shadow-clay)]">
+                <p className="font-heading text-base font-semibold">Hand tracking paused</p>
+                <p className="mt-2 text-sm font-semibold text-muted-foreground">
                   Show your hand to the camera to resume.
                 </p>
               </div>

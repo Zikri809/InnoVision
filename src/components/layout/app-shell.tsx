@@ -34,14 +34,14 @@ export function AppShell({
   const links = NAV[role];
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex min-h-dvh flex-col">
       <a href="#main" className="skip-link">
         Skip to content
       </a>
 
       <header className="sticky top-0 z-50 border-b-[3px] border-border bg-background/85 backdrop-blur">
-        <div className="mx-auto flex h-[74px] w-full max-w-6xl items-center justify-between gap-4 px-6">
-          <div className="flex min-w-0 items-center gap-8">
+        <div className="mx-auto flex h-[74px] w-full max-w-6xl items-center justify-between gap-3 px-3 sm:px-6">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-6 md:gap-8">
             <Link href="/dashboard" className="flex shrink-0 items-center gap-2.5">
               <span className="grid h-10 w-10 -rotate-4 place-items-center rounded-[14px] bg-primary font-heading text-lg font-bold text-primary-foreground shadow-[0_4px_0_var(--primary-deep)]">
                 IV
@@ -51,7 +51,7 @@ export function AppShell({
               </span>
             </Link>
 
-            <nav aria-label="Primary" className="flex items-center gap-1.5">
+            <nav aria-label="Primary" className="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-1">
               {links.map((l) => (
                 <AppNavLink key={l.href} href={l.href} label={l.label} />
               ))}

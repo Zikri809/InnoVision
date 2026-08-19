@@ -57,16 +57,21 @@ type VisionModule = {
   };
 };
 
+let cachedHandVision: VisionModule | null = null;
+let cachedHandFileset: unknown = null;
+
 export class HandLandmarkerTracker implements IHandTracker {
   private readonly video: HTMLVideoElement;
   private readonly canvas: HTMLCanvasElement;
   private landmarker: MediaPipeHandLandmarker | null = null;
   private cameraToken: number | null = null;
+  private stream: MediaStream | null = null;
   private rafId: number | null = null;
   private disposed = false;
   private lastFrameAt = 0;
   private visibilityHandler: (() => void) | null = null;
   private loadedMetadataHandler: (() => void) | null = null;
+  private loadedMetadataTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(opts: { video: HTMLVideoElement; canvas: HTMLCanvasElement }) {
     this.video = opts.video;
@@ -77,6 +82,18 @@ export class HandLandmarkerTracker implements IHandTracker {
     onFrame: (frame: HandFrame) => void,
     onError?: (err: Error) => void,
   ): Promise<void> {
+    // Start loading Vision + Landmarker concurrently with camera acquisition
+    const modelPromise = (async () => {
+      try {
+        const vision = await this.loadVision();
+        if (this.disposed) return null;
+        return await this.createLandmarker(vision);
+      } catch (err) {
+        console.error("[hand-tracker] failed to create landmarker:", err);
+        throw err;
+      }
+    })();
+
     // 1. Camera via the SHARED stream manager (Phase 7) — this module is NOT
     //    the track-stop owner. `stop()` releases the ref; camera.ts stops the
     //    tracks only when the last consumer releases.
@@ -88,30 +105,52 @@ export class HandLandmarkerTracker implements IHandTracker {
     }
     const stream = resolveStream(this.cameraToken);
 
+    this.stream = stream;
     this.video.srcObject = stream;
     this.video.muted = true;
     this.video.playsInline = true;
-    await new Promise<void>((resolve) => {
-      this.loadedMetadataHandler = () => resolve();
-      this.video.onloadedmetadata = this.loadedMetadataHandler;
-    });
+
+    if (this.video.readyState < 1) {
+      await Promise.race([
+        new Promise<void>((resolve) => {
+          this.loadedMetadataHandler = () => resolve();
+          this.video.onloadedmetadata = this.loadedMetadataHandler;
+        }),
+        new Promise<void>((resolve) => {
+          this.loadedMetadataTimer = setTimeout(resolve, 2000);
+        }),
+      ]);
+      if (this.loadedMetadataTimer) {
+        clearTimeout(this.loadedMetadataTimer);
+        this.loadedMetadataTimer = null;
+      }
+    }
+
     if (this.disposed) {
       this.releaseCamera();
       return;
     }
-    await this.video.play();
+
+    try {
+      await Promise.race([
+        this.video.play(),
+        new Promise<void>((resolve) => setTimeout(resolve, 500)),
+      ]);
+    } catch {
+      // Non-fatal if playback already underway
+    }
 
     const w = this.video.videoWidth || CAMERA_WIDTH_MAX;
     const h = this.video.videoHeight || CAMERA_HEIGHT_MAX;
     this.canvas.width = w;
     this.canvas.height = h;
 
-    // 2. Bundle + WASM + model (GPU → CPU fallback).
-    const vision = await this.loadVision();
-    this.landmarker = await this.createLandmarker(vision);
+    // 2. Await concurrent model creation
+    this.landmarker = await modelPromise;
 
     if (this.disposed) {
       this.closeLandmarker();
+      this.releaseCamera();
       return;
     }
 
@@ -140,6 +179,10 @@ export class HandLandmarkerTracker implements IHandTracker {
       this.video.onloadedmetadata = null;
       this.loadedMetadataHandler = null;
     }
+    if (this.loadedMetadataTimer) {
+      clearTimeout(this.loadedMetadataTimer);
+      this.loadedMetadataTimer = null;
+    }
     this.closeLandmarker();
     this.releaseCamera();
     const ctx = this.canvas.getContext("2d");
@@ -153,26 +196,26 @@ export class HandLandmarkerTracker implements IHandTracker {
       releaseCameraStream(this.cameraToken);
       this.cameraToken = null;
     }
-    if (this.video.srcObject) {
+    if (this.stream && this.video.srcObject === this.stream) {
       this.video.srcObject = null;
     }
+    this.stream = null;
   }
 
   private async loadVision(): Promise<VisionModule> {
-    // `webpackIgnore` keeps Next/Turbopack from bundling or rewriting the URL;
-    // the browser fetches the static file from `public/mediapipe/`. The module
-    // is typed by the ambient declaration `src/types/mediapipe-url.d.ts`, which
-    // mirrors the exact-pinned `@mediapipe/tasks-vision` package; the local
-    // structural `VisionModule` below narrows it to just the two members this
-    // file uses (kept in sync by the vendor script's version check).
-    const mod = (await import(
-      /* webpackIgnore: true */
-      MEDIAPIPE_BUNDLE_URL
-    )) as unknown as VisionModule;
-    return mod;
+    if (!cachedHandVision) {
+      cachedHandVision = (await import(
+        /* webpackIgnore: true */
+        MEDIAPIPE_BUNDLE_URL
+      )) as unknown as VisionModule;
+    }
+    return cachedHandVision;
   }
 
   private async createLandmarker(vision: VisionModule) {
+    if (!cachedHandFileset) {
+      cachedHandFileset = await vision.FilesetResolver.forVisionTasks(MEDIAPIPE_WASM_ROOT);
+    }
     const base = {
       baseOptions: {
         modelAssetPath: HAND_MODEL_URL,
@@ -185,12 +228,9 @@ export class HandLandmarkerTracker implements IHandTracker {
       minTrackingConfidence: 0.6,
     };
     try {
-      const fileset = await vision.FilesetResolver.forVisionTasks(MEDIAPIPE_WASM_ROOT);
-      return await vision.HandLandmarker.createFromOptions(fileset, base);
+      return await vision.HandLandmarker.createFromOptions(cachedHandFileset, base);
     } catch {
-      // GPU unavailable (headless/software rendering) → CPU fallback.
-      const fileset = await vision.FilesetResolver.forVisionTasks(MEDIAPIPE_WASM_ROOT);
-      return await vision.HandLandmarker.createFromOptions(fileset, {
+      return await vision.HandLandmarker.createFromOptions(cachedHandFileset, {
         ...base,
         baseOptions: { ...base.baseOptions, delegate: "CPU" as const },
       });

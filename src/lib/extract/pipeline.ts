@@ -3,20 +3,26 @@
  *
  *   Upload file
  *      ▼
- *   [1] NativeExtractor (free, instant)
+ *   [1] NativeExtractor (free, instant)  ← skipped when an OCR engine is
+ *      │                                    EXPLICITLY chosen (glm/vision)
  *      │  text density OK? (≥ MIN_CHARS_PER_PAGE avg)
  *      ├── yes ──────────────────────────► use text, engine='native'
  *      ▼ no (scanned doc / image slides)
  *   [2] OCR engine picker (default = Tesseract, always available):
  *      ├── TesseractExtractor   → client-side WASM, $0 (DEFAULT)
- *      ├── GlmOcrExtractor      → local Ollama (opt-in, probe-gated)
+ *      ├── GlmOcrExtractor      → local Docker/vLLM (opt-in, probe-gated)
  *      └── VisionOcrExtractor   → cloud vision LLM (opt-in)
  *      ▼
- *   Extracted text (capped MAX_EXTRACT_CHARS) → /api/ai/generate-quiz
+ *   Extracted text → /api/ai/generate-quiz
+ *
+ * Engine semantics: an explicitly selected OCR engine (glm or vision) runs
+ * DIRECTLY on the file — the lecturer chose it for accuracy (tables, formulas,
+ * partial/embedded text layers), so a sparse native text layer must not
+ * silently win. Only the free default cascade (native → tesseract) keeps the
+ * native-first shortcut.
  */
 
 import {
-  MAX_EXTRACT_CHARS,
   type ExtractEngine,
   type ExtractionResult,
   type OcrConfig,
@@ -45,10 +51,6 @@ export type PipelineOptions = {
   data?: ArrayBuffer;
   filename?: string;
 };
-
-function capText(text: string): string {
-  return text.length > MAX_EXTRACT_CHARS ? text.slice(0, MAX_EXTRACT_CHARS) : text;
-}
 
 /** Throw an AbortError if the caller has cancelled the extraction. */
 function throwIfAborted(signal?: AbortSignal): void {
@@ -85,6 +87,15 @@ export async function runExtractionPipeline(
   }
 
   // ── [1] Native extractor ────────────────────────────────────────
+  // An EXPLICITLY selected OCR engine (glm/vision) is authoritative: it runs
+  // directly on the file without the native shortcut. The lecturer chose it
+  // for accuracy (scanned slides, tables, embedded/partial text layers), so a
+  // sparse native text layer must not silently win. Only the default cascade
+  // (native → tesseract) keeps the free native-first shortcut.
+  if (engine === "glm" || engine === "vision") {
+    return runOcr(opts, engine, cfg);
+  }
+
   opts.onProgress?.({ stage: "native", page: 0, total: 1 });
   throwIfAborted(opts.signal);
   let native: ExtractionResult;
@@ -115,7 +126,7 @@ export async function runExtractionPipeline(
     native.pages > 0;
 
   if (usable) {
-    return { ...native, text: capText(native.text) };
+    return native;
   }
 
   // ── [2] OCR engine ──────────────────────────────────────────────
@@ -125,27 +136,41 @@ export async function runExtractionPipeline(
     throw new Error("ocr_required_browser");
   }
 
+  return runOcr(opts, engine, cfg);
+}
+
+/**
+ * Run the chosen OCR engine. Requires a browser `File` (server-side callers
+ * never reach this — they throw `ocr_required_browser` in the pipeline).
+ */
+async function runOcr(
+  opts: PipelineOptions,
+  engine: ExtractEngine,
+  cfg: Partial<OcrConfig>,
+): Promise<ExtractionResult> {
+  const file = opts.file!;
+
   if (engine === "glm") {
     const glm = await glmExtract(
-      opts.file,
-      { baseUrl: cfg.ollamaBaseUrl ?? "http://localhost:11434", model: cfg.glmModel ?? "glm-ocr" },
+      file,
+      { baseUrl: cfg.glmBaseUrl ?? "http://localhost:11434", model: cfg.glmModel ?? "glm-ocr" },
       (page, total) => opts.onProgress?.({ stage: "ocr", page, total, engine: "glm" }),
     );
-    return { ...glm, text: capText(glm.text) };
+    return glm;
   }
 
   if (engine === "vision") {
     const vision = await visionExtract(
-      opts.file,
+      file,
       {},
       (done, total) => opts.onProgress?.({ stage: "ocr", page: done, total, engine: "vision" }),
     );
-    return { ...vision, text: capText(vision.text) };
+    return vision;
   }
 
   // Default: tesseract.
-  const ocr = await tesseractExtract(opts.file, (page, total) =>
+  const ocr = await tesseractExtract(file, (page, total) =>
     opts.onProgress?.({ stage: "ocr", page, total, engine: "tesseract" }),
   );
-  return { ...ocr, text: capText(ocr.text) };
+  return ocr;
 }

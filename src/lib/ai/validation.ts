@@ -1,6 +1,5 @@
 import { z } from "zod";
 import {
-  AI_EXTRACTED_TEXT_MAX,
   AI_INSTRUCTION_MAX,
   AI_QUESTIONS_MAX,
   AI_QUESTIONS_MIN,
@@ -37,7 +36,6 @@ export const GenerateQuizSchema = z.object({
   quizId: z.string().uuid("quizId must be a valid UUID."),
   extractedText: z
     .string()
-    .max(AI_EXTRACTED_TEXT_MAX, `Extracted text must be at most ${AI_EXTRACTED_TEXT_MAX} characters.`)
     .optional(),
   sourcePath: z
     .string()

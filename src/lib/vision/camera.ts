@@ -64,6 +64,7 @@ export function _resetCameraState(): void {
 export async function acquireCameraStream(): Promise<number> {
   const token = nextToken++;
   state.live.set(token, nextToken); // generation = token's serial (monotonic)
+  console.debug("[camera] acquire token", token, "refcount", state.refcount, "inFlight", !!state.inFlight);
 
   if (!state.inFlight) {
     state.inFlight = acquireMediaStream();
@@ -111,7 +112,8 @@ async function acquireMediaStream(): Promise<MediaStream> {
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error("This browser does not support webcam access.");
   }
-  return navigator.mediaDevices.getUserMedia({
+  console.debug("[camera] getUserMedia start");
+  const stream = await navigator.mediaDevices.getUserMedia({
     audio: false,
     video: {
       facingMode: "user",
@@ -119,6 +121,8 @@ async function acquireMediaStream(): Promise<MediaStream> {
       height: { max: 480, ideal: 480 },
     },
   });
+  console.debug("[camera] getUserMedia resolved, active=", stream.active);
+  return stream;
 }
 
 /** Resolve the opaque token to the shared `MediaStream`. */
@@ -137,7 +141,9 @@ export function releaseCameraStream(token: number): void {
   if (!state.live.has(token)) return;
   state.live.delete(token);
   state.refcount = Math.max(0, state.refcount - 1);
+  console.debug("[camera] release token", token, "refcount", state.refcount);
   if (state.refcount === 0 && state.stream) {
+    console.debug("[camera] refcount 0 — stopping all tracks");
     for (const track of state.stream.getTracks()) track.stop();
     state.stream = null;
     state.inFlight = null;

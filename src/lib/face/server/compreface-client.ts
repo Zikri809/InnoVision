@@ -98,6 +98,12 @@ function mockRecognize(frame: string): CompreFaceRecognizeResult {
   return { subject: null, similarity: 0, subjects: [] };
 }
 
+function frameToBlob(frame: string): Blob {
+  const base64 = frame.replace(/^data:image\/\w+;base64,/, "");
+  const buffer = Buffer.from(base64, "base64");
+  return new Blob([buffer], { type: "image/jpeg" });
+}
+
 /**
  * Recognize a frame against ALL enrolled subjects (1:N). Returns the top
  * match + the full ranked list (the route extracts top-2 for the margin rule).
@@ -109,17 +115,21 @@ export async function recognize(frame: string): Promise<CompreFaceRecognizeResul
 
   try {
     const form = new FormData();
-    form.append("file", new Blob([frame], { type: "image/jpeg" }), "frame.jpg");
+    form.append("file", frameToBlob(frame), "frame.jpg");
     form.append("limit", "0");
     const res = await comprefaceFetch("/api/v1/recognition/recognize", {
       method: "POST",
       body: form,
     });
+    if (res.status === 400) {
+      // No face found in image -> 0 similarity / no subject match
+      return { subject: null, similarity: 0, subjects: [] };
+    }
     if (!res.ok) return { error: "compreface_error" };
     const json = (await res.json()) as {
-      result?: { subjects?: { subject: string; similarity: number }[] };
+      result?: { subjects?: { subject: string; similarity: number }[] }[];
     };
-    const subjects = (json.result?.subjects ?? []).slice(0, 3);
+    const subjects = (json.result?.[0]?.subjects ?? []).slice(0, 3);
     const top = subjects[0] ?? null;
     return {
       subject: top?.subject ?? null,
@@ -143,17 +153,20 @@ export async function detect(
   }
   try {
     const form = new FormData();
-    form.append("file", new Blob([frame], { type: "image/jpeg" }), "frame.jpg");
-    form.append("det_prob_threshold", "0.8");
-    const res = await comprefaceFetch("/api/v1/detection/detect", {
+    form.append("file", frameToBlob(frame), "frame.jpg");
+    const res = await comprefaceFetch("/api/v1/recognition/recognize?face_plugins=pose", {
       method: "POST",
       body: form,
     });
+    if (res.status === 400) {
+      // No face found in image
+      return { faces: [] };
+    }
     if (!res.ok) return { error: "compreface_error" };
     const json = (await res.json()) as {
-      result?: { faces?: { attributes?: { pose?: { yaw?: number } } }[] };
+      result?: { pose?: { yaw?: number } }[];
     };
-    const faces = (json.result?.faces ?? []).map((f) => ({ yaw: f.attributes?.pose?.yaw ?? 0 }));
+    const faces = (json.result ?? []).map((f) => ({ yaw: f.pose?.yaw ?? 0 }));
     return { faces };
   } catch {
     return { error: "compreface_unavailable" };
@@ -168,8 +181,8 @@ export async function addSubjectExample(
   if (isMockMode()) return { imageId: "mock-image-id" };
   try {
     const form = new FormData();
-    form.append("file", new Blob([frame], { type: "image/jpeg" }), "frame.jpg");
-    const res = await comprefaceFetch(`/api/v1/recognition/subjects/${encodeURIComponent(subject)}/examples`, {
+    form.append("file", frameToBlob(frame), "frame.jpg");
+    const res = await comprefaceFetch(`/api/v1/recognition/faces?subject=${encodeURIComponent(subject)}`, {
       method: "POST",
       body: form,
     });
@@ -210,17 +223,21 @@ export async function subjectExists(subject: string): Promise<boolean | CompreFa
 }
 
 /** CompreFace health probe (used by `/api/face/health` + the boot race). */
+/**
+ * CompreFace availability probe (used by `/api/face/health` + the boot race).
+ *
+ * 1.2.0 dropped the old public `/api/v1/health` (the inference API now parses
+ * unknown `/api/v1/<path>` segments as recognition model types and 500s on
+ * `/health`). The real health signal is `/api/v1/consistence/status`, which
+ * reports DB + face-collection consistency and is keyed on `x-api-key`.
+ */
 export async function health(): Promise<boolean> {
   if (isMockMode()) return true;
   try {
-    const res = await fetch(
-      `${process.env.COMPREFACE_BASE_URL || "http://localhost:8000"}/api/v1/health`,
-      {
-        cache: "no-store",
-        signal: AbortSignal.timeout(COMPREFACE_TIMEOUT_MS),
-      },
-    );
-    return res.ok;
+    const res = await comprefaceFetch("/api/v1/consistence/status", { method: "GET" });
+    if (!res.ok) return false;
+    const json = (await res.json()) as { status?: string; dbIsInconsistent?: boolean };
+    return json.status === "OK" && json.dbIsInconsistent !== true;
   } catch {
     return false;
   }

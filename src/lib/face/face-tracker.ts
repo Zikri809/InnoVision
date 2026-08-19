@@ -1,4 +1,4 @@
-import type { IFaceTracker } from "./types";
+import type { IFaceTracker, LivePose } from "./types";
 import { BlinkDetector } from "./liveness";
 import {
   FRAME_QUALITY_MAX_SIZE,
@@ -46,7 +46,7 @@ export const FACE_LANDMARKER_MODEL_URL = "/models/face_landmarker.task";
 type MediaPipeFaceLandmarker = {
   detectForVideo(video: HTMLVideoElement, timestamp: number): {
     faceBlendshapes?: { categories?: { categoryName?: string; score?: number }[] }[];
-    faceLandmarks?: unknown[];
+    faceLandmarks?: { x: number; y: number; z: number }[][];
     faces?: { faceRectangle?: { left: number; top: number; width: number; height: number } }[];
   };
   close(): void;
@@ -77,10 +77,30 @@ type FaceQuality =
   | { ok: true; rect: { left: number; top: number; width: number; height: number } }
   | { ok: false; reason: string };
 
+// Suppress benign Emscripten/TFLite C++ stderr logs that trigger Next.js dev overlay
+if (typeof window !== "undefined") {
+  const origError = console.error;
+  console.error = (...args: unknown[]) => {
+    if (
+      typeof args[0] === "string" &&
+      (args[0].includes("Created TensorFlow Lite XNNPACK delegate") ||
+        args[0].includes("Sets FaceBlendshapesGraph acceleration"))
+    ) {
+      console.info(...args);
+      return;
+    }
+    origError.apply(console, args);
+  };
+}
+
+let cachedVision: VisionModule | null = null;
+let cachedFileset: unknown = null;
+
 export class FaceTracker implements IFaceTracker {
   private readonly video: HTMLVideoElement;
   private landmarker: MediaPipeFaceLandmarker | null = null;
   private cameraToken: number | null = null;
+  private stream: MediaStream | null = null;
   private rafId: number | null = null;
   private disposed = false;
   private blinkDetector = new BlinkDetector();
@@ -88,6 +108,7 @@ export class FaceTracker implements IFaceTracker {
   private loadedMetadataHandler: (() => void) | null = null;
   private loadedMetadataTimer: ReturnType<typeof setTimeout> | null = null;
   private waitForBlinkResolvers: (() => void)[] = [];
+  private poseListeners: Set<(pose: LivePose) => void> = new Set();
   private lastFrameAt = 0;
   private lastQualityResult: FaceQuality = { ok: false, reason: "no-frame-yet" };
   private canvas: HTMLCanvasElement | null = null;
@@ -96,9 +117,36 @@ export class FaceTracker implements IFaceTracker {
     this.video = video;
   }
 
+  onPoseChange(cb: (pose: LivePose) => void): () => void {
+    this.poseListeners.add(cb);
+    return () => {
+      this.poseListeners.delete(cb);
+    };
+  }
+
   async start(): Promise<void> {
+    console.info("[face-tracker] start() initiated");
+    // Start loading Vision + Landmarker concurrently with camera acquisition
+    const modelPromise = (async () => {
+      try {
+        console.info("[face-tracker] loadVision() starting...");
+        const vision = await this.loadVision();
+        console.info("[face-tracker] loadVision() resolved");
+        if (this.disposed) return null;
+        console.info("[face-tracker] createLandmarker() starting...");
+        const landmarker = await this.createLandmarker(vision);
+        console.info("[face-tracker] createLandmarker() resolved");
+        return landmarker;
+      } catch (err) {
+        console.error("[face-tracker] failed to create landmarker:", err);
+        throw err;
+      }
+    })();
+
     // 1. Shared camera stream (coalesced; release on stop).
+    console.info("[face-tracker] acquiring camera stream...");
     this.cameraToken = await acquireCameraStream();
+    console.info("[face-tracker] camera stream acquired, token:", this.cameraToken);
     if (this.disposed) {
       releaseCameraStream(this.cameraToken);
       this.cameraToken = null;
@@ -115,29 +163,61 @@ export class FaceTracker implements IFaceTracker {
       throw err;
     }
 
+    this.stream = stream;
     this.video.srcObject = stream;
     this.video.muted = true;
     this.video.playsInline = true;
-    await Promise.race([
-      new Promise<void>((resolve) => {
-        this.loadedMetadataHandler = () => resolve();
-        this.video.onloadedmetadata = this.loadedMetadataHandler;
-      }),
-      new Promise<void>((resolve) => {
-        this.loadedMetadataTimer = setTimeout(() => resolve(), 5000);
-      }),
-    ]);
-    if (this.loadedMetadataTimer) clearTimeout(this.loadedMetadataTimer);
+    console.info("[face-tracker] video srcObject set, readyState:", this.video.readyState);
+
+    if (this.video.readyState < 1) {
+      console.info("[face-tracker] waiting for video metadata...");
+      await Promise.race([
+        new Promise<void>((resolve) => {
+          this.loadedMetadataHandler = () => {
+            console.info("[face-tracker] onloadedmetadata fired");
+            resolve();
+          };
+          this.video.onloadedmetadata = this.loadedMetadataHandler;
+        }),
+        new Promise<void>((resolve) => {
+          this.loadedMetadataTimer = setTimeout(() => {
+            console.info("[face-tracker] loadedMetadataTimer expired (3s fallback)");
+            resolve();
+          }, 3000);
+        }),
+      ]);
+      if (this.loadedMetadataTimer) {
+        clearTimeout(this.loadedMetadataTimer);
+        this.loadedMetadataTimer = null;
+      }
+    }
+
     if (this.disposed) {
+      console.info("[face-tracker] disposed before play");
       this.releaseCamera();
       return;
     }
-    await this.video.play();
 
-    // 2. Bundle + WASM + FaceLandmarker (blendshapes for blink liveness only —
-    //    the embedding model is gone; CompreFace owns matching server-side).
-    const vision = await this.loadVision();
-    this.landmarker = await this.createLandmarker(vision);
+    try {
+      console.info("[face-tracker] calling video.play()...");
+      await Promise.race([
+        this.video.play(),
+        new Promise<void>((resolve) => setTimeout(resolve, 500)),
+      ]);
+      console.info("[face-tracker] video.play() resolved/proceeded");
+    } catch (err) {
+      if (this.disposed || (err instanceof Error && err.name === "AbortError")) {
+        console.info("[face-tracker] play() aborted due to disposal/abort");
+        this.releaseCamera();
+        return;
+      }
+      console.warn("[face-tracker] play() non-fatal warning:", err);
+    }
+
+    // 2. Await the concurrent model creation
+    console.info("[face-tracker] awaiting model creation...");
+    this.landmarker = await modelPromise;
+    console.info("[face-tracker] model creation ready, landmarker present:", !!this.landmarker);
 
     if (this.disposed) {
       this.closeModels();
@@ -151,40 +231,31 @@ export class FaceTracker implements IFaceTracker {
     };
     document.addEventListener("visibilitychange", this.visibilityHandler);
     this.rafId = requestAnimationFrame((now) => this.detectLoop(now));
+    console.info("[face-tracker] start() completed successfully!");
   }
 
   /**
    * Capture a base64 JPEG frame of the current `<video>` frame, subject to a
    * best-effort client quality gate. Returns null when the gate fails / the
    * video is not ready / the tab is hidden.
-   *
-   * The quality gate checks (native FaceDetector when available, else the
-   * landmarker): single face in range `[FRAME_QUALITY_MIN_SIZE,
-   * FRAME_QUALITY_MAX_SIZE]`, both eyes open. The ROUTE does NOT trust this —
-   * CompreFace runs its own detection; this is a cheap client-side guard to
-   * avoid wasting a server round-trip on bad frames.
    */
   async captureFrame(): Promise<string | null> {
     if (this.disposed || !this.video) return null;
     if (typeof document !== "undefined" && document.hidden) return null;
     if (this.video.readyState < 2) return null;
 
-    const quality = this.evaluateQuality();
-    if (!quality.ok) {
-      this.lastQualityResult = quality;
-      return null;
-    }
-    this.lastQualityResult = quality;
-
     try {
       const canvas = this.ensureCanvas();
       const ctx = canvas.getContext("2d");
       if (!ctx) return null;
 
+      const vw = this.video.videoWidth || 640;
+      const vh = this.video.videoHeight || 480;
+
       // Downscale to ≤640px so the JPEG stays small (≈30–60 KB base64).
-      const scale = Math.min(1, CAPTURE_CANVAS_MAX / this.video.videoWidth);
-      canvas.width = Math.round(this.video.videoWidth * scale);
-      canvas.height = Math.round(this.video.videoHeight * scale);
+      const scale = Math.min(1, CAPTURE_CANVAS_MAX / vw);
+      canvas.width = Math.round(vw * scale);
+      canvas.height = Math.round(vh * scale);
       ctx.drawImage(this.video, 0, 0, canvas.width, canvas.height);
 
       return canvas.toDataURL("image/jpeg", FRAME_JPEG_QUALITY);
@@ -193,12 +264,22 @@ export class FaceTracker implements IFaceTracker {
     }
   }
 
+  private lastBlinkAt = 0;
+
   async waitForBlink(timeoutMs: number = LIVENESS_TIMEOUT_MS): Promise<"passed" | "failed"> {
     if (this.disposed) return "failed";
     if (typeof document !== "undefined" && document.hidden) return "failed";
 
+    // If the user already blinked naturally within the last 3.5 seconds:
+    if (Date.now() - this.lastBlinkAt < 3500) {
+      this.lastBlinkAt = 0;
+      this.blinkDetector.reset();
+      return "passed";
+    }
+
     return new Promise<"passed" | "failed">((resolve) => {
       const onBlink = () => {
+        this.lastBlinkAt = 0;
         this.blinkDetector.reset();
         resolve("passed");
       };
@@ -290,6 +371,7 @@ export class FaceTracker implements IFaceTracker {
   }
 
   private handleBlinkObserved(): void {
+    this.lastBlinkAt = Date.now();
     const resolvers = this.waitForBlinkResolvers;
     this.waitForBlinkResolvers = [];
     for (const r of resolvers) r();
@@ -326,9 +408,10 @@ export class FaceTracker implements IFaceTracker {
       releaseCameraStream(this.cameraToken);
       this.cameraToken = null;
     }
-    if (this.video.srcObject) {
+    if (this.stream && this.video.srcObject === this.stream) {
       this.video.srcObject = null;
     }
+    this.stream = null;
   }
 
   private detectLoop(now: number): void {
@@ -343,6 +426,31 @@ export class FaceTracker implements IFaceTracker {
         if (this.landmarker && this.video.readyState >= 2) {
           const results = this.landmarker.detectForVideo(this.video, now);
           this.feedLiveness(results);
+          if (this.poseListeners.size > 0) {
+            let yaw = 0;
+            let centered = false;
+            let faceDetected = false;
+            const landmarks = results.faceLandmarks?.[0];
+            if (landmarks && landmarks.length > 0) {
+              faceDetected = true;
+              const nose = landmarks[1];
+              const leftCheek = landmarks[234];
+              const rightCheek = landmarks[454];
+              if (nose && leftCheek && rightCheek) {
+                const span = rightCheek.x - leftCheek.x;
+                if (span > 0.01) {
+                  const ratio = (nose.x - leftCheek.x) / span;
+                  // Ratio ~0.5 when looking straight; >0.55 when turning left; <0.45 when turning right
+                  yaw = Math.round((ratio - 0.5) * 100);
+                }
+                centered = nose.x >= 0.30 && nose.x <= 0.70 && nose.y >= 0.20 && nose.y <= 0.80;
+              }
+            }
+            const pose: LivePose = { yaw, centered, faceDetected };
+            for (const listener of this.poseListeners) {
+              listener(pose);
+            }
+          }
         }
       }
       this.rafId = requestAnimationFrame((t) => this.detectLoop(t));
@@ -363,22 +471,31 @@ export class FaceTracker implements IFaceTracker {
       if (c.categoryName === "eyeBlinkLeft") left = c.score ?? 0;
       else if (c.categoryName === "eyeBlinkRight") right = c.score ?? 0;
     }
-    if (this.blinkDetector.update(left, right) === "passed") {
+    const updateResult = this.blinkDetector.update(left, right);
+    if (updateResult === "passed") {
       this.handleBlinkObserved();
+    } else if (updateResult === "failed") {
+      // Re-arm immediately so the continuous live stream keeps seeking a clean blink transition
+      this.blinkDetector.reset();
     }
   }
 
   private async loadVision(): Promise<VisionModule> {
-    // `webpackIgnore` keeps Next/Turbopack from bundling or rewriting the URL;
-    // the browser fetches the static file from `public/mediapipe/`.
-    const mod = (await import(
-      /* webpackIgnore: true */
-      BLINK_LANDMARKER_URL
-    )) as unknown as VisionModule;
-    return mod;
+    if (!cachedVision) {
+      // `webpackIgnore` keeps Next/Turbopack from bundling or rewriting the URL;
+      // the browser fetches the static file from `public/mediapipe/`.
+      cachedVision = (await import(
+        /* webpackIgnore: true */
+        BLINK_LANDMARKER_URL
+      )) as unknown as VisionModule;
+    }
+    return cachedVision;
   }
 
   private async createLandmarker(vision: VisionModule): Promise<MediaPipeFaceLandmarker> {
+    if (!cachedFileset) {
+      cachedFileset = await vision.FilesetResolver.forVisionTasks(WASM_ROOT);
+    }
     const base = {
       baseOptions: {
         modelAssetPath: FACE_LANDMARKER_MODEL_URL,
@@ -388,8 +505,7 @@ export class FaceTracker implements IFaceTracker {
       numFaces: 1,
       outputFaceBlendshapes: true,
     };
-    const fileset = await vision.FilesetResolver.forVisionTasks(WASM_ROOT);
-    return vision.FaceLandmarker.createFromOptions(fileset, base);
+    return vision.FaceLandmarker.createFromOptions(cachedFileset, base);
   }
 
   private closeModels(): void {

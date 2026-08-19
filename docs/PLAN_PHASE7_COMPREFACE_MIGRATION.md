@@ -93,12 +93,14 @@ These are security/robustness invariants from the executed Phase 7 that MUST sur
 
 ### Step 1 — `docker-compose.yml` + CompreFace provisioning
 
-1. **`docker-compose.yml`** at repo root. CompreFace services:
+1. **`docker-compose.yml`** at repo root. CompreFace services (official 1.2.0 layout):
    - `compreface-core` — InsightFace model container (CPU default for demo).
-   - `compreface-api` — REST API server.
+   - `compreface-api` — REST API server (recognition /verify /detect).
+   - `compreface-admin` — admin REST backend (1.2.0 split the admin out of the API image).
+   - `compreface-fe` — nginx: admin UI + `/api/v1` proxy; the only published port.
    - `compreface-postgres` — CompreFace's own Postgres (separate from Supabase's Postgres).
-   - **Ports: `127.0.0.1:8000:8000`** (API, loopback only). CompreFace's Postgres is **NOT host-bound** (internal only).
-   - **Named volumes** (not bind mounts): `compreface-postgres-data`, `compreface-core-data`.
+   - **Ports: `127.0.0.1:8000:80`** on `compreface-fe` (loopback only). CompreFace's Postgres is **NOT host-bound** (internal only).
+   - **Named volumes** (not bind mounts): `compreface-postgres-data`, `compreface-api-logs`.
    - Environment: `POSTGRES_URL`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `SPRING_PROFILES_ACTIVE=dev`.
 2. **`.env.local.example`** — add:
    ```env
@@ -108,7 +110,7 @@ These are security/robustness invariants from the executed Phase 7 that MUST sur
    ```
    Remove the stale `FACE_MATCH_THRESHOLD=0.6` line (never read by the app).
 3. **`.gitignore`** — add `/compreface-data/` (defensive; named volumes are used but this protects against a future bind-mount switch).
-4. **`docs/COMPREFACE_SETUP.md`** (NEW) — setup guide: `docker compose up -d compreface-core compreface-api compreface-postgres`, create application via admin UI at `http://localhost:8000`, copy API key, verify `GET /api/v1/health`.
+4. **`docs/COMPREFACE_SETUP.md`** (NEW) — setup guide: `docker compose up -d`, create the admin account + a Recognition application via the admin UI at `http://localhost:8000`, copy API key, verify `GET /api/v1/health` (with `x-api-key` header).
 5. **`supabase/config.toml`** — **NO CHANGE**. CompreFace (port 8000) and its Postgres (internal) don't collide with Supabase's ports. CompreFace runs via `docker-compose.yml`, separate from `supabase start`.
 
 ### Step 2 — Migration `0010_compreface.sql` + types

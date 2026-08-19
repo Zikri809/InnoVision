@@ -145,6 +145,7 @@ export default function RegisterPage() {
               <div className="space-y-2.5">
                 <Label>I am a…</Label>
                 <RadioGroup
+                  aria-label="I am a…"
                   value={role}
                   onValueChange={(v) => setRole(v as UserRole)}
                   className="flex gap-6"
@@ -201,7 +202,7 @@ export default function RegisterPage() {
                   </p>
                 </div>
               </div>
-              <div aria-live="polite">
+              <div aria-live="polite" className={!error ? "hidden" : undefined}>
                 {error && (
                   <p className="rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-3 text-sm font-bold text-destructive" role="alert">
                     {error}

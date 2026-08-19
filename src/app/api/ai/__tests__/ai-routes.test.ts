@@ -474,15 +474,19 @@ describe("I-A8 — duplicate/whitespace-colliding options are REJECTED (schema g
   });
 });
 
-describe("I-A9 — extractedText > 15k → 400", () => {
-  it("rejects oversized extractedText", async () => {
+describe("I-A9 — large extractedText is accepted (cap removed)", () => {
+  it("passes oversized extractedText through to generation", async () => {
     ownerContext();
     const { generate } = await importHandlers();
     const res = await generate.POST(
-      req({ quizId: QUIZ_C, extractedText: "A".repeat(15_001) }),
+      req({ quizId: QUIZ_C, extractedText: "A".repeat(30_000) }),
       { params: Promise.resolve({ id: QUIZ_C }) },
     );
-    expect(res.status).toBe(400);
+    // The happy-path stub returns valid JSON, so a 30k-char source text
+    // should generate successfully rather than being rejected at 400.
+    expect(res.status).toBe(200);
+    const quizRow = currentClient().tables["quizzes"]?.find((q) => q.id === QUIZ_C);
+    expect(String(quizRow?.source_text ?? "").length).toBe(30_000);
   });
 });
 
@@ -535,18 +539,6 @@ describe("RPC error-mapping branches (Phase 4 audit gap)", () => {
     );
     expect(res.status).toBe(422);
     expect((await res.json()).error).toBe("invalid_ai_output");
-  });
-
-  it("source_text_too_long → 422 source_text_too_long", async () => {
-    ownerContext();
-    stubRpcError("source_text_too_long");
-    const { generate } = await importHandlers();
-    const res = await generate.POST(
-      req({ quizId: QUIZ_C, extractedText: "any text" }),
-      { params: Promise.resolve({ id: QUIZ_C }) },
-    );
-    expect(res.status).toBe(422);
-    expect((await res.json()).error).toBe("source_text_too_long");
   });
 
   it("unknown RPC error → 503 (not a raw message)", async () => {
@@ -660,14 +652,14 @@ describe("I-A1 — sourcePath persists source_file_url + source_text", () => {
   });
 });
 
-describe("I-A10 — AI 45s timeout → 503 timeout, zero inserts", () => {
+describe("I-A10 — AI round-trip timeout → 503 timeout, zero inserts", () => {
   it("returns 503 timeout and never calls the RPC", async () => {
     ownerContext();
     // Hang MSW's chat-completions handler indefinitely.
     defaultAiServer.use(
       http.post("*/chat/completions", () => new Promise(() => {})),
     );
-    // Use fake timers to advance past the 45s abort inside chatCompletions
+    // Use fake timers to advance past the abort inside chatCompletions
     // without waiting real wall-clock time.
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
@@ -676,8 +668,8 @@ describe("I-A10 — AI 45s timeout → 503 timeout, zero inserts", () => {
         req({ quizId: QUIZ_C, extractedText: "any text" }),
         { params: Promise.resolve({ id: QUIZ_C }) },
       );
-      // Advance past the 45s abort deadline (in fake ms).
-      await vi.advanceTimersByTimeAsync(46_000);
+      // Advance past the abort deadline (600s locally; in fake ms).
+      await vi.advanceTimersByTimeAsync(601_000);
       const res = await promise;
       expect(res.status).toBe(503);
       const body = await res.json();
@@ -691,11 +683,11 @@ describe("I-A10 — AI 45s timeout → 503 timeout, zero inserts", () => {
 });
 
 describe("Parse timeout — pathological file → 503 timeout", () => {
-  it("server-native parse that exceeds PARSE_TIMEOUT_MS returns 503", { timeout: 15_000 }, async () => {
+  it("server-native parse that exceeds PARSE_TIMEOUT_MS returns 503", { timeout: 130_000 }, async () => {
     const ctx = ownerContext();
     // Seed a file, but override storage.download to hang indefinitely so the
     // route races against the parse-timeout. The download hangs inside the
-    // route's `downloadAndParseNative`; the 15s parse timeout fires first.
+    // route's `downloadAndParseNative`; the parse timeout fires first.
     ctx.client.storageFiles[`${OWNER_ID}/${QUIZ_C}/hang.pdf`] = new TextEncoder().encode(
       "fake",
     );
@@ -713,8 +705,8 @@ describe("Parse timeout — pathological file → 503 timeout", () => {
         }),
         { params: Promise.resolve({ id: QUIZ_C }) },
       );
-      // Advance past the 15s parse timeout.
-      await vi.advanceTimersByTimeAsync(16_000);
+      // Advance past the parse timeout (120s locally).
+      await vi.advanceTimersByTimeAsync(121_000);
       const res = await promise;
       expect(res.status).toBe(503);
       expect((await res.json()).error).toBe("timeout");
@@ -753,7 +745,7 @@ describe("Phase 4 audit gap — AI transport error branches", () => {
       const promise = regen.POST(req({ questionId: QUESTION_D }), {
         params: Promise.resolve({ id: QUIZ_C }),
       });
-      await vi.advanceTimersByTimeAsync(46_000);
+      await vi.advanceTimersByTimeAsync(601_000);
       const res = await promise;
       expect(res.status).toBe(503);
       expect((await res.json()).error).toBe("timeout");
@@ -786,7 +778,7 @@ describe("Phase 4 audit gap — AI transport error branches", () => {
     try {
       const { vision: vis } = await importHandlers();
       const promise = vis.POST(req({ images: ["data:image/png;base64,AAAA"] }));
-      await vi.advanceTimersByTimeAsync(46_000);
+      await vi.advanceTimersByTimeAsync(601_000);
       const res = await promise;
       expect(res.status).toBe(503);
       expect((await res.json()).error).toBe("timeout");

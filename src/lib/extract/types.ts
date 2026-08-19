@@ -3,7 +3,7 @@
  * (PLAN §3). Engine semantics:
  *  - 'native'  — free, instant text-layer extraction (pdfjs/mammoth/jszip).
  *  - 'tesseract' — client-side WASM OCR (default, $0, zero setup).
- *  - 'glm'     — local GLM-OCR via Ollama (opt-in, probe-gated, high accuracy).
+ *  - 'glm'     — local GLM-OCR via Docker/vLLM (opt-in, probe-gated, high accuracy).
  *  - 'vision'  — cloud vision LLM via /api/ocr/vision (opt-in, costs tokens).
  */
 
@@ -20,15 +20,13 @@ export type ExtractionResult = {
 /** Config passed from the builder page (server component reads env). */
 export type OcrConfig = {
   defaultEngine: ExtractEngine;
-  ollamaBaseUrl: string;
+  glmBaseUrl: string;
   glmModel: string;
   visionModel: string;
 };
 
 /** Text density: a page is "scanned" (needs OCR) below this many chars. */
 export const MIN_CHARS_PER_PAGE = 40;
-/** Extracted text is capped to keep AI calls inside the 60s serverless budget. */
-export const MAX_EXTRACT_CHARS = 15_000;
 /** Max pages rendered per vision OCR request (Vercel 4.5 MB body cap). */
 export const MAX_VISION_PAGES = 3;
 /** Max pages rasterized + recognized per Tesseract/GLM OCR run (DoS / responsiveness cap). */

@@ -74,7 +74,10 @@ function CardContent({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="card-content"
-      className={cn("px-(--card-spacing)", className)}
+      className={cn(
+        "px-(--card-spacing) group-has-data-[slot=card-footer]/card:pb-(--card-spacing)",
+        className
+      )}
       {...props}
     />
   )

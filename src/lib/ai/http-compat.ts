@@ -1,9 +1,10 @@
 /**
- * Browser-only OpenAI-compatible chat helper for LOCAL GLM-OCR via Ollama.
+ * Browser-only OpenAI-compatible chat helper for LOCAL GLM-OCR (Docker/vLLM).
  *
  * This module MUST NOT be imported from server code. It performs a plain fetch
- * from the lecturer's browser to `{OLLAMA_BASE_URL}/v1/chat/completions` — the
- * local Ollama endpoint — and carries no API key.
+ * from the lecturer's browser to `{GLM_BASE_URL}/v1/chat/completions` — the
+ * local GLM-OCR endpoint (vLLM in Docker, loopback-bound) — and carries no API
+ * key.
  *
  * SSRF guard (S8): server routes must NEVER derive `baseURL` from a request
  * body. The server only ever talks to env-configured providers through
@@ -22,7 +23,8 @@ export type HttpChatResult =
 
 /**
  * POST an OpenAI-compatible chat request and return the assistant's text.
- * Intended for GLM-OCR (vision-language transcription) against local Ollama.
+ * Intended for GLM-OCR (vision-language transcription) against the local
+ * vLLM/Docker endpoint.
  */
 export async function httpChatCompletions(opts: {
   baseUrl: string; // ROOT URL, e.g. http://localhost:11434 (no /v1)
@@ -48,7 +50,7 @@ export async function httpChatCompletions(opts: {
       return {
         ok: false,
         error: "http_error",
-        message: `Ollama returned HTTP ${res.status}`,
+        message: `GLM-OCR returned HTTP ${res.status}`,
       };
     }
     const data = (await res.json()) as {
@@ -70,11 +72,12 @@ export async function httpChatCompletions(opts: {
 }
 
 /**
- * Probe whether a local Ollama is reachable and serves the GLM-OCR model.
- * Returns true when `GET {baseUrl}/api/tags` lists `model`. Short timeout so
- * the engine picker degrades instantly when Ollama is not running.
+ * Probe whether the local GLM-OCR endpoint is reachable and serves the model.
+ * Uses the OpenAI-compatible `GET {baseUrl}/v1/models` (works with vLLM and
+ * Ollama alike). Returns true when the model id is listed. Short timeout so
+ * the engine picker degrades instantly when the container is not running.
  */
-export async function probeOllamaModel(opts: {
+export async function probeGlmModel(opts: {
   baseUrl: string;
   model: string;
   timeoutMs?: number;
@@ -83,13 +86,13 @@ export async function probeOllamaModel(opts: {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/tags`, {
+    const res = await fetch(`${baseUrl.replace(/\/$/, "")}/v1/models`, {
       signal: controller.signal,
     });
     if (!res.ok) return false;
-    const data = (await res.json()) as { models?: { name?: string }[] };
-    return (data.models ?? []).some(
-      (m) => m.name === model || (m.name ?? "").startsWith(`${model}:`),
+    const data = (await res.json()) as { data?: { id?: string }[] };
+    return (data.data ?? []).some(
+      (m) => m.id === model || (m.id ?? "").startsWith(`${model}:`),
     );
   } catch {
     return false;

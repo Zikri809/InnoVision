@@ -12,7 +12,7 @@
 //         a second lecturer reads 0 rows of the live quiz (owner-only)
 //   D39 — N concurrent replace_quiz_questions on one draft quiz → no errors,
 //         valid final state (advisory lock serialization)
-//   D40 — source_text > 15000 via direct SQL → CHECK error
+//   D40 — source_text > 15000 via direct SQL → stored (cap removed)
 // NOT a unit test; run manually: node scripts/verify-ai.mjs
 import { createClient } from "@supabase/supabase-js";
 import fs from "node:fs";
@@ -366,13 +366,23 @@ p_questions: makePayload("GHOST"),
       indexes39[2] === 2,
     `errors=${repErrors.length} indexes=${JSON.stringify(indexes39)}`);
 
-  // ── D40: source_text > 15000 → CHECK error ─────────────────────
+  // ── D40: source_text > 15000 stored (cap removed) ──────────────
   const quiz40 = await makeDraftQuiz("D40 Quiz");
+  const bigSource = "x".repeat(15_001);
   const { error: d40Err } = await clientA
     .from("quizzes")
-    .update({ source_text: "x".repeat(15_001) })
+    .update({ source_text: bigSource })
     .eq("id", quiz40.id);
-  record("D40 source_text > 15000 rejected", Boolean(d40Err), d40Err?.message ?? "unexpectedly stored oversized source_text");
+  const { data: d40Row } = await clientA
+    .from("quizzes")
+    .select("source_text")
+    .eq("id", quiz40.id)
+    .single();
+  record(
+    "D40 source_text > 15000 stored",
+    !d40Err && d40Row?.source_text?.length === 15_001,
+    d40Err?.message ?? (d40Row?.source_text?.length === 15_001 ? "stored" : "unexpected short/absent source_text"),
+  );
 
   // ── Summary ──────────────────────────────────────────────────
   console.log("\n" + "=".repeat(60));

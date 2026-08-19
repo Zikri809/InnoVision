@@ -123,6 +123,7 @@ export function useFaceTracker(opts?: {
       timedOut = true;
       tracker.stop();
       if (bootId === bootIdRef.current && !disposedRef.current) {
+        console.error("[face-boot] timed out after", FACE_BOOT_TIMEOUT_MS, "ms");
         setBooting(false);
         setAvailable(false);
         onUnavailableRef.current?.();
@@ -131,30 +132,43 @@ export function useFaceTracker(opts?: {
 
     // CompreFace health probe (L14): BOTH the tracker boot AND the health
     // check must succeed. In E2E mock mode the health route returns 200.
+    console.info("[face-boot] starting tracker.start() and healthProbe...");
     const healthProbe = fetch("/api/face/health", { method: "GET", cache: "no-store" })
-      .then((res) => res.ok)
-      .catch(() => false);
+      .then((res) => (res.ok ? res.json() : { available: false }))
+      .then((data: { available?: boolean }) => {
+        console.info("[face-boot] healthProbe resolved with available:", data.available);
+        return data.available === true;
+      })
+      .catch((err) => {
+        console.error("[face-boot] healthProbe failed with error:", err);
+        return false;
+      });
 
     Promise.all([tracker.start(), healthProbe])
       .then(([, healthy]) => {
+        console.info("[face-boot] Promise.all completed! healthy:", healthy);
         clearTimeout(timeout);
         if (bootId !== bootIdRef.current || disposedRef.current || timedOut) {
+          console.info("[face-boot] boot was superseded or timed out");
           tracker.stop();
           return;
         }
         if (!healthy) {
+          console.info("[face-boot] health check was not healthy -> unavailable");
           tracker.stop();
           setBooting(false);
           setAvailable(false);
           onUnavailableRef.current?.();
           return;
         }
+        console.info("[face-boot] boot successful -> available: true");
         setBooting(false);
         setAvailable(true);
       })
-      .catch(() => {
+      .catch((err) => {
         clearTimeout(timeout);
         tracker.stop();
+        console.error("[face-boot] failed:", err);
         if (bootId === bootIdRef.current && !disposedRef.current) {
           setBooting(false);
           setAvailable(false);

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -19,7 +20,12 @@ import { OcrProgress } from "./OcrProgress";
 import { runExtractionPipeline, type PipelineProgress } from "@/lib/extract/pipeline";
 import type { ExtractEngine, OcrConfig } from "@/lib/extract/types";
 
-const CLIENT_TIMEOUT_MS = 65_000;
+// Local-only deployment: a 30-question generation on a large deck can take a
+// couple of minutes. The client waits LONGER than any realistic server
+// budget (was 65s for the old 60s Vercel cap). On timeout it refreshes and
+// tells the lecturer to check — it never auto-retries (which could
+// double-spend on a slow-but-successful generation).
+const CLIENT_TIMEOUT_MS = 20 * 60_000;
 
 /**
  * "Generate from file" dialog. Orchestrates the PLAN §3.2 cascade:
@@ -101,7 +107,7 @@ export function GenerateFromFileDialog({
       setExtractEngine(result.engine);
       setNotice(
         result.engine === "native"
-          ? "Text extracted from the file (no OCR needed)."
+          ? "Text extracted directly from the file (native, no OCR needed) — the chosen OCR engine was skipped because the file has a text layer."
           : `OCR complete (${result.engine}). You can review the text below.`,
       );
     } catch (err) {
@@ -182,8 +188,8 @@ export function GenerateFromFileDialog({
       if (!o) reset();
       onOpenChange(o);
     }}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
-        <DialogHeader>
+      <DialogContent className="max-h-[88vh] flex flex-col sm:max-w-xl p-6 overflow-hidden gap-0">
+        <DialogHeader className="shrink-0 pb-3 border-b-2 border-border/30">
           <DialogTitle>Generate quiz from file</DialogTitle>
           <DialogDescription>
             Upload a chapter PDF, slides, or document. We&apos;ll extract the text,
@@ -191,12 +197,13 @@ export function GenerateFromFileDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="flex-1 overflow-y-auto space-y-4 py-4 pr-1">
           {!extractedText && (
             <>
               <UploadDropzone
                 userId={userId}
                 quizId={quizId}
+                fileName={file?.name}
                 onUploaded={(path, f) => {
                   setStoragePath(path);
                   setFile(f);
@@ -204,6 +211,11 @@ export function GenerateFromFileDialog({
                 onError={setError}
               />
               <EnginePicker config={config} value={engine} onChange={setEngine} />
+              {error && (
+                <p className="rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm font-bold text-destructive" role="alert">
+                  {error}
+                </p>
+              )}
               {progress && (
                 <OcrProgress
                   page={progress.page}
@@ -214,38 +226,29 @@ export function GenerateFromFileDialog({
                       : progress.engine === "glm"
                         ? "GLM-OCR…"
                         : progress.engine === "vision"
-                          ? "Cloud vision OCR…"
+                          ? "Cloud Vision OCR…"
                           : "Tesseract OCR…"
                   }
                 />
               )}
-              <Button
-                type="button"
-                onClick={handleExtract}
-                disabled={!file || busy}
-                className="w-full"
-              >
-                {busy && !extractedText ? "Extracting…" : "Extract text"}
-              </Button>
             </>
           )}
 
           {extractedText && (
             <>
-              <div className="rounded-lg border p-3">
-                <p className="mb-2 text-xs font-medium text-muted-foreground">
+              <div className="rounded-2xl border-[3px] border-border bg-card p-4 shadow-[var(--shadow-clay-sm)]">
+                <p className="mb-2 text-xs font-bold text-muted-foreground">
                   Extracted text ({extractedText.length.toLocaleString()} chars)
-                  — engine: {extractEngine}
+                  — engine: {extractEngine === "glm" ? "GLM-OCR" : extractEngine === "vision" ? "Cloud Vision" : extractEngine === "tesseract" ? "Tesseract" : "Native"}
                 </p>
-                <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 text-xs">
-                  {extractedText.slice(0, 2000)}
-                  {extractedText.length > 2000 ? "\n…" : ""}
+                <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-xl bg-muted/60 p-3 text-xs font-mono font-medium">
+                  {extractedText}
                 </pre>
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className="mt-2"
+                  className="mt-2 font-bold"
                   onClick={() => {
                     setExtractedText(null);
                     setFile(null);
@@ -258,61 +261,71 @@ export function GenerateFromFileDialog({
                 </Button>
               </div>
 
-              <div className="space-y-1">
-                <Label htmlFor="question-count">Number of questions</Label>
+              <div className="space-y-1.5">
+                <Label htmlFor="question-count" className="font-extrabold">Number of questions</Label>
                 <Input
                   id="question-count"
                   type="number"
                   min={3}
                   max={30}
                   value={questionCount}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) => setQuestionCount(Number(e.target.value) || 10)}
                 />
-                <p className="text-xs text-muted-foreground">Between 3 and 30.</p>
+                <p className="text-xs font-semibold text-muted-foreground">Between 3 and 30 questions.</p>
               </div>
 
               {hasQuestions && (
-                <label className="flex items-start gap-2 text-sm">
-                  <input
-                    type="checkbox"
+                <div className="flex items-start gap-2.5 rounded-xl border-[3px] border-amber-300/80 bg-amber-50/60 p-3">
+                  <Checkbox
+                    id="confirm-replace"
                     checked={confirmReplace}
-                    onChange={(e) => setConfirmReplace(e.target.checked)}
+                    onCheckedChange={(c) => setConfirmReplace(Boolean(c))}
                     className="mt-0.5"
                   />
-                  <span>
-                    This quiz already has {hasQuestions ? "questions" : ""}. Generating will
-                    replace them.
-                  </span>
-                </label>
+                  <Label htmlFor="confirm-replace" className="text-xs font-semibold text-amber-900 cursor-pointer">
+                    This quiz already has questions. Generating will replace them.
+                  </Label>
+                </div>
               )}
 
               {notice && (
-                <p className="text-sm text-emerald-600" role="status">
+                <p className="rounded-xl border-[3px] border-emerald-300 bg-emerald-100 dark:bg-emerald-950/40 px-4 py-2.5 text-sm font-bold text-emerald-800 dark:text-emerald-300" role="status">
                   {notice}
                 </p>
               )}
               {error && (
-                <p className="text-sm text-destructive" role="alert">
+                <p className="rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm font-bold text-destructive" role="alert">
                   {error}
                 </p>
               )}
-
-              <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => onOpenChange(false)}
-                  disabled={busy}
-                >
-                  Cancel
-                </Button>
-                <Button type="button" onClick={handleGenerate} disabled={!canGenerate}>
-                  {busy ? "Generating…" : "Generate quiz"}
-                </Button>
-              </DialogFooter>
             </>
           )}
         </div>
+
+        <DialogFooter className="shrink-0 pt-3 border-t-2 border-border/40 flex items-center justify-end gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={busy}
+          >
+            Cancel
+          </Button>
+          {!extractedText ? (
+            <Button
+              type="button"
+              onClick={handleExtract}
+              disabled={!file || busy}
+            >
+              {busy ? "Extracting…" : "Extract text"}
+            </Button>
+          ) : (
+            <Button type="button" onClick={handleGenerate} disabled={!canGenerate}>
+              {busy ? "Generating…" : "Generate quiz"}
+            </Button>
+          )}
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

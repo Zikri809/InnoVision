@@ -195,7 +195,7 @@ export async function generateQuiz(opts: {
   /** Wall-clock deadline for attempt+retry combined. Defaults to now + 50s. */
   deadlineMs?: number;
 }): Promise<GenerateQuizResult> {
-  const { chat, text, questionCount, deadlineMs = Date.now() + 50_000 } = opts;
+  const { chat, text, questionCount, deadlineMs = Date.now() + 900_000 } = opts;
 
   const attempt = async (extra?: string): Promise<GenerateQuizResult> => {
     const remaining = remainingBudgetMs(deadlineMs);
@@ -245,7 +245,7 @@ export async function regenerateQuestion(opts: {
   instruction?: string;
   deadlineMs?: number;
 }): Promise<RegenerateResult> {
-  const { chat, question, siblings, instruction, deadlineMs = Date.now() + 50_000 } = opts;
+  const { chat, question, siblings, instruction, deadlineMs = Date.now() + 900_000 } = opts;
 
   const attempt = async (extra?: string): Promise<RegenerateResult> => {
     const remaining = remainingBudgetMs(deadlineMs);

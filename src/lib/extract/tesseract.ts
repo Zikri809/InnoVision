@@ -9,7 +9,6 @@
  */
 
 import {
-  MAX_EXTRACT_CHARS,
   MAX_OCR_PAGES,
   MIN_CHARS_PER_PAGE,
   type ExtractionResult,
@@ -45,21 +44,17 @@ export async function tesseractExtract(
   });
 
   const parts: string[] = [];
-  let recognizedChars = 0;
   try {
     for (let i = 0; i < pages.length; i++) {
       onProgress?.(i + 1, pages.length);
       const { data } = await worker.recognize(pages[i].dataUrl);
       parts.push(data.text);
-      recognizedChars += data.text.length;
-      if (recognizedChars > MAX_EXTRACT_CHARS * 2) break; // safety backstop
     }
   } finally {
     await worker.terminate().catch(() => undefined);
   }
 
   let text = parts.join("\n\n").trim();
-  if (text.length > MAX_EXTRACT_CHARS) text = text.slice(0, MAX_EXTRACT_CHARS);
 
   const nonEmpty = parts.filter((p) => p.trim().length > 0).length;
   const avgPerPage = nonEmpty > 0 ? text.length / nonEmpty : 0;

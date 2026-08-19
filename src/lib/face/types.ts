@@ -12,6 +12,12 @@ import type { FaceCheckTrigger, SessionStatus } from "@/lib/types/aliases";
 
 export type { FaceCheckTrigger };
 
+export type LivePose = {
+  yaw: number;
+  centered: boolean;
+  faceDetected: boolean;
+};
+
 /**
  * The test seam every face-tracking implementation satisfies. `start` may be
  * async (real boot) or sync (fake); `stop` must be idempotent (StrictMode
@@ -29,6 +35,8 @@ export interface IFaceTracker {
   captureFrame(): Promise<string | null>;
   /** Wait for a blink within `timeoutMs`; resolves 'passed' or 'failed'. */
   waitForBlink(timeoutMs: number): Promise<"passed" | "failed">;
+  /** Optional subscriber for real-time face pose updates (yaw, balance, centering). */
+  onPoseChange?(cb: (pose: LivePose) => void): () => void;
   stop(): void;
 }
 

@@ -60,3 +60,6 @@ next-env.d.ts
 
 # CompreFace (defensive — named volumes are used, but protect against a future bind-mount switch)
 /compreface-data/
+
+# GLM-OCR benchmark raw timings (regenerate with `npm run glm:bench`)
+/bench-glm-ocr.jsonl

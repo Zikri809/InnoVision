@@ -9,7 +9,6 @@
 
 import {
   batch,
-  MAX_EXTRACT_CHARS,
   MAX_IMAGE_BASE64_CHARS,
   MAX_VISION_PAGES,
   type ExtractionResult,
@@ -89,7 +88,6 @@ export async function visionExtract(
   }
 
   let text = parts.join("\n\n").trim();
-  if (text.length > MAX_EXTRACT_CHARS) text = text.slice(0, MAX_EXTRACT_CHARS);
   return { text, pages: images.length, engine: "vision" };
 }
 

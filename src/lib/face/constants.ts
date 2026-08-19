@@ -52,8 +52,8 @@ export const ENROLL_CAPTURE_FRAMES = 3;
 /** Max total capture attempts before enrollment gives up (`capture_failed`). */
 export const ENROLL_CAPTURE_MAX_ATTEMPTS = 15;
 
-/** Max wall-clock for the whole 3-angle capture (10s cap). */
-export const ENROLL_CAPTURE_MAX_MS = 10000;
+/** Max wall-clock for the whole 3-angle capture (45s cap). */
+export const ENROLL_CAPTURE_MAX_MS = 45000;
 
 /** The three guided enrollment angles. */
 export const ENROLL_ANGLES = ["front", "left", "right"] as const;
@@ -68,7 +68,7 @@ export const PERIODIC_MIN_MS = 30000;
 export const PERIODIC_MAX_MS = 45000;
 
 /** Whole-boot deadline for the face tracker (camera + bundle + models). */
-export const FACE_BOOT_TIMEOUT_MS = 10000;
+export const FACE_BOOT_TIMEOUT_MS = 20000;
 
 /** Flagged-state poll interval (the student waits for a lecturer unlock). */
 export const FLAGGED_POLL_MS = 8000;

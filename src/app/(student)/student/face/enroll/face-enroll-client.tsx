@@ -41,6 +41,11 @@ export function FaceEnrollClient({
   const [notice, setNotice] = useState<string | null>(null);
   const [revoking, setRevoking] = useState(false);
   const [currentAngle, setCurrentAngle] = useState<number>(0);
+  const [pose, setPose] = useState<{ yaw: number; centered: boolean; faceDetected: boolean }>({
+    yaw: 0,
+    centered: false,
+    faceDetected: false,
+  });
 
   const framesRef = useRef<string[]>([]);
   const attemptsRef = useRef(0);
@@ -49,10 +54,12 @@ export function FaceEnrollClient({
 
   useEffect(() => {
     disposedRef.current = false;
+    const unsub = trackerRef.current?.onPoseChange?.(setPose);
     return () => {
       disposedRef.current = true;
+      unsub?.();
     };
-  }, []);
+  }, [trackerRef, available]);
 
   async function handleConsent() {
     setError(null);
@@ -101,6 +108,9 @@ export function FaceEnrollClient({
     if (!tracker) return null;
     const blink = await tracker.waitForBlink(LIVENESS_TIMEOUT_MS);
     if (blink !== "passed") return null;
+    // Allow 350ms for eyes to fully reopen after the blink before snapping the photo
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    if (disposedRef.current) return null;
     return tracker.captureFrame();
   }
 
@@ -175,19 +185,6 @@ export function FaceEnrollClient({
     router.refresh();
   }
 
-  if (!available && !booting) {
-    return (
-      <div className="mx-auto max-w-2xl">
-        <div className="rounded-[28px] border-[3px] border-border bg-card p-8 shadow-[var(--shadow-clay)]">
-          <h1 className="font-heading text-2xl font-semibold">Face enrollment</h1>
-          <p className="mt-2 text-sm font-semibold text-muted-foreground">
-            Camera or face service unavailable — face enrollment needs a working webcam and the face service online.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   const angleLabel = (idx: number) => {
     switch (idx) {
       case 0:
@@ -212,16 +209,6 @@ export function FaceEnrollClient({
         )}
       </div>
 
-      {/* Persistent hidden video node (never conditionally mounted). */}
-      <video
-        ref={videoRef}
-        className="hidden"
-        autoPlay
-        playsInline
-        muted
-        aria-hidden
-      />
-
       <div aria-live="polite">
         {error && (
           <p className="mb-4 rounded-2xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-3 text-sm font-bold text-destructive" role="alert">
@@ -235,7 +222,113 @@ export function FaceEnrollClient({
         )}
       </div>
 
-      {!consent ? (
+      {/* The ONE single persistent video element — never conditionally unmounted */}
+      <div
+        className={
+          consent && (available || booting)
+            ? "relative mx-auto mb-5 aspect-[4/3] w-full max-w-md overflow-hidden rounded-3xl border-[3px] border-border bg-muted/40 shadow-[var(--shadow-clay)]"
+            : "fixed -top-[9999px] left-0 pointer-events-none opacity-0"
+        }
+      >
+        <video
+          ref={videoRef}
+          className="h-full w-full object-cover -scale-x-100"
+          autoPlay
+          playsInline
+          muted
+        />
+
+        {/* Live Face Guide & Balance Overlay */}
+        {!booting && (
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-between p-4">
+            {/* Steps Progress Header */}
+            <div className="flex items-center gap-2 rounded-full bg-black/60 px-3 py-1.5 backdrop-blur-md">
+              <span
+                className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${
+                  currentAngle === 0
+                    ? "bg-amber-400 text-black"
+                    : currentAngle > 0
+                    ? "bg-emerald-500 text-white"
+                    : "bg-white/20 text-white/70"
+                }`}
+              >
+                1. Front {currentAngle > 0 && "✓"}
+              </span>
+              <span
+                className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${
+                  currentAngle === 1
+                    ? "bg-amber-400 text-black"
+                    : currentAngle > 1
+                    ? "bg-emerald-500 text-white"
+                    : "bg-white/20 text-white/70"
+                }`}
+              >
+                2. Left {currentAngle > 1 && "✓"}
+              </span>
+              <span
+                className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${
+                  currentAngle === 2
+                    ? "bg-amber-400 text-black"
+                    : captureState === "done"
+                    ? "bg-emerald-500 text-white"
+                    : "bg-white/20 text-white/70"
+                }`}
+              >
+                3. Right {captureState === "done" && "✓"}
+              </span>
+            </div>
+
+            {/* Centered Face Oval Guide */}
+            <div
+              className={`h-40 w-32 sm:h-48 sm:w-36 rounded-[50%] border-4 transition-all duration-300 ${
+                !pose.faceDetected
+                  ? "border-dashed border-white/50"
+                  : (currentAngle === 0 && Math.abs(pose.yaw) <= 15 && pose.centered) ||
+                    (currentAngle === 1 && pose.yaw >= 10) ||
+                    (currentAngle === 2 && pose.yaw <= -10)
+                  ? "scale-105 border-emerald-400 bg-emerald-500/10 shadow-[0_0_20px_rgba(52,211,153,0.5)]"
+                  : "border-amber-400/80 bg-amber-400/5 shadow-[0_0_15px_rgba(251,191,36,0.3)]"
+              }`}
+            />
+
+            {/* Live Angle & Balance HUD */}
+            <div className="flex items-center gap-2 rounded-full bg-black/70 px-4 py-1.5 text-xs font-bold text-white backdrop-blur-md">
+              {!pose.faceDetected ? (
+                <span className="text-amber-300">Position face in frame</span>
+              ) : (
+                <>
+                  <span className={pose.centered ? "text-emerald-400" : "text-amber-300"}>
+                    {pose.centered ? "Centered ✓" : "Center Face"}
+                  </span>
+                  <span className="text-white/40">|</span>
+                  <span>Angle: {Math.abs(pose.yaw)}°</span>
+                  <span className="text-white/40">|</span>
+                  <span className="text-emerald-300">
+                    {currentAngle === 0 && (Math.abs(pose.yaw) <= 15 ? "Good! Blink now" : "Look Straight")}
+                    {currentAngle === 1 && (pose.yaw >= 10 ? "Good! Blink now" : "Turn Left ⟵")}
+                    {currentAngle === 2 && (pose.yaw <= -10 ? "Good! Blink now" : "Turn Right ⟶")}
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {booting && (
+          <div className="absolute inset-0 flex items-center justify-center bg-muted/80 text-sm font-semibold text-muted-foreground">
+            Starting camera…
+          </div>
+        )}
+      </div>
+
+      {!available && !booting ? (
+        <div className="rounded-[28px] border-[3px] border-border bg-card p-8 shadow-[var(--shadow-clay)]">
+          <h2 className="font-heading text-xl font-semibold">Camera or service unavailable</h2>
+          <p className="mt-2 text-sm font-semibold text-muted-foreground">
+            Camera or face service unavailable — face enrollment needs a working webcam and the face service online.
+          </p>
+        </div>
+      ) : !consent ? (
         <div className="rounded-[28px] border-[3px] border-border bg-card p-7 shadow-[var(--shadow-clay)] md:p-8">
           <h2 className="font-heading text-xl font-semibold">Biometric consent</h2>
           <p className="mt-2 text-sm font-semibold text-muted-foreground">

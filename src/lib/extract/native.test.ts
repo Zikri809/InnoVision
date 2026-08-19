@@ -9,7 +9,6 @@ import {
   base64ByteLength,
   batch,
   isAllowedExtension,
-  MAX_EXTRACT_CHARS,
   MIN_CHARS_PER_PAGE,
 } from "@/lib/extract/types";
 
@@ -49,12 +48,11 @@ describe("U-E3 — text-density heuristic (≥40 chars/page)", () => {
   });
 });
 
-describe("U-E5 — >15k chars truncated + flagged", () => {
-  it("caps text at MAX_EXTRACT_CHARS", async () => {
+describe("U-E5 — extracted text is no longer truncated", () => {
+  it("returns the full text regardless of length", async () => {
     const big = "A".repeat(20_000);
     const res = await nativeExtract(new TextEncoder().encode(big).buffer as ArrayBuffer, "notes.txt", { node: true });
-    expect(res.text.length).toBeLessThanOrEqual(MAX_EXTRACT_CHARS);
-    expect(res.text.length).toBe(MAX_EXTRACT_CHARS);
+    expect(res.text.length).toBe(20_000);
   });
 });
 

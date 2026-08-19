@@ -54,23 +54,23 @@ export function AppUserMenu({
 
       <DialogContent className="sm:max-w-xs">
         <DialogHeader>
-          <div className="mb-1 grid h-12 w-12 place-items-center rounded-2xl bg-orange-100 text-orange-600">
+          <div className="mb-1 grid h-12 w-12 place-items-center rounded-2xl bg-primary/15 text-primary">
             <UserRound className="h-6 w-6" aria-hidden />
           </div>
           <DialogTitle className="break-all text-base">{email}</DialogTitle>
           <DialogDescription>Your InnoVision account</DialogDescription>
         </DialogHeader>
 
-        <div className="flex items-center gap-2.5 rounded-2xl border-[3px] border-border bg-orange-50/60 px-4 py-3 text-sm font-bold">
+        <div className="flex items-center gap-2.5 rounded-2xl border-[3px] border-border bg-muted/60 px-4 py-3 text-sm font-bold">
           {consentGiven ? (
             <>
-              <CircleCheck className="h-5 w-5 text-green-600" aria-hidden />
-              <span className="text-green-700">Biometric consent given</span>
+              <CircleCheck className="h-5 w-5 text-emerald-600 dark:text-emerald-400" aria-hidden />
+              <span className="text-emerald-700 dark:text-emerald-300">Biometric consent given</span>
             </>
           ) : (
             <>
-              <CircleAlert className="h-5 w-5 text-amber-600" aria-hidden />
-              <span className="text-amber-700">Consent not given yet</span>
+              <CircleAlert className="h-5 w-5 text-amber-600 dark:text-amber-400" aria-hidden />
+              <span className="text-amber-700 dark:text-amber-300">Consent not given yet</span>
             </>
           )}
         </div>

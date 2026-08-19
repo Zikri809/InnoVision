@@ -15,14 +15,17 @@ export const AI_QUESTIONS_MIN = 3;
 export const AI_QUESTIONS_MAX = 30;
 export const AI_TITLE_MIN = 1;
 export const AI_TITLE_MAX = 200;
-export const AI_EXTRACTED_TEXT_MAX = 15_000;
 export const AI_INSTRUCTION_MAX = 500;
 
-/** Max characters the AI model may emit per generation. */
-export const AI_MAX_OUTPUT_TOKENS = 4000;
+/** Max characters the AI model may emit per generation. 30-question quizzes
+ * need ~8k+ output tokens; raised from 4000 (a Vercel-60s-budget cap) since
+ * the app now runs locally on the lecturer's machine. */
+export const AI_MAX_OUTPUT_TOKENS = 16_000;
 
-/** Wall-clock budget for a single AI chat round-trip (routes run ≤60s). */
-export const AI_ROUND_TRIP_TIMEOUT_MS = 45_000;
+/** Wall-clock budget for a single AI chat round-trip. Local-only tuning: the
+ * 45s value was a serverless guard; keep a generous 10-minute ceiling so a
+ * long 30-question generation can't be aborted mid-stream. */
+export const AI_ROUND_TRIP_TIMEOUT_MS = 600_000;
 
 /** A single AI question (shared by the quiz schema and single-question regen). */
 export const AiQuestionSchema = z

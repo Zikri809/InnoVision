@@ -9,10 +9,7 @@ import { createAiClient, chatCompletions, AI_MODEL } from "@/lib/ai/client";
 import { generateQuiz, type GenerateQuizResult } from "@/lib/ai/quiz-prompt";
 import { aiQuizToRows } from "@/lib/ai/quiz-schema";
 import { nativeExtract } from "@/lib/extract/native";
-import {
-  MAX_EXTRACT_CHARS,
-  MAX_FILE_BYTES,
-} from "@/lib/extract/types";
+import { MAX_FILE_BYTES } from "@/lib/extract/types";
 import {
   firstIssueMessage,
   internalError,
@@ -28,22 +25,24 @@ import {
 } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// Local-only deployment (the lecturer's machine) — no Vercel 60s function cap.
+// A 30-question generation on a large deck can legitimately take a couple of
+// minutes, so the route is free to run as long as it needs.
+// export const maxDuration = 60; // (removed for local runs)
 
 // Per-user rate limit on generation (token cost guard, S4). In-memory and
 // per-process — accepted at demo scale (documented in SECURITY_AUDIT).
 const GENERATE_RATE = { limit: 10, windowMs: 60 * 60 * 1000 };
 
-// Per PLAN §S1: ~10s parse timeout. A pathological file can otherwise eat the
-// full `maxDuration=60` budget. The underlying parse continues to run in the
-// isolate (we can't truly abort pdf.js/mammoth/jszip), but the route returns
-// a clean 503 and Vercel reclaims the worker on the 60s cap.
-const PARSE_TIMEOUT_MS = 15_000;
+// Generous parse timeout: a pathological file can otherwise stall the route
+// indefinitely. The underlying parse continues to run (we can't truly abort
+// pdf.js/mammoth/jszip), but the route returns a clean 503.
+const PARSE_TIMEOUT_MS = 120_000;
 
 // Overall wall-clock budget for the whole generation (parse + AI attempt +
-// retry). Kept under `maxDuration = 60` so Vercel never kills the route
-// mid-AI-call: parse can eat up to 15s, leaving ~35s for the AI round-trips.
-const GENERATION_BUDGET_MS = 50_000;
+// retry). Local tuning: 15 minutes is far beyond what a real generation needs
+// but bounds the route against a genuinely hung upstream.
+const GENERATION_BUDGET_MS = 900_000;
 
 // In-process in-flight guard so a scripted double-POST can't fire two LLM
 // calls for the same quiz (S4). Single-instance caveat documented.
@@ -56,8 +55,8 @@ const inFlight = new Set<string>();
  *  - `extractedText` (client did extraction/OCR) is used directly.
  *  - Otherwise the stored file at `sourcePath` (or the quiz's source_file_url)
  *    is parsed SERVER-SIDE with the native extractor (bounded: 25 MB, ≤50
- *    pages, ≤15k chars). Scanned (low-density) stored files → 422 asking the
- *    lecturer to re-upload and run OCR in the browser.
+ *    pages). Scanned (low-density) stored files → 422 asking the lecturer to
+ *    re-upload and run OCR in the browser.
  *
  * Rules:
  *  - Lecturer + quiz owner + draft-only.
@@ -130,9 +129,8 @@ async function handleGenerate(
 ): Promise<NextResponse> {
   const { supabase, quizId, userId, body } = ctx;
 
-  // Single overall deadline for parse + AI attempt + retry, so the AI call
-  // doesn't get a fresh 50s after the parse already consumed part of the 60s
-  // `maxDuration` budget (see GENERATION_BUDGET_MS).
+  // Single overall deadline for parse + AI attempt + retry (local tuning —
+  // generous 15m budget; see GENERATION_BUDGET_MS).
   const deadlineMs = Date.now() + GENERATION_BUDGET_MS;
 
   const { extractedText, sourcePath, questionCount } = body;
@@ -186,10 +184,6 @@ async function handleGenerate(
     return unprocessable("Extracted text is empty. Try a different file.", "empty_text");
   }
 
-  // Cap once and reuse — the same capped value feeds both the AI prompt and
-  // the stored `p_source_text` (avoids a redundant second slice).
-  const cappedText = text.slice(0, MAX_EXTRACT_CHARS);
-
   // Run the AI generation (one retry inside generateQuiz). Share a single
   // deadline across attempt + retry so the second call doesn't burn another
   // full 45s when most of the window is already gone.
@@ -197,7 +191,7 @@ async function handleGenerate(
   const result: GenerateQuizResult = await generateQuiz({
     chat: (messages, timeoutMs) =>
       chatCompletions({ client: ai, model: AI_MODEL, messages, timeoutMs }),
-    text: cappedText,
+    text,
     questionCount: questionCount ?? 10,
     deadlineMs,
   });
@@ -233,7 +227,7 @@ async function handleGenerate(
     p_quiz_id: quizId,
     p_title: result.quiz.title,
     p_source_file_url: sourcePathFinal ?? null,
-    p_source_text: cappedText,
+    p_source_text: text,
     // Pass the array directly (not JSON.stringify): PostgREST serializes a
     // jsonb arg as a real JSON array, so jsonb_typeof(p_questions) = 'array'.
     p_questions: rows,
@@ -262,12 +256,6 @@ async function handleGenerate(
       return unprocessable(
         "The AI returned a title outside the allowed range. Try again.",
         "invalid_ai_output",
-      );
-    }
-    if (msg.includes("source_text_too_long")) {
-      return unprocessable(
-        "The source text exceeded the 15k character limit. Try a shorter file.",
-        "source_text_too_long",
       );
     }
     if (
@@ -304,13 +292,12 @@ async function downloadAndParseNative(
   supabase: Awaited<ReturnType<typeof createClient>>,
   path: string,
 ): Promise<{ text?: string; lowConfidence?: boolean; error?: NextResponse }> {
-  // Parse with a wall-clock timeout (PLAN §S1) so a pathological file can't
-  // consume the full `maxDuration=60` budget. We race the ENTIRE
-  // download+arrayBuffer+parse chain against a 15s deadline: the storage
-  // download, the size check, AND the PDF/DOCX/PPTX parse are all covered.
-  // The underlying work continues in the isolate (we can't truly abort
-  // pdf.js/mammoth/jszip), but the route returns a clean 503 and Vercel
-  // reclaims the worker on the 60s cap.
+  // Parse with a wall-clock timeout so a pathological file can't stall the
+  // route indefinitely. We race the ENTIRE download+arrayBuffer+parse chain
+  // against the PARSE_TIMEOUT_MS deadline: the storage download, the size
+  // check, AND the PDF/DOCX/PPTX parse are all covered. The underlying work
+  // continues (we can't truly abort pdf.js/mammoth/jszip), but the route
+  // returns a clean 503.
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([

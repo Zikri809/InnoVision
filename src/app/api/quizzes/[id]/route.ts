@@ -3,12 +3,14 @@ import { createClient } from "@/lib/supabase/server";
 import { requireQuizOwner } from "@/lib/quizzes/guards";
 import { isUuid } from "@/lib/classes/roster";
 import { UpdateQuizSchema } from "@/lib/quizzes/validation";
+import { buildQuizUpdates } from "@/lib/quizzes/updates";
 import {
   checkSameOrigin,
   firstIssueMessage,
   internalError,
   invalidBody,
   invalidJson,
+  jsonError,
   notDraft,
   notFound,
 } from "@/lib/http";
@@ -56,27 +58,33 @@ export async function PATCH(request: Request, { params }: Params) {
     return invalidBody("No editable fields provided.");
   }
 
-  // Build the update from the keys the caller actually supplied. A PATCH that
-  // only renames (or only changes the time limit) must NOT rewrite `mode`.
-  const updates: {
-    title?: string;
-    mode?: "practice" | "assessment";
-    time_limit_sec?: number | null;
-  } = {};
-  if (title !== undefined) updates.title = title;
-  if (mode !== undefined) updates.mode = mode;
-  if (timeLimitSec !== undefined) updates.time_limit_sec = timeLimitSec;
+  const updates = buildQuizUpdates({ title, mode, timeLimitSec }, owner.quiz.mode);
 
   const { data: quiz, error } = await supabase
     .from("quizzes")
     .update(updates)
     .eq("id", id)
     .select("id, class_id, title, mode, status, time_limit_sec, created_at")
-    .single();
+    .maybeSingle();
 
   if (error) {
     console.error("Update quiz error:", error);
+    if (error.message?.includes("quiz_not_draft_edit")) {
+      return notDraft();
+    }
+    if (
+      error.message?.includes("quizzes_practice_untimed") ||
+      error.message?.includes("quizzes_time_limit_sec_check") ||
+      error.message?.includes("quizzes_title_check") ||
+      error.message?.includes("check constraint")
+    ) {
+      return invalidBody("Invalid quiz data.");
+    }
     return internalError("Could not update the quiz right now.");
+  }
+
+  if (!quiz) {
+    return notFound();
   }
 
   return NextResponse.json({ quiz });
@@ -120,12 +128,10 @@ export async function DELETE(request: Request, { params }: Params) {
   }
 
   if ((count ?? 0) > 0) {
-    return NextResponse.json(
-      {
-        error: "quiz_has_sessions",
-        message: "This quiz has student attempts. Close or reset them before deleting.",
-      },
-      { status: 409, headers: { "content-type": "application/json" } },
+    return jsonError(
+      "quiz_has_sessions",
+      "This quiz has student attempts. Close or reset them before deleting.",
+      409,
     );
   }
 

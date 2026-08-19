@@ -26,6 +26,14 @@ export const MCQ_OPTIONS_MIN = 2;
 export const MCQ_OPTIONS_MAX = 5;
 export const TRUE_FALSE_OPTIONS = 2;
 
+/**
+ * Time-limit bounds. null = untimed; 1..7200 = timed; 0 is invalid in
+ * both Zod and the DB. Must stay in lockstep with the DB CHECK in
+ * supabase/migrations/0004_quizzes.sql:40.
+ */
+export const TIME_LIMIT_MIN_SEC = 1;
+export const TIME_LIMIT_MAX_SEC = 7200; // 2 hours (120 minutes)
+
 /** A single question as sent from the client (camelCase on the wire). */
 export const QuestionInputSchema = z
   .object({
@@ -89,10 +97,10 @@ const QuizFieldsSchema = z.object({
     .max(TITLE_MAX, `Title must be at most ${TITLE_MAX} characters.`),
   mode: z.enum(["practice", "assessment"]),
   timeLimitSec: z
-    .number()
+    .number({ message: "Time limit must be a number of seconds." })
     .int("Time limit must be a whole number of seconds.")
-    .min(1, "Time limit must be at least 1 second.")
-    .max(72 * 3600, "Time limit must be at most 72 hours.")
+    .min(TIME_LIMIT_MIN_SEC, "Time limit must be at least 1 second.")
+    .max(TIME_LIMIT_MAX_SEC, "Time limit must be at most 2 hours (120 minutes).")
     .nullable()
     .optional(),
 });
@@ -128,7 +136,9 @@ export type RevealSettingsInput = z.infer<typeof RevealSettingsSchema>;
 /** Reorder payload: the exact ordered set of question ids (draft only). */
 export const ReorderSchema = z.object({
   questionIds: z
-    .array(z.string().uuid("Each question id must be a valid UUID."), "Each question id must be a valid UUID.")
+    .array(z.string().uuid("Each question id must be a valid UUID."), {
+      message: "Each question id must be a valid UUID.",
+    })
     .min(1, "Reorder must include at least one question."),
 });
 
