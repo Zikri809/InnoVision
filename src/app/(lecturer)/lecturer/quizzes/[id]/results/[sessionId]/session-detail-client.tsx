@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useLocale, useTranslations } from "next-intl";
 import { ArrowLeft } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -28,21 +29,6 @@ type AnswerRow = {
   answered_at: string | null;
 };
 
-const DATE_FMT = new Intl.DateTimeFormat(undefined, {
-  month: "short",
-  day: "numeric",
-  hour: "numeric",
-  minute: "2-digit",
-});
-
-function formatTime(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "—" : DATE_FMT.format(d);
-}
-
-// Warm-family correctness styles (sage green / terracotta) that stay inside
-// the clay palette instead of clashing with pure mint/pure red.
 const PILL_CORRECT = "border-[2px] border-emerald-300 dark:border-emerald-700/60 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300";
 const PILL_WRONG = "border-[2px] border-destructive/30 bg-destructive/10 text-destructive";
 const PILL_NONE = "border-[2px] border-border bg-muted text-muted-foreground";
@@ -52,11 +38,6 @@ const ROW_PLAIN = "border-2 border-border bg-muted text-muted-foreground";
 const TINT_CORRECT = "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-700/60";
 const TINT_WRONG = "bg-destructive/10 border-destructive/30";
 
-/**
- * Lecturer's per-session answer breakdown for one quiz session. Shows each
- * question, the option the student selected, and correct/wrong — NOT the
- * correct answer (D10: questions arrive without correct_index/explanation).
- */
 export function SessionDetailClient({
   quizId,
   quizTitle,
@@ -72,7 +53,35 @@ export function SessionDetailClient({
   answers: AnswerRow[];
   studentName: string | null;
 }) {
+  const locale = useLocale();
+  const t = useTranslations("lecturer.results");
+  const tCommon = useTranslations("common");
   const answerByQuestion = new Map(answers.map((a) => [a.question_id, a]));
+
+  function formatTime(iso: string | null | undefined): string {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "—";
+    return new Intl.DateTimeFormat(locale === "ms" ? "ms-MY" : "en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(d);
+  }
+
+  function formatOptionText(text: string, type: string): string {
+    if (type === "true_false") {
+      const lower = text.trim().toLowerCase();
+      if (lower === "true" || lower === "betul") {
+        return locale === "ms" ? "Betul" : "True";
+      }
+      if (lower === "false" || lower === "salah") {
+        return locale === "ms" ? "Salah" : "False";
+      }
+    }
+    return text;
+  }
 
   return (
     <div className="space-y-6">
@@ -83,31 +92,31 @@ export function SessionDetailClient({
             href={`/lecturer/quizzes/${quizId}/results`}
             className="inline-flex items-center gap-1.5 text-sm font-extrabold text-muted-foreground transition-colors hover:text-primary"
           >
-            <ArrowLeft className="h-4 w-4" aria-hidden /> Back to results
+            <ArrowLeft className="h-4 w-4" aria-hidden /> {tCommon("back")}
           </Link>
           <h1 className="mt-3 font-heading text-3xl font-semibold [text-wrap:balance]">
-            {studentName ?? "Removed student"}
+            {studentName ?? t("tableHeaderStudent")}
           </h1>
           <p className="mt-2 text-sm font-semibold text-muted-foreground">
-            {quizTitle} · Started {formatTime(session.started_at)}
+            {quizTitle} · {formatTime(session.started_at)}
           </p>
 
           <div className="mt-6 flex max-w-xl flex-wrap gap-4">
             <div className="rounded-2xl border-[3px] border-border bg-card px-4 py-3 shadow-[var(--shadow-clay-sm)]">
               <span className="font-heading text-2xl font-bold">{session.score ?? "—"}</span>
               <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">
-                Score {session.score == null ? "(in progress)" : `of ${questions.length}`}
+                {t("tableHeaderScore")} {session.score == null ? `(${tCommon("inProgress")})` : `/ ${questions.length}`}
               </p>
             </div>
             <div className="rounded-2xl border-[3px] border-border bg-card px-4 py-3 shadow-[var(--shadow-clay-sm)]">
               <span className="font-heading text-2xl font-bold">{answers.length}</span>
-              <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">Answered</p>
+              <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">{tCommon("completed")}</p>
             </div>
             <div className="rounded-2xl border-[3px] border-border bg-card px-4 py-3 shadow-[var(--shadow-clay-sm)]">
               <span className="font-heading text-2xl font-bold">
                 {answers.filter((a) => a.is_correct).length}
               </span>
-              <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">Correct</p>
+              <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">{t("tableHeaderScore")}</p>
             </div>
           </div>
         </div>
@@ -115,15 +124,15 @@ export function SessionDetailClient({
 
       <Card>
         <CardHeader>
-          <CardTitle>Answer breakdown</CardTitle>
+          <CardTitle>{t("breakdownTitle")}</CardTitle>
           <CardDescription>
-            Each question this student answered, with the option they selected.
+            {t("breakdownSubtitle")}
           </CardDescription>
         </CardHeader>
         <CardContent>
           {questions.length === 0 ? (
             <p className="rounded-2xl border-[3px] border-dashed border-border bg-card p-6 text-center text-sm font-semibold text-muted-foreground">
-              No questions for this quiz.
+              {tCommon("notFound")}
             </p>
           ) : (
             <ol className="space-y-4">
@@ -146,7 +155,7 @@ export function SessionDetailClient({
                           isCorrect ? PILL_CORRECT : isWrong ? PILL_WRONG : PILL_NONE
                         }`}
                       >
-                        {isCorrect ? "Correct" : isWrong ? "Wrong" : "Unanswered"}
+                        {isCorrect ? "✓" : isWrong ? "✗" : "—"}
                       </span>
                     </div>
                     <ul className="space-y-2 px-5 pb-5">
@@ -179,7 +188,7 @@ export function SessionDetailClient({
                                 selected ? "text-foreground" : "text-muted-foreground"
                               }`}
                             >
-                              {opt}
+                              {formatOptionText(opt, q.type)}
                             </span>
                             {selected && !isCorrect && (
                               <span className="ml-auto shrink-0 font-extrabold text-[#C4553B]">

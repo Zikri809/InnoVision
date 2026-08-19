@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ArrowDown, ArrowUp, Trash2 } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -54,6 +55,11 @@ function EditQuestionForm({
   onClose: () => void;
   onSuccess?: () => void;
 }) {
+  const locale = useLocale();
+  const t = useTranslations("lecturer.dialogs");
+  const tBuilder = useTranslations("lecturer.builder");
+  const tCommon = useTranslations("common");
+
   const [draft, setDraft] = useState<QuestionDraft>(() => ({
     type: question.type,
     prompt: question.prompt,
@@ -94,8 +100,6 @@ function EditQuestionForm({
       if (target < 0 || target >= d.options.length) return d;
       const options = [...d.options];
       [options[index], options[target]] = [options[target], options[index]];
-      // Follow the correct answer through the swap so it keeps pointing at
-      // the same option text.
       let correctIndex = d.correctIndex;
       if (correctIndex === index) correctIndex = target;
       else if (correctIndex === target) correctIndex = index;
@@ -128,36 +132,38 @@ function EditQuestionForm({
       );
       const body = await res.json();
       if (!res.ok) {
-        setError(body.message ?? body.error ?? "Could not save the question.");
+        setError(body.message ?? body.error ?? tCommon("errorGeneric"));
         return;
       }
       onClose();
       onSuccess?.();
     } catch {
-      setError("Network error saving question.");
+      setError(tCommon("errorGeneric"));
     } finally {
       setSaving(false);
     }
   }
 
+  const defaultTrueFalseOptions = locale === "ms" ? ["Betul", "Salah"] : ["True", "False"];
+
   return (
     <>
       <DialogHeader className="shrink-0 pb-3 border-b-2 border-border/30">
         <DialogTitle className="text-xl font-bold font-heading">
-          Edit question {questionIndex != null ? `#${questionIndex + 1}` : ""}
+          {t("editQuestionTitle", { number: questionIndex != null ? questionIndex + 1 : 1 })}
         </DialogTitle>
         <DialogDescription className="text-xs font-semibold text-muted-foreground mt-0.5">
-          Multiple choice: 2–5 options (fingers 1–5). True/False: exactly 2.
+          {t("editQuestionSubtitle")}
         </DialogDescription>
       </DialogHeader>
 
       <form onSubmit={handleSave} className="flex flex-col flex-1 min-h-0 pt-4">
         <div className="flex-1 overflow-y-auto space-y-5 pr-2 -mr-1 py-1">
           {/* Type and Correct Answer */}
-          <div className="flex flex-wrap items-center gap-6 sm:gap-8">
+          <div className="flex flex-wrap items-center gap-4 sm:gap-6">
             <div className="space-y-1.5">
               <Label htmlFor="edit-q-type" className="text-xs font-extrabold text-foreground">
-                Question Type
+                {tBuilder("questionTypeLabel")}
               </Label>
               <Select
                 value={draft.type}
@@ -168,7 +174,7 @@ function EditQuestionForm({
                       ? {
                           ...d,
                           type,
-                          options: ["True", "False"],
+                          options: defaultTrueFalseOptions,
                           correctIndex: 0,
                         }
                       : {
@@ -180,20 +186,21 @@ function EditQuestionForm({
                   );
                 }}
               >
-                <SelectTrigger id="edit-q-type" className="w-full sm:w-48">
-                  <SelectValue placeholder="Select type">
-                    {(v) => (v === "true_false" ? "True / False" : "Multiple Choice")}
+                <SelectTrigger id="edit-q-type" className="w-full sm:w-auto sm:min-w-[12.5rem]">
+
+                  <SelectValue placeholder={tBuilder("questionTypeLabel")}>
+                    {(v) => (v === "true_false" ? tCommon("trueFalse") : tCommon("mcq"))}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="mcq">Multiple Choice</SelectItem>
-                  <SelectItem value="true_false">True / False</SelectItem>
+                  <SelectItem value="mcq">{tCommon("mcq")}</SelectItem>
+                  <SelectItem value="true_false">{tCommon("trueFalse")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="edit-q-correct" className="text-xs font-extrabold text-foreground">
-                Correct Answer
+                {tBuilder("correctAnswerLabel")}
               </Label>
               <Select
                 value={String(draft.correctIndex + 1)}
@@ -201,15 +208,15 @@ function EditQuestionForm({
                   setDraft((d) => ({ ...d, correctIndex: Number(v) - 1 }))
                 }
               >
-                <SelectTrigger id="edit-q-correct" className="w-full sm:w-40">
-                  <SelectValue placeholder="Select answer">
-                    {(v) => (v ? `Option ${v}` : "Select answer")}
+                <SelectTrigger id="edit-q-correct" className="w-full sm:w-auto sm:min-w-[10rem]">
+                  <SelectValue placeholder={tBuilder("correctAnswerLabel")}>
+                    {(v) => (v ? `${tBuilder("optionLabel", { index: v })}` : tBuilder("correctAnswerLabel"))}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {draft.options.map((_, i) => (
                     <SelectItem key={i} value={String(i + 1)}>
-                      Option {i + 1}
+                      {tBuilder("optionLabel", { index: i + 1 })}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -220,11 +227,11 @@ function EditQuestionForm({
           {/* Question Prompt */}
           <div className="space-y-1.5">
             <Label htmlFor="edit-q-prompt" className="text-xs font-extrabold text-foreground">
-              Question Prompt
+              {tBuilder("promptLabel")}
             </Label>
             <Textarea
               id="edit-q-prompt"
-              aria-label="Question"
+              aria-label={tBuilder("promptLabel")}
               value={draft.prompt}
               onChange={(e) =>
                 setDraft((d) => ({ ...d, prompt: e.target.value }))
@@ -232,7 +239,7 @@ function EditQuestionForm({
               rows={3}
               maxLength={2000}
               required
-              placeholder="Type the question…"
+              placeholder={tBuilder("promptPlaceholder")}
               className="resize-y"
             />
           </div>
@@ -240,9 +247,9 @@ function EditQuestionForm({
           {/* Options */}
           <div className="space-y-2.5">
             <div className="flex items-center justify-between">
-              <Label className="text-xs font-extrabold text-foreground">Answer Options</Label>
+              <Label className="text-xs font-extrabold text-foreground">{tBuilder("correctAnswerLabel")}</Label>
               <span className="text-xs font-bold text-emerald-800 bg-emerald-100/80 border border-emerald-300/60 rounded-full px-2.5 py-0.5">
-                Correct: Option {draft.correctIndex + 1}
+                {tBuilder("correctAnswerLabel")}: {tBuilder("optionLabel", { index: draft.correctIndex + 1 })}
               </span>
             </div>
             <div className="space-y-2.5">
@@ -255,7 +262,7 @@ function EditQuestionForm({
                         ? "border-[2px] border-emerald-500 bg-emerald-100 text-emerald-900 shadow-emerald-200/50"
                         : "border-[2px] border-border bg-muted/60 text-muted-foreground"
                     )}
-                    title={draft.correctIndex === i ? "Correct Answer" : `Option ${i + 1}`}
+                    title={draft.correctIndex === i ? tBuilder("correctAnswerLabel") : tBuilder("optionLabel", { index: i + 1 })}
                   >
                     {i + 1}
                   </span>
@@ -263,8 +270,8 @@ function EditQuestionForm({
                     value={opt}
                     onChange={(e) => setOption(i, e.target.value)}
                     maxLength={500}
-                    placeholder={`Option ${i + 1}`}
-                    aria-label={`Option ${i + 1}`}
+                    placeholder={tBuilder("optionLabel", { index: i + 1 })}
+                    aria-label={tBuilder("optionLabel", { index: i + 1 })}
                     disabled={draft.type === "true_false"}
                     className={cn(
                       "flex-1",
@@ -282,7 +289,7 @@ function EditQuestionForm({
                             className="size-8 rounded-lg"
                             onClick={() => moveOption(i, "up")}
                             disabled={i === 0}
-                            aria-label={`Move option ${i + 1} up`}
+                            aria-label={`${tBuilder("moveUp")} ${i + 1}`}
                           >
                             <ArrowUp className="size-4" />
                           </Button>
@@ -293,7 +300,7 @@ function EditQuestionForm({
                             className="size-8 rounded-lg"
                             onClick={() => moveOption(i, "down")}
                             disabled={i === draft.options.length - 1}
-                            aria-label={`Move option ${i + 1} down`}
+                            aria-label={`${tBuilder("moveDown")} ${i + 1}`}
                           >
                             <ArrowDown className="size-4" />
                           </Button>
@@ -306,7 +313,7 @@ function EditQuestionForm({
                           size="icon-sm"
                           className="size-8 rounded-lg text-destructive hover:bg-destructive/10 hover:text-destructive"
                           onClick={() => removeOption(i)}
-                          aria-label={`Remove option ${i + 1}`}
+                          aria-label={`${tBuilder("deleteBtn")} ${i + 1}`}
                         >
                           <Trash2 className="size-4" />
                         </Button>
@@ -324,24 +331,16 @@ function EditQuestionForm({
                 onClick={addOption}
                 className="mt-1"
               >
-                Add option
+                {tBuilder("addOptionBtn")}
               </Button>
-            )}
-            {draft.type === "true_false" && (
-              <p className="text-xs font-semibold text-muted-foreground mt-1">
-                True/False questions always have exactly two options.
-              </p>
             )}
           </div>
 
           {/* Explanation */}
           <div className="space-y-1.5">
             <Label htmlFor="edit-q-explanation" className="text-xs font-extrabold text-foreground">
-              Explanation <span className="text-muted-foreground font-normal">(Optional)</span>
+              {tBuilder("explanationLabel")}
             </Label>
-            <p className="text-xs font-semibold text-muted-foreground">
-              Shown to students after answering to explain why the correct option is right.
-            </p>
             <Textarea
               id="edit-q-explanation"
               value={draft.explanation}
@@ -350,7 +349,7 @@ function EditQuestionForm({
               }
               rows={2}
               maxLength={2000}
-              placeholder="Explain why the correct answer is right (shown after answering)…"
+              placeholder={tBuilder("explanationPlaceholder")}
               className="resize-y"
             />
           </div>
@@ -373,13 +372,13 @@ function EditQuestionForm({
             onClick={onClose}
             disabled={saving}
           >
-            Cancel
+            {tCommon("cancel")}
           </Button>
           <Button
             type="submit"
             disabled={saving || !draft.prompt.trim()}
           >
-            {saving ? "Saving…" : "Save changes"}
+            {saving ? tCommon("saving") : t("saveChanges")}
           </Button>
         </DialogFooter>
       </form>

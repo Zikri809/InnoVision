@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -29,6 +30,9 @@ export type LecturerClassCard = {
  */
 export function ClassesPageClient({ classes }: { classes: LecturerClassCard[] }) {
   const router = useRouter();
+  const t = useTranslations("lecturer.classes");
+  const tCommon = useTranslations("common");
+
   const [title, setTitle] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,13 +53,13 @@ export function ClassesPageClient({ classes }: { classes: LecturerClassCard[] })
       });
       const body = await res.json();
       if (!res.ok) {
-        setError(body.message ?? body.error ?? "Failed to create class.");
+        setError(body.message ?? body.error ?? tCommon("errorGeneric"));
         return;
       }
       setTitle("");
       router.refresh();
     } catch {
-      setError("Network error creating class.");
+      setError(tCommon("errorGeneric"));
     } finally {
       submitLock.current = false;
       setCreating(false);
@@ -72,14 +76,13 @@ export function ClassesPageClient({ classes }: { classes: LecturerClassCard[] })
         <div aria-hidden className="pointer-events-none absolute -bottom-12 left-1/3 h-28 w-28 rounded-[60%_40%_45%_55%/50%_60%_40%_55%] bg-blue-100/60" />
         <div className="relative">
           <span className="inline-flex items-center gap-2 rounded-full border-[3px] border-border bg-card px-3.5 py-1 text-xs font-extrabold text-primary">
-            <GraduationCap className="h-4 w-4" aria-hidden /> Lecturer dashboard
+            <GraduationCap className="h-4 w-4" aria-hidden /> {t("heroTitle")}
           </span>
           <h1 className="mt-4 font-heading text-3xl font-semibold [text-wrap:balance] md:text-4xl">
-            Your classes, all in one place
+            {t("heroSubtitle")}
           </h1>
           <p className="mt-2 max-w-xl text-sm font-semibold text-muted-foreground md:text-base">
-            Create a class, share its join code, and build gesture-powered quizzes
-            your students will actually enjoy.
+            {t("createCardSubtitle")}
           </p>
 
           {/* quick stats */}
@@ -90,7 +93,7 @@ export function ClassesPageClient({ classes }: { classes: LecturerClassCard[] })
                 <span className="font-heading text-2xl font-bold">{classes.length}</span>
               </div>
               <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">
-                {classes.length === 1 ? "Class" : "Classes"}
+                {t("classCount", { count: classes.length })}
               </p>
             </div>
             <div className="rounded-2xl border-[3px] border-border bg-card px-5 py-4 shadow-[var(--shadow-clay-sm)]">
@@ -99,7 +102,7 @@ export function ClassesPageClient({ classes }: { classes: LecturerClassCard[] })
                 <span className="font-heading text-2xl font-bold">{totalQuizzes}</span>
               </div>
               <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">
-                {totalQuizzes === 1 ? "Quiz" : "Quizzes"}
+                {t("quizCount", { count: totalQuizzes })}
               </p>
             </div>
           </div>
@@ -114,20 +117,20 @@ export function ClassesPageClient({ classes }: { classes: LecturerClassCard[] })
             <div className="mb-1 grid h-11 w-11 place-items-center rounded-2xl bg-orange-100 text-primary">
               <Plus className="h-5 w-5" aria-hidden />
             </div>
-            <CardTitle>Create a class</CardTitle>
+            <CardTitle>{t("createCardTitle")}</CardTitle>
             <CardDescription>
-              A unique 6-character join code is generated for each class.
+              {t("createCardSubtitle")}
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-1 flex-col">
             <form onSubmit={handleCreate} className="flex flex-1 flex-col gap-3">
               <div>
                 <Label htmlFor="class-title" className="sr-only">
-                  Class title
+                  {t("classTitleLabel")}
                 </Label>
                 <Input
                   id="class-title"
-                  placeholder="e.g. CS101 Algorithms"
+                  placeholder={t("classTitlePlaceholder")}
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   required
@@ -142,7 +145,7 @@ export function ClassesPageClient({ classes }: { classes: LecturerClassCard[] })
                 )}
               </div>
               <Button type="submit" className="mt-auto w-full" disabled={creating || !title.trim()}>
-                {creating ? "Creating…" : "Create class"}
+                {creating ? t("creatingBtn") : t("createBtn")}
               </Button>
             </form>
           </CardContent>
@@ -151,10 +154,10 @@ export function ClassesPageClient({ classes }: { classes: LecturerClassCard[] })
         {/* Class cards */}
         <div>
           <div className="mb-4 flex items-baseline justify-between">
-            <h2 className="font-heading text-xl font-semibold">My classes</h2>
+            <h2 className="font-heading text-xl font-semibold">{t("heroSubtitle")}</h2>
             {classes.length > 0 && (
               <span className="text-sm font-extrabold text-muted-foreground">
-                {classes.length} {classes.length === 1 ? "class" : "classes"}
+                {t("classCount", { count: classes.length })}
               </span>
             )}
           </div>
@@ -164,9 +167,9 @@ export function ClassesPageClient({ classes }: { classes: LecturerClassCard[] })
               <span className="grid h-14 w-14 place-items-center rounded-2xl bg-orange-100 text-primary">
                 <Plus className="h-7 w-7" aria-hidden />
               </span>
-              <p className="mt-4 font-heading text-lg font-semibold">No classes yet</p>
+              <p className="mt-4 font-heading text-lg font-semibold">{t("emptyTitle")}</p>
               <p className="mt-1 max-w-xs text-sm font-semibold text-muted-foreground">
-                Create your first class on the left to start building quizzes for your students.
+                {t("emptySubtitle")}
               </p>
             </div>
           ) : (
@@ -190,17 +193,17 @@ export function ClassesPageClient({ classes }: { classes: LecturerClassCard[] })
                     </h3>
                     <div className="mt-auto flex items-center justify-between pt-3">
                       <span className="text-xs font-extrabold text-muted-foreground">
-                        {c.quizCount} {c.quizCount === 1 ? "quiz" : "quizzes"}
+                        {t("quizCount", { count: c.quizCount })}
                       </span>
                       <span className="inline-flex items-center gap-1 text-sm font-extrabold text-primary transition-transform duration-200 group-hover:translate-x-0.5">
-                        Open <ArrowRight className="h-4 w-4" aria-hidden />
+                        {tCommon("next")} <ArrowRight className="h-4 w-4" aria-hidden />
                       </span>
                     </div>
                   </Link>
                 </li>
               ))}
 
-              {/* Balancing "new class" tile — keeps the grid intentional at any count. */}
+              {/* Balancing "new class" tile */}
               <li>
                 <button
                   type="button"
@@ -210,7 +213,7 @@ export function ClassesPageClient({ classes }: { classes: LecturerClassCard[] })
                   <span className="grid h-10 w-10 place-items-center rounded-2xl border-[3px] border-current">
                     <Plus className="h-5 w-5" aria-hidden />
                   </span>
-                  <span className="text-sm font-extrabold">New class</span>
+                  <span className="text-sm font-extrabold">{t("createCardTitle")}</span>
                 </button>
               </li>
             </ul>

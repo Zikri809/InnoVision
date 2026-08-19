@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useLocale, useTranslations } from "next-intl";
 import { ArrowDown, ArrowLeft, ArrowUp, Check, Pencil, Settings2, Timer, Trash2, Wand2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDuration } from "@/lib/format/duration";
 import { TITLE_MAX } from "@/lib/quizzes/validation";
-import { MODE_CLASS, MODE_LABEL, STATUS_CLASS, STATUS_LABEL } from "@/lib/quizzes/labels";
+import { MODE_CLASS, STATUS_CLASS, getModeLabel, getStatusLabel } from "@/lib/quizzes/labels";
 import {
   Select,
   SelectContent,
@@ -84,6 +85,10 @@ export function QuizBuilderClient({
   ocrConfig: OcrConfig;
 }) {
   const router = useRouter();
+  const locale = useLocale();
+  const t = useTranslations("lecturer.builder");
+  const tClasses = useTranslations("lecturer.classes");
+  const tCommon = useTranslations("common");
   const isDraft = quiz.status === "draft";
 
   // Title editing state
@@ -142,11 +147,11 @@ export function QuizBuilderClient({
 
     const trimmed = titleDraft.trim();
     if (!trimmed) {
-      setError("Quiz title is required.");
+      setError(tCommon("errorGeneric"));
       return;
     }
     if (trimmed.length > TITLE_MAX) {
-      setError(`Quiz title must be at most ${TITLE_MAX} characters.`);
+      setError(`Title max ${TITLE_MAX}`);
       return;
     }
     if (trimmed === quiz.title) {
@@ -167,7 +172,7 @@ export function QuizBuilderClient({
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(body.message ?? body.error ?? "Could not update quiz title.");
+        setError(body.message ?? body.error ?? tCommon("errorGeneric"));
         if (res.status === 409) {
           setEditingTitle(false);
           router.refresh();
@@ -178,11 +183,11 @@ export function QuizBuilderClient({
         return;
       }
       setEditingTitle(false);
-      setNotice("Quiz title updated.");
+      setNotice(t("renameQuiz"));
       router.refresh();
       editTitleBtnRef.current?.focus();
     } catch {
-      setError("Network error updating quiz title.");
+      setError(tCommon("errorGeneric"));
     } finally {
       titleSubmitLock.current = false;
       setSavingTitle(false);
@@ -232,8 +237,6 @@ export function QuizBuilderClient({
       if (target < 0 || target >= d.options.length) return d;
       const options = [...d.options];
       [options[index], options[target]] = [options[target], options[index]];
-      // Follow the correct answer through the swap so it keeps pointing at
-      // the same option text.
       let correctIndex = d.correctIndex;
       if (correctIndex === index) correctIndex = target;
       else if (correctIndex === target) correctIndex = index;
@@ -244,12 +247,6 @@ export function QuizBuilderClient({
   function startEdit(q: QuestionRow, index: number) {
     setEditingQuestion(q);
     setEditingIndex(index);
-    setError(null);
-    setNotice(null);
-  }
-
-  function resetForm() {
-    setDraft(emptyDraft);
     setError(null);
     setNotice(null);
   }
@@ -266,7 +263,6 @@ export function QuizBuilderClient({
       prompt: draft.prompt,
       options: draft.options,
       correctIndex: draft.correctIndex,
-      // Send the explanation as-is; the route normalizes null (Zod allows "").
       explanation: draft.explanation,
     };
 
@@ -276,23 +272,22 @@ export function QuizBuilderClient({
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const body = await res.json().catch(() => ({}));
+      const body = await res.json();
       if (!res.ok) {
-        setError(body.message ?? body.error ?? "Could not save the question.");
+        setError(body.message ?? body.error ?? tCommon("errorGeneric"));
         return;
       }
-      resetForm();
-      setNotice("Question added.");
+      setDraft(emptyDraft);
+      setNotice(t("addQuestionBtn"));
       router.refresh();
     } catch {
-      setError("Network error saving question.");
+      setError(tCommon("errorGeneric"));
     } finally {
       setSaving(false);
     }
   }
 
   async function handleDelete(q: QuestionRow) {
-    if (!window.confirm("Delete this question?")) return;
     setError(null);
     setNotice(null);
     try {
@@ -301,74 +296,71 @@ export function QuizBuilderClient({
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        setError(body.message ?? body.error ?? "Could not delete the question.");
+        setError(body.message ?? body.error ?? tCommon("errorGeneric"));
         return;
       }
-      if (editingQuestion?.id === q.id) {
-        setEditingQuestion(null);
-        setEditingIndex(null);
-      }
-      setNotice("Question deleted.");
+      setNotice(t("deleteBtn"));
       router.refresh();
     } catch {
-      setError("Network error deleting question.");
+      setError(tCommon("errorGeneric"));
     }
   }
 
   async function handleMove(q: QuestionRow, direction: "up" | "down") {
     if (reordering) return;
-    const index = questions.findIndex((x) => x.id === q.id);
-    const target =
-      direction === "up" ? index - 1 : index + 1;
-    if (target < 0 || target >= questions.length) return;
+    const currentIdx = questions.findIndex((x) => x.id === q.id);
+    const targetIdx = direction === "up" ? currentIdx - 1 : currentIdx + 1;
+    if (targetIdx < 0 || targetIdx >= questions.length) return;
 
-    const ordered = questions.map((x) => x.id);
-    [ordered[index], ordered[target]] = [ordered[target], ordered[index]];
-
+    setReordering(true);
     setError(null);
     setNotice(null);
-    setReordering(true);
+
+    const nextQuestions = [...questions];
+    const [moved] = nextQuestions.splice(currentIdx, 1);
+    nextQuestions.splice(targetIdx, 0, moved);
+    const questionIds = nextQuestions.map((x) => x.id);
+
     try {
-      const res = await fetch(`/api/quizzes/${quiz.id}/reorder`, {
+      const res = await fetch(`/api/quizzes/${quiz.id}/questions/reorder`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ questionIds: ordered }),
+        body: JSON.stringify({ questionIds }),
       });
+      const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        setError(body.message ?? body.error ?? "Could not reorder.");
+        setError(body.message ?? body.error ?? tCommon("errorGeneric"));
         return;
       }
       router.refresh();
     } catch {
-      setError("Network error reordering questions.");
+      setError(tCommon("errorGeneric"));
     } finally {
       setReordering(false);
     }
   }
 
   async function handlePublish() {
-    if (publishing) return;
     setPublishing(true);
     setError(null);
-    setNotice(null);
     try {
       const res = await fetch(`/api/quizzes/${quiz.id}/publish`, {
         method: "POST",
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(body.message ?? body.error ?? "Could not publish the quiz.");
+        setError(body.message ?? body.error ?? tCommon("errorGeneric"));
         return;
       }
-      setNotice("Quiz published — students can now see it.");
       router.refresh();
     } catch {
-      setError("Network error publishing quiz.");
+      setError(tCommon("errorGeneric"));
     } finally {
       setPublishing(false);
     }
   }
+
+  const defaultTrueFalseOptions = locale === "ms" ? ["Betul", "Salah"] : ["True", "False"];
 
   return (
     <div className="space-y-6">
@@ -382,123 +374,75 @@ export function QuizBuilderClient({
           >
             <ArrowLeft className="h-4 w-4" aria-hidden /> {quiz.class_title}
           </Link>
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-4">
-            <div className="min-w-0 flex-1">
-              {editingTitle && isDraft ? (
+          <div className="mt-3 flex flex-wrap items-end justify-between gap-6">
+            <div className="min-w-0">
+              {editingTitle ? (
                 <form
                   onSubmit={handleTitleSave}
-                  className="space-y-2"
-                  aria-label="Edit quiz title"
+                  className="flex flex-wrap items-center gap-2"
                 >
-                  <div className="flex flex-wrap items-center gap-2">
-                    <div className="relative min-w-[240px] max-w-lg flex-1">
-                      <Input
-                        ref={titleInputRef}
-                        value={titleDraft}
-                        onChange={(e) => setTitleDraft(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Escape") {
-                            e.preventDefault();
-                            cancelTitleEdit();
-                          }
-                        }}
-                        maxLength={TITLE_MAX}
-                        disabled={savingTitle}
-                        placeholder="Quiz title…"
-                        aria-label="Quiz title"
-                        aria-required="true"
-                        aria-invalid={Boolean(error && !titleDraft.trim())}
-                        className="h-11 font-heading text-lg font-semibold pr-16 bg-white/90 dark:bg-card/90"
-                      />
-                      <span
-                        aria-hidden
-                        className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-bold text-muted-foreground"
-                      >
-                        {titleDraft.length}/{TITLE_MAX}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <Button
-                        type="submit"
-                        size="sm"
-                        disabled={savingTitle || !titleDraft.trim()}
-                        className="h-10 px-3.5 gap-1.5 font-bold"
-                      >
-                        {savingTitle ? (
-                          "Saving…"
-                        ) : (
-                          <>
-                            <Check className="size-4" aria-hidden />
-                            Save
-                          </>
-                        )}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={cancelTitleEdit}
-                        disabled={savingTitle}
-                        className="h-10 px-3"
-                      >
-                        <X className="size-4 mr-1" aria-hidden />
-                        Cancel
-                      </Button>
-                    </div>
-                  </div>
-                  <p className="text-xs font-semibold text-muted-foreground">
-                    Press <kbd className="rounded-lg border-[2px] border-border bg-muted px-1.5 py-0.5 font-mono text-[11px] font-bold shadow-[0_2px_0_var(--border)]">Enter</kbd> to save, <kbd className="rounded-lg border-[2px] border-border bg-muted px-1.5 py-0.5 font-mono text-[11px] font-bold shadow-[0_2px_0_var(--border)]">Esc</kbd> to cancel.
-                  </p>
+                  <Input
+                    ref={titleInputRef}
+                    value={titleDraft}
+                    onChange={(e) => setTitleDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") cancelTitleEdit();
+                    }}
+                    maxLength={TITLE_MAX}
+                    disabled={savingTitle}
+                    aria-label={t("renameQuiz")}
+                    className="font-heading text-2xl font-semibold sm:text-3xl max-w-md h-auto py-1 px-2.5 rounded-xl border-[3px] border-primary/40 bg-card/90 focus-visible:ring-primary/40"
+                  />
+                  <Button
+                    type="submit"
+                    size="icon-sm"
+                    disabled={savingTitle || !titleDraft.trim()}
+                    aria-label={tCommon("save")}
+                    className="size-9 rounded-xl"
+                  >
+                    <Check className="size-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={cancelTitleEdit}
+                    disabled={savingTitle}
+                    aria-label={tCommon("cancel")}
+                    className="size-9 rounded-xl"
+                  >
+                    <X className="size-4" />
+                  </Button>
                 </form>
               ) : (
-                <div className="flex items-center gap-2.5 flex-wrap">
+                <div className="group/title flex items-center gap-2">
                   <h1
                     ref={headingRef}
                     tabIndex={-1}
-                    className="font-heading text-3xl font-semibold outline-none [text-wrap:balance]"
+                    className="font-heading text-3xl font-semibold [text-wrap:balance] focus:outline-none"
                   >
                     {quiz.title}
                   </h1>
                   {isDraft && (
-                    <div className="flex items-center gap-1">
-                      <Button
-                        ref={editTitleBtnRef}
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={startTitleEdit}
-                        disabled={savingTitle || publishing || settingsOpen}
-                        aria-label={`Rename quiz: ${quiz.title}`}
-                        title="Rename title (inline)"
-                        className="relative size-9 rounded-xl text-muted-foreground hover:text-primary hover:bg-white/60 dark:hover:bg-card/60 transition-colors before:absolute before:-inset-1 before:content-['']"
-                      >
-                        <Pencil className="size-4" aria-hidden="true" />
-                      </Button>
-                      <Button
-                        ref={settingsBtnRef}
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={() => {
-                          cancelTitleEdit();
-                          setSettingsOpen(true);
-                        }}
-                        disabled={savingTitle || publishing}
-                        aria-label="Edit quiz settings"
-                        title="Edit title, mode, and time limit"
-                        aria-haspopup="dialog"
-                        aria-expanded={settingsOpen}
-                        className="relative size-9 rounded-xl text-muted-foreground hover:text-primary hover:bg-white/60 dark:hover:bg-card/60 transition-colors before:absolute before:-inset-1 before:content-['']"
-                      >
-                        <Settings2 className="size-4" aria-hidden="true" />
-                      </Button>
-                    </div>
+                    <Button
+                      ref={editTitleBtnRef}
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={startTitleEdit}
+                      aria-label={t("renameQuiz")}
+                      className="size-8 opacity-40 transition-opacity group-hover/title:opacity-100 hover:opacity-100 focus-visible:opacity-100 rounded-lg"
+                    >
+                      <Pencil className="size-4" />
+                    </Button>
                   )}
                 </div>
               )}
-              <div className="mt-3 flex flex-wrap items-center gap-2.5">
+
+              {/* Status and Mode Chips */}
+              <div className="mt-2.5 flex flex-wrap items-center gap-2">
                 <span className={`inline-flex items-center justify-center h-8 rounded-full border-[3px] px-3.5 text-xs font-extrabold select-none cursor-default ${STATUS_CLASS[quiz.status]}`}>
-                  {STATUS_LABEL[quiz.status]}
+                  {getStatusLabel(quiz.status, locale)}
                 </span>
 
                 {isDraft ? (
@@ -511,15 +455,15 @@ export function QuizBuilderClient({
                     disabled={savingTitle || publishing}
                     aria-haspopup="dialog"
                     aria-expanded={settingsOpen}
-                    aria-label={`Quiz mode: ${MODE_LABEL[quiz.mode]}. Click to edit settings.`}
+                    aria-label={`Quiz mode: ${getModeLabel(quiz.mode, locale)}.`}
                     className={`relative inline-flex items-center justify-center gap-1.5 h-8 rounded-full border-[3px] px-3.5 text-xs font-extrabold cursor-pointer transition-[transform,box-shadow] duration-150 hover:-translate-y-0.5 hover:shadow-[var(--shadow-clay-sm)] active:translate-y-0 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/70 disabled:pointer-events-none disabled:opacity-60 before:absolute before:-inset-1.5 before:content-[''] ${MODE_CLASS[quiz.mode]}`}
                   >
-                    <span>{MODE_LABEL[quiz.mode]}</span>
+                    <span>{getModeLabel(quiz.mode, locale)}</span>
                     <Pencil className="size-3 opacity-60" aria-hidden="true" />
                   </button>
                 ) : (
                   <span className={`inline-flex items-center justify-center h-8 rounded-full border-[3px] px-3.5 text-xs font-extrabold select-none cursor-default ${MODE_CLASS[quiz.mode]}`}>
-                    {MODE_LABEL[quiz.mode]}
+                    {getModeLabel(quiz.mode, locale)}
                   </span>
                 )}
 
@@ -534,23 +478,22 @@ export function QuizBuilderClient({
                       disabled={savingTitle || publishing}
                       aria-haspopup="dialog"
                       aria-expanded={settingsOpen}
-                      aria-label={`Time limit: ${formatDuration(quiz.time_limit_sec)}. Click to edit settings.`}
                       className="relative inline-flex items-center justify-center gap-1.5 h-8 rounded-full border-[3px] border-border bg-muted px-3.5 text-xs font-extrabold tabular-nums text-muted-foreground cursor-pointer transition-[transform,box-shadow] duration-150 hover:-translate-y-0.5 hover:shadow-[var(--shadow-clay-sm)] active:translate-y-0 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/70 disabled:pointer-events-none disabled:opacity-60 before:absolute before:-inset-1.5 before:content-['']"
                     >
                       <Timer className="size-3.5" aria-hidden="true" />
-                      <span>{formatDuration(quiz.time_limit_sec)} limit</span>
+                      <span>{formatDuration(quiz.time_limit_sec, locale)}</span>
                       <Pencil className="size-3 opacity-60" aria-hidden="true" />
                     </button>
                   ) : (
                     <span className="inline-flex items-center justify-center gap-1.5 h-8 rounded-full border-[3px] border-border bg-muted px-3.5 text-xs font-extrabold tabular-nums text-muted-foreground select-none cursor-default">
                       <Timer className="size-3.5" aria-hidden="true" />
-                      {formatDuration(quiz.time_limit_sec)} limit
+                      {formatDuration(quiz.time_limit_sec, locale)}
                     </span>
                   )
                 )}
 
                 <span className="inline-flex items-center justify-center h-8 rounded-full border-[3px] border-border bg-muted px-3.5 text-xs font-extrabold text-muted-foreground select-none cursor-default">
-                  {questions.length} {questions.length === 1 ? "question" : "questions"}
+                  {t("questionCount", { count: questions.length })}
                 </span>
               </div>
             </div>
@@ -560,12 +503,12 @@ export function QuizBuilderClient({
                 onClick={() => setGenerateOpen(true)}
               >
                 <Wand2 className="mr-1.5 size-4" />
-                Generate from file
+                {t("generateFromFile")}
               </Button>
             )}
             {!isDraft && (
               <Link href={`/lecturer/quizzes/${quiz.id}/results`}>
-                <Button variant="accent">View results</Button>
+                <Button variant="accent">{t("viewResults")}</Button>
               </Link>
             )}
           </div>
@@ -579,7 +522,7 @@ export function QuizBuilderClient({
         onOpenChange={handleDialogClose}
         quiz={quiz}
         onSuccess={() => {
-          setNotice("Quiz settings updated.");
+          setNotice(t("renameQuiz"));
           router.refresh();
         }}
         onError={(status, message) => {
@@ -613,7 +556,7 @@ export function QuizBuilderClient({
         question={editingQuestion}
         questionIndex={editingIndex ?? undefined}
         onSuccess={() => {
-          setNotice("Question updated.");
+          setNotice(t("editBtn"));
           router.refresh();
         }}
       />
@@ -629,7 +572,7 @@ export function QuizBuilderClient({
         question={regeneratingQuestion}
         questionIndex={regeneratingIndex ?? undefined}
         onSuccess={() => {
-          setNotice("Question regenerated.");
+          setNotice(t("regenerateBtn"));
           router.refresh();
         }}
       />
@@ -639,10 +582,7 @@ export function QuizBuilderClient({
           role="alert"
           className="mb-6 rounded-2xl border-[3px] border-amber-300 bg-amber-50 p-4 text-sm font-semibold text-amber-900"
         >
-          This quiz is <strong className="font-extrabold">{STATUS_LABEL[quiz.status].toLowerCase()}</strong>.
-          Questions can no longer be edited. {quiz.status === "live"
-            ? "Students can see and take it."
-            : "It is closed to new attempts."}
+          {quiz.status === "live" ? tCommon("active") : tCommon("closed")}
         </div>
       )}
 
@@ -662,16 +602,16 @@ export function QuizBuilderClient({
       {isDraft && (
         <Card className="mb-6">
           <CardHeader>
-            <CardTitle>Add question</CardTitle>
+            <CardTitle>{t("addQuestionTitle")}</CardTitle>
             <CardDescription>
-              Multiple choice: 2–5 options (fingers 1–5). True/False: exactly 2.
+              {t("addQuestionTitle")}
             </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSave} className="space-y-4">
               <div className="flex flex-wrap items-center gap-4 sm:gap-6">
                 <div className="space-y-1">
-                  <Label htmlFor="q-type">Question Type</Label>
+                  <Label htmlFor="q-type">{t("questionTypeLabel")}</Label>
                   <Select
                     value={draft.type}
                     onValueChange={(v) => {
@@ -681,41 +621,41 @@ export function QuizBuilderClient({
                           ? {
                               ...d,
                               type,
-                              options: ["True", "False"],
+                              options: defaultTrueFalseOptions,
                               correctIndex: 0,
                             }
                           : { ...d, type, options: d.options.length >= 2 ? d.options : ["", ""] },
                       );
                     }}
                   >
-                    <SelectTrigger id="q-type" className="w-full sm:w-44">
-                      <SelectValue placeholder="Select type">
-                        {(v) => (v === "true_false" ? "True / False" : "Multiple Choice")}
+                    <SelectTrigger id="q-type" className="w-full sm:w-auto sm:min-w-[11rem]">
+                      <SelectValue placeholder={t("questionTypeLabel")}>
+                        {(v) => (v === "true_false" ? tCommon("trueFalse") : tCommon("mcq"))}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="mcq">Multiple Choice</SelectItem>
-                      <SelectItem value="true_false">True / False</SelectItem>
+                      <SelectItem value="mcq">{tCommon("mcq")}</SelectItem>
+                      <SelectItem value="true_false">{tCommon("trueFalse")}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-1">
-                  <Label htmlFor="q-correct">Correct Answer</Label>
+                  <Label htmlFor="q-correct">{t("correctAnswerLabel")}</Label>
                   <Select
                     value={String(draft.correctIndex + 1)}
                     onValueChange={(v) =>
                       setDraft((d) => ({ ...d, correctIndex: Number(v) - 1 }))
                     }
                   >
-                    <SelectTrigger id="q-correct" className="w-full sm:w-36">
-                      <SelectValue placeholder="Select answer">
-                        {(v) => (v ? `Option ${v}` : "Select answer")}
+                    <SelectTrigger id="q-correct" className="w-full sm:w-auto sm:min-w-[10rem]">
+                      <SelectValue placeholder={t("correctAnswerLabel")}>
+                        {(v) => (v ? `${t("optionLabel", { index: v })}` : t("correctAnswerLabel"))}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {draft.options.map((_, i) => (
                         <SelectItem key={i} value={String(i + 1)}>
-                          Option {i + 1}
+                          {t("optionLabel", { index: i + 1 })}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -724,7 +664,7 @@ export function QuizBuilderClient({
               </div>
 
               <div className="space-y-1">
-                <Label htmlFor="q-prompt">Question Prompt</Label>
+                <Label htmlFor="q-prompt">{t("promptLabel")}</Label>
                 <Textarea
                   id="q-prompt"
                   value={draft.prompt}
@@ -732,12 +672,12 @@ export function QuizBuilderClient({
                   rows={3}
                   maxLength={2000}
                   required
-                  placeholder="Type the question…"
+                  placeholder={t("promptPlaceholder")}
                 />
               </div>
 
               <div className="space-y-2">
-                <Label>Options</Label>
+                <Label>{t("correctAnswerLabel")}</Label>
                 {draft.options.map((opt, i) => (
                   <div key={i} className="flex items-center gap-2">
                     <span
@@ -753,8 +693,8 @@ export function QuizBuilderClient({
                       value={opt}
                       onChange={(e) => setOption(i, e.target.value)}
                       maxLength={500}
-                      placeholder={`Option ${i + 1}`}
-                      aria-label={`Option ${i + 1}`}
+                      placeholder={t("optionLabel", { index: i + 1 })}
+                      aria-label={t("optionLabel", { index: i + 1 })}
                       disabled={draft.type === "true_false"}
                       className="flex-1"
                     />
@@ -768,7 +708,7 @@ export function QuizBuilderClient({
                               size="icon-sm"
                               onClick={() => moveOption(i, "up")}
                               disabled={i === 0}
-                              aria-label={`Move option ${i + 1} up`}
+                              aria-label={`${t("moveUp")} ${i + 1}`}
                             >
                               <ArrowUp className="size-4" />
                             </Button>
@@ -778,7 +718,7 @@ export function QuizBuilderClient({
                               size="icon-sm"
                               onClick={() => moveOption(i, "down")}
                               disabled={i === draft.options.length - 1}
-                              aria-label={`Move option ${i + 1} down`}
+                              aria-label={`${t("moveDown")} ${i + 1}`}
                             >
                               <ArrowDown className="size-4" />
                             </Button>
@@ -790,7 +730,7 @@ export function QuizBuilderClient({
                             variant="ghost"
                             size="icon-sm"
                             onClick={() => removeOption(i)}
-                            aria-label={`Remove option ${i + 1}`}
+                            aria-label={`${t("deleteBtn")} ${i + 1}`}
                           >
                             <Trash2 className="size-4" />
                           </Button>
@@ -806,22 +746,13 @@ export function QuizBuilderClient({
                     size="sm"
                     onClick={addOption}
                   >
-                    Add option
+                    {t("addOptionBtn")}
                   </Button>
-                )}
-                {draft.type === "true_false" && (
-                  <p className="text-xs text-muted-foreground">
-                    True/False questions always have exactly two options.
-                  </p>
                 )}
               </div>
 
               <div className="space-y-1">
-                <Label htmlFor="q-explanation" className="font-extrabold">Explanation (Optional)</Label>
-                <p className="text-xs font-semibold text-muted-foreground">
-                  Shown to students after they answer — explain why the correct
-                  option is right.
-                </p>
+                <Label htmlFor="q-explanation" className="font-extrabold">{t("explanationLabel")}</Label>
                 <Textarea
                   id="q-explanation"
                   value={draft.explanation}
@@ -830,13 +761,13 @@ export function QuizBuilderClient({
                   }
                   rows={2}
                   maxLength={2000}
-                  placeholder="Explain why the correct answer is right (shown after answering)…"
+                  placeholder={t("explanationPlaceholder")}
                 />
               </div>
 
               <div className="flex items-center gap-3">
                 <Button type="submit" disabled={saving || !draft.prompt.trim()}>
-                  {saving ? "Adding…" : "Add question"}
+                  {saving ? tCommon("loading") : t("addQuestionBtn")}
                 </Button>
               </div>
             </form>
@@ -847,10 +778,9 @@ export function QuizBuilderClient({
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
-            <CardTitle>Questions</CardTitle>
+            <CardTitle>{t("questionsHeader")}</CardTitle>
             <CardDescription>
-              {questions.length} question{questions.length === 1 ? "" : "s"} —
-              answered with {questions.length === 0 ? "gestures" : "1–5 fingers"}
+              {t("questionCount", { count: questions.length })}
             </CardDescription>
           </div>
           {isDraft && (
@@ -858,14 +788,14 @@ export function QuizBuilderClient({
               onClick={handlePublish}
               disabled={publishing || questions.length === 0}
             >
-              {publishing ? "Publishing…" : "Publish"}
+              {publishing ? t("publishingBtn") : t("publishBtn")}
             </Button>
           )}
         </CardHeader>
         <CardContent>
           {questions.length === 0 ? (
             <p className="rounded-2xl border-[3px] border-dashed border-border bg-card p-6 text-center text-sm font-semibold text-muted-foreground">
-              No questions yet. Add one above — you need at least one to publish.
+              {t("noQuestionsSubtitle")}
             </p>
           ) : (
             <ul className="divide-y divide-border">
@@ -875,10 +805,10 @@ export function QuizBuilderClient({
                     <div className="flex items-center gap-2">
                       <span className="font-heading text-sm font-semibold text-muted-foreground">{idx + 1}.</span>
                       <span className="rounded-full border-[3px] border-border bg-muted px-2.5 py-0.5 text-xs font-extrabold text-foreground">
-                        {q.type === "mcq" ? "MCQ" : "True / False"}
+                        {q.type === "mcq" ? tCommon("mcq") : tCommon("trueFalse")}
                       </span>
                       <span className="text-xs font-bold text-muted-foreground">
-                        Answer: Option {q.correct_index + 1}
+                        {t("correctAnswerLabel")}: {t("optionLabel", { index: q.correct_index + 1 })}
                       </span>
                     </div>
                     <p className="mt-1.5 font-heading text-base font-semibold">{q.prompt}</p>
@@ -887,7 +817,7 @@ export function QuizBuilderClient({
                     </p>
                     {q.explanation && (
                       <p className="mt-1.5 text-xs font-semibold text-muted-foreground">
-                        <strong className="font-extrabold text-foreground">Explanation:</strong> {q.explanation}
+                        <strong className="font-extrabold text-foreground">{t("explanationLabel")}:</strong> {q.explanation}
                       </p>
                     )}
                   </div>
@@ -900,17 +830,17 @@ export function QuizBuilderClient({
                           setRegeneratingQuestion(q);
                           setRegeneratingIndex(idx);
                         }}
-                        aria-label="Regenerate question"
+                        aria-label={t("regenerateBtn")}
                         className="h-8 gap-1.5 px-2.5 text-xs font-bold"
                       >
                         <Wand2 className="size-3.5 text-primary" />
-                        Regenerate
+                        {t("regenerateBtn")}
                       </Button>
                       <Button
                         variant="ghost"
                         size="icon-sm"
                         onClick={() => startEdit(q, idx)}
-                        aria-label="Edit question"
+                        aria-label={t("editBtn")}
                         className="size-8"
                       >
                         <Pencil className="size-4" />
@@ -920,7 +850,7 @@ export function QuizBuilderClient({
                         size="icon-sm"
                         onClick={() => handleMove(q, "up")}
                         disabled={idx === 0 || reordering}
-                        aria-label="Move up"
+                        aria-label={t("moveUp")}
                         className="size-8"
                       >
                         <ArrowUp className="size-4" />
@@ -930,7 +860,7 @@ export function QuizBuilderClient({
                         size="icon-sm"
                         onClick={() => handleMove(q, "down")}
                         disabled={idx === questions.length - 1 || reordering}
-                        aria-label="Move down"
+                        aria-label={t("moveDown")}
                         className="size-8"
                       >
                         <ArrowDown className="size-4" />
@@ -939,7 +869,7 @@ export function QuizBuilderClient({
                         variant="ghost"
                         size="icon-sm"
                         onClick={() => handleDelete(q)}
-                        aria-label="Delete question"
+                        aria-label={t("deleteBtn")}
                         className="size-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
                       >
                         <Trash2 className="size-4" />

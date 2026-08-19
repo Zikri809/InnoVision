@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,17 +23,15 @@ export type StudentClassCard = {
   quizCount: number;
 };
 
-/**
- * Student "My Classes" dashboard — hero band, quick stats, and chunky class
- * cards (replaces the old flat single-column list).
- */
 export function StudentClassesClient({ classes }: { classes: StudentClassCard[] }) {
   const router = useRouter();
+  const t = useTranslations("student.classes");
+  const tCommon = useTranslations("common");
+
   const [code, setCode] = useState("");
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  // Ref lock guards against a fast double-click before React re-renders.
   const submitLock = useRef(false);
 
   async function handleJoin(e: React.FormEvent) {
@@ -50,19 +49,19 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
       });
       const body = await res.json();
       if (!res.ok) {
-        // already_enrolled is not an error worth surfacing harshly.
         if (res.status === 409) {
-          setNotice("You are already enrolled in that class.");
+          setNotice(t("alreadyEnrolled"));
         } else {
-          setError(body.message ?? body.error ?? "Could not join the class.");
+          setError(body.message ?? body.error ?? tCommon("errorGeneric"));
         }
         return;
       }
       setCode("");
-      setNotice(`Joined ${body.class?.title ?? "class"}.`);
+      setNotice(t("joinedNotice", { title: body.class?.title ?? "" }));
       router.refresh();
+
     } catch {
-      setError("Network error joining class.");
+      setError(tCommon("errorGeneric"));
     } finally {
       submitLock.current = false;
       setJoining(false);
@@ -79,14 +78,13 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
         <div aria-hidden className="pointer-events-none absolute -bottom-12 left-1/3 h-28 w-28 rounded-[60%_40%_45%_55%/50%_60%_40%_55%] bg-orange-100/70" />
         <div className="relative">
           <span className="inline-flex items-center gap-2 rounded-full border-[3px] border-border bg-card px-3.5 py-1 text-xs font-extrabold text-accent">
-            <Sparkles className="h-4 w-4" aria-hidden /> Student dashboard
+            <Sparkles className="h-4 w-4" aria-hidden /> {t("heroTitle")}
           </span>
           <h1 className="mt-4 font-heading text-3xl font-semibold [text-wrap:balance] md:text-4xl">
-            Ready to play, {classes.length > 0 ? "champ" : "friend"}?
+            {t("heroSubtitle")}
           </h1>
           <p className="mt-2 max-w-xl text-sm font-semibold text-muted-foreground md:text-base">
-            Join your classes with a code, then wave your hand to answer quizzes —
-            no clicks needed.
+            {t("joinCardSubtitle")}
           </p>
 
           {/* quick stats */}
@@ -97,7 +95,7 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
                 <span className="font-heading text-2xl font-bold">{classes.length}</span>
               </div>
               <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">
-                {classes.length === 1 ? "Class" : "Classes"}
+                {t("classCount", { count: classes.length })}
               </p>
             </div>
             <Link href="/student/quizzes" className="block rounded-2xl border-[3px] border-border bg-card px-5 py-4 shadow-[var(--shadow-clay-sm)] transition-[transform,box-shadow] duration-200 hover:-translate-y-0.5 hover:shadow-[0_6px_0_var(--border)]">
@@ -106,7 +104,7 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
                 <span className="font-heading text-2xl font-bold">{totalQuizzes}</span>
               </div>
               <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">
-                Live {totalQuizzes === 1 ? "quiz" : "quizzes"} →
+                {t("liveQuizCount", { count: totalQuizzes })} →
               </p>
             </Link>
           </div>
@@ -115,26 +113,25 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
 
       {/* ── Join + list ── */}
       <section className="grid items-stretch gap-6 lg:grid-cols-[340px_1fr]">
-        {/* Join card — stretches to match the classes row height (bento alignment). */}
         <Card className="flex flex-col">
           <CardHeader>
             <div className="mb-1 grid h-11 w-11 place-items-center rounded-2xl bg-blue-100 text-accent">
               <KeyRound className="h-5 w-5" aria-hidden />
             </div>
-            <CardTitle>Join a class</CardTitle>
+            <CardTitle>{t("joinCardTitle")}</CardTitle>
             <CardDescription>
-              Use the 6-character code your lecturer shared.
+              {t("joinCardSubtitle")}
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-1 flex-col">
             <form onSubmit={handleJoin} className="flex flex-1 flex-col gap-3">
               <div>
                 <Label htmlFor="join-code" className="sr-only">
-                  Join code
+                  {t("joinCardTitle")}
                 </Label>
                 <Input
                   id="join-code"
-                  placeholder="e.g. AB3X9K"
+                  placeholder={t("joinCodePlaceholder")}
                   value={code}
                   onChange={(e) => setCode(e.target.value)}
                   maxLength={12}
@@ -154,7 +151,7 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
                 )}
               </div>
               <Button type="submit" variant="accent" className="mt-auto w-full" disabled={joining || !code.trim()}>
-                {joining ? "Joining…" : "Join class"}
+                {joining ? t("joiningBtn") : t("joinBtn")}
               </Button>
             </form>
           </CardContent>
@@ -163,10 +160,10 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
         {/* Class cards */}
         <div>
           <div className="mb-4 flex items-baseline justify-between">
-            <h2 className="font-heading text-xl font-semibold">My classes</h2>
+            <h2 className="font-heading text-xl font-semibold">{t("myClasses")}</h2>
             {classes.length > 0 && (
               <span className="text-sm font-extrabold text-muted-foreground">
-                {classes.length} {classes.length === 1 ? "class" : "classes"}
+                {t("classCount", { count: classes.length })}
               </span>
             )}
           </div>
@@ -176,9 +173,9 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
               <span className="grid h-14 w-14 place-items-center rounded-2xl bg-blue-100 text-accent">
                 <KeyRound className="h-7 w-7" aria-hidden />
               </span>
-              <p className="mt-4 font-heading text-lg font-semibold">No classes yet</p>
+              <p className="mt-4 font-heading text-lg font-semibold">{t("emptyTitle")}</p>
               <p className="mt-1 max-w-xs text-sm font-semibold text-muted-foreground">
-                Join your first class with a code on the left to unlock its quizzes.
+                {t("emptySubtitle")}
               </p>
             </div>
           ) : (
@@ -194,7 +191,7 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
                         {c.title.trim().charAt(0).toUpperCase()}
                       </span>
                       <span className="rounded-full border-[3px] border-border bg-muted px-2.5 py-0.5 text-xs font-extrabold text-muted-foreground">
-                        {c.quizCount} live
+                        {t("liveQuizCount", { count: c.quizCount })}
                       </span>
                     </div>
                     <h3 className="mt-3.5 font-heading text-lg font-semibold leading-snug [text-wrap:balance]">
@@ -202,14 +199,13 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
                     </h3>
                     <div className="mt-auto flex items-center justify-end pt-3">
                       <span className="inline-flex items-center gap-1 text-sm font-extrabold text-accent transition-transform duration-200 group-hover:translate-x-0.5">
-                        View quizzes <ArrowRight className="h-4 w-4" aria-hidden />
+                        {t("viewQuizzes")} <ArrowRight className="h-4 w-4" aria-hidden />
                       </span>
                     </div>
                   </Link>
                 </li>
               ))}
 
-              {/* Balancing "join another" tile — keeps the grid intentional at any count. */}
               <li>
                 <button
                   type="button"
@@ -219,7 +215,7 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
                   <span className="grid h-10 w-10 place-items-center rounded-2xl border-[3px] border-current">
                     <KeyRound className="h-5 w-5" aria-hidden />
                   </span>
-                  <span className="text-sm font-extrabold">Join another</span>
+                  <span className="text-sm font-extrabold">{t("joinCardTitle")}</span>
                 </button>
               </li>
             </ul>

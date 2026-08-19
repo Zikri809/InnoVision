@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,6 +23,10 @@ import {
 } from "@/components/ui/card";
 import { ArrowLeft, Check, Copy } from "lucide-react";
 import { formatDuration } from "@/lib/format/duration";
+import { HOURS_MAX, MINUTES_MAX, hmToSeconds } from "@/lib/quizzes/time-limit";
+import { TITLE_MAX } from "@/lib/quizzes/validation";
+import { MODE_CLASS, STATUS_CLASS, getModeLabel, getStatusLabel } from "@/lib/quizzes/labels";
+import type { QuizMode } from "@/lib/types/aliases";
 
 type ClassInfo = {
   id: string;
@@ -45,19 +50,6 @@ type QuizRow = {
   created_at: string;
 };
 
-import { HOURS_MAX, MINUTES_MAX, hmToSeconds } from "@/lib/quizzes/time-limit";
-import { TITLE_MAX } from "@/lib/quizzes/validation";
-import { MODE_CLASS, MODE_LABEL, STATUS_CLASS, STATUS_LABEL } from "@/lib/quizzes/labels";
-import type { QuizMode } from "@/lib/types/aliases";
-
-const DATE_FMT = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" });
-
-function formatDate(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "—" : DATE_FMT.format(d);
-}
-
 export function ClassDetailClient({
   cls,
   roster,
@@ -68,6 +60,10 @@ export function ClassDetailClient({
   quizzes: QuizRow[];
 }) {
   const router = useRouter();
+  const locale = useLocale();
+  const t = useTranslations("lecturer.classDetail");
+  const tCommon = useTranslations("common");
+
   const [title, setTitle] = useState("");
   const [mode, setMode] = useState<"practice" | "assessment">("practice");
   const [hours, setHours] = useState("");
@@ -79,6 +75,18 @@ export function ClassDetailClient({
 
   // Ref lock guards against a fast double-click before React re-renders.
   const submitLock = useRef(false);
+
+  function formatDate(iso: string | null | undefined): string {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "—";
+    const dateFmt = new Intl.DateTimeFormat(locale === "ms" ? "ms-MY" : "en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+    return dateFmt.format(d);
+  }
 
   function blockNonNumeric(e: React.KeyboardEvent<HTMLInputElement>) {
     if (["e", "E", "+", "-", "."].includes(e.key)) {
@@ -120,7 +128,7 @@ export function ClassDetailClient({
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(body.message ?? body.error ?? "Failed to create quiz.");
+        setError(body.message ?? body.error ?? tCommon("errorGeneric"));
         return;
       }
       setTitle("");
@@ -128,7 +136,7 @@ export function ClassDetailClient({
       setMinutes("");
       router.refresh();
     } catch {
-      setError("Network error creating quiz.");
+      setError(tCommon("errorGeneric"));
     } finally {
       submitLock.current = false;
       setCreating(false);
@@ -145,18 +153,18 @@ export function ClassDetailClient({
             href="/lecturer/classes"
             className="inline-flex items-center gap-1.5 text-sm font-extrabold text-muted-foreground transition-colors hover:text-primary"
           >
-            <ArrowLeft className="h-4 w-4" aria-hidden /> Back to classes
+            <ArrowLeft className="h-4 w-4" aria-hidden /> {t("backToClasses")}
           </Link>
           <div className="mt-3 flex flex-wrap items-end justify-between gap-6">
             <div className="min-w-0">
               <h1 className="font-heading text-3xl font-semibold [text-wrap:balance]">{cls.title}</h1>
               <p className="mt-1.5 text-sm font-semibold text-muted-foreground">
-                {roster.length} {roster.length === 1 ? "student" : "students"} · {quizzes.length} {quizzes.length === 1 ? "quiz" : "quizzes"}
+                {t("rosterCount", { count: roster.length })} · {t("quizCount", { count: quizzes.length })}
               </p>
             </div>
             {/* Join code */}
             <div className="rounded-2xl border-[3px] border-border bg-card px-5 py-4 text-center shadow-[var(--shadow-clay-sm)]">
-              <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted-foreground">Join code</p>
+              <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted-foreground">{t("joinCode")}</p>
               <div className="mt-0.5 flex items-center justify-center gap-2">
                 <p className="font-heading text-2xl font-bold tracking-[0.3em] text-primary">
                   {cls.join_code}
@@ -166,7 +174,7 @@ export function ClassDetailClient({
                   variant="ghost"
                   size="icon-sm"
                   onClick={copyJoinCode}
-                  aria-label={copied ? "Join code copied" : "Copy join code"}
+                  aria-label={copied ? t("joinCodeCopied") : t("copyJoinCode")}
                 >
                   {copied ? (
                     <Check className="size-4" aria-hidden />
@@ -187,9 +195,9 @@ export function ClassDetailClient({
 
       <Card>
         <CardHeader>
-          <CardTitle>Quizzes</CardTitle>
+          <CardTitle>{t("classQuizzes")}</CardTitle>
           <CardDescription>
-            {quizzes.length} quiz{quizzes.length === 1 ? "" : "zes"} in this class
+            {t("quizCount", { count: quizzes.length })}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -197,11 +205,11 @@ export function ClassDetailClient({
             <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
               <div className="space-y-1">
                 <Label htmlFor="quiz-title" className="sr-only">
-                  Quiz title
+                  {t("createQuizTitle")}
                 </Label>
                 <Input
                   id="quiz-title"
-                  placeholder="e.g. Chapter 1 Quiz"
+                  placeholder={t("quizTitlePlaceholder")}
                   value={title}
                   disabled={creating}
                   onChange={(e) => setTitle(e.target.value)}
@@ -211,28 +219,29 @@ export function ClassDetailClient({
               </div>
               <div className="space-y-1">
                 <Label htmlFor="quiz-mode" className="sr-only">
-                  Mode
+                  {t("modeLabel")}
                 </Label>
                 <Select
                   value={mode}
                   onValueChange={(v) => setMode(v as "practice" | "assessment")}
                   disabled={creating}
                 >
-                  <SelectTrigger id="quiz-mode" className="w-full sm:w-40">
-                    <SelectValue placeholder="Select mode">
-                      {(v) => MODE_LABEL[v as QuizMode] ?? (v === "assessment" ? "Assessment" : "Practice")}
+                  <SelectTrigger id="quiz-mode" className="w-full sm:w-auto sm:min-w-[12rem]">
+
+                    <SelectValue placeholder={t("modeLabel")}>
+                      {(v) => getModeLabel(v as QuizMode, locale)}
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="practice">Practice</SelectItem>
-                    <SelectItem value="assessment">Assessment</SelectItem>
+                    <SelectItem value="practice">{tCommon("practice")}</SelectItem>
+                    <SelectItem value="assessment">{tCommon("assessment")}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div className="flex items-end gap-1.5">
                 <div className="space-y-1">
                   <Label htmlFor="quiz-time-hours" className="sr-only">
-                    Time limit (hours)
+                    {t("hoursShort")}
                   </Label>
                   <Input
                     id="quiz-time-hours"
@@ -262,10 +271,10 @@ export function ClassDetailClient({
                     className="w-16 text-center placeholder:text-center [appearance:textfield] [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                   />
                 </div>
-                <span aria-hidden className="pb-2.5 text-xs font-extrabold text-muted-foreground">h</span>
+                <span aria-hidden className="pb-2.5 text-xs font-extrabold text-muted-foreground">{t("hoursShort")}</span>
                 <div className="space-y-1">
                   <Label htmlFor="quiz-time-minutes" className="sr-only">
-                    Time limit (minutes)
+                    {t("minutesShort")}
                   </Label>
                   <Input
                     id="quiz-time-minutes"
@@ -292,15 +301,16 @@ export function ClassDetailClient({
                     className="w-16 text-center placeholder:text-center [appearance:textfield] [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                   />
                 </div>
-                <span aria-hidden className="pb-2.5 text-xs font-extrabold text-muted-foreground">min</span>
+                <span aria-hidden className="pb-2.5 text-xs font-extrabold text-muted-foreground">{t("minutesShort")}</span>
               </div>
             </div>
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <p id="quiz-create-time-helper" className="text-xs font-semibold text-muted-foreground">
-                Leave the time limit empty for an untimed quiz.
+                {t("timeLimitHelperNone")}
               </p>
+
               <Button type="submit" disabled={creating || !title.trim()}>
-                {creating ? "Creating…" : "New quiz"}
+                {creating ? t("creatingQuizBtn") : t("createQuizBtn")}
               </Button>
             </div>
             {error && (
@@ -312,39 +322,39 @@ export function ClassDetailClient({
 
           {quizzes.length === 0 ? (
             <p className="rounded-2xl border-[3px] border-dashed border-border bg-card p-6 text-center text-sm font-semibold text-muted-foreground">
-              No quizzes yet. Create one above.
+              {t("noQuizzes")}
             </p>
           ) : (
             <ul className="divide-y divide-border">
               {quizzes.map((q) => (
                 <li key={q.id}>
-                  <div className="flex items-center justify-between gap-3 rounded-xl px-2 py-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl px-2 py-3">
                     <Link
                       href={`/lecturer/quizzes/${q.id}/builder`}
                       className="flex min-w-0 items-center gap-3 rounded-xl transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/70"
                     >
                       <span className="truncate font-heading text-base font-semibold">{q.title}</span>
                       <span className={`rounded-full border-[3px] px-2.5 py-0.5 text-xs font-extrabold ${MODE_CLASS[q.mode]}`}>
-                        {MODE_LABEL[q.mode]}
+                        {getModeLabel(q.mode, locale)}
                       </span>
                     </Link>
                     <div className="flex shrink-0 items-center gap-3">
                       {q.mode === "assessment" && q.time_limit_sec != null && (
                         <span className="text-xs font-bold tabular-nums text-muted-foreground">
-                          {formatDuration(q.time_limit_sec)}
+                          {formatDuration(q.time_limit_sec, locale)}
                         </span>
                       )}
                       <span
                         className={`rounded-full border-[3px] px-2.5 py-0.5 text-xs font-extrabold ${STATUS_CLASS[q.status]}`}
                       >
-                        {STATUS_LABEL[q.status]}
+                        {getStatusLabel(q.status, locale)}
                       </span>
                       {q.status !== "draft" && (
                         <Link
                           href={`/lecturer/quizzes/${q.id}/results`}
                           className="text-xs font-bold text-primary hover:underline"
                         >
-                          Results
+                          {t("resultsBtn")}
                         </Link>
                       )}
                     </div>
@@ -358,17 +368,17 @@ export function ClassDetailClient({
 
       <Card>
         <CardHeader>
-          <CardTitle>Roster</CardTitle>
+          <CardTitle>{t("rosterTitle")}</CardTitle>
           <CardDescription>
-            {roster.length} enrolled student{roster.length === 1 ? "" : "s"}
+            {t("rosterCount", { count: roster.length })}
           </CardDescription>
         </CardHeader>
         <CardContent>
           {roster.length === 0 ? (
             <div className="grid place-items-center rounded-2xl border-[3px] border-dashed border-border bg-card/60 px-6 py-10 text-center">
-              <p className="font-heading text-base font-semibold">No students yet</p>
+              <p className="font-heading text-base font-semibold">{t("noStudents")}</p>
               <p className="mt-1 text-sm font-semibold text-muted-foreground">
-                Share the join code above to enroll your first student.
+                {t("joinCode")}
               </p>
             </div>
           ) : (
@@ -379,10 +389,10 @@ export function ClassDetailClient({
                     <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-orange-100 font-heading text-sm font-bold text-primary">
                       {(s.full_name ?? "U").trim().charAt(0).toUpperCase()}
                     </span>
-                    <span translate="no" className="truncate font-heading text-base font-semibold">{s.full_name ?? "Unnamed student"}</span>
+                    <span translate="no" className="truncate font-heading text-base font-semibold">{s.full_name ?? t("unnamedStudent")}</span>
                   </span>
                   <span className="shrink-0 text-xs font-bold text-muted-foreground">
-                    Joined {formatDate(s.enrolled_at)}
+                    {t("joinedOn", { date: formatDate(s.enrolled_at) })}
                   </span>
                 </li>
               ))}

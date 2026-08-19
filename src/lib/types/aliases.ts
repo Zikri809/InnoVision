@@ -9,7 +9,12 @@ import type { Database } from "@/lib/types/database";
 
 export type UserRole = Database["public"]["Enums"]["user_role"];
 
-export type Profile = Database["public"]["Tables"]["profiles"]["Row"];
+export type SupportedLocale = "en" | "ms";
+
+export type Profile = Database["public"]["Tables"]["profiles"]["Row"] & {
+  locale?: SupportedLocale;
+};
+
 
 export type QuizMode = Database["public"]["Enums"]["quiz_mode"];
 

@@ -25,6 +25,7 @@ export type OcrProgress = (page: number, total: number) => void;
 export async function tesseractExtract(
   file: File,
   onProgress?: OcrProgress,
+  languages = "eng+msa",
 ): Promise<ExtractionResult> {
   const Tesseract = await import("tesseract.js");
 
@@ -33,15 +34,24 @@ export async function tesseractExtract(
 
   // Single worker reused across all pages — in tesseract.js v7, recognize()
   // internally creates+terminates a worker per call, which re-fetches the WASM
-  // core (~MB) and eng.traineddata (~4-11 MB) on every page. Creating one worker
+  // core (~MB) and traineddata (~4-11 MB) on every page. Creating one worker
   // here and reusing it is the supported pattern.
   //
   // `logger` MUST be a function — tesseract.js v7's message handler invokes
   // `logger({...})` unconditionally and crashes with `TypeError: logger is
   // not a function` when undefined.
-  const worker = await Tesseract.createWorker("eng", 1, {
-    logger: () => {},
-  });
+  let worker: Tesseract.Worker;
+  try {
+    worker = await Tesseract.createWorker(languages, 1, {
+      logger: () => {},
+    });
+  } catch {
+    // Fallback to English only if combined data is unavailable
+    worker = await Tesseract.createWorker("eng", 1, {
+      logger: () => {},
+    });
+  }
+
 
   const parts: string[] = [];
   try {

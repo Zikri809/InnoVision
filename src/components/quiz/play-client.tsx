@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
+
 import { QuestionCard } from "@/components/quiz/question-card";
 import { ProgressHud } from "@/components/quiz/progress-hud";
 import { GestureLayer } from "@/components/vision/gesture-layer";
@@ -12,6 +14,7 @@ import { FaceVerifier } from "@/components/face/face-verifier";
 import { useFacePipeline, type FacePipelinePhase } from "@/components/face/use-face-pipeline";
 import { useFaceTracker } from "@/components/face/use-face-tracker";
 import type { FaceStatus } from "@/lib/face/types";
+
 
 type Question = {
   id: string;
@@ -87,17 +90,17 @@ export function PlayClient({
   sessionId,
   quiz,
   questions,
-  initialAnswers,
-  initialIndex,
-  initialRemainingMs,
+  initialIndex = 0,
+  initialAnswers = [],
+  initialRemainingMs = null,
   face,
 }: {
   sessionId: string;
   quiz: Quiz;
   questions: Question[];
-  initialAnswers: SeedAnswer[];
-  initialIndex: number;
-  initialRemainingMs: number | null;
+  initialIndex?: number;
+  initialAnswers?: SeedAnswer[];
+  initialRemainingMs?: number | null;
   face?: {
     enrolled: boolean;
     consentGiven: boolean;
@@ -106,8 +109,11 @@ export function PlayClient({
     initialFaceStatus: FaceStatus;
     hasFaceChecks: boolean;
   };
+
 }) {
   const router = useRouter();
+  const t = useTranslations("play");
+  const tCommon = useTranslations("common");
 
   const [index, setIndex] = useState(initialIndex < 0 ? 0 : initialIndex);
   const [answers, setAnswers] = useState<Record<string, AnswerState>>(() => {
@@ -229,7 +235,7 @@ export function PlayClient({
     setSubmissionReason("time_up");
     setPhaseAndRef("timeUp");
     setError(null);
-    setNotice("Time's up — submitting your answers.");
+    setNotice(t("toast.timeUp"));
     // Await any in-flight answer so the student's last answer isn't dropped.
     if (inFlightAnswer.current) {
       try {
@@ -286,7 +292,7 @@ export function PlayClient({
         const isPracticeAck = isPractice && typeof body.isCorrect === "boolean";
         const isAssessmentAck = !isPractice && body.recorded === true;
         if (res.ok && !isPracticeAck && !isAssessmentAck) {
-          setError("Unexpected server response. Refresh to see your answer.");
+          setError(tCommon("errorGeneric"));
           setPhaseAndRef("question");
           return;
         }
@@ -337,17 +343,17 @@ export function PlayClient({
             // network — fall through to the conservative branch below
           }
           if (realStatus === "paused") {
-            setError("This session is paused. Recover your face check to continue.");
+            setError(t("toast.sessionPaused"));
             setPhaseAndRef("question");
             return;
           }
           if (realStatus === "flagged") {
             if (alreadyTimeUp) {
               // Stay in timeUp; the flagged overlay + Retry-submit stay visible.
-              setError("This session is flagged for review.");
+              setError(t("toast.sessionFlagged"));
               setPhaseAndRef("timeUp");
             } else {
-              setError("This session is flagged for review.");
+              setError(t("toast.sessionFlagged"));
               setPhaseAndRef("question");
             }
             return;
@@ -357,13 +363,13 @@ export function PlayClient({
             return;
           }
           // Unknown/gone → dead (terminal).
-          setError("This session is no longer active.");
+          setError(t("toast.sessionInactive"));
           setPhaseAndRef("dead");
           return;
         }
 
         if (res.status === 409 && body.error === "quiz_not_live") {
-          setError("This quiz is no longer available.");
+          setError(t("toast.quizUnavailable"));
           setPhaseAndRef("dead");
           return;
         }
@@ -371,7 +377,7 @@ export function PlayClient({
         if (res.status === 404) {
           // D13 — the session was reset by a lecturer mid-flight (or is
           // otherwise gone). Terminal dead screen, no retry, no re-submit.
-          setError(RESET_DEAD_MSG);
+          setError(t("toast.resetDead"));
           setPhaseAndRef("dead");
           return;
         }
@@ -382,7 +388,7 @@ export function PlayClient({
               ? body.message
               : typeof body.error === "string"
                 ? body.error
-                : "Could not record the answer.",
+                : tCommon("errorGeneric"),
           );
           setPhaseAndRef("question");
           return;
@@ -403,9 +409,9 @@ export function PlayClient({
       } catch (err) {
         // Abort/network error â†’ surface a retry (endpoints are idempotent).
         if ((err as Error)?.name === "AbortError") {
-          setError("The request timed out. Tap your answer again to retry.");
+          setError(t("toast.recordTimeout"));
         } else {
-          setError("Network error recording your answer. Tap again to retry.");
+          setError(t("toast.recordError"));
         }
         setPhaseAndRef("question");
       } finally {
@@ -463,10 +469,10 @@ export function PlayClient({
         // (Retry-submit + flagged overlay; the flagged poll survives timeUp);
         // else → 'question' + overlay.
         if (phaseRef.current === "timeUp") {
-          setError("This session is flagged for review. A lecturer must unlock it.");
+          setError(t("toast.sessionFlaggedLecturer"));
           setPhaseAndRef("timeUp");
         } else {
-          setError("This session is flagged for review. A lecturer must unlock it.");
+          setError(t("toast.sessionFlaggedLecturer"));
           setPhaseAndRef("question");
         }
         return;
@@ -475,7 +481,7 @@ export function PlayClient({
       if (res.status === 404) {
         // D13 — the session was reset by a lecturer mid-flight. Terminal dead
         // screen, no retry, no re-submit.
-        setError(RESET_DEAD_MSG);
+        setError(t("toast.resetDead"));
         setPhaseAndRef("dead");
         return;
       }
@@ -486,7 +492,7 @@ export function PlayClient({
             ? body.message
             : typeof body.error === "string"
               ? body.error
-              : "Could not submit the quiz.",
+              : tCommon("errorGeneric"),
         );
         setPhaseAndRef(phaseRef.current === "timeUp" ? "timeUp" : "question");
         return;
@@ -495,7 +501,7 @@ export function PlayClient({
       // Shape-validate the SUCCESS body: score may be a number (revealed) OR
       // null (assessment awaiting release); total defaults to question count.
       if (body.session == null || !("score" in body)) {
-        setError("Unexpected server response. Refresh to see your result.");
+        setError(tCommon("errorGeneric"));
         setPhaseAndRef(phaseRef.current === "timeUp" ? "timeUp" : "question");
         return;
       }
@@ -510,9 +516,9 @@ export function PlayClient({
       router.refresh();
     } catch (err) {
       if ((err as Error)?.name === "AbortError") {
-        setError("The submit request timed out. Please submit again.");
+        setError(t("toast.submitTimeout"));
       } else {
-        setError("Network error submitting the quiz. Please submit again.");
+        setError(t("toast.submitError"));
       }
       // phaseRef, not the render closure: a timeUp auto-submit that failed must
       // stay timeUp (Retry-submit reachable; the remainingMs guard terminates).
@@ -546,7 +552,7 @@ export function PlayClient({
     return (
       <div className="mx-auto max-w-3xl px-4 py-8">
         <p className="rounded-2xl border-[3px] border-destructive/30 bg-destructive/10 p-4 text-sm font-bold text-destructive" role="alert">
-          This quiz has no questions yet. Please try again later.
+          {t("toast.noQuestions")}
         </p>
       </div>
     );
@@ -561,12 +567,12 @@ export function PlayClient({
       <div className="mx-auto max-w-2xl px-4 py-12">
         <div className="rounded-[28px] border-[3px] border-border bg-card p-8 text-center shadow-[var(--shadow-clay)] md:p-10" role="status">
           <p className="text-sm font-extrabold uppercase tracking-wide text-muted-foreground">
-            {isPractice ? "Practice complete" : result.score != null ? "Assessment complete" : "Assessment submitted"}
+            {isPractice ? t("end.practiceTitle") : result.score != null ? t("end.assessmentTitle") : t("end.submittedTitle")}
           </p>
           <h1 className="mt-1 font-heading text-2xl font-semibold [text-wrap:balance]">{quiz.title}</h1>
           {submissionReason === "time_up" && (
             <div className="mx-auto mt-3 inline-flex items-center gap-2 rounded-full border-[2px] border-amber-300 bg-amber-50 px-4 py-1.5 text-xs font-bold text-amber-800" role="status">
-              ⏱️ Auto-submitted: The time limit for this assessment expired.
+              ⏱️ {tCommon("timeExpired")}
             </div>
           )}
           {result.score != null ? (
@@ -575,26 +581,21 @@ export function PlayClient({
                 {result.score}
                 <span className="text-3xl text-muted-foreground"> / {result.total}</span>
               </p>
-              <p className="mt-1 text-sm font-extrabold text-muted-foreground">{pct}% correct</p>
+              <p className="mt-1 text-sm font-extrabold text-muted-foreground">{t("end.pctCorrect", { pct })}</p>
             </>
           ) : (
             <div className="mx-auto mt-6 max-w-md rounded-2xl border-[3px] border-border bg-muted/50 px-5 py-4" role="status">
               <p className="font-heading text-base font-semibold">
-                Submitted ✓ — results will be released by your lecturer.
+                {t("end.resultsPending")}
               </p>
             </div>
           )}
-          {isPractice && (
-            <p className="mx-auto mt-5 max-w-md text-sm font-semibold text-muted-foreground">
-              Practice again any time — each attempt creates a new session.
-            </p>
-          )}
           <div className="mt-8 flex flex-wrap justify-center gap-3">
             <Button variant="outline" size="lg" onClick={() => router.push("/student/quizzes")}>
-              Back to quizzes
+              {t("end.backToQuizzes")}
             </Button>
             {isPractice && (
-              <Button size="lg" onClick={() => router.push("/student/quizzes")}>Try again</Button>
+              <Button size="lg" onClick={() => router.push("/student/quizzes")}>{t("end.tryAgain")}</Button>
             )}
           </div>
         </div>
@@ -603,22 +604,20 @@ export function PlayClient({
   }
 
   // Terminal dead-end: session no longer active / quiz no longer available.
-  // A non-actionable "back to question" would strand the student with no way
-  // out — render a CTA instead.
   if (phase === "dead") {
     return (
       <div className="mx-auto max-w-2xl px-4 py-12">
         <div className="rounded-[28px] border-[3px] border-destructive/40 bg-card p-8 text-center shadow-[var(--shadow-clay)] md:p-10" role="alert">
           <h1 className="font-heading text-2xl font-semibold">{quiz.title}</h1>
           <p className="mt-1 text-sm font-extrabold uppercase tracking-wide text-muted-foreground">
-            {isPractice ? "Practice" : "Assessment"}
+            {isPractice ? tCommon("practice") : tCommon("assessment")}
           </p>
           <p className="mx-auto mt-6 max-w-md rounded-2xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-3 text-sm font-bold text-destructive">
-            {error ?? "This quiz is no longer available."}
+            {error ?? tCommon("errorGeneric")}
           </p>
           <div className="mt-8 flex justify-center gap-3">
             <Button variant="outline" size="lg" onClick={() => router.push("/student/quizzes")}>
-              Back to quizzes
+              {t("end.backToQuizzes")}
             </Button>
           </div>
         </div>
@@ -635,7 +634,7 @@ export function PlayClient({
               ? "border-emerald-300 bg-emerald-100 text-emerald-800"
               : "border-accent/40 bg-blue-100 text-accent"
           }`}>
-            {isPractice ? "Practice" : "Assessment"}
+            {isPractice ? tCommon("practice") : tCommon("assessment")}
           </span>
           <h1 className="mt-2 font-heading text-2xl font-semibold [text-wrap:balance]">{quiz.title}</h1>
         </div>
@@ -659,8 +658,7 @@ export function PlayClient({
         )}
       </div>
 
-      {/* Persistent video node for the FACE tracker (kept in-viewport so Chromium
-          maintains active decode loops and never suspends offscreen frames). */}
+      {/* Persistent video node for the FACE tracker */}
       <video
         ref={faceTracker.videoRef}
         className="fixed bottom-0 right-0 h-48 w-64 opacity-0 pointer-events-none -z-50"
@@ -680,9 +678,6 @@ export function PlayClient({
           void pipeline.beginGate();
         }}
         onConsent={() => {
-          // Consent granted at the gate: persist server-side AND tell the
-          // pipeline so `consentGivenRef` agrees (otherwise Begin would keep
-          // re-blocking on the client-side guard until a reload).
           void fetch("/api/face/consent", {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -732,26 +727,25 @@ export function PlayClient({
           <div className="flex items-center gap-3">
             {gestureActive && question.options.length < MAX_ANSWER_FINGERS && (
               <span className="text-sm font-bold text-muted-foreground" role="status">
-                or hold ✋
+                {t("feedback.orHold")}
               </span>
             )}
             <Button size="lg" onClick={goNext}>
-              {index + 1 >= questions.length ? "Finish" : "Next"}
+              {index + 1 >= questions.length ? t("feedback.finish") : t("feedback.next")}
             </Button>
           </div>
         )}
         {phase === "submitting" && (
-          <Button size="lg" disabled>Submitting…</Button>
+          <Button size="lg" disabled>{t("feedback.submitting")}</Button>
         )}
         {phase === "timeUp" && (
-          // Auto-submit failed (network/abort) — offer an in-page retry so the
-          // student isn't stranded on a disabled button.
-          <Button size="lg" onClick={() => void submitNow()}>Retry submit</Button>
+          <Button size="lg" onClick={() => void submitNow()}>{t("feedback.retrySubmit")}</Button>
         )}
         {phase === "locked" && (
-          <Button size="lg" disabled>Recording…</Button>
+          <Button size="lg" disabled>{t("feedback.recording")}</Button>
         )}
       </div>
     </div>
   );
 }
+

@@ -3,8 +3,10 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useLocale, useTranslations } from "next-intl";
+
 import { register } from "@/lib/auth/register";
-import type { UserRole } from "@/lib/types/aliases";
+import type { UserRole, SupportedLocale } from "@/lib/types/aliases";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,16 +23,20 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { LanguageToggle } from "@/components/layout/language-toggle";
 
 export default function RegisterPage() {
   const router = useRouter();
+  const t = useTranslations("auth");
 
+  const activeLocale = useLocale() as SupportedLocale;
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   // Display-only for the picker; the server action always registers "student".
   const [role, setRole] = useState<UserRole>("student");
   const [inviteCode, setInviteCode] = useState("");
+  const [locale, setLocaleState] = useState<SupportedLocale>(activeLocale || "en");
   const [consent, setConsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -40,17 +46,18 @@ export default function RegisterPage() {
     setError(null);
 
     if (!consent) {
-      setError("You must provide biometric consent to register.");
+      setError(t("consentTitle") + ": " + t("consentText"));
       return;
     }
 
     if (password.length < 6) {
-      setError("Password must be at least 6 characters.");
+      setError(t("passwordMinLength"));
       return;
     }
 
+
     if (role === "lecturer" && !inviteCode.trim()) {
-      setError("A lecturer invite code is required to register as a lecturer.");
+      setError(t("inviteCodeHelp"));
       return;
     }
 
@@ -61,6 +68,7 @@ export default function RegisterPage() {
       password,
       fullName: fullName || undefined,
       inviteCode: role === "lecturer" ? inviteCode : undefined,
+      locale,
     });
 
     if (error) {
@@ -84,6 +92,11 @@ export default function RegisterPage() {
       <div aria-hidden className="pointer-events-none absolute -left-10 top-20 h-32 w-32 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-orange-200/50" />
       <div aria-hidden className="pointer-events-none absolute -right-8 bottom-24 h-28 w-28 rounded-[60%_40%_45%_55%/50%_60%_40%_55%] bg-blue-200/50" />
 
+      {/* Top right language switch */}
+      <div className="absolute right-6 top-6 z-10">
+        <LanguageToggle />
+      </div>
+
       <div className="w-full max-w-md">
         <Link href="/" className="mb-8 flex items-center justify-center gap-2.5">
           <span className="grid h-11 w-11 -rotate-4 place-items-center rounded-2xl bg-primary font-heading text-xl font-bold text-primary-foreground shadow-[0_4px_0_var(--primary-deep)]">
@@ -94,27 +107,26 @@ export default function RegisterPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-2xl">Create your account</CardTitle>
-            <CardDescription>
-              Join InnoVision — wave your way through quizzes
-            </CardDescription>
+            <CardTitle className="text-2xl">{t("createAccount")}</CardTitle>
+            <CardDescription>{t("createSubtitle")}</CardDescription>
           </CardHeader>
           <form onSubmit={handleSubmit}>
             <CardContent className="space-y-5">
               <div className="space-y-2">
-                <Label htmlFor="full-name">Full name (optional)</Label>
+                <Label htmlFor="full-name">{t("fullName")}</Label>
                 <Input
                   id="full-name"
                   name="name"
                   type="text"
                   autoComplete="name"
-                  placeholder="Jane Doe"
+                  placeholder={t("fullNamePlaceholder")}
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                 />
               </div>
+
               <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email">{t("email")}</Label>
                 <Input
                   id="email"
                   name="email"
@@ -122,65 +134,94 @@ export default function RegisterPage() {
                   inputMode="email"
                   spellCheck={false}
                   autoComplete="email"
-                  placeholder="you@example.com"
+                  placeholder={t("emailPlaceholder")}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
                 />
               </div>
+
               <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
+                <Label htmlFor="password">{t("password")}</Label>
                 <Input
                   id="password"
                   name="password"
                   type="password"
                   autoComplete="new-password"
-                  placeholder="At least 6 characters"
+                  placeholder={t("passwordPlaceholder")}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
                   minLength={6}
                 />
               </div>
+
               <div className="space-y-2.5">
-                <Label>I am a…</Label>
+                <Label>{t("roleLabel")}</Label>
                 <RadioGroup
-                  aria-label="I am a…"
+                  aria-label={t("roleLabel")}
                   value={role}
                   onValueChange={(v) => setRole(v as UserRole)}
                   className="flex gap-6"
                 >
                   <div className="flex items-center space-x-2.5">
                     <RadioGroupItem value="student" id="role-student" />
-                    <Label htmlFor="role-student" className="cursor-pointer">
-                      Student
+                    <Label htmlFor="role-student" className="cursor-pointer font-bold">
+                      {t("studentRole")}
                     </Label>
                   </div>
                   <div className="flex items-center space-x-2.5">
                     <RadioGroupItem value="lecturer" id="role-lecturer" />
-                    <Label htmlFor="role-lecturer" className="cursor-pointer">
-                      Lecturer
+                    <Label htmlFor="role-lecturer" className="cursor-pointer font-bold">
+                      {t("lecturerRole")}
                     </Label>
                   </div>
                 </RadioGroup>
               </div>
+
+              {/* Preferred language selector during registration */}
+              <div className="space-y-2.5">
+                <Label>{t("languageLabel")}</Label>
+                <RadioGroup
+                  aria-label={t("languageLabel")}
+                  value={locale}
+                  onValueChange={(v) => setLocaleState(v as SupportedLocale)}
+                  className="flex gap-6"
+                >
+                  <div className="flex items-center space-x-2.5">
+                    <RadioGroupItem value="en" id="locale-en" />
+                    <Label htmlFor="locale-en" className="cursor-pointer font-semibold">
+                      {t("english")}
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2.5">
+                    <RadioGroupItem value="ms" id="locale-ms" />
+                    <Label htmlFor="locale-ms" className="cursor-pointer font-semibold">
+                      {t("malay")}
+                    </Label>
+                  </div>
+
+
+                </RadioGroup>
+              </div>
+
               {role === "lecturer" && (
                 <div className="space-y-2">
-                  <Label htmlFor="invite-code">Lecturer invite code</Label>
+                  <Label htmlFor="invite-code">{t("inviteCode")}</Label>
                   <Input
                     id="invite-code"
                     type="text"
-                    placeholder="Provided by your administrator"
+                    placeholder={t("inviteCodePlaceholder")}
                     value={inviteCode}
                     onChange={(e) => setInviteCode(e.target.value)}
                     autoComplete="off"
                   />
                   <p className="text-xs font-semibold text-muted-foreground">
-                    Lecturer registration requires a valid invite code. Students
-                    do not need one.
+                    {t("inviteCodeHelp")}
                   </p>
                 </div>
               )}
+
               <div className="flex items-start space-x-3 rounded-2xl border-[3px] border-border bg-orange-50/60 p-4">
                 <Checkbox
                   id="consent"
@@ -193,15 +234,14 @@ export default function RegisterPage() {
                     htmlFor="consent"
                     className="cursor-pointer text-sm font-extrabold"
                   >
-                    Biometric consent
+                    {t("consentTitle")}
                   </Label>
                   <p className="text-xs font-semibold leading-relaxed text-muted-foreground">
-                    I understand InnoVision uses my webcam for face verification
-                    and gesture-based answering. Face embeddings are stored but
-                    face images are never saved. I can revoke consent at any time.
+                    {t("consentText")}
                   </p>
                 </div>
               </div>
+
               <div aria-live="polite" className={!error ? "hidden" : undefined}>
                 {error && (
                   <p className="rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-3 text-sm font-bold text-destructive" role="alert">
@@ -217,15 +257,15 @@ export default function RegisterPage() {
                 size="lg"
                 disabled={loading || !consent}
               >
-                {loading ? "Creating account…" : "Create account"}
+                {loading ? t("creatingAccount") : t("createAccountBtn")}
               </Button>
               <p className="text-sm font-semibold text-muted-foreground">
-                Already have an account?{" "}
+                {t("haveAccount")}{" "}
                 <Link
                   href="/login"
                   className="font-extrabold text-primary hover:underline"
                 >
-                  Sign in
+                  {t("loginLink")}
                 </Link>
               </p>
             </CardFooter>

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { getTranslations } from "next-intl/server";
 import {
   Hand,
   ShieldCheck,
@@ -10,54 +11,7 @@ import {
   Check,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-
-const features = [
-  {
-    icon: Hand,
-    tint: "bg-orange-100 text-orange-600",
-    title: "Wave to Answer",
-    body: "Just hold up 1–5 fingers to choose. Our friendly hand-tracking reads your gesture and locks it in.",
-  },
-  {
-    icon: ShieldCheck,
-    tint: "bg-blue-100 text-blue-600",
-    title: "Friendly Check-ins",
-    body: "A quick glance at the camera now and then keeps things fair — no scary proctoring software.",
-  },
-  {
-    icon: Sparkles,
-    tint: "bg-green-100 text-green-600",
-    title: "Instant Quiz Magic",
-    body: "Teachers drop in their notes and — poof! — a ready-to-play quiz appears in seconds.",
-  },
-  {
-    icon: Target,
-    tint: "bg-pink-100 text-pink-600",
-    title: "Practice & Level Up",
-    body: "Try as many times as you want in practice mode, with instant feedback to help you improve.",
-  },
-  {
-    icon: LineChart,
-    tint: "bg-yellow-100 text-yellow-600",
-    title: "See Your Progress",
-    body: "Colorful dashboards show your scores and streaks, so you always know how you're doing.",
-  },
-  {
-    icon: Link2,
-    tint: "bg-violet-100 text-violet-600",
-    title: "Join in a Snap",
-    body: "Pop in a class code, do a one-time face enroll, and you're ready for every quiz.",
-  },
-] as const;
-
-const stats = [
-  { value: "99%", label: "Fair & accurate", accent: false },
-  { value: "3×", label: "Faster for teachers", accent: true },
-  { value: "0", label: "Apps to install", accent: false },
-  { value: "∞", label: "Practice tries", accent: true },
-] as const;
-
-const options = ["Stack", "Queue", "Tree", "Graph"] as const;
+import { LanguageToggle } from "@/components/layout/language-toggle";
 
 export default async function Home() {
   const supabase = await createClient();
@@ -68,9 +22,60 @@ export default async function Home() {
   // Logged-in users skip the marketing page and go straight to their dashboard.
   if (user) redirect("/dashboard");
 
+  const t = await getTranslations("landing");
+  const tNav = await getTranslations("nav");
+
+  const features = [
+    {
+      icon: Hand,
+      tint: "bg-orange-100 text-orange-600",
+      title: t("feature1Title"),
+      body: t("feature1Body"),
+    },
+    {
+      icon: ShieldCheck,
+      tint: "bg-blue-100 text-blue-600",
+      title: t("feature2Title"),
+      body: t("feature2Body"),
+    },
+    {
+      icon: Sparkles,
+      tint: "bg-green-100 text-green-600",
+      title: t("feature3Title"),
+      body: t("feature3Body"),
+    },
+    {
+      icon: Target,
+      tint: "bg-pink-100 text-pink-600",
+      title: t("feature4Title"),
+      body: t("feature4Body"),
+    },
+    {
+      icon: LineChart,
+      tint: "bg-yellow-100 text-yellow-600",
+      title: t("feature5Title"),
+      body: t("feature5Body"),
+    },
+    {
+      icon: Link2,
+      tint: "bg-violet-100 text-violet-600",
+      title: t("feature6Title"),
+      body: t("feature6Body"),
+    },
+  ];
+
+  const stats = [
+    { value: t("stat1Value"), label: t("stat1Label"), accent: false },
+    { value: t("stat2Value"), label: t("stat2Label"), accent: true },
+    { value: t("stat3Value"), label: t("stat3Label"), accent: false },
+    { value: t("stat4Value"), label: t("stat4Label"), accent: true },
+  ];
+
+  const options = ["Stack", "Queue", "Tree", "Graph"] as const;
+
   return (
     <div className="flex min-h-screen flex-col overflow-x-hidden">
-      <a href="#main" className="skip-link">Skip to content</a>
+      <a href="#main" className="skip-link">{tNav("skipToContent")}</a>
       {/* ===== Nav ===== */}
       <header className="sticky top-0 z-50 border-b-[3px] border-border bg-background/85 backdrop-blur">
         <div className="mx-auto flex h-[74px] w-full max-w-6xl items-center justify-between px-6">
@@ -78,16 +83,17 @@ export default async function Home() {
             <span className="grid h-10 w-10 -rotate-4 place-items-center rounded-[14px] bg-primary font-heading text-lg font-bold text-primary-foreground shadow-[0_4px_0_var(--primary-deep)]">
               IV
             </span>
-            <span className="font-heading text-[23px] font-semibold">InnoVision</span>
+            <span className="font-heading text-[23px] font-semibold">{tNav("brand")}</span>
           </Link>
           <nav className="hidden items-center gap-7 md:flex">
-            <a href="#features" className="text-[15px] font-bold text-muted-foreground transition-colors hover:text-primary">Features</a>
-            <a href="#stats" className="text-[15px] font-bold text-muted-foreground transition-colors hover:text-primary">Why us</a>
-            <a href="#cta" className="text-[15px] font-bold text-muted-foreground transition-colors hover:text-primary">Join in</a>
+            <a href="#features" className="text-[15px] font-bold text-muted-foreground transition-colors hover:text-primary">{tNav("features")}</a>
+            <a href="#stats" className="text-[15px] font-bold text-muted-foreground transition-colors hover:text-primary">{tNav("whyUs")}</a>
+            <a href="#cta" className="text-[15px] font-bold text-muted-foreground transition-colors hover:text-primary">{tNav("joinIn")}</a>
           </nav>
           <div className="flex items-center gap-3">
-            <Link href="/login" className="clay-btn-ghost px-5 py-2.5 text-sm">Sign in</Link>
-            <Link href="/register" className="clay-btn-primary px-5 py-2.5 text-sm">Play now</Link>
+            <LanguageToggle />
+            <Link href="/login" className="clay-btn-ghost px-5 py-2.5 text-sm">{tNav("signIn")}</Link>
+            <Link href="/register" className="clay-btn-primary px-5 py-2.5 text-sm">{tNav("register")}</Link>
           </div>
         </div>
       </header>
@@ -101,18 +107,16 @@ export default async function Home() {
           <div aria-hidden className="pointer-events-none absolute bottom-16 left-[12%] hidden h-16 w-16 rounded-[50%_50%_42%_58%/55%_48%_52%_45%] bg-pink-200/60 md:block" />
 
           <div className="mx-auto max-w-6xl px-6 text-center">
-            <span className="clay-pill clay-pop">Quizzes just got way more fun</span>
+            <span className="clay-pill clay-pop">{t("heroSubtitle")}</span>
             <h1 className="clay-pop mx-auto mt-6 max-w-3xl font-heading text-[clamp(38px,6.4vw,68px)] font-semibold leading-[1.05] [animation-delay:70ms] [text-wrap:balance]">
-              Answer with a <span className="text-primary">wave of your hand</span> —{" "}
-              <span className="text-accent">no clicks needed!</span>
+              {t("heroTitle")}
             </h1>
             <p className="clay-pop mx-auto mt-5 max-w-xl text-[19px] font-semibold text-muted-foreground [animation-delay:140ms]">
-              Hold up your fingers to pick an answer. InnoVision watches, cheers you on,
-              and keeps everything fair. Learning has never felt this playful.
+              {t("feature1Body")}
             </p>
             <div className="clay-pop mt-9 flex flex-wrap items-center justify-center gap-4 [animation-delay:220ms]">
-              <Link href="/register" className="clay-btn-primary">Join a class</Link>
-              <a href="#features" className="clay-btn-ghost">See the magic</a>
+              <Link href="/register" className="clay-btn-primary">{t("joinClass")}</Link>
+              <a href="#features" className="clay-btn-ghost">{t("seeMagic")}</a>
             </div>
 
             {/* gesture-quiz mock */}
@@ -172,12 +176,12 @@ export default async function Home() {
         <section id="features" className="py-20">
           <div className="mx-auto max-w-6xl px-6">
             <div className="mx-auto mb-14 max-w-2xl text-center">
-              <span className="clay-pill">Why you&apos;ll love it</span>
+              <span className="clay-pill">{t("howItWorks")}</span>
               <h2 className="mt-4 font-heading text-[clamp(30px,4.4vw,44px)] font-semibold [text-wrap:balance]">
-                Made for students, loved by teachers
+                {t("statsTitle")}
               </h2>
               <p className="mt-3.5 text-[17px] font-semibold text-muted-foreground">
-                Friendly, fair, and just a little bit magical.
+                {t("heroSubtitle")}
               </p>
             </div>
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
@@ -220,12 +224,12 @@ export default async function Home() {
               <div aria-hidden className="pointer-events-none absolute -right-12 -top-16 h-48 w-48 rounded-full bg-white/10" />
               <div aria-hidden className="pointer-events-none absolute -bottom-10 left-[6%] h-32 w-32 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-white/10" />
               <h2 className="relative font-heading text-[clamp(28px,4.4vw,44px)] font-semibold [text-wrap:balance]">
-                Ready to make quizzes the best part of class?
+                {t("ctaTitle")}
               </h2>
               <p className="relative mx-auto mt-4 max-w-xl text-[17px] font-semibold text-white/90">
-                Grab a join code from your teacher and wave your way to better grades.
+                {t("ctaSubtitle")}
               </p>
-              <Link href="/register" className="clay-btn-primary relative mt-8">Join your class</Link>
+              <Link href="/register" className="clay-btn-primary relative mt-8">{t("ctaButton")}</Link>
             </div>
           </div>
         </section>
@@ -240,7 +244,7 @@ export default async function Home() {
             </span>
             <span className="font-heading text-[17px] font-semibold text-foreground">InnoVision</span>
           </div>
-          <div>© 2025 InnoVision · Learning, but make it fun</div>
+          <div>{t("footerCopy")}</div>
         </div>
       </footer>
     </div>

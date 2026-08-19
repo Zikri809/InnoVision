@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -20,22 +21,8 @@ import { OcrProgress } from "./OcrProgress";
 import { runExtractionPipeline, type PipelineProgress } from "@/lib/extract/pipeline";
 import type { ExtractEngine, OcrConfig } from "@/lib/extract/types";
 
-// Local-only deployment: a 30-question generation on a large deck can take a
-// couple of minutes. The client waits LONGER than any realistic server
-// budget (was 65s for the old 60s Vercel cap). On timeout it refreshes and
-// tells the lecturer to check — it never auto-retries (which could
-// double-spend on a slow-but-successful generation).
 const CLIENT_TIMEOUT_MS = 20 * 60_000;
 
-/**
- * "Generate from file" dialog. Orchestrates the PLAN §3.2 cascade:
- *  upload → native/OCR extraction → extracted-text preview → question count →
- *  POST /api/ai/generate-quiz → render the response (no DB refetch) → refresh.
- *
- * Timeout behavior (R2): the client waits LONGER than the server budget (65s vs
- * 60s) and, on timeout, refreshes + tells the lecturer to check — it never
- * auto-retries (which could double-spend on a slow-but-successful generation).
- */
 export function GenerateFromFileDialog({
   quizId,
   userId,
@@ -52,11 +39,12 @@ export function GenerateFromFileDialog({
   hasQuestions: boolean;
 }) {
   const router = useRouter();
+  const t = useTranslations("extract");
+  const tCommon = useTranslations("common");
+
   const [file, setFile] = useState<File | null>(null);
   const [storagePath, setStoragePath] = useState<string | null>(null);
   const [engine, setEngine] = useState<ExtractEngine>(() => {
-    // Restore the lecturer's last-chosen engine from localStorage if it's a
-    // valid value, otherwise fall back to the server-configured default.
     try {
       const stored = localStorage.getItem("innovision.ocrEngine");
       if (stored === "tesseract" || stored === "glm" || stored === "vision") {
@@ -107,19 +95,20 @@ export function GenerateFromFileDialog({
       setExtractEngine(result.engine);
       setNotice(
         result.engine === "native"
-          ? "Text extracted directly from the file (native, no OCR needed) — the chosen OCR engine was skipped because the file has a text layer."
-          : `OCR complete (${result.engine}). You can review the text below.`,
+          ? "Text extracted directly from file (native)."
+          : `OCR complete (${result.engine}).`,
       );
     } catch (err) {
       const aborted = err instanceof Error && err.name === "AbortError";
       setError(
         aborted
-          ? "Extraction is taking too long. Try a smaller file or a different engine."
+          ? t("timeout")
           : err instanceof Error
             ? err.message
-            : "Extraction failed.",
+            : tCommon("errorGeneric"),
       );
     } finally {
+
       clearTimeout(timer);
       setBusy(false);
       setProgress(null);
@@ -127,11 +116,7 @@ export function GenerateFromFileDialog({
   }
 
   async function handleGenerate() {
-    if (submitLock.current) return;
-    if (!extractedText && !storagePath) {
-      setError("Extract text first, or upload a file to use as the source.");
-      return;
-    }
+    if (!extractedText || submitLock.current || busy) return;
     submitLock.current = true;
     setBusy(true);
     setError(null);
@@ -139,61 +124,67 @@ export function GenerateFromFileDialog({
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
+
     try {
       const res = await fetch("/api/ai/generate-quiz", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           quizId,
-          ...(extractedText ? { extractedText } : { sourcePath: storagePath }),
+          extractedText,
           questionCount,
+          sourcePath: storagePath ?? undefined,
         }),
         signal: controller.signal,
       });
-      const body = await res.json();
+
+      const body = await res.json().catch(() => ({}));
+
       if (!res.ok) {
-        setError(body.message ?? body.error ?? "Generation failed.");
+        setError(body.message ?? body.error ?? tCommon("errorGeneric"));
         return;
       }
-      // Render the response directly (no DB refetch — E2E determinism), then
-      // refresh the server component so the new questions persist server-side.
-      setNotice("Quiz generated. Review the questions below, then publish when ready.");
-      reset();
+
+      setNotice(t("generateBtn"));
       router.refresh();
       onOpenChange(false);
+      reset();
     } catch (err) {
       const aborted = err instanceof Error && err.name === "AbortError";
       if (aborted) {
-        // R2: never auto-retry; show current state and let the lecturer check.
-        setError(
-          "Generation is taking longer than expected. It may still complete — refresh the page to check your questions.",
-        );
+        setError(t("generationDelayed"));
         router.refresh();
-        onOpenChange(false);
       } else {
-        setError("Network error generating the quiz.");
+        setError(tCommon("errorGeneric"));
       }
     } finally {
       clearTimeout(timer);
       submitLock.current = false;
       setBusy(false);
     }
+
   }
 
   const canGenerate =
-    Boolean(extractedText || storagePath) && !busy && (!hasQuestions || confirmReplace);
+    Boolean(extractedText) &&
+    !busy &&
+    (!hasQuestions || confirmReplace);
 
   return (
-    <Dialog open={open} onOpenChange={(o) => {
-      if (!o) reset();
-      onOpenChange(o);
-    }}>
-      <DialogContent className="max-h-[88vh] flex flex-col sm:max-w-xl p-6 overflow-hidden gap-0">
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) reset();
+        onOpenChange(next);
+      }}
+    >
+      <DialogContent className="max-h-[90vh] flex flex-col sm:max-w-2xl overflow-hidden p-6 sm:p-7 gap-0">
         <DialogHeader className="shrink-0 pb-3 border-b-2 border-border/30">
-          <DialogTitle>Generate quiz from file</DialogTitle>
-          <DialogDescription>
-            Upload a chapter PDF, slides, or document. We&apos;ll extract the text,
-            then AI-generate questions you can review and edit.
+          <DialogTitle className="text-xl font-bold font-heading">
+            {t("dialogTitle")}
+          </DialogTitle>
+          <DialogDescription className="text-xs font-semibold text-muted-foreground mt-0.5">
+            {t("dialogSubtitle")}
           </DialogDescription>
         </DialogHeader>
 
@@ -220,15 +211,7 @@ export function GenerateFromFileDialog({
                 <OcrProgress
                   page={progress.page}
                   total={progress.total}
-                  label={
-                    progress.stage === "native"
-                      ? "Parsing file…"
-                      : progress.engine === "glm"
-                        ? "GLM-OCR…"
-                        : progress.engine === "vision"
-                          ? "Cloud Vision OCR…"
-                          : "Tesseract OCR…"
-                  }
+                  label={t("ocrProgressLabel")}
                 />
               )}
             </>
@@ -238,9 +221,10 @@ export function GenerateFromFileDialog({
             <>
               <div className="rounded-2xl border-[3px] border-border bg-card p-4 shadow-[var(--shadow-clay-sm)]">
                 <p className="mb-2 text-xs font-bold text-muted-foreground">
-                  Extracted text ({extractedText.length.toLocaleString()} chars)
-                  — engine: {extractEngine === "glm" ? "GLM-OCR" : extractEngine === "vision" ? "Cloud Vision" : extractEngine === "tesseract" ? "Tesseract" : "Native"}
+                  {t("previewTitle")} ({t("chars", { count: extractedText.length.toLocaleString() })})
+                  — {extractEngine === "glm" ? "GLM-OCR" : extractEngine === "vision" ? "Cloud Vision" : extractEngine === "tesseract" ? "Tesseract" : "Native"}
                 </p>
+
                 <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-xl bg-muted/60 p-3 text-xs font-mono font-medium">
                   {extractedText}
                 </pre>
@@ -252,17 +236,15 @@ export function GenerateFromFileDialog({
                   onClick={() => {
                     setExtractedText(null);
                     setFile(null);
-                    // Also clear the previously-uploaded storage path so the
-                    // Generate button doesn't silently re-target the OLD file.
                     setStoragePath(null);
                   }}
                 >
-                  Choose a different file
+                  {t("dropzoneReady")}
                 </Button>
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="question-count" className="font-extrabold">Number of questions</Label>
+                <Label htmlFor="question-count" className="font-extrabold">{t("questionCountLabel")}</Label>
                 <Input
                   id="question-count"
                   type="number"
@@ -272,7 +254,6 @@ export function GenerateFromFileDialog({
                   onFocus={(e) => e.target.select()}
                   onChange={(e) => setQuestionCount(Number(e.target.value) || 10)}
                 />
-                <p className="text-xs font-semibold text-muted-foreground">Between 3 and 30 questions.</p>
               </div>
 
               {hasQuestions && (
@@ -284,7 +265,7 @@ export function GenerateFromFileDialog({
                     className="mt-0.5"
                   />
                   <Label htmlFor="confirm-replace" className="text-xs font-semibold text-amber-900 cursor-pointer">
-                    This quiz already has questions. Generating will replace them.
+                    {t("warningReplace")}
                   </Label>
                 </div>
               )}
@@ -310,7 +291,7 @@ export function GenerateFromFileDialog({
             onClick={() => onOpenChange(false)}
             disabled={busy}
           >
-            Cancel
+            {tCommon("cancel")}
           </Button>
           {!extractedText ? (
             <Button
@@ -318,11 +299,11 @@ export function GenerateFromFileDialog({
               onClick={handleExtract}
               disabled={!file || busy}
             >
-              {busy ? "Extracting…" : "Extract text"}
+              {busy ? tCommon("loading") : t("generateBtn")}
             </Button>
           ) : (
             <Button type="button" onClick={handleGenerate} disabled={!canGenerate}>
-              {busy ? "Generating…" : "Generate quiz"}
+              {busy ? t("generatingBtn") : t("generateBtn")}
             </Button>
           )}
         </DialogFooter>

@@ -1,3 +1,6 @@
+"use client";
+
+import { useLocale, useTranslations } from "next-intl";
 import { OptionCard } from "@/components/quiz/option-card";
 import type { AnswerState } from "@/components/quiz/play-client";
 import type { HoldProgress } from "@/lib/gestures/types";
@@ -11,20 +14,6 @@ type Question = {
   created_at: string;
 };
 
-/**
- * Prompt + ordered clay option cards (A/B/C/D/E + finger glyphs). Click-first:
- * each option is a keyboard-focusable card; feedback states are driven by the
- * `answer` prop:
- *  - `answer` undefined → unanswered (selectable when `disabled` is false)
- *  - `answer.seeded` → previously answered on a resume: neutral "answered"
- *    chip (assessment) or correct/incorrect chip (practice) — WITHOUT the key
- *    or explanation (they're never stored on session_answers)
- *  - fresh answer → full practice feedback (correct/incorrect + correctIndex
- *    + explanation) or quiet "answered" chip (assessment)
- *
- * `holdProgress` (P6) forwards the 0..1 hold completion to the matching
- * OptionCard (finger === `i + 1`); other options show no fill.
- */
 export function QuestionCard({
   question,
   answer,
@@ -40,13 +29,29 @@ export function QuestionCard({
   holdProgress?: HoldProgress | null;
   onSelect: (index: number) => void;
 }) {
+  const locale = useLocale();
+  const t = useTranslations("play");
+  const tCommon = useTranslations("common");
   const letters = ["A", "B", "C", "D", "E"];
+
+  function formatOptionText(text: string, type: "mcq" | "true_false"): string {
+    if (type === "true_false") {
+      const lower = text.trim().toLowerCase();
+      if (lower === "true" || lower === "betul") {
+        return locale === "ms" ? "Betul" : "True";
+      }
+      if (lower === "false" || lower === "salah") {
+        return locale === "ms" ? "Salah" : "False";
+      }
+    }
+    return text;
+  }
 
   return (
     <section aria-labelledby="question-prompt">
       <div className="mb-3 flex items-center justify-between gap-3">
         <span className="rounded-full border-[3px] border-border bg-card px-3.5 py-1 text-xs font-extrabold text-muted-foreground">
-          {question.type === "mcq" ? "Multiple Choice" : "True / False"}
+          {question.type === "mcq" ? tCommon("mcq") : tCommon("trueFalse")}
         </span>
         {answer && (
           <span
@@ -60,9 +65,9 @@ export function QuestionCard({
           >
             {mode === "practice"
               ? answer.isCorrect
-                ? "Correct"
-                : "Incorrect"
-              : "Answered"}
+                ? t("feedback.correct")
+                : t("feedback.incorrect")
+              : tCommon("completed")}
           </span>
         )}
       </div>
@@ -85,7 +90,7 @@ export function QuestionCard({
               <OptionCard
                 letter={letters[i] ?? String(i + 1)}
                 finger={i + 1}
-                text={opt}
+                text={formatOptionText(opt, question.type)}
                 selected={selected}
                 correct={isCorrectOption}
                 incorrect={isWrongSelection}
@@ -100,7 +105,7 @@ export function QuestionCard({
 
       {mode === "practice" && answer && !answer.seeded && answer.explanation && (
         <div className="mt-5 rounded-2xl border-[3px] border-emerald-300 bg-emerald-50 p-4 text-sm font-semibold text-emerald-900" role="status">
-          <strong className="font-extrabold">Explanation:</strong> {answer.explanation}
+          <strong className="font-extrabold">{t("end.explanation")}</strong> {answer.explanation}
         </div>
       )}
     </section>

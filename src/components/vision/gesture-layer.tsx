@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useTranslations } from "next-intl";
+
 import { HoldConfirm } from "@/lib/gestures/hold-confirm";
 import { HandLossMonitor } from "@/lib/gestures/hand-loss";
 import { mapFingersToOption } from "@/lib/gestures/finger-count";
@@ -17,6 +19,7 @@ import { getFakeHandTracker } from "@/lib/gestures/fake-seam";
 import { HandLandmarkerTracker } from "@/lib/gestures/hand-tracker";
 import type { HandFrame, HoldProgress, IHandTracker } from "@/lib/gestures/types";
 import { GestureCalibration } from "@/components/vision/gesture-calibration";
+
 
 type GestureStatus = "booting" | "calibrating" | "active" | "off";
 type HandLost = "warn" | "paused" | null;
@@ -80,7 +83,9 @@ export function GestureLayer({
   onStatusChange: (status: "active" | "off") => void;
   children: ReactNode;
 }) {
+  const t = useTranslations("vision");
   const [status, setStatus] = useState<GestureStatus>("booting");
+
   const [handLost, setHandLost] = useState<HandLost>(null);
   const [scanning, setScanning] = useState(false);
   const [trackerReady, setTrackerReady] = useState(false);
@@ -477,7 +482,7 @@ export function GestureLayer({
           aria-label="Show camera preview"
           className="fixed top-4 right-4 z-40 md:top-auto md:bottom-4 md:right-4 rounded-full border-[3px] border-border bg-card px-3 py-1.5 text-xs font-bold text-foreground shadow-[var(--shadow-clay-sm)] hover:bg-muted cursor-pointer"
         >
-          Show camera
+          {t("cameraPreview")}
         </button>
       )}
 
@@ -485,7 +490,7 @@ export function GestureLayer({
         <GestureCalibration
           fingerCount={calibFingerCount}
           handDetected={calibHandDetected}
-          notice={PRIVACY_NOTICE}
+          notice={t("privacyNotice")}
           onContinue={() => {
             setHandLostState(null);
             lossRef.current.reset();
@@ -509,21 +514,22 @@ export function GestureLayer({
         <>
           {handLost === "warn" && (
             <div
-              className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-full border-[3px] border-amber-300 bg-amber-100 px-4 py-1.5 text-xs font-extrabold text-amber-800 shadow-[var(--shadow-clay-sm)]"
+              className="fixed bottom-4 left-1/2 z-50 max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-full border-[3px] border-amber-300 bg-amber-100 px-4 py-1.5 text-center text-xs font-extrabold text-amber-800 shadow-[var(--shadow-clay-sm)]"
               role="status"
             >
-              Keep your hand visible to answer
+              {t("keepHandVisible")}
             </div>
           )}
+
           {handLost === "paused" && !blockInput && (
             <div
               className="fixed inset-0 z-[60] flex items-center justify-center bg-background/80 p-4"
               role="alert"
             >
               <div className="rounded-2xl border-[3px] border-border bg-card p-6 text-center shadow-[var(--shadow-clay)]">
-                <p className="font-heading text-base font-semibold">Hand tracking paused</p>
+                <p className="font-heading text-base font-semibold">{t("handPaused")}</p>
                 <p className="mt-2 text-sm font-semibold text-muted-foreground">
-                  Show your hand to the camera to resume.
+                  {t("handPausedResume")}
                 </p>
               </div>
             </div>
@@ -534,7 +540,7 @@ export function GestureLayer({
               data-testid="scan-overlay"
             >
               <div className="rounded-xl bg-black/70 px-6 py-3 text-2xl font-semibold text-white">
-                3-2-1-SCAN
+                {t("scanCountdown")}
               </div>
             </div>
           )}
@@ -543,9 +549,10 @@ export function GestureLayer({
 
       {status === "off" && (
         <div className="mt-4 text-center text-xs text-muted-foreground" role="status">
-          Gestures unavailable — click to answer
+          {t("gesturesUnavailable")}
         </div>
       )}
     </div>
   );
 }
+

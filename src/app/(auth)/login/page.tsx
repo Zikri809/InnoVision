@@ -3,6 +3,7 @@
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { login } from "@/lib/auth/login";
 import { sanitizeRedirect } from "@/lib/auth/redirect";
 import { Button } from "@/components/ui/button";
@@ -16,14 +17,13 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { LanguageToggle } from "@/components/layout/language-toggle";
 
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  // Anti-open-redirect: only allow same-origin local paths (mirrors the auth
-  // callback). Handles protocol-relative, absolute, and backslash variants.
-  // `window` is unavailable during SSR (client components are pre-rendered),
-  // so derive the origin lazily with a safe fallback to a local path.
+  const t = useTranslations("auth");
+
   const redirect = sanitizeRedirect(
     searchParams.get("redirect"),
     typeof window !== "undefined" ? window.location.origin : "http://localhost",
@@ -57,6 +57,11 @@ function LoginForm() {
       <div aria-hidden className="pointer-events-none absolute -left-10 top-16 h-32 w-32 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-orange-200/50" />
       <div aria-hidden className="pointer-events-none absolute -right-8 bottom-24 h-28 w-28 rounded-[60%_40%_45%_55%/50%_60%_40%_55%] bg-blue-200/50" />
 
+      {/* Top right language switch */}
+      <div className="absolute right-6 top-6 z-10">
+        <LanguageToggle />
+      </div>
+
       <div className="w-full max-w-md">
         <Link href="/" className="mb-8 flex items-center justify-center gap-2.5">
           <span className="grid h-11 w-11 -rotate-4 place-items-center rounded-2xl bg-primary font-heading text-xl font-bold text-primary-foreground shadow-[0_4px_0_var(--primary-deep)]">
@@ -67,15 +72,13 @@ function LoginForm() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-2xl">Welcome back!</CardTitle>
-            <CardDescription>
-              Sign in to jump back into your quizzes
-            </CardDescription>
+            <CardTitle className="text-2xl">{t("welcomeBack")}</CardTitle>
+            <CardDescription>{t("signInSubtitle")}</CardDescription>
           </CardHeader>
           <form onSubmit={handleSubmit}>
             <CardContent className="space-y-5">
               <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email">{t("email")}</Label>
                 <Input
                   id="email"
                   name="email"
@@ -83,20 +86,20 @@ function LoginForm() {
                   inputMode="email"
                   spellCheck={false}
                   autoComplete="email"
-                  placeholder="you@example.com"
+                  placeholder={t("emailPlaceholder")}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
+                <Label htmlFor="password">{t("password")}</Label>
                 <Input
                   id="password"
                   name="password"
                   type="password"
                   autoComplete="current-password"
-                  placeholder="Your password"
+                  placeholder={t("passwordPlaceholder")}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
@@ -112,12 +115,12 @@ function LoginForm() {
             </CardContent>
             <CardFooter className="flex flex-col gap-4">
               <Button type="submit" className="w-full" size="lg" disabled={loading}>
-                {loading ? "Signing in…" : "Sign in"}
+                {loading ? t("signingIn") : t("signInBtn")}
               </Button>
               <p className="text-sm font-semibold text-muted-foreground">
-                Don&apos;t have an account?{" "}
+                {t("noAccount")}{" "}
                 <Link href="/register" className="font-extrabold text-primary hover:underline">
-                  Register
+                  {t("registerLink")}
                 </Link>
               </p>
             </CardFooter>

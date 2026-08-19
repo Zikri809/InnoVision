@@ -1,14 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 
-/**
- * Collapsible source-text preview in the builder. Shows the lecturer what the
- * AI actually saw (PLAN §8 risk #5 — "see why before blaming the AI").
- */
 export function SourceTextPreview({ text }: { text: string | null }) {
   const [open, setOpen] = useState(false);
+  const t = useTranslations("extract");
   if (!text) return null;
+
   return (
     <div className="rounded-2xl border-[3px] border-border bg-card p-4 shadow-[var(--shadow-clay-sm)]">
       <button
@@ -17,9 +16,9 @@ export function SourceTextPreview({ text }: { text: string | null }) {
         className="flex w-full cursor-pointer items-center justify-between font-heading text-sm font-semibold text-foreground"
         aria-expanded={open}
       >
-        <span>Source text used for generation</span>
+        <span>{t("previewTitle")}</span>
         <span className="rounded-full border-2 border-border bg-muted px-2.5 py-0.5 text-xs font-bold text-muted-foreground">
-          {open ? "Hide" : "Show"}
+          {open ? t("hideText") : t("showText")}
         </span>
       </button>
       {open && (

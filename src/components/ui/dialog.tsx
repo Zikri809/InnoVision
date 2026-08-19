@@ -1,7 +1,9 @@
 "use client"
 
 import * as React from "react"
+import { useTranslations } from "next-intl"
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
+
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -72,10 +74,20 @@ function DialogContent({
           >
             <RiCloseLine
             />
-            <span className="sr-only">Close</span>
+            <span className="sr-only">
+              {(() => {
+                try {
+                  const t = useTranslations("common");
+                  return t("close");
+                } catch {
+                  return "Close";
+                }
+              })()}
+            </span>
           </DialogPrimitive.Close>
         )}
       </DialogPrimitive.Popup>
+
     </DialogPortal>
   )
 }

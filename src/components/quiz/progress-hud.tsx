@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 /** Time (ms) below which the remaining-time display turns red. */
 const WARNING_THRESHOLD_MS = 30_000;
 
@@ -16,6 +18,7 @@ export function ProgressHud({
   total: number;
   remainingMs: number | null;
 }) {
+  const t = useTranslations("play.hud");
   const pct = total <= 0 ? 0 : Math.min(100, Math.round((current / total) * 100));
 
   function formatMs(ms: number): string {
@@ -29,10 +32,10 @@ export function ProgressHud({
   const warning = remainingMs !== null && remainingMs <= WARNING_THRESHOLD_MS;
 
   return (
-    <div className="w-44 space-y-2">
+    <div className="w-44 sm:w-48 space-y-2">
       <div className="flex items-center justify-between text-sm font-extrabold">
         <span className="text-foreground">
-          Q {Math.min(current, total)}/{total}
+          {t("questionOf", { current: Math.min(current, total), total })}
         </span>
         {remainingMs !== null && (
           <span

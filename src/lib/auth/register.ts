@@ -6,6 +6,12 @@ import { isValidInviteCode } from "@/lib/auth/invite-code";
 import { isSameTimestamp } from "@/lib/auth/consent";
 import { rateLimit } from "@/lib/classes/rate-limit";
 
+import { cookies } from "next/headers";
+import { LOCALE_COOKIE_NAME } from "@/i18n/config";
+import type { SupportedLocale } from "@/lib/types/aliases";
+
+
+
 export interface RegisterResult {
   session: boolean;
   error?: string;
@@ -31,13 +37,16 @@ export async function register({
   password,
   fullName,
   inviteCode,
+  locale = "en",
 }: {
   email: string;
   password: string;
   fullName?: string;
   inviteCode?: string;
+  locale?: SupportedLocale;
 }): Promise<RegisterResult> {
   const wantsLecturer = Boolean(inviteCode && inviteCode.trim().length > 0);
+  const userLocale: SupportedLocale = locale === "ms" ? "ms" : "en";
 
   // Basic input validation BEFORE any DB/auth work. Mirrors the bounds used
   // elsewhere (title/prompt) so a pathological payload can't bloat the DB or
@@ -92,12 +101,26 @@ export async function register({
         // The client role picker is display-only; never trust user_metadata.role.
         role: "student",
         full_name: fullName || undefined,
+        locale: userLocale,
       },
     },
   });
 
   if (error) {
     return { session: false, error: error.message };
+  }
+
+  // Persist chosen language in cookies
+  try {
+    const cookieStore = await cookies();
+    cookieStore.set(LOCALE_COOKIE_NAME, userLocale, {
+      path: "/",
+      maxAge: 60 * 60 * 24 * 365,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+    });
+  } catch {
+    // Non-blocking cookie set
   }
 
   const userId = data.user?.id;
@@ -119,7 +142,13 @@ export async function register({
       const { error: roleError } = await admin
         .from("profiles")
         .upsert(
-          { id: userId, role: "lecturer", consent_given_at: consentAt },
+          {
+            id: userId,
+            role: "lecturer",
+            full_name: fullName || null,
+            locale: userLocale,
+            consent_given_at: consentAt,
+          },
           { onConflict: "id" },
         )
         .select("id, role")
@@ -135,7 +164,11 @@ export async function register({
 
       // Keep auth.users metadata in sync (belt-and-suspenders).
       await admin.auth.admin.updateUserById(userId, {
-        user_metadata: { role: "lecturer", full_name: fullName || undefined },
+        user_metadata: {
+          role: "lecturer",
+          full_name: fullName || undefined,
+          locale: userLocale,
+        },
       });
 
       // Verify promotion actually took effect; if not, surface a clear error
@@ -162,15 +195,9 @@ export async function register({
     }
   } else {
     // Student: record consent via the user's own session (server-side).
-    // Plain UPDATE (RLS allows self-update with role='student'). In the normal
-    // flow the signup trigger has already created the profile row, so this
-    // succeeds. The real race: the UPDATE matches 0 rows because the trigger
-    // hasn't inserted yet, THEN the trigger inserts the row (consent NULL).
-    // So we verify the consent VALUE after the update, not just row existence,
-    // and fall back to a service-role upsert when consent is still unset.
     const { error: consentError } = await supabase
       .from("profiles")
-      .update({ consent_given_at: consentAt })
+      .update({ consent_given_at: consentAt, locale: userLocale })
       .eq("id", userId);
 
     if (consentError) {
@@ -183,10 +210,6 @@ export async function register({
       .eq("id", userId)
       .maybeSingle();
 
-    // Compare by epoch ms via isSameTimestamp, NOT string equality: PostgREST
-    // serializes timestamptz as "...+00:00" while `consentAt` is a JS ISO
-    // string ("...Z"), so a direct === never matches and would make the admin
-    // fallback run unconditionally.
     const consentWritten = isSameTimestamp(profile?.consent_given_at, consentAt);
 
     if (consentWritten) {
@@ -198,7 +221,13 @@ export async function register({
       const { error: adminError } = await admin
         .from("profiles")
         .upsert(
-          { id: userId, role: "student", consent_given_at: consentAt },
+          {
+            id: userId,
+            role: "student",
+            full_name: fullName || null,
+            locale: userLocale,
+            consent_given_at: consentAt,
+          },
           { onConflict: "id" },
         );
       if (adminError) {
@@ -210,6 +239,7 @@ export async function register({
       }
     }
   }
+
 
   return { session: Boolean(data.session) };
 }

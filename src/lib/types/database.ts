@@ -207,6 +207,7 @@ export type Database = {
           face_enrollment_status: string | null
           full_name: string | null
           id: string
+          locale: string
           role: Database["public"]["Enums"]["user_role"]
         }
         Insert: {
@@ -216,6 +217,7 @@ export type Database = {
           face_enrollment_status?: string | null
           full_name?: string | null
           id: string
+          locale?: string
           role: Database["public"]["Enums"]["user_role"]
         }
         Update: {
@@ -225,6 +227,7 @@ export type Database = {
           face_enrollment_status?: string | null
           full_name?: string | null
           id?: string
+          locale?: string
           role?: Database["public"]["Enums"]["user_role"]
         }
         Relationships: []

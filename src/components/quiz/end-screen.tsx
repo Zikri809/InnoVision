@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { PartyPopper, ClipboardCheck, Lock } from "lucide-react";
 import type { ResultsBreakdownRow } from "@/app/play/[sessionId]/page";
@@ -24,18 +27,6 @@ type Quiz = {
   results_revealed_at?: string | null;
 };
 
-/**
- * EndScreen — mode-aware terminal state for a completed session.
- *
- * Three renderings (PLAN_REVEAL_RESULTS v4):
- *  - Practice: always reveals score + % + per-question breakdown.
- *  - Assessment revealed: score + % + breakdown (revealed_at set).
- *  - Assessment hidden: "Submitted ✓ — results will be released by your
- *    lecturer." — NO score, NO %, NO breakdown (a hidden score would leak).
- *
- * `score` may be null even on a completed assessment before reveal; the
- * parent NEVER fabricates `0 / N` for a hidden assessment.
- */
 export function EndScreen({
   session,
   quiz,
@@ -51,8 +42,22 @@ export function EndScreen({
   total: number;
   breakdown?: ResultsBreakdownRow[];
 }) {
+  const locale = useLocale();
+  const t = useTranslations("play.end");
+  const tCommon = useTranslations("common");
   const isPractice = session.mode === "practice";
   const pct = revealed && total > 0 && score != null ? Math.round((score / total) * 100) : 0;
+
+  function formatOptionText(text: string): string {
+    const lower = text.trim().toLowerCase();
+    if (lower === "true" || lower === "betul") {
+      return locale === "ms" ? "Betul" : "True";
+    }
+    if (lower === "false" || lower === "salah") {
+      return locale === "ms" ? "Salah" : "False";
+    }
+    return text;
+  }
 
   return (
     <div className="relative mx-auto max-w-2xl px-4 py-12">
@@ -72,7 +77,7 @@ export function EndScreen({
         </div>
 
         <p className="text-sm font-extrabold uppercase tracking-wide text-muted-foreground">
-          {isPractice ? "Practice complete" : revealed ? "Assessment complete" : "Assessment submitted"}
+          {isPractice ? t("practiceTitle") : revealed ? t("assessmentTitle") : t("submittedTitle")}
         </p>
         <h1 className="mt-1 font-heading text-2xl font-semibold [text-wrap:balance]">{quiz.title}</h1>
 
@@ -82,7 +87,7 @@ export function EndScreen({
             if (elapsedSec >= quiz.time_limit_sec - 2) {
               return (
                 <div className="mx-auto mt-3 inline-flex items-center gap-2 rounded-full border-[2px] border-amber-300 bg-amber-50 px-4 py-1.5 text-xs font-bold text-amber-800" role="status">
-                  ⏱️ Auto-submitted: The time limit for this assessment expired.
+                  ⏱️ {tCommon("timeExpired")}
                 </div>
               );
             }
@@ -96,31 +101,25 @@ export function EndScreen({
               {score}
               <span className="text-3xl text-muted-foreground"> / {total}</span>
             </p>
-            <p className="mt-1 text-sm font-extrabold text-muted-foreground">{pct}% correct</p>
+            <p className="mt-1 text-sm font-extrabold text-muted-foreground">
+              {t("pctCorrect", { pct })}
+            </p>
           </>
         ) : (
           <div className="mx-auto mt-6 max-w-md rounded-2xl border-[3px] border-border bg-muted/50 px-5 py-4" role="status">
             <p className="font-heading text-base font-semibold">
-              Submitted ✓ — results will be released by your lecturer.
+              {t("resultsPending")}
             </p>
           </div>
         )}
 
-        <p className="mx-auto mt-5 max-w-md text-sm font-semibold text-muted-foreground">
-          {isPractice
-            ? "Practice again any time — each attempt creates a new session."
-            : revealed
-              ? "This assessment can only be taken once. Review your answers below."
-              : "You have completed this assessment. It can only be taken once."}
-        </p>
-
         <div className="mt-8 flex flex-wrap justify-center gap-3">
           <Link href="/student/quizzes">
-            <Button variant="outline" size="lg">Back to quizzes</Button>
+            <Button variant="outline" size="lg">{t("backToQuizzes")}</Button>
           </Link>
           {isPractice && (
             <Link href="/student/quizzes">
-              <Button size="lg">Try again</Button>
+              <Button size="lg">{t("tryAgain")}</Button>
             </Link>
           )}
         </div>
@@ -128,7 +127,7 @@ export function EndScreen({
 
       {revealed && breakdown.length > 0 && (
         <div className="mt-6">
-          <h2 className="mb-3 font-heading text-lg font-semibold">Answer breakdown</h2>
+          <h2 className="mb-3 font-heading text-lg font-semibold">{t("answerBreakdown")}</h2>
           <ol className="space-y-3">
             {breakdown.map((b) => {
               const isCorrect = b.is_correct === true;
@@ -153,7 +152,7 @@ export function EndScreen({
                             : "border-destructive/30 bg-destructive/10 text-destructive"
                       }`}
                     >
-                      {b.selected_index == null ? "Unanswered" : isCorrect ? "Correct" : "Wrong"}
+                      {b.selected_index == null ? "—" : isCorrect ? "✓" : "✗"}
                     </span>
                   </div>
                   <ul className="space-y-2 px-5 pb-5">
@@ -187,11 +186,11 @@ export function EndScreen({
                               selected || correct ? "text-foreground" : "text-muted-foreground"
                             }`}
                           >
-                            {opt}
+                            {formatOptionText(opt)}
                           </span>
                           {correct && !selected && (
                             <span className="ml-auto shrink-0 text-[11px] font-extrabold text-emerald-700 dark:text-emerald-400">
-                              Correct answer
+                              {t("correctAnswer")}
                             </span>
                           )}
                         </li>
@@ -200,7 +199,7 @@ export function EndScreen({
                   </ul>
                   {b.explanation && (
                     <div className="border-t-2 border-border/60 px-5 py-3 text-sm font-semibold text-muted-foreground">
-                      <strong className="font-extrabold text-foreground">Explanation:</strong>{" "}
+                      <strong className="font-extrabold text-foreground">{t("explanation")}</strong>{" "}
                       {b.explanation}
                     </div>
                   )}

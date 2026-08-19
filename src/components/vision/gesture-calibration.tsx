@@ -1,23 +1,10 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 
 const FINGER_GUIDE = ["1", "2", "3", "4", "5"];
 
-/**
- * Calibration panel shown once before the quiz starts (Phase 6). Non-gated and
- * always skippable: Continue is enabled only when the tracker is ready
- * (`trackerReady`); Skip is always enabled and turns gestures off.
- *
- * The live webcam/canvas is rendered ABOVE this panel by `GestureLayer` as a
- * persistent node (never remounted between calibration and the PIP), so this
- * component only renders the status readout, finger guide, privacy notice, and
- * the Continue/Skip actions.
- *
- * The `notice` is the honest webcam-consent line: MediaPipe runs locally and
- * only the selected option index is POSTed (exactly as a click would) — video
- * never leaves the device.
- */
 export function GestureCalibration({
   fingerCount,
   handDetected,
@@ -33,13 +20,14 @@ export function GestureCalibration({
   onSkip: () => void;
   continueDisabled: boolean;
 }) {
+  const t = useTranslations("vision");
+
   return (
     <div className="mx-auto max-w-2xl px-4 pb-8">
       <div className="mb-6">
-        <h1 className="font-heading text-2xl font-semibold">Hand gestures</h1>
+        <h1 className="font-heading text-2xl font-semibold">{t("calibrationTitle")}</h1>
         <p className="mt-1 text-sm font-semibold text-muted-foreground">
-          Hold up one to five fingers and keep them steady to answer. Raise all
-          five (open palm) to continue between questions.
+          {t("calibrationSubtitle")}
         </p>
       </div>
 
@@ -56,10 +44,10 @@ export function GestureCalibration({
                 className={`size-2 rounded-full ${handDetected ? "bg-emerald-500" : "bg-muted-foreground/50"}`}
                 aria-hidden
               />
-              {handDetected ? "Hand detected" : "No hand"}
+              {handDetected ? t("handDetected", { fingers: fingerCount }) : t("noHand")}
             </span>
             <span className="text-xs font-bold text-muted-foreground">
-              Fingers: {fingerCount}
+              {t("handDetected", { fingers: fingerCount })}
             </span>
           </div>
         </div>
@@ -90,15 +78,15 @@ export function GestureCalibration({
 
       <div className="mt-6 flex gap-3">
         <Button onClick={onContinue} disabled={continueDisabled}>
-          Continue
+          {t("continueBtn")}
         </Button>
         <Button variant="outline" onClick={onSkip}>
-          Skip — click to answer
+          {t("skipBtn")}
         </Button>
       </div>
       {continueDisabled && (
         <p className="mt-2 text-xs font-semibold text-muted-foreground" role="status">
-          Waiting for hand tracking to be ready…
+          {t("waitingHand")}
         </p>
       )}
     </div>

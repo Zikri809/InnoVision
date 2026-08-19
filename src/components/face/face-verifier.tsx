@@ -1,30 +1,11 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import type { FaceStatus } from "@/lib/face/types";
 import { FaceGate } from "@/components/face/face-gate";
 
-/**
- * FaceVerifier — presentational wrapper that owns the face-pipeline UI.
- *
- * Renders:
- *  - the assessment GATE (instead of children) when status is `'gate'`;
- *  - an honest chip when `'unavailable'` (passthrough, click-first);
- *  - a pause overlay (blink recovery) when `'paused'`;
- *  - a recovering overlay while the blink is awaited;
- *  - a flagged overlay (lecturer decision + poll + "Check again") when `'flagged'`;
- *  - children mounted otherwise (EXCEPT in `'gate'` — children stay mounted in
- *    paused/recovering/flagged so the hand model stays warm; overlays sit above
- *    the gesture PIP via explicit z-index).
- *
- * Face overlays are SUPPRESSED when PlayClient's phase is `submitted`/`dead`
- * (the EndScreen must never be covered by a lingering flag/pause overlay).
- *
- * Liveness UI state is DERIVED from `status` (no effect-synced state): a
- * `recovering` status shows "waiting"; `paused` shows "failed" (re-offer);
- * anything else shows "idle". `verifying` is local to the Begin click.
- */
 export function FaceVerifier({
   status,
   phase,
@@ -48,16 +29,9 @@ export function FaceVerifier({
   onCheckAgain: () => void;
   children: ReactNode;
 }) {
-  // Liveness UI state is DERIVED from `status` (no effect-synced state): a
-  // `recovering` status shows "waiting"; `paused` shows "failed" (re-offer);
-  // anything else shows "idle". There is deliberately NO local `verifying`
-  // state — `beginGate` synchronously flips the pipeline to `recovering` (the
-  // gate unmounts; the overlay owns the "Verifying…" UX), so a persisted
-  // per-click flag would only survive a failed-blink re-render and permanently
-  // disable the Begin button (gate soft-lock).
+  const t = useTranslations("face");
   const terminal = phase === "submitted" || phase === "dead";
 
-  // Derive the liveness readout from the pipeline status.
   const livenessState: "idle" | "waiting" | "passed" | "failed" =
     status === "recovering" ? "waiting" : status === "paused" ? "failed" : "idle";
 
@@ -74,7 +48,7 @@ export function FaceVerifier({
       <div className="relative">
         <div className="mb-2 flex justify-center">
           <span className="rounded-full border-[3px] border-border bg-muted px-3.5 py-1 text-xs font-extrabold text-muted-foreground" role="status">
-            Face check unavailable — camera or models offline
+            {t("offlineChip")}
           </span>
         </div>
         {children}
@@ -96,7 +70,6 @@ export function FaceVerifier({
     );
   }
 
-  // Children stay mounted under overlays for paused/recovering/flagged.
   return (
     <div className="relative">
       {children}
@@ -105,16 +78,16 @@ export function FaceVerifier({
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm" role="alert">
           <div className="rounded-[28px] border-[3px] border-border bg-card p-8 text-center shadow-[var(--shadow-clay)]">
             <p className="font-heading text-xl font-semibold">
-              {status === "recovering" ? "Blink to recover" : "Face check paused"}
+              {status === "recovering" ? t("recoveringTitle") : t("pausedTitle")}
             </p>
             <p className="mx-auto mt-2 max-w-xs text-sm font-semibold text-muted-foreground">
               {status === "recovering"
-                ? "Look at the camera and blink."
-                : "A face mismatch paused the check. Blink to continue."}
+                ? t("recoveringBody")
+                : t("pausedBody")}
             </p>
             {status === "paused" && (
               <Button size="lg" className="mt-6" onClick={onRecover}>
-                Blink to recover
+                {t("recoverBtn")}
               </Button>
             )}
           </div>
@@ -124,14 +97,13 @@ export function FaceVerifier({
       {status === "flagged" && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm" role="alert">
           <div className="rounded-[28px] border-[3px] border-destructive/40 bg-card p-8 text-center shadow-[var(--shadow-clay)]">
-            <p className="font-heading text-xl font-semibold text-destructive">Assessment flagged</p>
+            <p className="font-heading text-xl font-semibold text-destructive">{t("flaggedTitle")}</p>
             <p className="mx-auto mt-2 max-w-sm text-sm font-semibold text-muted-foreground">
-              Our system detected repeated face mismatches. A lecturer must review
-              and unlock your assessment before you can continue.
+              {t("flaggedBody")}
             </p>
             <div className="mt-6 flex justify-center gap-3">
               <Button size="lg" variant="outline" onClick={onCheckAgain}>
-                Check again
+                {t("checkAgainBtn")}
               </Button>
             </div>
           </div>

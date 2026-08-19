@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -13,6 +14,7 @@ import {
 } from "@/components/ui/card";
 import { ClipboardList, Zap, ShieldCheck, Timer, Play, ScanFace, Layers } from "lucide-react";
 import { formatDuration } from "@/lib/format/duration";
+import { getModeLabel } from "@/lib/quizzes/labels";
 
 type QuizRow = {
   id: string;
@@ -24,16 +26,6 @@ type QuizRow = {
   classes: { title: string } | null;
 };
 
-const MODE_LABEL: Record<QuizRow["mode"], string> = {
-  practice: "Practice",
-  assessment: "Assessment",
-};
-
-/**
- * Student quizzes dashboard — hero header, quick stats, and chunky quiz cards.
- * Start logic is identical to the previous list (201 → /play/{id}, 409
- * already_attempted → resume/notice, 404 → unavailable).
- */
 export function StudentQuizzesClient({
   quizzes,
   enrolled,
@@ -42,7 +34,10 @@ export function StudentQuizzesClient({
   enrolled: boolean;
 }) {
   const router = useRouter();
-  // Ref lock guards against a fast double-click before React re-renders.
+  const locale = useLocale();
+  const t = useTranslations("student.quizzes");
+  const tCommon = useTranslations("common");
+
   const submitLock = useRef(false);
   const [startingId, setStartingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -67,30 +62,25 @@ export function StudentQuizzesClient({
       }
 
       if (res.status === 409 && body.error === "already_attempted") {
-        // The play page disambiguates the payload's session_id: an active /
-        // paused session resumes (starts at the first unanswered question); a
-        // completed one renders the EndScreen's clean "already taken" message
-        // (E5 — no 500). This is strictly more robust than trying to guess the
-        // status from the quiz list (the payload carries no status).
         if (body.session_id) {
           router.push(`/play/${body.session_id}`);
           return;
         }
         setNotice((prev) => ({
           ...prev,
-          [quizId]: "You have already taken this assessment.",
+          [quizId]: tCommon("completed"),
         }));
         return;
       }
 
       if (res.status === 404) {
-        setError("This quiz is no longer available.");
+        setError(tCommon("errorGeneric"));
         return;
       }
 
-      setError(body.message ?? body.error ?? "Could not start the quiz.");
+      setError(body.message ?? body.error ?? tCommon("errorGeneric"));
     } catch {
-      setError("Network error starting the quiz.");
+      setError(tCommon("errorGeneric"));
     } finally {
       submitLock.current = false;
       setStartingId(null);
@@ -108,14 +98,13 @@ export function StudentQuizzesClient({
         <div aria-hidden className="pointer-events-none absolute -bottom-12 left-1/3 h-28 w-28 rounded-[60%_40%_45%_55%/50%_60%_40%_55%] bg-blue-100/60" />
         <div className="relative">
           <span className="inline-flex items-center gap-2 rounded-full border-[3px] border-border bg-card px-3.5 py-1 text-xs font-extrabold text-primary">
-            <ClipboardList className="h-4 w-4" aria-hidden /> Available quizzes
+            <ClipboardList className="h-4 w-4" aria-hidden /> {t("heroTitle")}
           </span>
           <h1 className="mt-4 font-heading text-3xl font-semibold [text-wrap:balance] md:text-4xl">
-            Pick a quiz and wave your answer
+            {t("heroSubtitle")}
           </h1>
           <p className="mt-2 max-w-xl text-sm font-semibold text-muted-foreground md:text-base">
-            Practice as much as you like, or take a one-shot assessment — your
-            hand is the mouse.
+            {t("unlimitedTries")}
           </p>
 
           {/* quick stats */}
@@ -125,23 +114,21 @@ export function StudentQuizzesClient({
                 <Zap className="h-5 w-5" aria-hidden />
                 <span className="font-heading text-2xl font-bold">{practiceCount}</span>
               </div>
-              <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">Practice</p>
+              <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">{t("statPractice")}</p>
             </div>
             <div className="rounded-2xl border-[3px] border-border bg-card px-5 py-4 shadow-[var(--shadow-clay-sm)]">
               <div className="flex items-center gap-2 text-accent">
                 <ShieldCheck className="h-5 w-5" aria-hidden />
                 <span className="font-heading text-2xl font-bold">{assessmentCount}</span>
               </div>
-              <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">
-                {assessmentCount === 1 ? "Assessment" : "Assessments"}
-              </p>
+              <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">{t("statAssessment")}</p>
             </div>
             <div className="rounded-2xl border-[3px] border-border bg-card px-5 py-4 shadow-[var(--shadow-clay-sm)] max-sm:col-span-2">
               <div className="flex items-center gap-2 text-primary">
                 <ClipboardList className="h-5 w-5" aria-hidden />
                 <span className="font-heading text-2xl font-bold">{quizzes.length}</span>
               </div>
-              <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">Total live</p>
+              <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">{t("statLive")}</p>
             </div>
           </div>
         </div>
@@ -163,11 +150,10 @@ export function StudentQuizzesClient({
             </span>
             <div>
               <p className="font-heading text-base font-semibold text-amber-800">
-                Face enrollment recommended
+                {t("enrollBannerTitle")}
               </p>
               <p className="mt-1 max-w-md text-sm font-semibold text-amber-700">
-                Assessment quizzes use face verification. Enroll now so you&apos;re
-                ready when an assessment opens.
+                {t("enrollBannerBody")}
               </p>
             </div>
           </div>
@@ -175,7 +161,7 @@ export function StudentQuizzesClient({
             variant="outline"
             onClick={() => router.push("/student/face/enroll")}
           >
-            Enroll your face
+            {t("enrollNowBtn")}
           </Button>
         </div>
       )}
@@ -186,9 +172,9 @@ export function StudentQuizzesClient({
           <span className="grid h-14 w-14 place-items-center rounded-2xl bg-orange-100 text-primary">
             <ClipboardList className="h-7 w-7" aria-hidden />
           </span>
-          <p className="mt-4 font-heading text-lg font-semibold">No quizzes yet</p>
+          <p className="mt-4 font-heading text-lg font-semibold">{t("emptyTitle")}</p>
           <p className="mt-1 max-w-xs text-sm font-semibold text-muted-foreground">
-            Check back once your lecturer publishes one for your classes.
+            {t("emptySubtitle")}
           </p>
         </div>
       ) : (
@@ -211,12 +197,12 @@ export function StudentQuizzesClient({
                             ? "border-emerald-300 bg-emerald-100 text-emerald-800"
                             : "border-accent/40 bg-blue-100 text-accent"
                         }`}>
-                          {MODE_LABEL[q.mode]}
+                          {getModeLabel(q.mode, locale)}
                         </span>
                         {q.mode === "assessment" && q.time_limit_sec != null && (
                           <span className="inline-flex items-center gap-1 rounded-full border-[3px] border-border bg-muted px-3 py-1 text-xs font-extrabold tabular-nums text-muted-foreground">
                             <Timer className="h-3.5 w-3.5" aria-hidden />
-                            {formatDuration(q.time_limit_sec)}
+                            {formatDuration(q.time_limit_sec, locale)}
                           </span>
                         )}
                       </div>
@@ -234,8 +220,8 @@ export function StudentQuizzesClient({
                     ) : (
                       <span className="text-sm font-semibold text-muted-foreground">
                         {isPractice
-                          ? "Unlimited tries"
-                          : "One attempt only"}
+                          ? t("unlimitedTries")
+                          : t("oneAttempt")}
                       </span>
                     )}
                     <Button
@@ -244,7 +230,7 @@ export function StudentQuizzesClient({
                       disabled={startingId === q.id}
                     >
                       <Play className="h-4 w-4" aria-hidden />
-                      {startingId === q.id ? "Starting…" : "Start"}
+                      {startingId === q.id ? t("startingBtn") : t("startBtn")}
                     </Button>
                   </CardContent>
                 </Card>
@@ -252,7 +238,6 @@ export function StudentQuizzesClient({
             );
           })}
 
-          {/* Balancing tile — points back to classes so a short list never looks stranded. */}
           <li>
             <Link
               href="/student/classes"
@@ -261,10 +246,7 @@ export function StudentQuizzesClient({
               <span className="grid h-11 w-11 place-items-center rounded-2xl border-[3px] border-current">
                 <Layers className="h-5 w-5" aria-hidden />
               </span>
-              <span className="text-sm font-extrabold">Browse your classes</span>
-              <span className="max-w-[180px] text-xs font-semibold text-muted-foreground">
-                Join more classes to unlock more quizzes
-              </span>
+              <span className="text-sm font-extrabold">{tCommon("all")}</span>
             </Link>
           </li>
         </ul>

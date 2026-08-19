@@ -1,18 +1,8 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { getTranslations } from "next-intl/server";
 import { AppUserMenu } from "./app-user-menu";
 import { AppNavLink } from "./app-nav-link";
-
-type NavLink = { href: string; label: string };
-
-const NAV: Record<"lecturer" | "student", NavLink[]> = {
-  lecturer: [{ href: "/lecturer/classes", label: "My Classes" }],
-  student: [
-    { href: "/student/classes", label: "My Classes" },
-    { href: "/student/quizzes", label: "Quizzes" },
-    { href: "/student/face/enroll", label: "Face Setup" },
-  ],
-};
 
 /**
  * Shared clay app shell for the authenticated areas. Renders a sticky topbar
@@ -20,7 +10,7 @@ const NAV: Record<"lecturer" | "student", NavLink[]> = {
  * in a centered, padded container. `/play` intentionally opts out (full-screen
  * focus mode).
  */
-export function AppShell({
+export async function AppShell({
   role,
   email,
   consentGiven,
@@ -31,12 +21,21 @@ export function AppShell({
   consentGiven: boolean;
   children: ReactNode;
 }) {
-  const links = NAV[role];
+  const t = await getTranslations("nav");
+
+  const links =
+    role === "lecturer"
+      ? [{ href: "/lecturer/classes", label: t("myClasses") }]
+      : [
+          { href: "/student/classes", label: t("myClasses") },
+          { href: "/student/quizzes", label: t("quizzes") },
+          { href: "/student/face/enroll", label: t("faceSetup") },
+        ];
 
   return (
     <div className="flex min-h-dvh flex-col">
       <a href="#main" className="skip-link">
-        Skip to content
+        {t("skipToContent")}
       </a>
 
       <header className="sticky top-0 z-50 border-b-[3px] border-border bg-background/85 backdrop-blur">

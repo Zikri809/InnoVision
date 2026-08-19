@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import {
   Select,
   SelectContent,
@@ -14,11 +15,6 @@ import type { ExtractEngine, OcrConfig } from "@/lib/extract/types";
 
 const STORAGE_KEY = "innovision.ocrEngine";
 
-/**
- * OCR engine picker. Tesseract is always the default; GLM only appears when
- * the local GLM-OCR (Docker/vLLM) availability probe succeeds (U-E4); vision
- * is always an opt-in. The choice is persisted to localStorage (PLAN §3.3).
- */
 export function EnginePicker({
   config,
   value,
@@ -29,6 +25,7 @@ export function EnginePicker({
   onChange: (engine: ExtractEngine) => void;
 }) {
   const [glmAvailableFlag, setGlmAvailableFlag] = useState(false);
+  const t = useTranslations("extract");
 
   useEffect(() => {
     let cancelled = false;
@@ -49,42 +46,32 @@ export function EnginePicker({
     }
   }, [value]);
 
-  // Re-hide GLM if the stored engine is tesseract/vision (the parent's `value`
-  // already controls selection; this only affects the probe visibility).
-  // (No additional state needed — `glmAvailableFlag` already drives visibility.)
-
   return (
     <div className="space-y-1.5">
-      <Label htmlFor="ocr-engine" className="font-extrabold">OCR Engine</Label>
+      <Label htmlFor="ocr-engine" className="font-extrabold">{t("engineLabel")}</Label>
       <Select
         value={value}
         onValueChange={(v) => onChange(v as ExtractEngine)}
       >
         <SelectTrigger id="ocr-engine" className="w-full">
-          <SelectValue placeholder="Select OCR engine">
+          <SelectValue placeholder={t("engineLabel")}>
             {(v) =>
               v === "glm"
-                ? "GLM-OCR (local, high accuracy)"
+                ? t("engineGlm")
                 : v === "vision"
-                  ? "Cloud Vision (costs tokens)"
-                  : "Tesseract (built-in, $0)"
+                  ? t("engineVision")
+                  : t("engineTesseract")
             }
           </SelectValue>
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="tesseract">Tesseract (built-in, $0)</SelectItem>
+          <SelectItem value="tesseract">{t("engineTesseract")}</SelectItem>
           {glmAvailableFlag && (
-            <SelectItem value="glm">GLM-OCR (local, high accuracy)</SelectItem>
+            <SelectItem value="glm">{t("engineGlm")}</SelectItem>
           )}
-          <SelectItem value="vision">Cloud Vision (costs tokens)</SelectItem>
+          <SelectItem value="vision">{t("engineVision")}</SelectItem>
         </SelectContent>
       </Select>
-      <p className="text-xs font-semibold text-muted-foreground">
-        Used only when the file is scanned or has no text layer.
-        {glmAvailableFlag
-          ? " GLM-OCR detected on this machine."
-          : " GLM-OCR (local Docker) not detected."}
-      </p>
     </div>
   );
 }

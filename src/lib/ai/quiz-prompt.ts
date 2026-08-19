@@ -29,12 +29,20 @@ export function sanitizePromptFeedback(text: string, maxLen = 500): string {
 }
 
 /** System prompt: gesture constraints + untrusted-source hardening. */
-export function buildQuizSystemPrompt(): string {
+export function buildQuizSystemPrompt(language: "en" | "ms" | "auto" = "auto"): string {
+  const langRule =
+    language === "ms"
+      ? "- Language: Generate all content (title, questions, options, explanation) in Bahasa Melayu (Malay). For true_false questions, use exactly 2 options: ['Betul', 'Salah']."
+      : language === "en"
+        ? "- Language: Generate all content (title, questions, options, explanation) in English. For true_false questions, use exactly 2 options: ['True', 'False']."
+        : "- Language: Match the language of the source text. If the source text is in Bahasa Melayu (Malay), generate content in Malay and for true_false questions use exactly 2 options: ['Betul', 'Salah']. If in English, use English and ['True', 'False'].";
+
   return [
     "You generate gesture-answerable quiz questions from textbook chapters.",
     "Constraints:",
     `- Exactly ${AI_QUESTIONS_MIN} to ${AI_QUESTIONS_MAX} questions.`,
-    "- Each question is either mcq (multiple choice, 2 to 5 options) or true_false (exactly 2 options: True / False).",
+    "- Each question is either mcq (multiple choice, 2 to 5 options) or true_false (exactly 2 options).",
+    langRule,
     "- The correct answer index must be 0-based and point at an existing option.",
     "- Options must be distinct (case-insensitive). Keep options short and unambiguous.",
     "- Provide a one-line explanation of the correct answer when useful.",
@@ -49,6 +57,7 @@ export function buildQuizSystemPrompt(): string {
     '{"title": string, "questions": [{"type": "mcq"|"true_false", "prompt": string, "options": string[], "correct_index": number, "explanation"?: string}]}',
   ].join("\n");
 }
+
 
 /** User prompt wrapping the extracted text (already capped at 15k chars). */
 export function buildQuizUserPrompt(text: string, questionCount: number): string {
@@ -81,6 +90,7 @@ export function buildRegeneratePrompt(opts: {
   return [
     `Rewrite the following question as a better, gesture-answerable question.`,
     `Keep the SAME type (${question.type}).`,
+    `Maintain the SAME language as the existing question (e.g. if in Bahasa Melayu, write the prompt, options, and explanation in Bahasa Melayu; for true_false questions in Bahasa Melayu, use options ["Betul", "Salah"]).`,
     `Return ONLY a JSON object of the form: {"type": "mcq"|"true_false", "prompt": string, "options": string[], "correct_index": number, "explanation"?: string}.`,
     ``,
     `Existing question:`,
@@ -91,6 +101,7 @@ export function buildRegeneratePrompt(opts: {
     instructionText,
   ].join("\n");
 }
+
 
 export type ParsedQuiz =
   | { ok: true; quiz: AiQuiz }
@@ -192,15 +203,16 @@ export async function generateQuiz(opts: {
   chat: (messages: ChatMessage[], timeoutMs?: number) => Promise<ChatResult>;
   text: string;
   questionCount: number;
+  language?: "en" | "ms" | "auto";
   /** Wall-clock deadline for attempt+retry combined. Defaults to now + 50s. */
   deadlineMs?: number;
 }): Promise<GenerateQuizResult> {
-  const { chat, text, questionCount, deadlineMs = Date.now() + 900_000 } = opts;
+  const { chat, text, questionCount, language = "auto", deadlineMs = Date.now() + 900_000 } = opts;
 
   const attempt = async (extra?: string): Promise<GenerateQuizResult> => {
     const remaining = remainingBudgetMs(deadlineMs);
     const messages: ChatMessage[] = [
-      { role: "system", content: buildQuizSystemPrompt() },
+      { role: "system", content: buildQuizSystemPrompt(language) },
       {
         role: "user",
         content: extra
@@ -243,14 +255,15 @@ export async function regenerateQuestion(opts: {
   question: AiQuestion;
   siblings: AiQuestion[];
   instruction?: string;
+  language?: "en" | "ms" | "auto";
   deadlineMs?: number;
 }): Promise<RegenerateResult> {
-  const { chat, question, siblings, instruction, deadlineMs = Date.now() + 900_000 } = opts;
+  const { chat, question, siblings, instruction, language = "auto", deadlineMs = Date.now() + 900_000 } = opts;
 
   const attempt = async (extra?: string): Promise<RegenerateResult> => {
     const remaining = remainingBudgetMs(deadlineMs);
     const messages: ChatMessage[] = [
-      { role: "system", content: buildQuizSystemPrompt() },
+      { role: "system", content: buildQuizSystemPrompt(language) },
       {
         role: "user",
         content: extra
@@ -258,6 +271,7 @@ export async function regenerateQuestion(opts: {
           : buildRegeneratePrompt({ question, siblings, instruction }),
       },
     ];
+
     const res = await chat(messages, remaining);
     if (!res.ok) {
       return res.error === "timeout"
