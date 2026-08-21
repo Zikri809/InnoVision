@@ -103,9 +103,17 @@ describe("Pipeline engine branching", () => {
   // The pipeline requires a `File` for the OCR branches (server-side path
   // throws `ocr_required_browser` to avoid Node-only canvas code). A tiny
   // `File`-shaped stub is enough — we never call arrayBuffer/canvas on it
-  // because the OCR modules are mocked.
+  // because the OCR modules are mocked. The payload carries a valid PDF
+  // signature so magic-byte validation passes and the cascade proceeds.
   const fileStub = (filename: string) =>
-    ({ name: filename, arrayBuffer: async () => new ArrayBuffer(0) }) as unknown as File;
+    ({
+      name: filename,
+      arrayBuffer: async () =>
+        new TextEncoder().encode("%PDF-1.4\n%%EOF\n").buffer as ArrayBuffer,
+      slice: () => ({
+        arrayBuffer: async () => new ArrayBuffer(0),
+      }),
+    }) as unknown as File;
 
   beforeEach(() => {
     // Clear the OCR mock call counts between tests so `not.toHaveBeenCalled`
@@ -244,7 +252,9 @@ describe("Pipeline engine branching", () => {
     const r = await runExtractionPipeline({
       file: {
         name: "scan.pdf",
-        arrayBuffer: async () => new TextEncoder().encode("Hi.").buffer as ArrayBuffer,
+        arrayBuffer: async () =>
+          new TextEncoder().encode("%PDF-1.4\n%%EOF\n").buffer as ArrayBuffer,
+        slice: () => ({ arrayBuffer: async () => new ArrayBuffer(0) }),
       } as unknown as File,
       engine: "tesseract",
     });

@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import type { SetAllCookies } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import type { Database } from "@/lib/types/database";
+import { env } from "@/lib/env";
 
 const COOKIE_HANDLERS = (cookieStore: Awaited<ReturnType<typeof cookies>>) => ({
   getAll() {
@@ -29,8 +30,8 @@ const COOKIE_HANDLERS = (cookieStore: Awaited<ReturnType<typeof cookies>>) => ({
 export async function createClient() {
   const cookieStore = await cookies();
   return createServerClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    env.NEXT_PUBLIC_SUPABASE_URL,
+    env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     { cookies: COOKIE_HANDLERS(cookieStore) },
   );
 }
@@ -39,8 +40,8 @@ export async function createClient() {
 export async function createServerActionClient() {
   const cookieStore = await cookies();
   return createServerClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    env.NEXT_PUBLIC_SUPABASE_URL,
+    env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     { cookies: COOKIE_HANDLERS(cookieStore) },
   );
 }

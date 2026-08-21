@@ -40,7 +40,6 @@ jobs:
           echo "SUPABASE_SERVICE_ROLE_KEY=$(grep '^SERVICE_ROLE_KEY=' .env.local | cut -d= -f2- | tr -d '\"')" >> .env.local
           # Add the non-Supabase vars needed by the app/tests
           echo "LECTURER_INVITE_CODE=${{ env.LECTURER_INVITE_CODE }}" >> .env.local
-          echo "TIMER_GRACE_SEC=5" >> .env.local
           echo "AI_BASE_URL=https://api.openai.com/v1" >> .env.local
           echo "AI_API_KEY=test-key" >> .env.local
           echo "AI_MODEL=gpt-4o-mini" >> .env.local
@@ -55,14 +54,17 @@ jobs:
       - name: Regenerate types
         run: npm run gen:types
 
+      - name: Check database types drift
+        run: git diff --exit-code src/lib/types/database.ts
+
+      - name: Validate i18n parity
+        run: node scripts/check-i18n.mjs
+
       - name: Lint
         run: npm run lint
 
       - name: Typecheck
         run: npm run typecheck
-
-      - name: Unit tests
-        run: npm test
 
       - name: Unit coverage (per-file thresholds)
         run: npx vitest run --coverage

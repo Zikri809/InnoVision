@@ -109,8 +109,38 @@ export type Database = {
           },
         ]
       }
+      class_join_attempts: {
+        Row: {
+          fail_count: number
+          locked_until: string | null
+          student_id: string
+          window_started_at: string
+        }
+        Insert: {
+          fail_count?: number
+          locked_until?: string | null
+          student_id: string
+          window_started_at?: string
+        }
+        Update: {
+          fail_count?: number
+          locked_until?: string | null
+          student_id?: string
+          window_started_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "class_join_attempts_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       classes: {
         Row: {
+          archived_at: string | null
           created_at: string
           id: string
           join_code: string
@@ -118,6 +148,7 @@ export type Database = {
           title: string
         }
         Insert: {
+          archived_at?: string | null
           created_at?: string
           id?: string
           join_code: string
@@ -125,6 +156,7 @@ export type Database = {
           title: string
         }
         Update: {
+          archived_at?: string | null
           created_at?: string
           id?: string
           join_code?: string
@@ -291,6 +323,7 @@ export type Database = {
           id: string
           last_activity_at: string
           mode: Database["public"]["Enums"]["quiz_mode"]
+          paused_at: string | null
           quiz_id: string
           score: number | null
           started_at: string
@@ -306,6 +339,7 @@ export type Database = {
           id?: string
           last_activity_at?: string
           mode: Database["public"]["Enums"]["quiz_mode"]
+          paused_at?: string | null
           quiz_id: string
           score?: number | null
           started_at?: string
@@ -321,6 +355,7 @@ export type Database = {
           id?: string
           last_activity_at?: string
           mode?: Database["public"]["Enums"]["quiz_mode"]
+          paused_at?: string | null
           quiz_id?: string
           score?: number | null
           started_at?: string
@@ -761,26 +796,6 @@ export type Database = {
           time_limit_sec: number | null
           title: string | null
         }
-        Insert: {
-          class_id?: string | null
-          created_at?: string | null
-          id?: string | null
-          mode?: Database["public"]["Enums"]["quiz_mode"] | null
-          results_revealed_at?: string | null
-          status?: Database["public"]["Enums"]["quiz_status"] | null
-          time_limit_sec?: number | null
-          title?: string | null
-        }
-        Update: {
-          class_id?: string | null
-          created_at?: string | null
-          id?: string | null
-          mode?: Database["public"]["Enums"]["quiz_mode"] | null
-          results_revealed_at?: string | null
-          status?: Database["public"]["Enums"]["quiz_status"] | null
-          time_limit_sec?: number | null
-          title?: string | null
-        }
         Relationships: [
           {
             foreignKeyName: "quizzes_class_id_fkey"
@@ -945,6 +960,7 @@ export type Database = {
         Args: { p_reason: string; p_session_id: string }
         Returns: Json
       }
+      grant_face_consent: { Args: never; Returns: Json }
       is_enrolled_in_class: { Args: { p_class_id: string }; Returns: boolean }
       is_lecturer: { Args: never; Returns: boolean }
       is_lecturer_of_class: { Args: { p_class_id: string }; Returns: boolean }
@@ -959,19 +975,32 @@ export type Database = {
       }
       join_class: { Args: { code: string }; Returns: Json }
       pause_session: { Args: { p_session_id: string }; Returns: Json }
-      record_face_check: {
-        Args: {
-          p_frame: string
-          p_nonce: string
-          p_second_similarity: number
-          p_second_subject: string
-          p_session_id: string
-          p_similarity: number
-          p_subject: string
-          p_trigger: Database["public"]["Enums"]["face_check_trigger"]
-        }
-        Returns: Json
-      }
+      prune_expired_data: { Args: never; Returns: Json }
+      record_face_check:
+        | {
+            Args: {
+              p_claimed_distance?: number
+              p_claimed_matched?: boolean
+              p_client_nonce?: string
+              p_frame: string
+              p_session_id: string
+              p_trigger?: Database["public"]["Enums"]["face_check_trigger"]
+            }
+            Returns: Json
+          }
+        | {
+            Args: {
+              p_frame: string
+              p_nonce: string
+              p_second_similarity: number
+              p_second_subject: string
+              p_session_id: string
+              p_similarity: number
+              p_subject: string
+              p_trigger: Database["public"]["Enums"]["face_check_trigger"]
+            }
+            Returns: Json
+          }
       reject_face_enrollment: { Args: { p_student_id: string }; Returns: Json }
       reorder_questions: {
         Args: { p_ordered_ids: string[]; p_quiz_id: string }
@@ -1003,37 +1032,21 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      report_face_unavailable: { Args: { p_session_id: string }; Returns: Json }
+      reset_session: { Args: { p_session_id: string }; Returns: Json }
+      revoke_face_consent: { Args: never; Returns: Json }
+      safe_audit_uuid: { Args: { p_value: string }; Returns: string }
       save_quiz_questions: {
         Args: {
           p_mode?: string
           p_questions: Json
           p_quiz_id: string
-          p_source_file_url?: string | null
-          p_source_text?: string | null
-          p_title?: string | null
+          p_source_file_url: string
+          p_source_text: string
+          p_title: string
         }
-        Returns: {
-          correct_index: number
-          created_at: string
-          explanation: string | null
-          id: string
-          options: string[]
-          order_index: number
-          prompt: string
-          quiz_id: string
-          type: Database["public"]["Enums"]["question_type"]
-        }[]
-        SetofOptions: {
-          from: "*"
-          to: "questions"
-          isOneToOne: false
-          isSetofReturn: true
-        }
+        Returns: undefined
       }
-      report_face_unavailable: { Args: { p_session_id: string }; Returns: Json }
-      reset_session: { Args: { p_session_id: string }; Returns: Json }
-      revoke_face_consent: { Args: never; Returns: Json }
-      safe_audit_uuid: { Args: { p_value: string }; Returns: string }
       self_recover_session: { Args: { p_session_id: string }; Returns: Json }
       start_quiz_session: { Args: { p_quiz_id: string }; Returns: Json }
       student_results: { Args: { p_quiz_id: string }; Returns: Json }

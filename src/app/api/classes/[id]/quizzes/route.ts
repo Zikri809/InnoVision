@@ -30,6 +30,9 @@ export async function POST(request: Request, { params }: Params) {
 
   const owner = await requireClassOwner(supabase, classId);
   if (!owner.ok) return owner.response;
+  if (owner.archivedAt) {
+    return invalidBody("Cannot create quizzes in an archived class.");
+  }
 
   // CSRF: reject cross-origin quiz creation (AI/session-route precedent).
   const originError = checkSameOrigin(request);

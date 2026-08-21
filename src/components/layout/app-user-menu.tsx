@@ -38,12 +38,21 @@ export function AppUserMenu({
   const t = useTranslations("nav");
   const [open, setOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState(false);
 
   async function handleLogout() {
     setSigningOut(true);
-    await logout();
-    router.push("/login");
-    router.refresh();
+    setSignOutError(false);
+    try {
+      await logout();
+      router.push("/login");
+      router.refresh();
+    } catch (err) {
+      console.error("Sign out failed:", err);
+      setSignOutError(true);
+    } finally {
+      setSigningOut(false);
+    }
   }
 
   return (
@@ -81,6 +90,11 @@ export function AppUserMenu({
                 </>
               )}
             </div>
+            {signOutError && (
+              <p role="alert" className="text-sm font-bold text-destructive">
+                {t("signOutFailed")}
+              </p>
+            )}
           </div>
 
           <Button

@@ -7,6 +7,7 @@ import { createClient } from "@supabase/supabase-js";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertLocalTarget } from "./lib/target-guard.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const envPath = path.resolve(__dirname, "../.env.local");
@@ -23,6 +24,8 @@ const env = fs
 const URL = env.NEXT_PUBLIC_SUPABASE_URL;
 const ANON = env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SERVICE = env.SUPABASE_SERVICE_ROLE_KEY;
+
+assertLocalTarget(URL, "verify-security.mjs");
 
 const admin = createClient(URL, SERVICE, { auth: { persistSession: false } });
 const stamp = Date.now();

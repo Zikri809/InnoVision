@@ -74,7 +74,7 @@ export function GenerateFromFileDialog({
   const [engine, setEngine] = useState<ExtractEngine>(() => {
     try {
       const stored = localStorage.getItem("innovision.ocrEngine");
-      if (stored === "tesseract" || stored === "glm" || stored === "vision") {
+      if (stored === "tesseract" || stored === "glm" || stored === "native") {
         return stored;
       }
     } catch {
@@ -124,14 +124,13 @@ export function GenerateFromFileDialog({
     setBusy(false);
   }
 
+  // Close-path reset happens in the Dialog's onOpenChange (reset() there);
+  // this effect only aborts any in-flight generation on unmount.
   useEffect(() => {
-    if (!open) {
-      reset();
-    }
     return () => {
       activeAbortRef.current?.abort();
     };
-  }, [open]);
+  }, []);
 
   useEffect(() => {
     stepContainerRef.current?.focus();

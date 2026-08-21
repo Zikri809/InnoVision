@@ -15,6 +15,10 @@ export type Profile = Database["public"]["Tables"]["profiles"]["Row"] & {
   locale?: SupportedLocale;
 };
 
+export type Class = Database["public"]["Tables"]["classes"]["Row"];
+export type ClassEnrollment = Database["public"]["Tables"]["class_enrollments"]["Row"];
+export type StudentClassView = Database["public"]["Views"]["student_class_view"]["Row"];
+export type StudentRosterView = Database["public"]["Views"]["student_roster_view"]["Row"];
 
 export type QuizMode = Database["public"]["Enums"]["quiz_mode"];
 
@@ -40,3 +44,18 @@ export type AuditEvent = Database["public"]["Tables"]["audit_events"]["Row"];
 
 export type LecturerAuditEvent =
   Database["public"]["Views"]["lecturer_audit_view"]["Row"];
+
+export type LecturerClassCard = Pick<
+  Class,
+  "id" | "title" | "join_code" | "created_at" | "archived_at"
+> & {
+  quizCount: number;
+};
+
+export type ArchivedClassCard = Pick<
+  Class,
+  "id" | "title" | "join_code" | "created_at" | "archived_at"
+> & {
+  quizCount: number;
+};
+

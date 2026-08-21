@@ -25,7 +25,7 @@
 |---|---|---|
 | Bandwidth | 100 GB/mo | ✅ App is small; MediaPipe models load from Google's CDN, not Vercel |
 | Serverless executions | 100k/day | ✅ ~20 users × a few dozen calls each |
-| Function duration | **60s hard cap on Hobby — not configurable upward** | ✅ AI route set to `maxDuration=60`; OCR runs locally/in-browser so it never hits this |
+| Function duration | **60s hard cap on Hobby — not configurable upward** | ⚠️ The AI quiz-generation routes intentionally run **long** (per-call timeout up to 10 min, 15-min shared budget) and `maxDuration` is **not** set — this is tuned for local/self-hosted runs. On Vercel Hobby the platform kills these functions at 60s; deploy AI generation only behind Pro/Fluid compute or a self-hosted runner (OCR still runs locally/in-browser so it never hits this). |
 | Builds | 6,000 min/mo | ✅ |
 | Team members | 1 | ✅ Solo project |
 
@@ -77,7 +77,7 @@
 
 1. **Local-first OCR cascade** (native parse → **Tesseract in-browser by default** → GLM-OCR local and cloud vision strictly opt-in) — extraction costs $0 in every default path.
 2. **All vision inference in-browser** (MediaPipe) — no GPU server, no per-frame API bills, better privacy.
-3. **15k-char cap on extracted text** — bounds every AI generation call regardless of deck size.
+3. **400k-char cap on extracted text** — bounds every AI generation call regardless of deck size (enforced in the API route's Zod validation *and* inside the `save_quiz_questions` RPC, so neither path can store more).
 4. **Polling instead of Supabase Realtime** — no connection limits to manage at this scale.
 5. **Vercel + Supabase free tiers** — zero fixed monthly cost until the product outgrows the demo.
 6. **OpenAI-compatible client everywhere** — point `AI_BASE_URL` at a local vLLM model for quiz generation too, and the entire demo runs at $0 with no internet dependency.

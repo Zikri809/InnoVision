@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireLecturer } from "@/lib/classes/guards";
 import { createClassWithRetry } from "@/lib/classes/join-code";
-import { checkSameOrigin } from "@/lib/http";
+import { checkSameOrigin, invalidJson, internalError, unauthorized, forbidden } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 
@@ -21,14 +21,19 @@ export async function POST(request: Request) {
   const originError = checkSameOrigin(request);
   if (originError) return originError;
 
-  let body: { title?: unknown };
+  let body: unknown;
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+    return invalidJson();
   }
 
-  const title = typeof body.title === "string" ? body.title.trim() : "";
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return invalidJson();
+  }
+
+  const rawBody = body as Record<string, unknown>;
+  const title = typeof rawBody.title === "string" ? rawBody.title.trim() : "";
   if (title.length < 1 || title.length > 200) {
     return NextResponse.json(
       { error: "invalid_title", message: "Title must be 1–200 characters." },
@@ -64,10 +69,7 @@ export async function POST(request: Request) {
       return data;
     });
   } catch {
-    return NextResponse.json(
-      { error: "internal", message: "Could not create the class right now." },
-      { status: 503 },
-    );
+    return internalError("Could not create the class right now.");
   }
 
   if (!result.ok) {
@@ -90,7 +92,7 @@ export async function GET() {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    return unauthorized();
   }
 
   const { data: profile, error: profileError } = await supabase
@@ -101,7 +103,7 @@ export async function GET() {
 
   if (profileError) {
     console.error("Profile fetch error:", profileError);
-    return NextResponse.json({ error: "internal" }, { status: 503 });
+    return internalError("Could not load profile.");
   }
   if (!profile) {
     return NextResponse.json(
@@ -113,13 +115,13 @@ export async function GET() {
   if (profile.role === "lecturer") {
     const { data, error } = await supabase
       .from("classes")
-      .select("id, title, join_code, created_at")
+      .select("id, title, join_code, created_at, archived_at")
       .eq("lecturer_id", user.id)
       .order("created_at", { ascending: false })
       .limit(CLASS_LIST_LIMIT);
     if (error) {
       console.error("Class list error:", error);
-      return NextResponse.json({ error: "internal" }, { status: 503 });
+      return internalError("Could not load classes.");
     }
     return NextResponse.json({ classes: data ?? [] });
   }
@@ -135,10 +137,10 @@ export async function GET() {
       .limit(CLASS_LIST_LIMIT);
     if (error) {
       console.error("Class list error:", error);
-      return NextResponse.json({ error: "internal" }, { status: 503 });
+      return internalError("Could not load classes.");
     }
     return NextResponse.json({ classes: data ?? [] });
   }
 
-  return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  return forbidden();
 }

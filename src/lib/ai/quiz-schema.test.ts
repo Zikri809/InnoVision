@@ -177,3 +177,25 @@ describe("aiQuizToRows — converts validated quiz to DB rows", () => {
     expect(rows[1]).toMatchObject({ type: "true_false", options: ["True", "False"] });
   });
 });
+
+describe("AiQuestionSchema length bounds", () => {
+  it("rejects prompt exceeding 2000 characters", () => {
+    const bad = {
+      ...validQuiz,
+      questions: [
+        { ...validQuiz.questions[0], prompt: "A".repeat(2001) },
+      ],
+    };
+    expect(AiQuizSchema.safeParse(bad).success).toBe(false);
+  });
+
+  it("rejects option exceeding 500 characters", () => {
+    const bad = {
+      ...validQuiz,
+      questions: [
+        { ...validQuiz.questions[0], options: ["A".repeat(501), "B", "C"] },
+      ],
+    };
+    expect(AiQuizSchema.safeParse(bad).success).toBe(false);
+  });
+});

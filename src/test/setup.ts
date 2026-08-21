@@ -10,6 +10,12 @@ import { vi } from "vitest";
  */
 vi.mock("server-only", () => ({}));
 
+// Public Supabase env (validated fail-fast by src/lib/env.ts at import time).
+process.env.NEXT_PUBLIC_SUPABASE_URL =
+  process.env.NEXT_PUBLIC_SUPABASE_URL ?? "http://localhost:54321";
+process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY =
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "test-anon-key";
+
 process.env.AI_BASE_URL = process.env.AI_BASE_URL ?? "https://api.openai.com/v1";
 process.env.AI_API_KEY = process.env.AI_API_KEY ?? "test-key";
 process.env.AI_MODEL = process.env.AI_MODEL ?? "gpt-4o-mini";

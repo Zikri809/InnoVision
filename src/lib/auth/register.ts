@@ -3,11 +3,11 @@
 import { createServerActionClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isValidInviteCode } from "@/lib/auth/invite-code";
-import { isSameTimestamp } from "@/lib/auth/consent";
 import { rateLimit } from "@/lib/classes/rate-limit";
 
 import { cookies } from "next/headers";
 import { LOCALE_COOKIE_NAME } from "@/i18n/config";
+import { tFor } from "@/lib/i18n/messages";
 import type { SupportedLocale } from "@/lib/types/aliases";
 
 
@@ -47,6 +47,7 @@ export async function register({
 }): Promise<RegisterResult> {
   const wantsLecturer = Boolean(inviteCode && inviteCode.trim().length > 0);
   const userLocale: SupportedLocale = locale === "ms" ? "ms" : "en";
+  const t = tFor(userLocale);
 
   // Basic input validation BEFORE any DB/auth work. Mirrors the bounds used
   // elsewhere (title/prompt) so a pathological payload can't bloat the DB or
@@ -55,14 +56,14 @@ export async function register({
   // on every roster page.
   const trimmedEmail = email.trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
-    return { session: false, error: "Please enter a valid email address." };
+    return { session: false, error: t("authErrors.invalidEmail") };
   }
   if (typeof password !== "string" || password.length < 6) {
-    return { session: false, error: "Password must be at least 6 characters." };
+    return { session: false, error: t("authErrors.passwordShort") };
   }
   const trimmedName = fullName?.trim() ?? "";
   if (trimmedName.length > 200) {
-    return { session: false, error: "Full name must be at most 200 characters." };
+    return { session: false, error: t("authErrors.nameTooLong") };
   }
 
   // Rate-limit lecturer signup attempts (the invite code is a shared secret;
@@ -79,7 +80,7 @@ export async function register({
     if (!allowed) {
       return {
         session: false,
-        error: "Too many registration attempts. Please try again later.",
+        error: t("authErrors.tooManyAttempts"),
       };
     }
   }
@@ -87,7 +88,7 @@ export async function register({
   // Validate the invite code BEFORE creating any account so an invalid code
   // never produces a (student) account that the caller didn't intend.
   if (wantsLecturer && !isValidInviteCode(inviteCode)) {
-    return { session: false, error: "Invalid lecturer invite code." };
+    return { session: false, error: t("authErrors.invalidInviteCode") };
   }
 
   const supabase = await createServerActionClient();
@@ -107,7 +108,8 @@ export async function register({
   });
 
   if (error) {
-    return { session: false, error: error.message };
+    console.error("signUp error:", error.message);
+    return { session: false, error: t("authErrors.signupFailed") };
   }
 
   // Persist chosen language in cookies
@@ -158,7 +160,7 @@ export async function register({
         console.error("Failed to promote profile to lecturer:", roleError);
         return {
           session: false,
-          error: "Account created but role promotion failed. Contact support.",
+          error: t("authErrors.promotionFailed"),
         };
       }
 
@@ -183,26 +185,28 @@ export async function register({
         console.error("Lecturer promotion not reflected in profile for", userId);
         return {
           session: false,
-          error: "Account created but role promotion failed. Contact support.",
+          error: t("authErrors.promotionFailed"),
         };
       }
     } catch (err) {
       console.error("Lecturer promotion error:", err);
       return {
         session: false,
-        error: "Account created but role promotion failed. Contact support.",
+        error: t("authErrors.promotionFailed"),
       };
     }
   } else {
-    // Student: record consent via the user's own session (server-side).
-    const { error: consentError } = await supabase
-      .from("profiles")
-      .update({ consent_given_at: consentAt, locale: userLocale })
-      .eq("id", userId);
-
-    if (consentError) {
-      console.error("Failed to record consent:", consentError);
+    // Student: record consent via the sanctioned RPC. The profiles
+    // restricted-columns trigger blocks every direct authenticated write to
+    // consent_given_at (anti-forgery), so the direct update this used to do
+    // would now fail with cannot_change_consent_directly. The chosen locale
+    // is unrestricted — persisted via a separate plain update.
+    const { data: grantData, error: grantError } = await supabase.rpc("grant_face_consent");
+    if (grantError || (grantData as Record<string, unknown> | null)?.ok !== true) {
+      console.error("grant_face_consent failed during registration:", grantError ?? grantData);
     }
+
+    await supabase.from("profiles").update({ locale: userLocale }).eq("id", userId);
 
     const { data: profile } = await supabase
       .from("profiles")
@@ -210,13 +214,13 @@ export async function register({
       .eq("id", userId)
       .maybeSingle();
 
-    const consentWritten = isSameTimestamp(profile?.consent_given_at, consentAt);
+    const consentWritten = profile?.consent_given_at != null;
 
     if (consentWritten) {
       // Consent written — done.
     } else {
-      // Trigger race (or consent still missing): create/repair via service
-      // role (bypasses RLS, which has no client INSERT policy by design).
+      // RPC race (or failure): create/repair via service role (bypasses RLS
+      // and passes the trigger, since auth.role() is 'service_role').
       const admin = createAdminClient();
       const { error: adminError } = await admin
         .from("profiles")
@@ -234,7 +238,7 @@ export async function register({
         console.error("Failed to record consent (admin fallback):", adminError);
         return {
           session: false,
-          error: "Account created but consent could not be recorded. Contact support.",
+          error: t("authErrors.consentFailed"),
         };
       }
     }

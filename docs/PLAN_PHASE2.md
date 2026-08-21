@@ -66,11 +66,26 @@
 
 ### Step 4 — Route handlers (`app/api/classes/*`)
 - `POST /api/classes` — `requireLecturer(supabase)`; normalize title; insert with retry; return class + join_code (201).
-- `GET /api/classes` — owner OR enrolled (one query via the SELECT policy).
-- `GET /api/classes/[id]` — owner → full detail + roster (uses new profiles policy); student → title only (omit roster, 200 not 500).
-- `PATCH` / `DELETE /api/classes/[id]` — **explicit owner pre-check** (`select ... where id=? and lecturer_id=auth.uid()`) → clean 404 vs 403 (RLS alone makes 0-row deletes indistinguishable); cascade removes enrollments.
-- `POST /api/classes/join` — `requireStudent(supabase)`; body `{code}`; call `join_class`; map typed errors → 400 malformed / 404 `invalid_code` / 409 `already_enrolled` / 403 `not_student`.
+- `GET /api/classes` — owner OR enrolled (one query via the SELECT policy; returns `archived_at`).
+- `GET /api/classes/[id]` — owner → full detail + roster + `archived_at` (uses new profiles policy); student → title only (omit roster, 200 not 500).
+- `PATCH /api/classes/[id]` — owner-only update: support `{ title?: string, archived?: boolean }` to rename or archive/restore classes.
+- `DELETE /api/classes/[id]` — **soft delete (archive) by default**: sets `archived_at = now()`, safely preserving all quizzes, questions, student rosters, face verification logs, and scores for grade disputes and audit compliance.
+- `POST /api/classes/join` — `requireStudent(supabase)`; body `{code}`; call `join_class`; map typed errors → 400 malformed / 404 `invalid_code` / 409 `already_enrolled` / 403 `not_student` / 400 `class_archived`.
 - Auth helpers `src/lib/classes/guards.ts`: `requireLecturer/requireStudent(supabase)` read the profile, return `403` typed responses. (Layout guards are for pages; route handlers must self-check — they're hit directly.)
+
+### Step 4b — Soft Delete & Archiving Subsystem (`0017_class_archiving.sql` & `0018_class_archived_index.sql`)
+- **Schema & Migrations**:
+  - `0017_class_archiving.sql`: Add `archived_at timestamptz default null` to `classes`, partial index `classes_lecturer_active_idx`.
+  - `0018_class_archived_index.sql`: Add partial composite index `classes_lecturer_archived_idx ON public.classes (lecturer_id, archived_at desc, created_at desc) WHERE archived_at IS NOT NULL` for sub-millisecond retrieval on the archive route.
+- **Security & Views**:
+  - `student_class_view`: Hardened with `where c.archived_at is null` so enrolled students only see active classes.
+  - `student_quiz_view`: Enforces `c.archived_at is null` to hide quizzes of archived classes.
+  - `join_class` RPC: Rejects attempts to join an archived class with typed `{ error: "class_archived" }`.
+  - `start_quiz_session` RPC: Rejects sessions on archived classes with `{ error: "quiz_not_live" }`.
+- **Dedicated Archive Page (`/lecturer/classes/archived`) & Dashboard Navigation**:
+  - Main dashboard `/lecturer/classes`: Streamlined to render only active classes with an interactive `[ 📦 Archived classes ({count}) → ]` header pill and a 3-stat hero cluster.
+  - Dedicated page `/lecturer/classes/archived`: Server Component with instant client-side search (`search.ts` with diacritic normalization and multi-word token matching), responsive Clay cards, "View audit →" dispute review links, and safe restore dialogs.
+  - Detail view `/lecturer/classes/[id]`: Preserves complete student roster, quiz scores, and biometric audit logs for dispute resolution, with back navigation returning to `/lecturer/classes/archived` when viewing archived classes.
 
 ### Step 5 — Pages & navigation
 - `(lecturer)/lecturer/classes/page.tsx` (list + create + show join code), `(lecturer)/lecturer/classes/[id]/page.tsx` (roster; quizzes placeholder for P3).

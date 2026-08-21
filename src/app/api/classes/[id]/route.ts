@@ -2,15 +2,16 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireLecturer } from "@/lib/classes/guards";
 import { getClassRoster, isUuid } from "@/lib/classes/roster";
-import { checkSameOrigin } from "@/lib/http";
+import {
+  checkSameOrigin,
+  internalError,
+  invalidJson,
+  notFound,
+} from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ id: string }> };
-
-async function invalidId(): Promise<Response> {
-  return NextResponse.json({ error: "not_found" }, { status: 404 });
-}
 
 /**
  * GET /api/classes/[id]
@@ -22,7 +23,7 @@ export async function GET(_request: Request, { params }: Params) {
   const supabase = await createClient();
   const { id } = await params;
 
-  if (!isUuid(id)) return invalidId();
+  if (!isUuid(id)) return notFound();
 
   const {
     data: { user },
@@ -36,7 +37,7 @@ export async function GET(_request: Request, { params }: Params) {
     .maybeSingle();
   if (profileError) {
     console.error("Profile fetch error:", profileError);
-    return NextResponse.json({ error: "internal" }, { status: 503 });
+    return internalError("Could not complete the request right now.");
   }
   if (!profile) {
     return NextResponse.json(
@@ -49,24 +50,30 @@ export async function GET(_request: Request, { params }: Params) {
     // Owner-filtered fetch so a non-owner never sees the join_code.
     const { data: cls, error } = await supabase
       .from("classes")
-      .select("id, title, join_code, created_at")
+      .select("id, title, join_code, created_at, archived_at")
       .eq("id", id)
       .eq("lecturer_id", user.id)
       .maybeSingle();
     if (error) {
       console.error("Class fetch error:", error);
-      return NextResponse.json({ error: "internal" }, { status: 503 });
+      return internalError("Could not complete the request right now.");
     }
-    if (!cls) return invalidId();
+    if (!cls) return notFound();
 
     const { roster, error: rosterError } = await getClassRoster(supabase, id);
     if (rosterError) {
       console.error("Roster fetch error:", rosterError);
-      return NextResponse.json({ error: "internal" }, { status: 503 });
+      return internalError("Could not complete the request right now.");
     }
 
     return NextResponse.json({
-      class: { id: cls.id, title: cls.title, join_code: cls.join_code, created_at: cls.created_at },
+      class: {
+        id: cls.id,
+        title: cls.title,
+        join_code: cls.join_code,
+        created_at: cls.created_at,
+        archived_at: cls.archived_at,
+      },
       roster,
     });
   }
@@ -83,15 +90,16 @@ export async function GET(_request: Request, { params }: Params) {
     .maybeSingle();
   if (error) {
     console.error("Class fetch error:", error);
-    return NextResponse.json({ error: "internal" }, { status: 503 });
+    return internalError("Could not complete the request right now.");
   }
-  if (!enrolled) return invalidId();
+  if (!enrolled) return notFound();
 
   return NextResponse.json({ class: { id: enrolled.id, title: enrolled.title } });
 }
 
 /**
- * PATCH /api/classes/[id] — rename (owner only).
+ * PATCH /api/classes/[id] — update title or archive/restore (owner only).
+ * Body: { title?: string, archived?: boolean }
  */
 export async function PATCH(request: Request, { params }: Params) {
   const supabase = await createClient();
@@ -99,23 +107,50 @@ export async function PATCH(request: Request, { params }: Params) {
   if (!auth.ok) return auth.response;
   const { id } = await params;
 
-  if (!isUuid(id)) return invalidId();
+  if (!isUuid(id)) return notFound();
 
-  // CSRF: reject cross-origin renames (AI/session-route precedent).
+  // CSRF: reject cross-origin renames/archives (AI/session-route precedent).
   const originError = checkSameOrigin(request);
   if (originError) return originError;
 
-  let body: { title?: unknown };
+  let body: unknown;
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+    return invalidJson();
   }
 
-  const title = typeof body.title === "string" ? body.title.trim() : "";
-  if (title.length < 1 || title.length > 200) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return invalidJson();
+  }
+
+  const rawBody = body as Record<string, unknown>;
+  const updatePayload: { title?: string; archived_at?: string | null } = {};
+
+  if ("title" in rawBody) {
+    const title = typeof rawBody.title === "string" ? rawBody.title.trim() : "";
+    if (title.length < 1 || title.length > 200) {
+      return NextResponse.json(
+        { error: "invalid_title", message: "Title must be 1–200 characters." },
+        { status: 400 },
+      );
+    }
+    updatePayload.title = title;
+  }
+
+  if ("archived" in rawBody) {
+    if (typeof rawBody.archived !== "boolean") {
+      return NextResponse.json(
+        { error: "invalid_archived", message: "Archived field must be a boolean." },
+        { status: 400 },
+      );
+    }
+    updatePayload.archived_at = rawBody.archived ? new Date().toISOString() : null;
+  }
+
+  if (Object.keys(updatePayload).length === 0) {
     return NextResponse.json(
-      { error: "invalid_title", message: "Title must be 1–200 characters." },
+      { error: "empty_update", message: "No valid fields provided to update." },
       { status: 400 },
     );
   }
@@ -124,22 +159,22 @@ export async function PATCH(request: Request, { params }: Params) {
   // forbidden distinguishable.
   const { data, error } = await supabase
     .from("classes")
-    .update({ title })
+    .update(updatePayload)
     .eq("id", id)
     .eq("lecturer_id", auth.userId)
-    .select("id, title, join_code, created_at")
+    .select("id, title, join_code, created_at, archived_at")
     .maybeSingle();
   if (error) {
     console.error("Class update error:", error);
-    return NextResponse.json({ error: "internal" }, { status: 503 });
+    return internalError("Could not complete the request right now.");
   }
-  if (!data) return invalidId();
+  if (!data) return notFound();
 
   return NextResponse.json({ class: data });
 }
 
 /**
- * DELETE /api/classes/[id] — owner only; cascades enrollments (and, later, quizzes).
+ * DELETE /api/classes/[id] — soft delete (archive) class by default (owner only).
  */
 export async function DELETE(request: Request, { params }: Params) {
   const supabase = await createClient();
@@ -147,7 +182,7 @@ export async function DELETE(request: Request, { params }: Params) {
   if (!auth.ok) return auth.response;
   const { id } = await params;
 
-  if (!isUuid(id)) return invalidId();
+  if (!isUuid(id)) return notFound();
 
   // CSRF: reject cross-origin class deletion (AI/session-route precedent).
   const originError = checkSameOrigin(request);
@@ -155,16 +190,16 @@ export async function DELETE(request: Request, { params }: Params) {
 
   const { data, error } = await supabase
     .from("classes")
-    .delete()
+    .update({ archived_at: new Date().toISOString() })
     .eq("id", id)
     .eq("lecturer_id", auth.userId)
     .select("id")
     .maybeSingle();
   if (error) {
-    console.error("Class delete error:", error);
-    return NextResponse.json({ error: "internal" }, { status: 503 });
+    console.error("Class archive/delete error:", error);
+    return internalError("Could not complete the request right now.");
   }
-  if (!data) return invalidId();
+  if (!data) return notFound();
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, archived: true });
 }

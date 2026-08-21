@@ -363,16 +363,27 @@ export function FaceEnrollClient({
             </p>
           </div>
 
-          {(captureState === "idle" || captureState === "failed") && (
-            <Button size="lg" className="mt-5" onClick={() => void runCapture()}>
-              {captureState === "failed" ? t("tryAgainBtn") : t("startCaptureBtn")}
+          <div className="mt-6 flex flex-wrap items-center gap-3">
+            {(captureState === "idle" || captureState === "failed") && (
+              <Button size="lg" onClick={() => void runCapture()}>
+                {captureState === "failed" ? t("tryAgainBtn") : t("startCaptureBtn")}
+              </Button>
+            )}
+            {captureState === "done" && (
+              <Button size="lg" onClick={() => void runCapture()}>
+                {t("recaptureBtn")}
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="lg"
+              onClick={() => void handleRevoke()}
+              disabled={revoking || captureState === "capturing" || captureState === "blink"}
+              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+            >
+              {revoking ? t("revokingConsent") : t("revokeConsentBtn")}
             </Button>
-          )}
-          {captureState === "done" && (
-            <Button size="lg" className="mt-5" onClick={() => void runCapture()}>
-              {t("recaptureBtn")}
-            </Button>
-          )}
+          </div>
         </div>
       )}
     </div>

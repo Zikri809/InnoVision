@@ -14,21 +14,28 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { GraduationCap, Layers, ClipboardList, Plus, ArrowRight } from "lucide-react";
-
-export type LecturerClassCard = {
-  id: string;
-  title: string;
-  join_code: string;
-  created_at: string;
-  quizCount: number;
-};
+import {
+  GraduationCap,
+  Layers,
+  ClipboardList,
+  Plus,
+  ArrowRight,
+  Archive,
+  Loader2,
+} from "lucide-react";
+import type { LecturerClassCard } from "@/lib/types/aliases";
 
 /**
- * Lecturer "My Classes" dashboard — hero band, quick stats, and chunky
- * interactive class cards (replaces the old flat single-column list).
+ * Lecturer "My Classes" dashboard — hero band, quick stats, active classes grid,
+ * and dedicated archived section for audit and dispute safety.
  */
-export function ClassesPageClient({ classes }: { classes: LecturerClassCard[] }) {
+export function ClassesPageClient({
+  classes,
+  archivedCount = 0,
+}: {
+  classes: LecturerClassCard[];
+  archivedCount?: number;
+}) {
   const router = useRouter();
   const t = useTranslations("lecturer.classes");
   const tCommon = useTranslations("common");
@@ -36,8 +43,11 @@ export function ClassesPageClient({ classes }: { classes: LecturerClassCard[] })
   const [title, setTitle] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
   // Ref lock guards against a fast double-click before React re-renders.
   const submitLock = useRef(false);
+
+  const activeClasses = classes.filter((c) => !c.archived_at);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -51,7 +61,7 @@ export function ClassesPageClient({ classes }: { classes: LecturerClassCard[] })
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ title }),
       });
-      const body = await res.json();
+      const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(body.message ?? body.error ?? tCommon("errorGeneric"));
         return;
@@ -66,7 +76,7 @@ export function ClassesPageClient({ classes }: { classes: LecturerClassCard[] })
     }
   }
 
-  const totalQuizzes = classes.reduce((n, c) => n + c.quizCount, 0);
+  const totalQuizzes = activeClasses.reduce((n, c) => n + c.quizCount, 0);
 
   return (
     <div className="space-y-8">
@@ -86,16 +96,17 @@ export function ClassesPageClient({ classes }: { classes: LecturerClassCard[] })
           </p>
 
           {/* quick stats */}
-          <div className="mt-6 grid max-w-md grid-cols-2 gap-4">
+          <div className="mt-6 grid max-w-lg grid-cols-2 gap-4 sm:grid-cols-3">
             <div className="rounded-2xl border-[3px] border-border bg-card px-5 py-4 shadow-[var(--shadow-clay-sm)]">
               <div className="flex items-center gap-2 text-primary">
                 <Layers className="h-5 w-5" aria-hidden />
-                <span className="font-heading text-2xl font-bold">{classes.length}</span>
+                <span className="font-heading text-2xl font-bold">{activeClasses.length}</span>
               </div>
               <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">
-                {t("classCount", { count: classes.length })}
+                {t("classCount", { count: activeClasses.length })}
               </p>
             </div>
+
             <div className="rounded-2xl border-[3px] border-border bg-card px-5 py-4 shadow-[var(--shadow-clay-sm)]">
               <div className="flex items-center gap-2 text-accent">
                 <ClipboardList className="h-5 w-5" aria-hidden />
@@ -105,14 +116,33 @@ export function ClassesPageClient({ classes }: { classes: LecturerClassCard[] })
                 {t("quizCount", { count: totalQuizzes })}
               </p>
             </div>
+
+            {archivedCount > 0 && (
+              <Link
+                href="/lecturer/classes/archived"
+                className="group col-span-2 rounded-2xl border-[3px] border-border bg-card px-5 py-4 shadow-[var(--shadow-clay-sm)] transition-[transform,box-shadow,border-color] duration-180 hover:-translate-y-0.5 hover:border-primary/50 sm:col-span-1"
+                aria-label={t("viewArchivedClassesAria", { count: archivedCount })}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-muted-foreground group-hover:text-primary">
+                    <Archive className="h-5 w-5" aria-hidden />
+                    <span className="font-heading text-2xl font-bold">{archivedCount}</span>
+                  </div>
+                  <ArrowRight className="h-4 w-4 text-muted-foreground transition-transform duration-180 group-hover:translate-x-0.5 group-hover:text-primary" aria-hidden />
+                </div>
+                <p className="mt-0.5 text-xs font-extrabold text-muted-foreground group-hover:text-foreground">
+                  {t("archivedClassesLabel")}
+                </p>
+              </Link>
+            )}
           </div>
         </div>
       </section>
 
       {/* ── Create + list ── */}
-      <section className="grid items-stretch gap-6 lg:grid-cols-[340px_1fr]">
-        {/* Create card — stretches to match the classes row height (bento alignment). */}
-        <Card className="flex flex-col">
+      <section className="grid items-start gap-6 lg:grid-cols-[340px_1fr]">
+        {/* Create card — compact sidebar card that sticks comfortably on scroll */}
+        <Card className="lg:sticky lg:top-6">
           <CardHeader>
             <div className="mb-1 grid h-11 w-11 place-items-center rounded-2xl bg-orange-100 text-primary">
               <Plus className="h-5 w-5" aria-hidden />
@@ -122,8 +152,8 @@ export function ClassesPageClient({ classes }: { classes: LecturerClassCard[] })
               {t("createCardSubtitle")}
             </CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-1 flex-col">
-            <form onSubmit={handleCreate} className="flex flex-1 flex-col gap-3">
+          <CardContent>
+            <form onSubmit={handleCreate} className="space-y-4">
               <div>
                 <Label htmlFor="class-title" className="sr-only">
                   {t("classTitleLabel")}
@@ -132,20 +162,28 @@ export function ClassesPageClient({ classes }: { classes: LecturerClassCard[] })
                   id="class-title"
                   placeholder={t("classTitlePlaceholder")}
                   value={title}
+                  disabled={creating}
                   onChange={(e) => setTitle(e.target.value)}
                   required
                   maxLength={200}
                 />
               </div>
-              <div aria-live="polite" className="flex-1">
+              <div aria-live="polite">
                 {error && (
                   <p className="rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm font-bold text-destructive" role="alert">
                     {error}
                   </p>
                 )}
               </div>
-              <Button type="submit" className="mt-auto w-full" disabled={creating || !title.trim()}>
-                {creating ? t("creatingBtn") : t("createBtn")}
+              <Button type="submit" className="w-full" disabled={creating || !title.trim()}>
+                {creating ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+                    {t("creatingBtn")}
+                  </>
+                ) : (
+                  t("createBtn")
+                )}
               </Button>
             </form>
           </CardContent>
@@ -153,16 +191,29 @@ export function ClassesPageClient({ classes }: { classes: LecturerClassCard[] })
 
         {/* Class cards */}
         <div>
-          <div className="mb-4 flex items-baseline justify-between">
-            <h2 className="font-heading text-xl font-semibold">{t("heroSubtitle")}</h2>
-            {classes.length > 0 && (
-              <span className="text-sm font-extrabold text-muted-foreground">
-                {t("classCount", { count: classes.length })}
-              </span>
+          <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
+            <div className="flex items-center gap-2.5">
+              <h2 className="font-heading text-xl font-semibold">{t("myClasses")}</h2>
+              {activeClasses.length > 0 && (
+                <span className="text-sm font-extrabold text-muted-foreground">
+                  {t("classCount", { count: activeClasses.length })}
+                </span>
+              )}
+            </div>
+
+            {archivedCount > 0 && (
+              <Link
+                href="/lecturer/classes/archived"
+                className="inline-flex items-center gap-1.5 rounded-full border-[3px] border-border bg-card px-3.5 py-1 text-xs font-extrabold text-muted-foreground shadow-[var(--shadow-clay-sm)] transition-[transform,border-color,color] duration-180 hover:-translate-y-0.5 hover:border-primary hover:text-primary active:translate-y-0 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/40"
+              >
+                <Archive className="h-3.5 w-3.5" aria-hidden />
+                <span>{t("viewArchivedClasses", { count: archivedCount })}</span>
+                <ArrowRight className="h-3 w-3" aria-hidden />
+              </Link>
             )}
           </div>
 
-          {classes.length === 0 ? (
+          {activeClasses.length === 0 ? (
             <div className="grid place-items-center rounded-[28px] border-[3px] border-dashed border-border bg-card/60 px-8 py-16 text-center">
               <span className="grid h-14 w-14 place-items-center rounded-2xl bg-orange-100 text-primary">
                 <Plus className="h-7 w-7" aria-hidden />
@@ -171,14 +222,24 @@ export function ClassesPageClient({ classes }: { classes: LecturerClassCard[] })
               <p className="mt-1 max-w-xs text-sm font-semibold text-muted-foreground">
                 {t("emptySubtitle")}
               </p>
+              {archivedCount > 0 && (
+                <p className="mt-4 text-xs font-semibold text-muted-foreground">
+                  <Link
+                    href="/lecturer/classes/archived"
+                    className="font-extrabold text-primary underline underline-offset-4 hover:text-primary/80 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/40"
+                  >
+                    {t("viewArchivedClasses", { count: archivedCount })} →
+                  </Link>
+                </p>
+              )}
             </div>
           ) : (
             <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(240px,1fr))]">
-              {classes.map((c) => (
+              {activeClasses.map((c) => (
                 <li key={c.id}>
                   <Link
                     href={`/lecturer/classes/${c.id}`}
-                    className="group flex h-full flex-col rounded-[22px] border-[3px] border-border bg-card p-5 shadow-[var(--shadow-clay)] transition-[transform,box-shadow] duration-200 hover:-translate-y-1 hover:shadow-[8px_10px_0_rgba(194,65,12,0.16)]"
+                    className="group flex h-full flex-col rounded-[22px] border-[3px] border-border bg-card p-5 shadow-[var(--shadow-clay)] transition-[transform,box-shadow] duration-200 hover:-translate-y-1 hover:shadow-[8px_10px_0_rgba(194,65,12,0.16)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/40"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-primary/15 font-heading text-lg font-bold text-primary">
@@ -208,7 +269,7 @@ export function ClassesPageClient({ classes }: { classes: LecturerClassCard[] })
                 <button
                   type="button"
                   onClick={() => document.getElementById("class-title")?.focus()}
-                  className="flex h-full min-h-[164px] w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-[22px] border-[3px] border-dashed border-border bg-transparent p-5 text-muted-foreground transition-[border-color,color,transform] duration-200 hover:-translate-y-1 hover:border-primary hover:text-primary"
+                  className="flex h-full min-h-[164px] w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-[22px] border-[3px] border-dashed border-border bg-transparent p-5 text-muted-foreground transition-[border-color,color,transform] duration-200 hover:-translate-y-1 hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/40"
                 >
                   <span className="grid h-10 w-10 place-items-center rounded-2xl border-[3px] border-current">
                     <Plus className="h-5 w-5" aria-hidden />

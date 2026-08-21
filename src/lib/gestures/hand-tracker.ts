@@ -98,6 +98,10 @@ export class HandLandmarkerTracker implements IHandTracker {
         throw err;
       }
     })();
+    // Attach an early no-op handler so a fast model rejection while start() is
+    // still awaiting the camera doesn't surface as an unhandled rejection;
+    // the real handling happens at `await modelPromise` below.
+    modelPromise.catch(() => {});
 
     // 1. Camera via the SHARED stream manager (Phase 7) — this module is NOT
     //    the track-stop owner. `stop()` releases the ref; camera.ts stops the
@@ -108,66 +112,73 @@ export class HandLandmarkerTracker implements IHandTracker {
       this.cameraToken = null;
       return;
     }
-    const stream = resolveStream(this.cameraToken);
-
-    this.stream = stream;
-    this.video.srcObject = stream;
-    this.video.muted = true;
-    this.video.playsInline = true;
-
-    if (this.video.readyState < 1) {
-      await Promise.race([
-        new Promise<void>((resolve) => {
-          this.loadedMetadataHandler = () => resolve();
-          this.video.onloadedmetadata = this.loadedMetadataHandler;
-        }),
-        new Promise<void>((resolve) => {
-          this.loadedMetadataTimer = setTimeout(resolve, 2000);
-        }),
-      ]);
-      if (this.loadedMetadataTimer) {
-        clearTimeout(this.loadedMetadataTimer);
-        this.loadedMetadataTimer = null;
-      }
-    }
-
-    if (this.disposed) {
-      this.releaseCamera();
-      return;
-    }
 
     try {
-      await Promise.race([
-        this.video.play(),
-        new Promise<void>((resolve) => setTimeout(resolve, 500)),
-      ]);
-    } catch {
-      // Non-fatal if playback already underway
-    }
+      const stream = resolveStream(this.cameraToken);
 
-    const w = this.video.videoWidth || CAMERA_WIDTH_MAX;
-    const h = this.video.videoHeight || CAMERA_HEIGHT_MAX;
-    this.canvas.width = w;
-    this.canvas.height = h;
+      this.stream = stream;
+      this.video.srcObject = stream;
+      this.video.muted = true;
+      this.video.playsInline = true;
 
-    // 2. Await concurrent model creation
-    this.landmarker = await modelPromise;
+      if (this.video.readyState < 1) {
+        await Promise.race([
+          new Promise<void>((resolve) => {
+            this.loadedMetadataHandler = () => resolve();
+            this.video.onloadedmetadata = this.loadedMetadataHandler;
+          }),
+          new Promise<void>((resolve) => {
+            this.loadedMetadataTimer = setTimeout(resolve, 2000);
+          }),
+        ]);
+        if (this.loadedMetadataTimer) {
+          clearTimeout(this.loadedMetadataTimer);
+          this.loadedMetadataTimer = null;
+        }
+      }
 
-    if (this.disposed) {
+      if (this.disposed) {
+        this.releaseCamera();
+        return;
+      }
+
+      try {
+        await Promise.race([
+          this.video.play(),
+          new Promise<void>((resolve) => setTimeout(resolve, 500)),
+        ]);
+      } catch {
+        // Non-fatal if playback already underway
+      }
+
+      const w = this.video.videoWidth || CAMERA_WIDTH_MAX;
+      const h = this.video.videoHeight || CAMERA_HEIGHT_MAX;
+      this.canvas.width = w;
+      this.canvas.height = h;
+
+      // 2. Await concurrent model creation
+      this.landmarker = await modelPromise;
+
+      if (this.disposed) {
+        this.closeLandmarker();
+        this.releaseCamera();
+        return;
+      }
+
+      // 3. rAF detection loop (capped ~30fps; skips while the tab is hidden).
+      this.lastFrameAt = 0;
+      this.visibilityHandler = () => {
+        // On tab return, `video.readyState` may be stale — the loop re-checks
+        // `readyState >= 2` every frame anyway.
+        this.lastFrameAt = 0;
+      };
+      document.addEventListener("visibilitychange", this.visibilityHandler);
+      this.rafId = requestAnimationFrame((now) => this.detectLoop(now, onFrame, onError));
+    } catch (err) {
       this.closeLandmarker();
       this.releaseCamera();
-      return;
+      throw err;
     }
-
-    // 3. rAF detection loop (capped ~30fps; skips while the tab is hidden).
-    this.lastFrameAt = 0;
-    this.visibilityHandler = () => {
-      // On tab return, `video.readyState` may be stale — the loop re-checks
-      // `readyState >= 2` every frame anyway.
-      this.lastFrameAt = 0;
-    };
-    document.addEventListener("visibilitychange", this.visibilityHandler);
-    this.rafId = requestAnimationFrame((now) => this.detectLoop(now, onFrame, onError));
   }
 
   stop(): void {
@@ -295,6 +306,7 @@ export class HandLandmarkerTracker implements IHandTracker {
       // unhandled `window.onerror` that the boot race can never catch.
       if (this.rafId !== null) cancelAnimationFrame(this.rafId);
       this.rafId = null;
+      this.releaseCamera();
       onError?.(err instanceof Error ? err : new Error(String(err)));
     }
   }

@@ -14,6 +14,7 @@ import {
   type ExtractionResult,
 } from "@/lib/extract/types";
 import { destroyPdf, loadPdfJs } from "@/lib/extract/pdf";
+import { assertSafeImageDimensions } from "@/lib/extract/image-guard";
 
 export type OcrProgress = (page: number, total: number) => void;
 
@@ -90,6 +91,8 @@ async function loadImageFromFile(file: File): Promise<HTMLImageElement> {
   }
 }
 
+const MAX_CANVAS_DIMENSION = 4096;
+
 /** Rasterize a PDF (via pdf.js render) or return the raw image for an image file. */
 async function rasterizeToImages(
   file: File,
@@ -97,13 +100,23 @@ async function rasterizeToImages(
 ): Promise<RenderedPage[]> {
   const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
   if (!isPdf) {
+    // Reject absurd dimensions before the browser decodes the bitmap.
+    await assertSafeImageDimensions(file);
     const img = await loadImageFromFile(file);
+    let targetWidth = img.naturalWidth;
+    let targetHeight = img.naturalHeight;
+    const maxDim = Math.max(targetWidth, targetHeight);
+    if (maxDim > MAX_CANVAS_DIMENSION) {
+      const scale = MAX_CANVAS_DIMENSION / maxDim;
+      targetWidth = Math.floor(targetWidth * scale);
+      targetHeight = Math.floor(targetHeight * scale);
+    }
     const canvas = document.createElement("canvas");
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("canvas_unavailable");
-    ctx.drawImage(img, 0, 0);
+    ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
     return [{ dataUrl: canvas.toDataURL("image/png"), width: canvas.width, height: canvas.height }];
   }
 
@@ -118,7 +131,12 @@ async function rasterizeToImages(
     for (let i = 1; i <= total; i++) {
       onProgress?.(i, total);
       const page = await doc.getPage(i);
-      const viewport = page.getViewport({ scale: 1.5 });
+      let viewport = page.getViewport({ scale: 1.5 });
+      const maxDim = Math.max(viewport.width, viewport.height);
+      if (maxDim > MAX_CANVAS_DIMENSION) {
+        const scale = (MAX_CANVAS_DIMENSION / maxDim) * 1.5;
+        viewport = page.getViewport({ scale });
+      }
       const canvas = document.createElement("canvas");
       canvas.width = Math.floor(viewport.width);
       canvas.height = Math.floor(viewport.height);

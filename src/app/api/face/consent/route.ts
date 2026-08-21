@@ -22,9 +22,10 @@ const CONSENT_RATE = { limit: 5, windowMs: 60 * 1000 };
 /**
  * POST /api/face/consent — set or revoke biometric consent.
  *
- * `{ consent: true }` → writes `consent_given_at = now()` via the user's own
- * session. (There is no guard trigger on this column — the new guard is
- * `UPDATE OF face_enrollment_status`, which does not fire here.)
+ * `{ consent: true }` → `grant_face_consent()` RPC. The profiles
+ * restricted-columns trigger blocks every direct authenticated write to
+ * `consent_given_at` (anti-forgery), so the sanctioned path goes through a
+ * SECURITY DEFINER RPC that opts in via `app.consent_write`.
  *
  * `{ consent: false }` → CompreFace migration (L17):
  *   1. `revoke_face_consent()` RPC FIRST — DB state cleaned (consent null,
@@ -65,14 +66,22 @@ export async function POST(request: Request) {
   }
 
   if (parsed.data.consent) {
-    const { error } = await supabase
-      .from("profiles")
-      .update({ consent_given_at: new Date().toISOString() })
-      .eq("id", auth.userId);
+    const { data, error } = await supabase.rpc("grant_face_consent");
+
     if (error) {
-      console.error("consent update error:", error);
+      console.error("grant_face_consent RPC error:", error);
       return internalError("Could not update consent right now.");
     }
+
+    const payload = data as Record<string, unknown> | null;
+    const mapped = mapFaceError(payload, {});
+    if (mapped) return mapped;
+
+    if (payload?.ok !== true) {
+      console.error("grant_face_consent unexpected payload:", payload);
+      return internalError("Could not update consent right now.");
+    }
+
     return Response.json({ consent: true }, { status: 200, headers: { "content-type": "application/json" } });
   }
 

@@ -317,6 +317,9 @@ export function GestureLayer({
           (frame) => frameHandlerRef.current(frame),
           (err) => {
             console.error("Hand tracking loop failed:", err);
+            // Release the shared camera token — a dead loop must not keep the
+            // webcam light on for the rest of the quiz (stop() is idempotent).
+            tracker.stop();
             if (bootId === bootIdRef.current && !disposedRef.current) {
               setStatus("off");
             }
@@ -347,6 +350,10 @@ export function GestureLayer({
           setStatus("calibrating");
         })
         .catch(() => {
+          // start() rejected (e.g. MediaPipe model failed to load AFTER the
+          // camera token was acquired) — release the token, same as the
+          // timeout path above.
+          trackerRef.current?.stop();
           if (bootId === bootIdRef.current && !disposedRef.current) {
             setStatus("off");
           }

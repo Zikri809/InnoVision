@@ -34,6 +34,13 @@
 invoice_*.html
 invoice_*.pdf
 
+# logs (never commit — have leaked credentials before)
+*.log
+*.err
+
+# local OCR/tesseract assets (self-hosting is a P9 task; loaded from CDN)
+*.traineddata
+
 # debug
 npm-debug.log*
 yarn-debug.log*

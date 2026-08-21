@@ -33,7 +33,7 @@ export default async function LecturerClassDetailPage({
 
   const { data: cls, error: classError } = await supabase
     .from("classes")
-    .select("id, title, join_code, created_at")
+    .select("id, title, join_code, created_at, archived_at")
     .eq("id", id)
     .eq("lecturer_id", user.id)
     .maybeSingle();

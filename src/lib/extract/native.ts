@@ -218,6 +218,45 @@ export function detectNativeType(
   }
 }
 
+/** Validate magic bytes to guard against disguised binary files */
+export function validateMagicBytes(
+  data: ArrayBuffer,
+  type: "pdf" | "docx" | "pptx" | "text",
+): void {
+  const bytes = new Uint8Array(data);
+  if (type === "pdf") {
+    // Must start with %PDF- (0x25, 0x50, 0x44, 0x46)
+    if (
+      bytes.length < 4 ||
+      bytes[0] !== 0x25 ||
+      bytes[1] !== 0x50 ||
+      bytes[2] !== 0x44 ||
+      bytes[3] !== 0x46
+    ) {
+      throw new Error("corrupt_or_invalid_pdf");
+    }
+  } else if (type === "docx" || type === "pptx") {
+    // Must start with PK\x03\x04 (0x50, 0x4B, 0x03, 0x04)
+    if (
+      bytes.length < 4 ||
+      bytes[0] !== 0x50 ||
+      bytes[1] !== 0x4B ||
+      bytes[2] !== 0x03 ||
+      bytes[3] !== 0x04
+    ) {
+      throw new Error(`corrupt_or_invalid_${type}`);
+    }
+  } else if (type === "text") {
+    // Check first 8KB for null bytes (\0) which indicate non-text binary
+    const checkLen = Math.min(bytes.length, 8192);
+    for (let i = 0; i < checkLen; i++) {
+      if (bytes[i] === 0x00) {
+        throw new Error("binary_file_not_supported_as_text");
+      }
+    }
+  }
+}
+
 /**
  * Run native extraction. Returns an ExtractionResult with engine='native'.
  * `lowConfidence` is set when the average chars/page falls below
@@ -229,6 +268,7 @@ export async function nativeExtract(
   opts: NativeParseOptions = {},
 ): Promise<ExtractionResult> {
   const type = detectNativeType(filename);
+  validateMagicBytes(data, type);
 
   let pages: string[];
   switch (type) {

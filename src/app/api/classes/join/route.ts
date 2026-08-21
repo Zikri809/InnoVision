@@ -8,9 +8,9 @@ import { checkSameOrigin } from "@/lib/http";
 export const dynamic = "force-dynamic";
 
 // Brute-force guard on join codes: an authenticated user gets a fixed number
-// of attempts per window. The RPC is also reachable directly, so this is a
-// defense-in-depth layer on top of the DB function (which cannot easily rate
-// limit without extra infra). Per-process — adequate at demo scale.
+// of attempts per window. The authoritative throttle lives in the DB
+// (`class_join_attempts` + join_class lockout — direct PostgREST RPC calls
+// are throttled too); this per-process layer is defense-in-depth only.
 const JOIN_RATE = { limit: 20, windowMs: 60_000 };
 
 /**
@@ -41,15 +41,20 @@ export async function POST(request: Request) {
     );
   }
 
-  let body: { code?: unknown };
+  let body: unknown;
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
 
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+  }
+
+  const rawBody = body as Record<string, unknown>;
   const normalized = normalizeJoinCode(
-    typeof body.code === "string" ? body.code : undefined,
+    typeof rawBody.code === "string" ? rawBody.code : undefined,
   );
   if (!normalized) {
     return NextResponse.json(
@@ -63,7 +68,7 @@ export async function POST(request: Request) {
   });
 
   if (error) {
-    // The RPC's typed results (invalid_code / already_enrolled / not_student)
+    // The RPC's typed results (invalid_code / already_enrolled / not_student / class_archived)
     // arrive as `data`, not `error` — so any error here is a transport/DB
     // outage, not a business rule. Surface 503, never a raw message.
     console.error("join_class RPC error:", error);
@@ -75,7 +80,7 @@ export async function POST(request: Request) {
 
   const result = data as
     | { class: { id: string; title: string } }
-    | { error: "invalid_code" | "already_enrolled" | "not_student" };
+    | { error: "invalid_code" | "already_enrolled" | "not_student" | "class_archived" | "join_locked" };
 
   if ("class" in result && result.class) {
     return NextResponse.json({ class: result.class }, { status: 200 });
@@ -83,6 +88,11 @@ export async function POST(request: Request) {
 
   const err = "error" in result ? result.error : "invalid_code";
   switch (err) {
+    case "join_locked":
+      return NextResponse.json(
+        { error: "join_locked", message: "Too many invalid codes. Try again later." },
+        { status: 429 },
+      );
     case "already_enrolled":
       return NextResponse.json(
         { error: "already_enrolled", message: "You are already enrolled in this class." },
@@ -90,6 +100,11 @@ export async function POST(request: Request) {
       );
     case "not_student":
       return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    case "class_archived":
+      return NextResponse.json(
+        { error: "class_archived", message: "This class has been archived and cannot be joined." },
+        { status: 400 },
+      );
     case "invalid_code":
     default:
       return NextResponse.json(

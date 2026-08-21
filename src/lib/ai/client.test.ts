@@ -118,4 +118,20 @@ describe("chatCompletions", () => {
     expect(captured?.temperature).toBe(0);
     expect(captured?.response_format).toBeUndefined();
   });
+
+  it("returns ai_error with descriptive message when finish_reason is length", async () => {
+    const client = makeClient(async () => ({
+      choices: [{ finish_reason: "length" as unknown as undefined, message: { content: '{"title": "incomplete' } }],
+    }));
+    const res = await chatCompletions({
+      client,
+      model: "m",
+      messages: [{ role: "user", content: "hi" }],
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error).toBe("ai_error");
+      expect(res.message).toContain("token budget reached");
+    }
+  });
 });

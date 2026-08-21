@@ -48,6 +48,17 @@
     "notFound": "Not found",
     "reason": "Reason"
   },
+  "authErrors": {
+    "invalidEmail": "Please enter a valid email address.",
+    "passwordShort": "Password must be at least 6 characters.",
+    "nameTooLong": "Full name must be at most 200 characters.",
+    "tooManyAttempts": "Too many registration attempts. Please try again later.",
+    "invalidInviteCode": "Invalid lecturer invite code.",
+    "signupFailed": "Could not create the account. Check your details and try again.",
+    "promotionFailed": "Account created but role promotion failed. Contact support.",
+    "consentFailed": "Account created but consent could not be recorded. Contact support.",
+    "loginFailed": "Invalid email or password."
+  },
   "nav": {
     "brand": "InnoVision",
     "myClasses": "My Classes",
@@ -61,6 +72,7 @@
     "joinIn": "Join in",
     "signOut": "Sign out",
     "signingOut": "Signing out…",
+    "signOutFailed": "Could not sign out. Check your connection and try again.",
     "accountMenu": "Your InnoVision account",
     "consentGiven": "Biometric consent given",
     "consentMissing": "Consent not given yet",
@@ -141,7 +153,8 @@
     "creatingAccount": "Creating account…",
     "creatingAccountBtn": "Creating account…",
     "haveAccount": "Already have an account?",
-    "loginLink": "Sign in"
+    "loginLink": "Sign in",
+    "checkEmailMessage": "Account created! Please check your email to confirm your account before signing in."
   },
   "lecturer": {
     "classes": {
@@ -161,7 +174,48 @@
       "creatingBtn": "Creating…",
       "myClasses": "My classes",
       "emptyTitle": "No classes yet",
-      "emptySubtitle": "Create your first class on the left to get a join code for your students."
+      "emptySubtitle": "Create your first class on the left to get a join code for your students.",
+      "archivedClassesLabel": "Archived classes",
+      "viewArchivedClasses": "{count, plural, =1 {1 Archived class} other {# Archived classes}}",
+      "viewArchivedClassesAria": "View {count, plural, =1 {1 archived class} other {# archived classes}}",
+      "archivedSectionTitle": "Archived classes",
+      "archivedSectionSubtitle": "Archived classes are hidden from students but safely preserved for audit trails and dispute resolution.",
+      "archivedCount": "{count, plural, =1 {1 Archived class} other {# Archived classes}}",
+      "archivedBadge": "Archived",
+      "restoreBtn": "Restore",
+      "restoreClassAria": "Restore {title}",
+      "restoringBtn": "Restoring…",
+      "restoreErrorGeneric": "Failed to restore the class. Please try again.",
+      "viewAuditBtn": "View audit",
+      "emptyArchived": "No archived classes."
+    },
+    "archivedClasses": {
+      "heroBadge": "Archive & Audit",
+      "heroTitle": "Archived Classes",
+      "heroSubtitle": "Classes safely preserved from past semesters. Access student results, attendance audit trails, or restore classes to active status.",
+      "backToClasses": "Back to classes",
+      "searchPlaceholder": "Search archived classes by title or code…",
+      "clearSearchAria": "Clear search filter",
+      "totalArchivedCount": "{count, plural, =1 {1 archived class preserved} other {# archived classes preserved}}",
+      "searchResultsCount": "{count, plural, =0 {No classes matching \"{query}\"} =1 {1 class matching \"{query}\"} other {# classes matching \"{query}\"}}",
+      "archivedBadge": "Archived",
+      "archivedOn": "Archived {date}",
+      "quizCount": "{count, plural, =1 {1 Quiz} other {# Quizzes}}",
+      "viewAuditBtn": "View audit",
+      "viewAuditAria": "View audit records for {title}",
+      "restoreBtn": "Restore",
+      "restoreClassAria": "Restore {title}",
+      "restoringBtn": "Restoring…",
+      "restoreConfirmBtn": "Restore class",
+      "restoreModalTitle": "Restore this class?",
+      "restoreModalDescription": "Restoring \"{title}\" will move it back to your active dashboard and make its live quizzes accessible to enrolled students.",
+      "restoreErrorGeneric": "Failed to restore class. Please try again.",
+      "emptyArchivedTitle": "No archived classes",
+      "emptyArchivedSubtitle": "When you archive a class from a previous semester, it will appear here safely preserved for audit trails and dispute resolution.",
+      "emptySearchTitle": "No matching classes",
+      "emptySearchSubtitle": "No archived classes match \"{query}\". Check your spelling or clear the search filter.",
+      "clearSearchBtn": "Clear search",
+      "backToActiveBtn": "Return to active classes"
     },
     "classDetail": {
       "backToClasses": "Back to classes",
@@ -170,6 +224,7 @@
       "joinCodeHint": "Share this 6-character code with students to let them enroll in this class.",
       "joinCodeCopied": "Copied!",
       "copyJoinCode": "Copy join code",
+      "copyJoinCodeError": "Could not copy the join code.",
       "createQuizTitle": "Create a new quiz",
       "createQuizCardTitle": "Create a new quiz",
       "createQuizCardSubtitle": "Draft questions by hand or generate a full quiz from your course slides using AI.",
@@ -189,12 +244,26 @@
       "quizzesTitle": "Quizzes",
       "quizCount": "{count, plural, =1 {1 quiz} other {# quizzes}}",
       "resultsBtn": "Results",
-      "noQuizzes": "No quizzes yet. Create one on the left to get started.",
+      "noQuizzes": "No quizzes yet. Create one above to get started.",
       "rosterTitle": "Class roster",
       "rosterCount": "{count, plural, =1 {1 enrolled student} other {# enrolled students}}",
       "unnamedStudent": "Student",
       "joinedOn": "Joined {date}",
-      "noStudents": "No students enrolled yet. Share the join code with your class."
+      "noStudents": "No students enrolled yet. Share the join code with your class.",
+      "archiveClass": "Archive class",
+      "archiveClassTitle": "Archive this class?",
+      "archiveClassDescription": "Archiving \"{title}\" will hide it from students and disable enrollment. All quizzes, scores, and face verification audit logs will be safely preserved for future dispute reviews. You can restore this class at any time.",
+      "archiveClassConfirmBtn": "Archive class",
+      "archiveClassArchivingBtn": "Archiving…",
+      "archiveClassError": "Could not archive the class. Please try again.",
+      "restoreClass": "Restore class",
+      "restoreClassTitle": "Restore this class?",
+      "restoreClassDescription": "Restoring \"{title}\" will make it active again so students can participate in quizzes.",
+      "restoreClassConfirmBtn": "Restore class",
+      "restoreClassRestoringBtn": "Restoring…",
+      "restoreClassError": "Could not restore the class. Please try again.",
+      "isArchivedBadge": "Archived",
+      "archivedBannerNotice": "This class is archived. It is preserved for audit and dispute resolution. Restore it to accept new student attempts or draft new quizzes."
     },
     "builder": {
       "backToClass": "Back to class",
@@ -350,6 +419,8 @@
       "startCaptureBtn": "Start capture",
       "tryAgainBtn": "Try again",
       "recaptureBtn": "Re-capture",
+      "revokeConsentBtn": "Revoke Biometric Consent",
+      "revokingConsent": "Revoking consent…",
       "lookStraight": "Look straight at the camera",
       "turnLeft": "Turn your head LEFT (~30°)",
       "turnRight": "Turn your head RIGHT (~30°)",
@@ -366,7 +437,14 @@
       "lightingTip": "Ensure your face is evenly lit with no heavy shadows for highest accuracy."
     }
   },
+  "builder": {
+    "quizLoadError": "Could not load the quiz right now. Please refresh.",
+    "questionsLoadError": "Could not load the questions right now. Please refresh."
+  },
   "play": {
+    "profileSettingUp": "Your profile is still being set up. Please refresh in a moment.",
+    "quizNoQuestions": "This quiz has no questions yet. Please try again later.",
+    "quizLoadError": "Could not load the quiz right now. Please refresh.",
     "hud": {
       "questionOf": "Q {current}/{total}",
       "timeRemaining": "Time remaining",

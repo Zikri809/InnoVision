@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "check:i18n": "node scripts/check-i18n.mjs",
     "db:reset": "supabase db reset",
     "db:push": "supabase db push",
     "gen:types": "node scripts/gen-types.mjs",

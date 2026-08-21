@@ -20,7 +20,7 @@ import { internalError, notFound } from "@/lib/http";
  */
 
 export type OwnerResult =
-  | { ok: true; userId: string }
+  | { ok: true; userId: string; archivedAt?: string | null }
   | { ok: false; response: Response };
 
 /**
@@ -36,7 +36,7 @@ export async function requireClassOwner(
 
   const { data: cls, error } = await supabase
     .from("classes")
-    .select("id")
+    .select("id, archived_at")
     .eq("id", classId)
     .eq("lecturer_id", auth.userId)
     .maybeSingle();
@@ -47,7 +47,7 @@ export async function requireClassOwner(
   }
   if (!cls) return { ok: false, response: notFound() };
 
-  return { ok: true, userId: auth.userId };
+  return { ok: true, userId: auth.userId, archivedAt: cls.archived_at };
 }
 
 /**

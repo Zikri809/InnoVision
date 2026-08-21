@@ -314,6 +314,9 @@ export class FakeSupabase {
     if (name === "reset_session") {
       return this._resetSession(args);
     }
+    if (name === "grant_face_consent") {
+      return this._grantFaceConsent();
+    }
     if (name === "revoke_face_consent") {
       return this._revokeFaceConsent();
     }
@@ -1035,6 +1038,25 @@ export class FakeSupabase {
       },
       error: null,
     };
+  }
+
+  /** grant_face_consent — sets consent_given_at + audits (mirrors 0019). */
+  private async _grantFaceConsent() {
+    if (this.rpcResult.data !== null || this.rpcResult.error !== null) return this.rpcResult;
+    const studentId = this.user?.id ?? "";
+    const profile = (this.tables["profiles"] ?? []).find((p) => p.id === studentId);
+    if (!profile) return { data: { error: "not_student" }, error: null };
+    profile.consent_given_at = "2026-01-01T00:00:00Z";
+    this.tables["audit_events"] ??= [];
+    this.tables["audit_events"].push({
+      id: randomUuid(),
+      actor_id: studentId,
+      subject_id: studentId,
+      action: "consent_granted",
+      metadata: {},
+      created_at: "2026-01-01T00:00:00Z",
+    });
+    return { data: { ok: true }, error: null };
   }
 
   private async _revokeFaceConsent() {

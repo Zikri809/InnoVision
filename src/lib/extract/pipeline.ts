@@ -101,13 +101,25 @@ export async function runExtractionPipeline(
   try {
     native = await nativeExtract(data, filename, { node: !opts.file });
   } catch (err) {
-    if ((err as Error)?.message === "unsupported_file_type") {
+    const msg = (err as Error)?.message;
+    if (msg === "unsupported_file_type") {
       const isImage = /\.(png|jpe?g|webp)$/i.test(filename);
       if (isImage) {
         native = { text: "", pages: 0, engine: "native", lowConfidence: true };
       } else {
         throw err;
       }
+    } else if (
+      // Content-based rejections from magic-byte validation are FINAL: a
+      // renamed binary will not magically parse in OCR either, so surface
+      // the typed error instead of masking it as low-confidence text.
+      msg === "corrupt_or_invalid_pdf" ||
+      msg === "corrupt_or_invalid_docx" ||
+      msg === "corrupt_or_invalid_pptx" ||
+      msg === "binary_file_not_supported_as_text" ||
+      msg === "image_too_large"
+    ) {
+      throw err;
     } else {
       native = { text: "", pages: 0, engine: "native", lowConfidence: true };
     }

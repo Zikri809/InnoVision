@@ -95,7 +95,15 @@ export async function chatCompletions(opts: {
       },
       { signal: controller.signal },
     );
-    const text = completion.choices?.[0]?.message?.content ?? "";
+    const choice = completion.choices?.[0];
+    if (choice?.finish_reason === "length") {
+      return {
+        ok: false,
+        error: "ai_error",
+        message: "Response truncated (token budget reached).",
+      };
+    }
+    const text = choice?.message?.content ?? "";
     if (!text) return { ok: false, error: "ai_error", message: "Empty model response." };
     return { ok: true, text };
   } catch (err) {

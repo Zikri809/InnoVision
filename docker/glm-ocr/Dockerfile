@@ -12,4 +12,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir \
-    "git+https://github.com/huggingface/transformers.git"
+    "git+https://github.com/huggingface/transformers.git@v4.49.0"
+
+USER 1001

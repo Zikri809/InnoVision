@@ -11,6 +11,7 @@ import { createClient } from "@supabase/supabase-js";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertLocalTarget } from "./lib/target-guard.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const envPath = path.resolve(__dirname, "../.env.local");
@@ -32,6 +33,8 @@ if (!URL || !ANON || !SERVICE) {
   console.error("Missing .env.local keys (NEXT_PUBLIC_SUPABASE_URL / ANON / SERVICE_ROLE).");
   process.exit(1);
 }
+
+assertLocalTarget(URL, "verify-classes.mjs");
 
 const admin = createClient(URL, SERVICE, { auth: { persistSession: false } });
 const stamp = Date.now();
@@ -194,6 +197,178 @@ async function main() {
     .eq("id", clsA.id);
   record("Escalation owner transfers class denied", Boolean(escalTransfer),
     escalTransfer?.message ?? "unexpectedly succeeded");
+
+  // ── Class Archiving & Dispute Audit Preservation Checks ──────
+  // 1. Lecturer A archives the class
+  const { data: archCls, error: archErr } = await clientA
+    .from("classes")
+    .update({ archived_at: new Date().toISOString() })
+    .eq("id", clsA.id)
+    .select("id, archived_at")
+    .single();
+  record("Archive class sets archived_at", !archErr && archCls?.archived_at !== null);
+
+  // 2. Dispute audit check: Lecturer A can still see the roster of the archived class
+  const { data: archRoster, error: archRosterErr } = await clientA
+    .from("class_enrollments")
+    .select("student_id")
+    .eq("class_id", clsA.id);
+  record(
+    "Dispute audit: roster preserved after class archived",
+    !archRosterErr && (archRoster ?? []).some((r) => r.student_id === studentS.id)
+  );
+
+  // 3. Enrolled student S can no longer see the archived class in student_class_view
+  const { data: sArchView } = await clientS
+    .from("student_class_view")
+    .select("id")
+    .eq("id", clsA.id);
+  record("Archived class hidden from student_class_view", (sArchView ?? []).length === 0);
+
+  // 4. Dedicated Archive Page Query: Lecturer A sees archived class
+  const { data: archPageList, error: archPageErr } = await clientA
+    .from("classes")
+    .select("id, title, join_code, created_at, archived_at")
+    .eq("lecturer_id", lecturerA.id)
+    .not("archived_at", "is", null)
+    .order("archived_at", { ascending: false });
+  record(
+    "Dedicated archive query returns archived class",
+    !archPageErr && (archPageList ?? []).some((c) => c.id === clsA.id)
+  );
+
+  // 5. Cross-lecturer isolation on dedicated archive query
+  const { data: bArchList } = await clientB
+    .from("classes")
+    .select("id")
+    .eq("lecturer_id", lecturerB.id)
+    .not("archived_at", "is", null);
+  record(
+    "Dedicated archive query lecturer isolation (B sees 0 of A's archived classes)",
+    (bArchList ?? []).every((c) => c.id !== clsA.id)
+  );
+
+  // 6. Active Dashboard Query: Excluded from active classes list
+  const { data: activeList } = await clientA
+    .from("classes")
+    .select("id")
+    .eq("lecturer_id", lecturerA.id)
+    .is("archived_at", null);
+  record(
+    "Active dashboard query excludes archived class",
+    (activeList ?? []).every((c) => c.id !== clsA.id)
+  );
+
+  // 7. Archived exact count query (used for UI header badge)
+  const { count: archCount } = await clientA
+    .from("classes")
+    .select("id", { count: "exact", head: true })
+    .eq("lecturer_id", lecturerA.id)
+    .not("archived_at", "is", null);
+  record("Archived exact count query returns 1", archCount === 1);
+
+  // 8. Quiz Secrecy & Session Start Prevention on Archived Class
+  const { data: archQuiz, error: quizInsErr } = await admin
+    .from("quizzes")
+    .insert({
+      class_id: clsA.id,
+      title: "Archived Class Quiz",
+      mode: "practice",
+      status: "draft",
+      created_by: lecturerA.id,
+    })
+    .select("id")
+    .single();
+
+  if (archQuiz) {
+    await admin.from("questions").insert({
+      quiz_id: archQuiz.id,
+      type: "mcq",
+      prompt: "Sample Question?",
+      options: ["A", "B", "C", "D"],
+      correct_index: 0,
+      order_index: 0,
+    });
+    await admin
+      .from("quizzes")
+      .update({ status: "live" })
+      .eq("id", archQuiz.id);
+  }
+
+  const { data: sQuizView } = await clientS
+    .from("student_quiz_view")
+    .select("id")
+    .eq("id", archQuiz?.id);
+  record(
+    "Quizzes of archived class hidden from student_quiz_view",
+    (sQuizView ?? []).length === 0
+  );
+
+  const { data: startArchQuiz, error: startArchQuizErr } = await clientS.rpc(
+    "start_quiz_session",
+    { p_quiz_id: archQuiz.id }
+  );
+  record(
+    "start_quiz_session rejected on archived class quiz (quiz_not_live)",
+    startArchQuizErr === null && startArchQuiz?.error === "quiz_not_live"
+  );
+
+  // 9. New student S2 cannot join an archived class (RPC returns class_archived)
+  const studentS2 = await createUser(`studS2-${stamp}@innovision.test`);
+  const clientS2 = await asUser(`studS2-${stamp}@innovision.test`);
+  const { data: joinArchived, error: joinArchivedErr } = await clientS2.rpc("join_class", { code: joinCode });
+  record(
+    "join_class rejected on archived class (class_archived)",
+    joinArchivedErr === null && joinArchived?.error === "class_archived",
+    JSON.stringify(joinArchivedErr?.message ?? joinArchived)
+  );
+
+  // 10. Cross-lecturer isolation: Lecturer B cannot unarchive Lecturer A's class
+  const { data: bUnarch } = await clientB
+    .from("classes")
+    .update({ archived_at: null })
+    .eq("id", clsA.id)
+    .select("id");
+  record("Lecturer B cannot unarchive A's class (RLS)", (bUnarch ?? []).length === 0);
+
+  // 11. Restoration: Lecturer A restores the class
+  const { data: restCls, error: restErr } = await clientA
+    .from("classes")
+    .update({ archived_at: null })
+    .eq("id", clsA.id)
+    .select("id, archived_at")
+    .single();
+  record("Restore class sets archived_at = null", !restErr && restCls?.archived_at === null);
+
+  // 12. Student S immediately sees the restored class again in view
+  const { data: sRestView } = await clientS
+    .from("student_class_view")
+    .select("id")
+    .eq("id", clsA.id);
+  record("Restored class visible again in student_class_view", (sRestView ?? []).length === 1);
+
+  // 13. Student S2 can now successfully join restored class
+  const { data: joinPostRest, error: joinPostRestErr } = await clientS2.rpc(
+    "join_class",
+    { code: joinCode }
+  );
+  record(
+    "join_class succeeds after class restored (student S2)",
+    joinPostRestErr === null && joinPostRest?.class?.id === clsA.id
+  );
+
+  // 14. Restored quiz visible again in student_quiz_view
+  const { data: sQuizViewRest } = await clientS
+    .from("student_quiz_view")
+    .select("id")
+    .eq("id", archQuiz.id);
+  record(
+    "Quizzes visible again in student_quiz_view after restoration",
+    (sQuizViewRest ?? []).length === 1
+  );
+
+  // Cleanup test quiz
+  await admin.from("quizzes").delete().eq("id", archQuiz.id);
 
   // ── D12: storage isolation ───────────────────────────────────
   // Service-role upload into A's folder (owner=NULL → foldername-keyed policy).

@@ -102,6 +102,7 @@ export function ResultsDashboardClient({
       month: "short",
       day: "numeric",
       year: "numeric",
+      timeZone: "Asia/Kuala_Lumpur",
     });
     return df.format(d);
   }
@@ -110,12 +111,14 @@ export function ResultsDashboardClient({
     if (!iso) return "—";
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return "—";
-    return d.toLocaleString(locale === "ms" ? "ms-MY" : "en-US", {
+    const tf = new Intl.DateTimeFormat(locale === "ms" ? "ms-MY" : "en-US", {
       month: "short",
       day: "numeric",
       hour: "numeric",
       minute: "2-digit",
+      timeZone: "Asia/Kuala_Lumpur",
     });
+    return tf.format(d);
   }
 
   const [busyRows, setBusyRows] = useState<Set<string>>(new Set());
@@ -160,14 +163,24 @@ export function ResultsDashboardClient({
   }
 
   async function handleAutoRevealToggle(checked: boolean) {
+    const prev = autoReveal;
     setAutoReveal(checked);
+    setRevealError(null);
     setSettingsSaving(true);
     try {
-      await fetch(`/api/quizzes/${quizId}`, {
+      const res = await fetch(`/api/quizzes/${quizId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ auto_reveal_on_complete: checked }),
       });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setAutoReveal(prev);
+        setRevealError(body.message ?? body.error ?? tCommon("errorGeneric"));
+      }
+    } catch {
+      setAutoReveal(prev);
+      setRevealError(tCommon("errorGeneric"));
     } finally {
       setSettingsSaving(false);
     }

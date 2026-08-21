@@ -23,11 +23,14 @@ function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const t = useTranslations("auth");
+  const tCommon = useTranslations("common");
 
   const redirect = sanitizeRedirect(
     searchParams.get("redirect"),
     typeof window !== "undefined" ? window.location.origin : "http://localhost",
   );
+
+  const message = searchParams.get("message");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -39,16 +42,21 @@ function LoginForm() {
     setError(null);
     setLoading(true);
 
-    const { error } = await login({ email, password });
+    try {
+      const { error } = await login({ email, password });
 
-    if (error) {
-      setError(error);
+      if (error) {
+        setError(error);
+        return;
+      }
+
+      router.push(redirect);
+      router.refresh();
+    } catch {
+      setError(tCommon("errorGeneric"));
+    } finally {
       setLoading(false);
-      return;
     }
-
-    router.push(redirect);
-    router.refresh();
   }
 
   return (
@@ -77,6 +85,14 @@ function LoginForm() {
           </CardHeader>
           <form onSubmit={handleSubmit}>
             <CardContent className="space-y-5">
+              {message === "check-email" && (
+                <div
+                  role="status"
+                  className="rounded-xl border-[3px] border-primary/30 bg-primary/10 px-4 py-3 text-sm font-bold text-primary"
+                >
+                  {t("checkEmailMessage")}
+                </div>
+              )}
               <div className="space-y-2">
                 <Label htmlFor="email">{t("email")}</Label>
                 <Input

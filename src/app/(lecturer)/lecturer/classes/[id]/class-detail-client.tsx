@@ -21,7 +21,23 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { ArrowLeft, Check, Copy } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  ArrowLeft,
+  Check,
+  Copy,
+  Archive,
+  RotateCcw,
+  AlertTriangle,
+  Loader2,
+} from "lucide-react";
 import { formatDuration } from "@/lib/format/duration";
 import { HOURS_MAX, MINUTES_MAX, hmToSeconds } from "@/lib/quizzes/time-limit";
 import { TITLE_MAX } from "@/lib/quizzes/validation";
@@ -33,6 +49,7 @@ type ClassInfo = {
   title: string;
   join_code: string;
   created_at: string;
+  archived_at?: string | null;
 };
 
 type RosterEntry = {
@@ -73,6 +90,14 @@ export function ClassDetailClient({
   const [copyError, setCopyError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
+
+  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+
   // Ref lock guards against a fast double-click before React re-renders.
   const submitLock = useRef(false);
 
@@ -84,6 +109,7 @@ export function ClassDetailClient({
       month: "short",
       day: "numeric",
       year: "numeric",
+      timeZone: "Asia/Kuala_Lumpur",
     });
     return dateFmt.format(d);
   }
@@ -101,7 +127,60 @@ export function ClassDetailClient({
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
     } catch {
-      setCopyError("Could not copy the join code.");
+      setCopyError(t("copyJoinCodeError"));
+    }
+  }
+
+  async function handleArchiveClass() {
+    if (submitLock.current) return;
+    setArchiveError(null);
+    submitLock.current = true;
+    setArchiving(true);
+    try {
+      const res = await fetch(`/api/classes/${cls.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ archived: true }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setArchiveError(body.message ?? body.error ?? t("archiveClassError"));
+        return;
+      }
+      setArchiveDialogOpen(false);
+      router.push("/lecturer/classes/archived");
+      router.refresh();
+    } catch {
+      setArchiveError(t("archiveClassError"));
+    } finally {
+      submitLock.current = false;
+      setArchiving(false);
+    }
+  }
+
+  async function handleRestoreClass() {
+    if (submitLock.current) return;
+    setRestoreError(null);
+    submitLock.current = true;
+    setRestoring(true);
+    try {
+      const res = await fetch(`/api/classes/${cls.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ archived: false }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setRestoreError(body.message ?? body.error ?? t("restoreClassError"));
+        return;
+      }
+      setRestoreDialogOpen(false);
+      router.refresh();
+    } catch {
+      setRestoreError(t("restoreClassError"));
+    } finally {
+      submitLock.current = false;
+      setRestoring(false);
     }
   }
 
@@ -148,16 +227,55 @@ export function ClassDetailClient({
       {/* ── Hero band ── */}
       <section className="relative overflow-hidden rounded-[28px] border-[3px] border-border bg-gradient-to-br from-orange-100 via-orange-50 to-blue-50 p-7 shadow-[var(--shadow-clay)] md:p-8">
         <div aria-hidden className="pointer-events-none absolute -right-8 -top-10 h-36 w-36 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-white/50" />
+        <div aria-hidden className="pointer-events-none absolute -bottom-12 left-1/3 h-28 w-28 rounded-[60%_40%_45%_55%/50%_60%_40%_55%] bg-blue-100/60" />
         <div className="relative">
-          <Link
-            href="/lecturer/classes"
-            className="inline-flex items-center gap-1.5 text-sm font-extrabold text-muted-foreground transition-colors hover:text-primary"
-          >
-            <ArrowLeft className="h-4 w-4" aria-hidden /> {t("backToClasses")}
-          </Link>
-          <div className="mt-3 flex flex-wrap items-end justify-between gap-6">
+          <div className="flex items-center justify-between gap-4">
+            <Link
+              href={cls.archived_at ? "/lecturer/classes/archived" : "/lecturer/classes"}
+              className="inline-flex items-center gap-1.5 text-sm font-extrabold text-muted-foreground transition-colors hover:text-primary"
+            >
+              <ArrowLeft className="h-4 w-4" aria-hidden /> {t("backToClasses")}
+            </Link>
+            {cls.archived_at ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setRestoreError(null);
+                  setRestoreDialogOpen(true);
+                }}
+                className="border-[3px] border-primary/40 bg-card/90 text-xs font-extrabold text-primary hover:bg-primary hover:text-primary-foreground hover:border-primary transition-all shadow-[var(--shadow-clay-sm)]"
+              >
+                <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                {t("restoreClass")}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setArchiveError(null);
+                  setArchiveDialogOpen(true);
+                }}
+                className="border-[3px] border-amber-600/30 bg-card/90 text-xs font-extrabold text-amber-800 hover:bg-amber-100 hover:text-amber-950 hover:border-amber-600/60 transition-all shadow-[var(--shadow-clay-sm)]"
+              >
+                <Archive className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                {t("archiveClass")}
+              </Button>
+            )}
+          </div>
+          <div className="mt-4 flex flex-wrap items-end justify-between gap-6">
             <div className="min-w-0">
-              <h1 className="font-heading text-3xl font-semibold [text-wrap:balance]">{cls.title}</h1>
+              <div className="flex items-center gap-2.5">
+                <h1 className="font-heading text-3xl font-semibold [text-wrap:balance]">{cls.title}</h1>
+                {cls.archived_at && (
+                  <span className="rounded-full border-[3px] border-amber-600/40 bg-amber-100 px-3 py-0.5 text-xs font-extrabold text-amber-800 uppercase tracking-wider">
+                    {t("isArchivedBadge")}
+                  </span>
+                )}
+              </div>
               <p className="mt-1.5 text-sm font-semibold text-muted-foreground">
                 {t("rosterCount", { count: roster.length })} · {t("quizCount", { count: quizzes.length })}
               </p>
@@ -193,6 +311,37 @@ export function ClassDetailClient({
         </div>
       </section>
 
+      {/* ── Archived class warning banner ── */}
+      {cls.archived_at && (
+        <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border-[3px] border-amber-400/60 bg-amber-50 p-5 text-amber-900 shadow-[var(--shadow-clay-sm)]">
+          <div className="flex items-center gap-3">
+            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-amber-200/80 text-amber-800">
+              <Archive className="h-5 w-5" aria-hidden />
+            </div>
+            <div>
+              <p className="text-sm font-bold text-amber-950">
+                {t("isArchivedBadge")}
+              </p>
+              <p className="text-xs font-semibold text-amber-900/90">
+                {t("archivedBannerNotice")}
+              </p>
+            </div>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => {
+              setRestoreError(null);
+              setRestoreDialogOpen(true);
+            }}
+            className="shrink-0 font-extrabold"
+          >
+            <RotateCcw className="mr-1.5 h-4 w-4" aria-hidden />
+            {t("restoreClass")}
+          </Button>
+        </div>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle>{t("classQuizzes")}</CardTitle>
@@ -201,22 +350,23 @@ export function ClassDetailClient({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleCreate} className="mb-6 space-y-3 rounded-2xl border-[3px] border-border bg-muted/40 p-4">
-            <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
-              <div className="space-y-1">
-                <Label htmlFor="quiz-title" className="sr-only">
-                  {t("createQuizTitle")}
-                </Label>
-                <Input
-                  id="quiz-title"
-                  placeholder={t("quizTitlePlaceholder")}
-                  value={title}
-                  disabled={creating}
-                  onChange={(e) => setTitle(e.target.value)}
-                  required
-                  maxLength={TITLE_MAX}
-                />
-              </div>
+          {!cls.archived_at && (
+            <form onSubmit={handleCreate} className="mb-6 space-y-3 rounded-2xl border-[3px] border-border bg-muted/40 p-4">
+              <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
+                <div className="space-y-1">
+                  <Label htmlFor="quiz-title" className="sr-only">
+                    {t("createQuizTitle")}
+                  </Label>
+                  <Input
+                    id="quiz-title"
+                    placeholder={t("quizTitlePlaceholder")}
+                    value={title}
+                    disabled={creating}
+                    onChange={(e) => setTitle(e.target.value)}
+                    required
+                    maxLength={TITLE_MAX}
+                  />
+                </div>
               <div className="space-y-1">
                 <Label htmlFor="quiz-mode" className="sr-only">
                   {t("modeLabel")}
@@ -310,7 +460,14 @@ export function ClassDetailClient({
               </p>
 
               <Button type="submit" disabled={creating || !title.trim()}>
-                {creating ? t("creatingQuizBtn") : t("createQuizBtn")}
+                {creating ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+                    {t("creatingQuizBtn")}
+                  </>
+                ) : (
+                  t("createQuizBtn")
+                )}
               </Button>
             </div>
             {error && (
@@ -319,6 +476,7 @@ export function ClassDetailClient({
               </p>
             )}
           </form>
+          )}
 
           {quizzes.length === 0 ? (
             <p className="rounded-2xl border-[3px] border-dashed border-border bg-card p-6 text-center text-sm font-semibold text-muted-foreground">
@@ -353,6 +511,7 @@ export function ClassDetailClient({
                         <Link
                           href={`/lecturer/quizzes/${q.id}/results`}
                           className="text-xs font-bold text-primary hover:underline"
+                          aria-label={`${t("resultsBtn")} - ${q.title}`}
                         >
                           {t("resultsBtn")}
                         </Link>
@@ -400,6 +559,123 @@ export function ClassDetailClient({
           )}
         </CardContent>
       </Card>
+
+      {/* ── Archive class confirmation dialog ── */}
+      <Dialog
+        open={archiveDialogOpen}
+        onOpenChange={(open) => {
+          if (!open && archiving) return;
+          setArchiveDialogOpen(open);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <div className="mb-2 grid h-12 w-12 place-items-center rounded-2xl border-[3px] border-amber-600/20 bg-amber-100 text-amber-800">
+              <Archive className="h-6 w-6" aria-hidden />
+            </div>
+            <DialogTitle className="font-heading text-xl font-bold text-foreground">
+              {t("archiveClassTitle")}
+            </DialogTitle>
+            <DialogDescription className="pt-1 text-sm font-semibold text-muted-foreground">
+              {t("archiveClassDescription", { title: cls.title })}
+            </DialogDescription>
+          </DialogHeader>
+
+          {archiveError && (
+            <p className="rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm font-bold text-destructive" role="alert">
+              {archiveError}
+            </p>
+          )}
+
+          <DialogFooter className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={archiving}
+              onClick={() => setArchiveDialogOpen(false)}
+            >
+              {tCommon("cancel")}
+            </Button>
+            <Button
+              type="button"
+              variant="default"
+              disabled={archiving}
+              onClick={handleArchiveClass}
+              className="bg-amber-600 hover:bg-amber-700 text-white font-extrabold"
+            >
+              {archiving ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+                  {t("archiveClassArchivingBtn")}
+                </>
+              ) : (
+                <>
+                  <Archive className="mr-2 h-4 w-4" aria-hidden />
+                  {t("archiveClassConfirmBtn")}
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Restore class confirmation dialog ── */}
+      <Dialog
+        open={restoreDialogOpen}
+        onOpenChange={(open) => {
+          if (!open && restoring) return;
+          setRestoreDialogOpen(open);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <div className="mb-2 grid h-12 w-12 place-items-center rounded-2xl border-[3px] border-primary/20 bg-primary/10 text-primary">
+              <RotateCcw className="h-6 w-6" aria-hidden />
+            </div>
+            <DialogTitle className="font-heading text-xl font-bold text-foreground">
+              {t("restoreClassTitle")}
+            </DialogTitle>
+            <DialogDescription className="pt-1 text-sm font-semibold text-muted-foreground">
+              {t("restoreClassDescription", { title: cls.title })}
+            </DialogDescription>
+          </DialogHeader>
+
+          {restoreError && (
+            <p className="rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm font-bold text-destructive" role="alert">
+              {restoreError}
+            </p>
+          )}
+
+          <DialogFooter className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={restoring}
+              onClick={() => setRestoreDialogOpen(false)}
+            >
+              {tCommon("cancel")}
+            </Button>
+            <Button
+              type="button"
+              variant="default"
+              disabled={restoring}
+              onClick={handleRestoreClass}
+            >
+              {restoring ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+                  {t("restoreClassRestoringBtn")}
+                </>
+              ) : (
+                <>
+                  <RotateCcw className="mr-2 h-4 w-4" aria-hidden />
+                  {t("restoreClassConfirmBtn")}
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

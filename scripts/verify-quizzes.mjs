@@ -18,6 +18,7 @@ import { createClient } from "@supabase/supabase-js";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertLocalTarget } from "./lib/target-guard.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const envPath = path.resolve(__dirname, "../.env.local");
@@ -39,6 +40,8 @@ if (!URL || !ANON || !SERVICE) {
   console.error("Missing .env.local keys (NEXT_PUBLIC_SUPABASE_URL / ANON / SERVICE_ROLE).");
   process.exit(1);
 }
+
+assertLocalTarget(URL, "verify-quizzes.mjs");
 
 const admin = createClient(URL, SERVICE, { auth: { persistSession: false } });
 const stamp = Date.now();

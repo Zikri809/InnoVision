@@ -34,7 +34,11 @@ profiles: id (uuid PK → auth.users), role ('lecturer'|'student'),
 -- no face vectors/embeddings are stored in Postgres (migration 0010 dropped the
 -- old pgvector `face_embedding` column).
 
-classes: id, lecturer_id → profiles, title, join_code (6-char, unique), created_at
+classes: id, lecturer_id → profiles, title, join_code (6-char, unique),
+         archived_at (timestamptz, null = active), created_at
+-- Soft-delete / Archiving: archiving sets archived_at = now(); preserves all
+-- quizzes, sessions, results, and face checks for dispute resolution/audit.
+-- Archived classes are hidden from student_class_view and cannot be joined.
 
 class_enrollments: class_id, student_id, enrolled_at,
                    PK(class_id, student_id)
@@ -89,7 +93,7 @@ audit_events: id, actor_id → profiles, subject_id (uuid),
 
 - **One-attempt (assessment):** enforced by the **partial unique index** above (not just the RPC check) so concurrent starts can't race. RPC `start_quiz_session(quiz_id)` (security definer) validates live/enrolled then inserts; on unique violation it **returns a typed result** — `{session}` for practice (rejoin existing) or `{error:'already_attempted', session_id}` for assessment (UI shows "You've already taken this assessment", never a 500).
 - **Answer secrecy (BOTH modes):** client fetches questions via view/RPC that **omits `correct_index`** for practice *and* assessment (a student can read the network tab before starting). Grading is server-side only; practice additionally returns `correctIndex` *after* the answer is submitted.
-- **Server-side timer:** `answer_question` rejects when `clock_timestamp() > started_at + time_limit_sec + grace`, where `grace` is a **SQL constant `interval '5 seconds'`** in the RPC (never caller-supplied — a caller can't pass a larger grace). `TIMER_GRACE_SEC` (env, default **5s**) mirrors it for the client/JS layer only — it is NOT an enforcement knob. Client timer is UX-only, never trusted. **Submit is ALLOWED past the deadline** (deviation pinned by D45/E10): the timer's job is stopping answers, not stranding a late auto-submit.
+- **Server-side timer:** `answer_question` rejects when `clock_timestamp() > started_at + time_limit_sec + grace`, where `grace` is a **SQL constant `interval '5 seconds'`** in the RPC (never caller-supplied — a caller can't pass a larger grace). There is no env knob — the former `TIMER_GRACE_SEC` variable was removed (nothing ever read it); grace lives only in SQL. Client timer is UX-only, never trusted. **Submit is ALLOWED past the deadline** (deviation pinned by D45/E10): the timer's job is stopping answers, not stranding a late auto-submit.
 - **RLS:** lecturers → own classes/quizzes/sessions only; students → enrolled classes, own sessions, own profile row. `correct_index` never exposed via any client-readable policy.
 - **Re-enrollment audit:** `enroll_face` writes an `audit_events` row (who/when) with the derived status; during a live assessment window re-enrollment requires the ever-enrolled gate (`live_assessment` blocks a revoke→re-enroll face swap).
 - **Abandoned sessions:** a session still `active`/`paused` after the quiz closes (or after 2h of no `last_activity_at` updates) is rendered as **"abandoned"** in the results dashboard — no status migration needed, it's derived at read time.
@@ -101,7 +105,7 @@ audit_events: id, actor_id → profiles, subject_id (uuid),
 
 | Route | Method | Purpose |
 |---|---|---|
-| `/api/ai/generate-quiz` | POST | Input: `{ quizId, extractedText?, useVisionOcr? }`. If `extractedText` provided (client did extraction/OCR) → use directly. Else server-side native parse. Validates with Zod → inserts questions as **draft**. `maxDuration = 60` |
+| `/api/ai/generate-quiz` | POST | Input: `{ quizId, extractedText?, useVisionOcr? }`. If `extractedText` provided (client did extraction/OCR) → use directly. Else server-side native parse. Validates with Zod → inserts questions as **draft**. No `maxDuration` — AI calls use long local budgets (see COSTS §2.1); not Hobby-Vercel-safe |
 | `/api/ai/regenerate-question` | POST | Input: `{ questionId, instruction? }` → regenerate single question |
 | `/api/ocr/vision` | POST | Input: `{ images: base64[] }` (page renders from client) → vision LLM → returns concatenated markdown text. Images never stored. **Batched client-side: max 3 pages per request** (~4 MB body, under the Vercel 4.5 MB limit); client sends batches sequentially and concatenates |
 | `/api/face/enroll` | POST | Input: `{ frames: string[] }` — 3 base64 JPEG frames (front / left / right), CompreFace migration. Route runs per-frame pose validation (`/detect`), a duplicate-identity check (`/recognize`, best non-self match ≥ `FACE_SUSPICION_MIN` 0.45 → `pending_review`), then `addSubjectExample(uid, frame)` and the `enroll_face` RPC (GUC-guarded; derives `enrolled`/`pending_review` from the duplicate metadata — no `p_status` param). Requires `consent_given_at` first. Old/deletion-pending CompreFace subjects are deleted before re-enrollment; partial enrollments are rolled back best-effort |
@@ -112,7 +116,9 @@ audit_events: id, actor_id → profiles, subject_id (uuid),
 | `/api/sessions/[id]/answer` | POST | Input: `{ questionId, selectedIndex }` → **rejects if past time limit** (403 `time_expired`; RPC-enforced with a SQL-constant 5s grace) → rejects if session `paused`/`flagged`/`completed` (409 `session_not_active`) → server grades → **assessment: `INSERT ... ON CONFLICT DO NOTHING`, returns 409 `already_answered` on re-answer (no overwrite; payload carries the existing `is_correct`); practice: upsert allowed** → returns `{ isCorrect }` (+ `correctIndex` **only in practice mode**) |
 | `/api/sessions/[id]/submit` | POST | **No timer rejection (deviation, D45/E10):** computes score, sets `submitted_at`, `status='completed'`. Idempotent (re-submit returns 409 `already_submitted` with the existing score, no change) |
 | `/api/sessions/[id]/reset` | DELETE | **Lecturer-only**: deletes the session + its answers/face_checks, writes `audit_events('session_reset')` → releases the one-attempt unique slot so the student can retake (demo fallback for dead laptops) |
-| `/api/classes` | POST | Create class; on join-code unique violation, **retry with a new code (up to 3 attempts)** before erroring |
+| `/api/classes` | POST, GET | Create class (retry up to 3 times on join-code collision); list classes visible to caller (lecturer owns, student enrolled) |
+| `/api/classes/[id]` | GET, PATCH, DELETE | GET class detail + roster; PATCH `{ title?, archived? }` to rename or archive/restore class; DELETE soft-deletes (archives) class for audit retention |
+| `/api/classes/join` | POST | Student enrolls via 6-character join code via `join_class` RPC (rejects archived classes) |
 
 **Phase 7 deviations from this API table (see `PLAN_PHASE7.md` §5):** (a) `GET /api/sessions/[id]` (own-student + quiz-lecturer envelope; `verify_nonce` for the own student ONLY) — added for the flagged poll + stale-nonce recovery; (b) `POST /api/sessions/[id]/pause` — the P6 client-only hand-loss pause moves server-side; (c) `POST /api/face/consent` (`{consent:true|false}` — revoke is session-coupled: flags in-progress assessments, deletes face_checks only for own completed sessions, audited; re-consent does NOT un-flag); (d) `POST /api/sessions/[id]/face-unavailable` — records `face_unavailable_at` (idempotent). Also: `submit_session` now accepts `paused` and REJECTS `flagged` (lecturer decision precedes score finalization).
 
@@ -178,7 +184,7 @@ Upload file
    └── VisionOcrExtractor   → cloud vision LLM, costs tokens (opt-in)
    │
    ▼
-Extracted text (capped ~15k chars) ──► /api/ai/generate-quiz
+Extracted text (capped ~400k chars) ──► /api/ai/generate-quiz
 ```
 
 ### 3.3 Engine notes
@@ -335,17 +341,17 @@ OCR_VISION_MODEL=gpt-4o-mini
 COMPREFACE_BASE_URL=http://localhost:8000   # self-hosted CompreFace (Docker)
 COMPREFACE_API_KEY=                          # server-only; see docs/COMPREFACE_SETUP.md
 COMPREFACE_MOCK_ENABLED=0                    # 1 = E2E/unit-test mock mode (never in prod)
-TIMER_GRACE_SEC=5                 # server-side grace on time-limit enforcement
+# (no TIMER_GRACE_SEC — grace is a SQL constant; see §Server-side timer)
 ```
 
-Vercel notes: AI route sets `maxDuration=60` — on the Hobby plan **60s is the hard cap, not configurable upward** (plan extraction around it, not past it). MediaPipe models (~30MB total across 3 models) **self-hosted from `/public/models`** (committed to repo or fetched via postinstall) — Google CDN is treated as an optimization, not a dependency, because venue/edu Wi-Fi often blocks `storage.googleapis.com`. Supabase free tier covers 20 students easily. GLM-OCR runs on the demo machine (Docker/vLLM), never on Vercel.
+Vercel notes: AI quiz-generation routes intentionally run long (per-call timeout up to 10 min, 15-min shared budget, no `maxDuration`) — they are tuned for local/self-hosted runs and will be platform-killed on Vercel Hobby's 60s function cap; host generation behind Pro/self-managed infra if deployed. MediaPipe models (~30MB total across 3 models) **self-hosted from `/public/models`** (committed to repo or fetched via postinstall) — Google CDN is treated as an optimization, not a dependency, because venue/edu Wi-Fi often blocks `storage.googleapis.com`. Supabase free tier covers 20 students easily. GLM-OCR runs on the demo machine (Docker/vLLM), never on Vercel.
 
 ---
 
 ## 8. Risks Accepted for Demo
 
 1. **Face threshold + bad lighting** — sliding-window flag (3-in-5) reduces false flags; recovery via liveness re-pass self-unlock, and lecturer **face-exempt override** guarantees no student is hard-blocked in the demo room.
-2. **60s serverless cap** — large PPTs may time out; mitigated by client-side extraction (OCR never touches serverless) + 15k-char cap + question-count picker.
+2. **60s serverless cap (Vercel Hobby)** — large PPTs may time out; mitigated by client-side extraction (OCR never touches serverless) + 400k-char cap + question-count picker. AI generation routes run long and are meant for local/self-hosted deployment (COSTS §2.1).
 3. **3 MediaPipe models on one stream** — fine on modern laptops, may chug on old ones; hand model gets GPU delegate, face models CPU (they run once per check, not per frame).
 4. **GLM-OCR availability is hardware-dependent** — it's a vision-language chat model, not a strict OCR API; it needs a local Docker container (vLLM) with the model weights. Mitigation: it's **opt-in only**, gated behind an availability probe; Tesseract is the reliable default, cloud vision is the no-hardware opt-in.
 5. **Sparse slide decks → weak AI questions** — slides are diagrams+bullets, so extracted text can be thin; builder shows a **source-text preview** so the lecturer sees why before blaming the AI.

@@ -7,7 +7,7 @@ import { rateLimit } from "@/lib/classes/rate-limit";
 import { GenerateQuizSchema } from "@/lib/ai/validation";
 import { createAiClient, chatCompletions, AI_MODEL } from "@/lib/ai/client";
 import { generateQuiz, type GenerateQuizResult } from "@/lib/ai/quiz-prompt";
-import { aiQuizToRows } from "@/lib/ai/quiz-schema";
+import { aiQuizToRows, GENERATION_BUDGET_MS } from "@/lib/ai/quiz-schema";
 import { normalizePath } from "@/lib/ai/validation";
 import { nativeExtract } from "@/lib/extract/native";
 import { MAX_AGGREGATE_CHARS, MAX_FILE_BYTES, MAX_TOTAL_UPLOAD_BYTES } from "@/lib/extract/types";
@@ -43,7 +43,8 @@ const PARSE_TIMEOUT_MS = 120_000;
 // Overall wall-clock budget for the whole generation (parse + AI attempt +
 // retry). Local tuning: 15 minutes is far beyond what a real generation needs
 // but bounds the route against a genuinely hung upstream.
-const GENERATION_BUDGET_MS = 900_000;
+// (Constant GENERATION_BUDGET_MS lives in quiz-schema.ts, shared with
+// regenerate-question.)
 
 // In-process in-flight guard so a scripted double-POST can't fire two LLM
 // calls for the same quiz (S4). Single-instance caveat documented.
@@ -283,7 +284,10 @@ async function handleGenerate(
       return timeout("The AI request timed out. Please try again.");
     }
     if (result.error === "ai_unavailable") {
-      return unprocessable("The AI service is unavailable right now. Try again later.", "ai_unavailable");
+      return unprocessable(
+        result.message ?? "The AI service is unavailable right now. Try again later.",
+        "ai_unavailable",
+      );
     }
     return unprocessable(
       "The AI did not return a valid quiz. Try a different file or model.",

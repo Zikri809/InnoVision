@@ -81,7 +81,7 @@
 ### 2.5 Timer & scoring helpers
 | # | Case | Expected |
 |---|---|---|
-| U-T1 | `isWithinTimeLimit(startedAt, limit, now)` with `TIMER_GRACE_SEC=5` | true inside `limit + 5s`, false past it |
+| U-T1 | `isWithinTimeLimit(startedAt, limit, now)` with `graceSec = 5` | true inside `limit + 5s`, false past it |
 | U-T2 | untimed quiz (`time_limit_sec=null`) | always within limit |
 | U-T3 | score computation | correct answers count once each |
 | U-T4 | **"abandoned" derived state** (PLAN §1) | session `active`/`paused` + quiz closed **or** `last_activity_at` > 2h ago → renders "abandoned"; recently-active session → "in progress"; `completed`/`flagged` never shown as abandoned |
@@ -124,6 +124,7 @@
 | D13 | **`audit_events` written on privileged actions** | unlock / exempt-face / session-reset / re-enroll each write a row with correct `actor_id`, `subject_id`, `action` |
 | D14 | **`verify_nonce` rotation** | successful verify rotates nonce; replayed request with the old nonce → 409 |
 | D15 | **Join idempotency** (P2) | second `join_class` for an already-enrolled student → typed `already_enrolled`, no duplicate row, no error |
+| D15b | **Join archived class rejected** (P2) | `join_class` against an archived class (`archived_at != null`) → typed `{error:'class_archived'}`, no enrollment row |
 | D16 | **Concurrent double-join** (P2) | two simultaneous `join_class` calls, same student+code | exactly one succeeds; the other returns `already_enrolled` (PK conflict, no 500) |
 | D17 | **Lecturer cannot join** (P2) | lecturer calls `join_class` with a valid code | typed `not_student`; no enrollment row |
 | D18 | **Join-code charset** (P2) | insert/update `classes.join_code` with disallowed chars (`ABC01!`, lowercase, `0/O/1/I`) | CHECK constraint rejects; stored codes always uppercase canonical |
@@ -135,6 +136,7 @@
 | D24 | **One-way status machine (P3)** | `live→draft`, `closed→live` | trigger errors (`live_quiz_cannot_reopen` / `closed_quiz_cannot_transition`); `live→closed` allowed |
 | D25 | **Cascade delete (P3 hardening)** | delete a quiz WITH questions; delete a class containing one | succeeds (cascade); no `quiz_not_found` |
 | D26 | **Join-code secrecy (P3 hardening)** | enrolled student reads `classes` directly | 0 rows (owner-only); `student_class_view` exposes `id/title/created_at` only |
+| D26b | **Class archiving & dispute audit** (P2/P3) | lecturer archives class (`archived_at=now()`) | class hidden from `student_class_view` and `student_quiz_view`; `class_enrollments`, quizzes, and audit logs preserved for owner lecturer |
 | D27 | **Quiz column secrecy (P3 hardening)** | enrolled student reads `quizzes` directly | 0 rows (owner-only); `student_quiz_view` exposes live quiz metadata only (no `source_file_url`/`created_by`) |
 | D28 | **Biometric secrecy (P3 hardening)** | lecturer reads enrolled student's `profiles` | 0 rows (self-only); `student_roster_view` exposes names only (no `face_enrollment_status`) |
 | D29 | **Quiz starts draft (P3 hardening)** | `INSERT quizzes SET status='live'` | trigger error `quiz_must_start_draft` (D21 holds on every write path) |
@@ -241,6 +243,12 @@
 | I-S12 | `DELETE /api/quizzes/[id]` (P5) | quiz has a seeded session | 409 `quiz_has_sessions`; without sessions → 200. *(Lives in the existing quiz-route test file, not a new sessions test file.)* |
 | I-S14 | answer | RPC `invalid_selected_index` | 400 |
 | I-S15 | submit | no answers | 200 `{ score: 0, total }` |
+| I-C1 | `PATCH /api/classes/[id]` (P2) | lecturer updates title / archive toggle | 200 `{ class }` with updated `title` and `archived_at` |
+| I-C2 | `PATCH /api/classes/[id]` (P2) | invalid body (`empty_update`, `invalid_title`, `invalid_archived`, `invalid_json`) | 400 with typed error |
+| I-C3 | `PATCH/DELETE /api/classes/[id]` (P2) | non-owner lecturer / student / cross-origin | 404 (no oracle) / 403 `forbidden` / 403 `invalid_origin` |
+| I-C4 | `DELETE /api/classes/[id]` (P2) | lecturer soft-deletes class | 200 `{ ok: true, archived: true }`, sets `archived_at` (audit preservation) |
+| I-C5 | `GET /api/classes/[id]` (P2) | student requests archived class | 404 (hidden via `student_class_view`) |
+| I-C6 | `POST /api/classes/join` (P2) | student attempts to join archived class | 400 `class_archived` |
 
 ---
 

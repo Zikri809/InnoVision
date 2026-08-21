@@ -27,18 +27,38 @@ export const AI_MAX_OUTPUT_TOKENS = 16_000;
  * long 30-question generation can't be aborted mid-stream. */
 export const AI_ROUND_TRIP_TIMEOUT_MS = 600_000;
 
+/** Overall wall-clock budget for a whole AI route (parse + attempt + retry).
+ * Shared by generate-quiz and regenerate-question so both routes bound the
+ * upstream identically. Local-only tuning (see docs/COSTS.md §2.1). */
+export const GENERATION_BUDGET_MS = 900_000;
+
 /** A single AI question (shared by the quiz schema and single-question regen). */
 export const AiQuestionSchema = z
   .object({
     type: z.enum(["mcq", "true_false"]),
-    prompt: z.string().trim().min(5, "Prompt must be at least 5 characters."),
+    prompt: z
+      .string()
+      .trim()
+      .min(5, "Prompt must be at least 5 characters.")
+      .max(2000, "Prompt must be at most 2000 characters."),
     options: z
-      .array(z.string().trim().min(1, "Options must not be empty."))
+      .array(
+        z
+          .string()
+          .trim()
+          .min(1, "Options must not be empty.")
+          .max(500, "Each option must be at most 500 characters."),
+      )
       .min(2, "A question needs at least 2 options.")
       .max(5, "A question can have at most 5 options."),
     correct_index: z.number().int().min(0),
     // Models frequently emit `explanation: null` — accept both absent and null.
-    explanation: z.string().trim().optional().nullable(),
+    explanation: z
+      .string()
+      .trim()
+      .max(2000, "Explanation must be at most 2000 characters.")
+      .optional()
+      .nullable(),
   })
   // Gesture constraint: true_false must have exactly 2 options, and
   // correct_index must point at an existing option.

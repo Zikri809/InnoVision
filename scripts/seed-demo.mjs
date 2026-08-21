@@ -36,6 +36,16 @@ if (!URL || !SERVICE) {
   process.exit(1);
 }
 
+const isLocalUrl = URL.includes("localhost") || URL.includes("127.0.0.1");
+if (!isLocalUrl && process.env.ALLOW_PROD_SEED !== "1" && env.ALLOW_PROD_SEED !== "1") {
+  console.error(
+    `\n⚠️ SAFETY GUARD: Target Supabase URL (${URL}) appears to be a remote/production environment.` +
+    `\nSeeding demo accounts and mock data to a remote project is blocked by default.` +
+    `\nIf you intended to seed this remote project, re-run with: ALLOW_PROD_SEED=1 node scripts/seed-demo.mjs\n`
+  );
+  process.exit(1);
+}
+
 const admin = createClient(URL, SERVICE, { auth: { persistSession: false } });
 
 const PASSWORD = "Password123!";
@@ -89,23 +99,23 @@ async function ensureUser({ email, name, role }) {
 }
 
 // ── Class + enrollments ─────────────────────────────────────────────
-async function ensureClass(lecturerId) {
+async function ensureClass({ lecturerId, title = CLASS_TITLE, joinCode = CLASS_JOIN_CODE, archivedAt = null }) {
   const { data: found } = await admin
     .from("classes")
     .select("id, join_code")
-    .eq("join_code", CLASS_JOIN_CODE)
+    .eq("join_code", joinCode)
     .maybeSingle();
   if (found) {
-    log(`  = reusing class ${CLASS_TITLE} (${CLASS_JOIN_CODE})`);
+    log(`  = reusing class ${title} (${joinCode})`);
     return found.id;
   }
   const { data, error } = await admin
     .from("classes")
-    .insert({ lecturer_id: lecturerId, title: CLASS_TITLE, join_code: CLASS_JOIN_CODE })
+    .insert({ lecturer_id: lecturerId, title, join_code: joinCode, archived_at: archivedAt })
     .select("id")
     .single();
   if (error) throw error;
-  log(`  + created class ${CLASS_TITLE} (${CLASS_JOIN_CODE})`);
+  log(`  + created class ${title} (${joinCode})${archivedAt ? " [archived]" : ""}`);
   return data.id;
 }
 
@@ -234,10 +244,20 @@ async function main() {
   const [lecturer, s1, s2] = await Promise.all(PEOPLE.map(ensureUser));
 
   log("\nClass:");
-  const classId = await ensureClass(lecturer.id);
+  const classId = await ensureClass({ lecturerId: lecturer.id, title: CLASS_TITLE, joinCode: CLASS_JOIN_CODE });
   await ensureEnrollment(classId, s1.id);
   await ensureEnrollment(classId, s2.id);
   log(`  + enrolled ${s1.email} + ${s2.email}`);
+
+  // Seed an archived class to showcase the dispute audit trail & archiving section
+  const archClassId = await ensureClass({
+    lecturerId: lecturer.id,
+    title: "CS100 — Programming Fundamentals (Archived)",
+    joinCode: "ARCH99",
+    archivedAt: new Date(Date.now() - 7 * 86400000).toISOString(),
+  });
+  await ensureEnrollment(archClassId, s1.id);
+  log(`  + enrolled ${s1.email} in archived class`);
 
   log("\nQuizzes:");
   const practice = await ensureQuiz({

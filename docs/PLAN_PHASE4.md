@@ -1,5 +1,7 @@
 # InnoVision — Phase 4 (Extraction + AI Generation) Implementation Plan
 
+> **Post-audit note:** the source-text cap is now **400k chars** (not 15k — enforced in Zod *and* the `save_quiz_questions` RPC), and the AI routes no longer set `maxDuration = 60` or a 45s timeout: they use long local budgets (per-call up to 10 min, 15-min shared deadline) tuned for local/self-hosted runs. Ignore stale numbers below; COSTS.md §2.1 and PLAN.md are authoritative.
+
 > **Status: EXECUTED + AUDITED (2 audit iterations, clean).** Implementation committed across `1b07444` → `eed8f1c` (fix E2) → `c698e9f` (audit iter 1) → `1950f57` + `8f76448` (audit iter 2), with the final CSRF/`parseQuestionJson`/cast cleanups pending in the working tree. All gate tests green: 210 unit/integration (Vitest), 82 live-DB checks (verify-security 3/3 · verify-classes 21/21 · verify-quizzes 42/42 · verify-ai 16/16), 7 Playwright E2E, `npm run lint` clean · `typecheck` clean · `build` succeeds. Coverage gate wired (`@vitest/coverage-v8`, per-file thresholds).
 > **Depends on:** Phase 3 (Manual Builder) — committed at `eac8011`, gates green (D5/D6/D19–D33, I20, I-Q1–I-Q13, E1b). Baseline verified: `npm run lint` clean · `npm run typecheck` clean · `npm test` 84/84.
 > **Phase 4 deliverable (PLAN §6):** upload → native/OCR cascade → AI generate → review/edit/reorder/regenerate → publish. A lecturer turns a real chapter PDF (incl. a scanned PDF via free in-browser OCR) into an editable, publishable quiz.

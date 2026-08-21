@@ -14,7 +14,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Sparkles, Layers, ClipboardList, KeyRound, ArrowRight } from "lucide-react";
+import { Sparkles, Layers, ClipboardList, KeyRound, ArrowRight, Loader2 } from "lucide-react";
 
 export type StudentClassCard = {
   id: string;
@@ -104,7 +104,7 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
                 <span className="font-heading text-2xl font-bold">{totalQuizzes}</span>
               </div>
               <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">
-                {t("liveQuizCount", { count: totalQuizzes })} →
+                {t("liveQuizCount", { count: totalQuizzes })} <span aria-hidden="true">→</span>
               </p>
             </Link>
           </div>
@@ -112,8 +112,8 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
       </section>
 
       {/* ── Join + list ── */}
-      <section className="grid items-stretch gap-6 lg:grid-cols-[340px_1fr]">
-        <Card className="flex flex-col">
+      <section className="grid items-start gap-6 lg:grid-cols-[340px_1fr]">
+        <Card className="lg:sticky lg:top-6">
           <CardHeader>
             <div className="mb-1 grid h-11 w-11 place-items-center rounded-2xl bg-blue-100 text-accent">
               <KeyRound className="h-5 w-5" aria-hidden />
@@ -123,8 +123,8 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
               {t("joinCardSubtitle")}
             </CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-1 flex-col">
-            <form onSubmit={handleJoin} className="flex flex-1 flex-col gap-3">
+          <CardContent>
+            <form onSubmit={handleJoin} className="space-y-4">
               <div>
                 <Label htmlFor="join-code" className="sr-only">
                   {t("joinCardTitle")}
@@ -138,7 +138,7 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
                   className="font-mono uppercase tracking-widest"
                 />
               </div>
-              <div aria-live="polite" className="flex-1">
+              <div aria-live="polite">
                 {error && (
                   <p className="rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm font-bold text-destructive" role="alert">
                     {error}
@@ -150,8 +150,15 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
                   </p>
                 )}
               </div>
-              <Button type="submit" variant="accent" className="mt-auto w-full" disabled={joining || !code.trim()}>
-                {joining ? t("joiningBtn") : t("joinBtn")}
+              <Button type="submit" variant="accent" className="w-full" disabled={joining || !code.trim()}>
+                {joining ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+                    {t("joiningBtn")}
+                  </>
+                ) : (
+                  t("joinBtn")
+                )}
               </Button>
             </form>
           </CardContent>

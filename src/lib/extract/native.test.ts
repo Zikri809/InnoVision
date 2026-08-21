@@ -158,3 +158,15 @@ describe("detectNativeType", () => {
     expect(detectNativeType("a.txt")).toBe("text");
   });
 });
+
+describe("validateMagicBytes", () => {
+  it("rejects non-PDF data disguised as .pdf", async () => {
+    const fakePdf = new TextEncoder().encode("NOT A PDF").buffer as ArrayBuffer;
+    await expect(nativeExtract(fakePdf, "test.pdf")).rejects.toThrow("corrupt_or_invalid_pdf");
+  });
+
+  it("rejects binary data disguised as .txt", async () => {
+    const fakeText = new Uint8Array([0x48, 0x65, 0x00, 0x6c, 0x6f]).buffer as ArrayBuffer;
+    await expect(nativeExtract(fakeText, "test.txt")).rejects.toThrow("binary_file_not_supported_as_text");
+  });
+});

@@ -4,6 +4,61 @@ import path from "path";
 const en = JSON.parse(fs.readFileSync("src/messages/en.json", "utf8"));
 const ms = JSON.parse(fs.readFileSync("src/messages/ms.json", "utf8"));
 
+function flattenKeys(obj, prefix = "") {
+  let keys = [];
+  for (const [k, v] of Object.entries(obj)) {
+    const fullKey = prefix ? `${prefix}.${k}` : k;
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      keys.push(...flattenKeys(v, fullKey));
+    } else {
+      keys.push(fullKey);
+    }
+  }
+  return keys;
+}
+
+const enKeys = new Set(flattenKeys(en));
+const msKeys = new Set(flattenKeys(ms));
+
+let hasError = false;
+
+// 1. Check EN -> MS
+const missingInMs = [];
+for (const key of enKeys) {
+  if (!msKeys.has(key)) {
+    missingInMs.push(key);
+  }
+}
+
+// 2. Check MS -> EN
+const missingInEn = [];
+for (const key of msKeys) {
+  if (!enKeys.has(key)) {
+    missingInEn.push(key);
+  }
+}
+
+console.log(`\n=== i18n Key Parity Check ===`);
+console.log(`Total EN keys: ${enKeys.size}`);
+console.log(`Total MS keys: ${msKeys.size}`);
+
+if (missingInMs.length > 0) {
+  hasError = true;
+  console.error(`\n❌ Keys in en.json missing from ms.json (${missingInMs.length}):`);
+  for (const k of missingInMs) console.error(`  - ${k}`);
+}
+
+if (missingInEn.length > 0) {
+  hasError = true;
+  console.error(`\n❌ Keys in ms.json missing from en.json (${missingInEn.length}):`);
+  for (const k of missingInEn) console.error(`  - ${k}`);
+}
+
+if (!hasError) {
+  console.log(`✅ Perfect en <-> ms key parity (${enKeys.size}/${msKeys.size})!`);
+}
+
+// 3. Scan code references
 function getAllFiles(dir, exts = [".ts", ".tsx"]) {
   let res = [];
   for (const f of fs.readdirSync(dir)) {
@@ -42,19 +97,7 @@ for (const file of files) {
     while ((callMatch = callRegex.exec(content)) !== null) {
       const key = callMatch[1];
       const fullPath = ns ? `${ns}.${key}` : key;
-      const parts = fullPath.split(".");
-      let curEn = en;
-      let okEn = true;
-      for (const p of parts) {
-        if (curEn && typeof curEn === "object" && p in curEn) {
-          curEn = curEn[p];
-        } else {
-          okEn = false;
-          break;
-        }
-      }
-
-      if (!okEn) {
+      if (!enKeys.has(fullPath) && !msKeys.has(fullPath)) {
         if (!missingByPath[fullPath]) {
           missingByPath[fullPath] = [];
         }
@@ -64,7 +107,18 @@ for (const file of files) {
   }
 }
 
-console.log("Unique missing fullPaths:", Object.keys(missingByPath).length);
-for (const [k, v] of Object.entries(missingByPath)) {
-  console.log(`- ${k} (used in ${[...new Set(v)].join(", ")})`);
+if (Object.keys(missingByPath).length > 0) {
+  hasError = true;
+  console.error(`\n❌ Code references missing translation keys (${Object.keys(missingByPath).length}):`);
+  for (const [k, v] of Object.entries(missingByPath)) {
+    console.error(`  - ${k} (used in ${[...new Set(v)].join(", ")})`);
+  }
+}
+
+if (hasError) {
+  console.error(`\n❌ i18n validation failed.`);
+  process.exit(1);
+} else {
+  console.log(`✅ All code references validated.\n`);
+  process.exit(0);
 }

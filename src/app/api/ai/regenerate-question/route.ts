@@ -7,7 +7,7 @@ import { rateLimit } from "@/lib/classes/rate-limit";
 import { RegenerateQuestionSchema } from "@/lib/ai/validation";
 import { createAiClient, chatCompletions, AI_MODEL } from "@/lib/ai/client";
 import { regenerateQuestion } from "@/lib/ai/quiz-prompt";
-import { normalizeOptions, type AiQuestion } from "@/lib/ai/quiz-schema";
+import { normalizeOptions, GENERATION_BUDGET_MS, type AiQuestion } from "@/lib/ai/quiz-schema";
 import {
   firstIssueMessage,
   internalError,
@@ -27,6 +27,8 @@ export const dynamic = "force-dynamic";
 
 const REGENERATE_RATE = { limit: 20, windowMs: 60 * 60 * 1000 };
 
+const inFlight = new Set<string>();
+
 /**
  * POST /api/ai/regenerate-question — rewrite ONE question on a DRAFT quiz.
  *
@@ -39,7 +41,7 @@ const REGENERATE_RATE = { limit: 20, windowMs: 60 * 60 * 1000 };
  *     non-owners → 404, no oracle).
  *  3. requireQuizOwner(quiz_id) → 404 for non-owner lecturers.
  *  4. Draft check → 409.
- *  5. Rate limit.
+ *  5. Rate limit & In-flight check.
  *  6. AI call (45s timeout).
  *  7. Only on success: quiz-scoped UPDATE (WHERE id AND quiz_id) — failure
  *     leaves the original untouched (I17).
@@ -99,6 +101,43 @@ export async function POST(request: Request, context?: { params?: Promise<{ id?:
     return rateLimited("Too many regenerations. Try again in an hour.");
   }
 
+  // In-flight guard: prevent double-spend on rapid clicks. In-process only
+  // (same mechanism + single-instance caveat as generate-quiz); keyed per
+  // question so unrelated questions can regenerate concurrently.
+  if (inFlight.has(questionId)) {
+    return rateLimited("A regeneration for this question is already in progress.");
+  }
+  inFlight.add(questionId);
+
+  try {
+    return await handleRegenerate({
+      supabase,
+      questionId,
+      questionRow,
+      instruction,
+    });
+  } finally {
+    inFlight.delete(questionId);
+  }
+}
+
+async function handleRegenerate(ctx: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  questionId: string;
+  questionRow: {
+    id: string;
+    quiz_id: string;
+    order_index: number;
+    type: "mcq" | "true_false";
+    prompt: string;
+    options: string[];
+    correct_index: number;
+    explanation: string | null;
+  };
+  instruction?: string;
+}): Promise<NextResponse> {
+  const { supabase, questionId, questionRow, instruction } = ctx;
+
   // Load siblings for coherence (excluding the target).
   const { data: siblingRows, error: sibErr } = await supabase
     .from("questions")
@@ -122,7 +161,8 @@ export async function POST(request: Request, context?: { params?: Promise<{ id?:
   const target = toAi(questionRow);
   const siblings = (siblingRows ?? []).map(toAi);
 
-  // 6. AI call.
+  // 6. AI call. Explicit deadline (same budget as generate-quiz) so the route
+  // never silently inherits a changed default inside regenerateQuestion.
   const ai = createAiClient();
   const result = await regenerateQuestion({
     chat: (messages, timeoutMs) =>
@@ -130,6 +170,7 @@ export async function POST(request: Request, context?: { params?: Promise<{ id?:
     question: target,
     siblings,
     instruction,
+    deadlineMs: Date.now() + GENERATION_BUDGET_MS,
   });
 
   if (!result.ok) {
@@ -137,7 +178,10 @@ export async function POST(request: Request, context?: { params?: Promise<{ id?:
       return timeout("The AI request timed out. Please try again.");
     }
     if (result.error === "ai_unavailable") {
-      return unprocessable("The AI service is unavailable right now. Try again later.", "ai_unavailable");
+      return unprocessable(
+        result.message ?? "The AI service is unavailable right now. Try again later.",
+        "ai_unavailable",
+      );
     }
     return unprocessable(
       "The AI did not return a valid question. Try again.",

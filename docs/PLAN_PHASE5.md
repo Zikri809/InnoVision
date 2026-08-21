@@ -1,5 +1,7 @@
 ﻿# InnoVision — Phase 5 (Play Screen, Click-First) Implementation Plan
 
+> **Post-audit note:** `TIMER_GRACE_SEC` was removed from `.env.local.example` and CI — nothing ever read it. The grace is a SQL constant (`interval '5 seconds'`) in the RPC; ignore any statement below that says the env var "already exists" or that CI writes it.
+
 > **Status:** DRAFT — pending review; not approved for execution.
 > **Depends on:** Phase 4 (Extraction + AI generation) — committed at `a44db05` (+ `12420d7` handoff doc, `8789776` baseline fixes); gates green (210 vitest · verify-security 3/3 · verify-classes 21/21 · verify-quizzes 42/42 · verify-ai 16/16 · 7 Playwright E2E · lint/typecheck/build clean).
 > **Phase 5 deliverable (PLAN §6):** `QuizEngine`, practice + assessment modes, one-attempt RPC, server timer (+grace), per-question grading, EndScreen. A full quiz playable with **mouse**; assessment locks retry; answers never leak `correct_index`.

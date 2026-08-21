@@ -1,4 +1,5 @@
 import { redirect, notFound } from "next/navigation";
+import { getTranslations } from "next-intl/server";
 import { createClient } from "@/lib/supabase/server";
 import { QuizBuilderClient } from "./quiz-builder-client";
 
@@ -18,6 +19,7 @@ export default async function QuizBuilderPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const tBuilder = await getTranslations("builder");
   const supabase = await createClient();
   const {
     data: { user },
@@ -53,7 +55,7 @@ export default async function QuizBuilderPage({
     return (
       <div className="mx-auto max-w-3xl px-4 py-8">
         <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
-          Could not load the quiz right now. Please refresh.
+          {tBuilder("quizLoadError")}
         </p>
       </div>
     );
@@ -87,7 +89,7 @@ export default async function QuizBuilderPage({
     return (
       <div className="mx-auto max-w-3xl px-4 py-8">
         <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
-          Could not load the quiz right now. Please refresh.
+          {tBuilder("quizLoadError")}
         </p>
       </div>
     );
@@ -99,7 +101,7 @@ export default async function QuizBuilderPage({
     return (
       <div className="mx-auto max-w-3xl px-4 py-8">
         <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
-          Could not load the questions right now. Please refresh.
+          {tBuilder("questionsLoadError")}
         </p>
       </div>
     );

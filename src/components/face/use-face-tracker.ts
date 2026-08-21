@@ -125,6 +125,28 @@ export function useFaceTracker(opts?: {
       const tracker = new FaceTracker(video);
       trackerRef.current = tracker;
 
+      // A detection-loop death after boot must degrade to unavailable
+      // (passthrough) instead of silently freezing poses/blinks. stop()
+      // releases the shared camera token — nothing consumes the video once
+      // the pipeline is unavailable.
+      function wireLoopErrors(t: FaceTracker) {
+        t.onError(() => {
+          t.stop();
+          // Drop the dead instance so nothing downstream (e.g. the pipeline
+          // effect) can hand a disposed tracker back to consumers.
+          if (trackerRef.current === t) trackerRef.current = null;
+          if (bootId === bootIdRef.current && !disposedRef.current) {
+            queueMicrotask(() => {
+              if (bootId !== bootIdRef.current || disposedRef.current) return;
+              setBooting(false);
+              setAvailable(false);
+              onUnavailableRef.current?.();
+            });
+          }
+        });
+      }
+      wireLoopErrors(tracker);
+
       let timedOut = false;
       const timeout = setTimeout(() => {
         timedOut = true;
@@ -183,6 +205,7 @@ export function useFaceTracker(opts?: {
           try {
             const retryTracker = new FaceTracker(video);
             trackerRef.current = retryTracker;
+            wireLoopErrors(retryTracker);
             const [, healthy] = await Promise.all([retryTracker.start(), probeHealthWithRetry()]);
             if (bootId !== bootIdRef.current || disposedRef.current) {
               retryTracker.stop();

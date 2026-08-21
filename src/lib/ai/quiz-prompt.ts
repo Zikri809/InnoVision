@@ -183,9 +183,13 @@ export function buildRegeneratePrompt(opts: {
   instruction?: string;
 }): string {
   const { question, siblings, instruction } = opts;
+  const safeQuestionJson = JSON.stringify(question).replace(/```/g, "'''");
   const siblingText = siblings.length
     ? siblings
-        .map((s, i) => `${i + 1}. [${s.type}] ${s.prompt} (options: ${s.options.join(" | ")})`)
+        .map(
+          (s, i) =>
+            `${i + 1}. [${s.type}] ${s.prompt.replace(/```/g, "'''")} (options: ${s.options.map((o) => o.replace(/```/g, "'''")).join(" | ")})`,
+        )
         .join("\n")
     : "(none)";
   const instructionText = instruction?.trim()
@@ -197,11 +201,15 @@ export function buildRegeneratePrompt(opts: {
     `Maintain the SAME language as the existing question (e.g. if in Bahasa Melayu, write the prompt, options, and explanation in Bahasa Melayu; for true_false questions in Bahasa Melayu, use options ["Betul", "Salah"]).`,
     `Return ONLY a JSON object of the form: {"type": "mcq"|"true_false", "prompt": string, "options": string[], "correct_index": number, "explanation"?: string}.`,
     ``,
-    `Existing question:`,
-    JSON.stringify(question),
+    `=== UNTRUSTED EXISTING QUESTION ===`,
+    `\`\`\``,
+    safeQuestionJson,
+    `\`\`\``,
     ``,
-    `Other questions in the quiz (for coherence, do not duplicate them):`,
+    `=== UNTRUSTED SIBLING QUESTIONS (for coherence, do not duplicate) ===`,
+    `\`\`\``,
     siblingText,
+    `\`\`\``,
     instructionText,
   ].join("\n");
 }

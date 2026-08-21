@@ -1,4 +1,5 @@
 import { redirect, notFound } from "next/navigation";
+import { getTranslations } from "next-intl/server";
 import { createClient } from "@/lib/supabase/server";
 import { isUuid } from "@/lib/classes/roster";
 import { firstUnansweredIndex, remainingMs } from "@/lib/sessions/timer";
@@ -79,6 +80,7 @@ export type ResultsBreakdownRow = {
  */
 export default async function PlayPage({ params }: PageProps) {
   const { sessionId } = await params;
+  const tPlay = await getTranslations("play");
   const supabase = await createClient();
 
   const {
@@ -99,7 +101,7 @@ export default async function PlayPage({ params }: PageProps) {
           className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground"
           role="alert"
         >
-          Your profile is still being set up. Please refresh in a moment.
+          {tPlay("profileSettingUp")}
         </p>
       </div>
     );
@@ -120,7 +122,7 @@ export default async function PlayPage({ params }: PageProps) {
 
   if (sessionError) {
     console.error("Play session fetch error:", sessionError);
-    return errorPanel();
+    return errorPanel(tPlay("quizLoadError"));
   }
   if (!session) notFound();
 
@@ -169,23 +171,23 @@ export default async function PlayPage({ params }: PageProps) {
 
   if (quizRes.status === "rejected" || quizRes.value.error) {
     console.error("Play quiz fetch error:", quizRes.status === "rejected" ? quizRes.reason : quizRes.value.error);
-    return errorPanel();
+    return errorPanel(tPlay("quizLoadError"));
   }
   if (questionsRes.status === "rejected" || questionsRes.value.error) {
     console.error("Play questions fetch error:", questionsRes.status === "rejected" ? questionsRes.reason : questionsRes.value.error);
-    return errorPanel();
+    return errorPanel(tPlay("quizLoadError"));
   }
   if (answersRes.status === "rejected" || answersRes.value.error) {
     console.error("Play answers fetch error:", answersRes.status === "rejected" ? answersRes.reason : answersRes.value.error);
-    return errorPanel();
+    return errorPanel(tPlay("quizLoadError"));
   }
   if (faceChecksRes.status === "rejected" || faceChecksRes.value.error) {
     console.error("Play face-checks fetch error:", faceChecksRes.status === "rejected" ? faceChecksRes.reason : faceChecksRes.value.error);
-    return errorPanel();
+    return errorPanel(tPlay("quizLoadError"));
   }
   if (profileRes.status === "rejected" || profileRes.value.error) {
     console.error("Play profile fetch error:", profileRes.status === "rejected" ? profileRes.reason : profileRes.value.error);
-    return errorPanel();
+    return errorPanel(tPlay("quizLoadError"));
   }
 
   const quiz = quizRes.value.data as QuizRow | null;
@@ -225,7 +227,7 @@ export default async function PlayPage({ params }: PageProps) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-8">
         <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
-          This quiz has no questions yet. Please try again later.
+          {tPlay("quizNoQuestions")}
         </p>
       </div>
     );
@@ -297,11 +299,11 @@ export default async function PlayPage({ params }: PageProps) {
   );
 }
 
-function errorPanel() {
+function errorPanel(msg: string) {
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
       <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
-        Could not load the quiz right now. Please refresh.
+        {msg}
       </p>
     </div>
   );

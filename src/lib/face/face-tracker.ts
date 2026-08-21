@@ -115,6 +115,8 @@ export class FaceTracker implements IFaceTracker {
   private loadedMetadataTimer: ReturnType<typeof setTimeout> | null = null;
   private waitForBlinkResolvers: (() => void)[] = [];
   private poseListeners: Set<(pose: LivePose) => void> = new Set();
+  private errorListeners: Set<(err: unknown) => void> = new Set();
+  private errored = false;
   private lastFrameAt = 0;
   private lastQualityResult: FaceQuality = { ok: false, reason: "no-frame-yet" };
   private canvas: HTMLCanvasElement | null = null;
@@ -135,6 +137,31 @@ export class FaceTracker implements IFaceTracker {
     };
   }
 
+  /**
+   * Subscribe to fatal detection-loop errors (fires at most once). A dead loop
+   * can no longer produce poses or blinks — subscribers must degrade the
+   * pipeline to `'unavailable'` instead of silently freezing (which used to
+   * brick blink recovery and strand the student on the paused overlay).
+   */
+  onError(cb: (err: unknown) => void): () => void {
+    this.errorListeners.add(cb);
+    return () => {
+      this.errorListeners.delete(cb);
+    };
+  }
+
+  private emitError(err: unknown): void {
+    if (this.errored) return;
+    this.errored = true;
+    for (const listener of this.errorListeners) {
+      try {
+        listener(err);
+      } catch {
+        // a broken subscriber must not break the others
+      }
+    }
+  }
+
   async start(): Promise<void> {
     console.info("[face-tracker] start() initiated");
     // Start loading Vision + Landmarker concurrently with camera acquisition
@@ -153,6 +180,10 @@ export class FaceTracker implements IFaceTracker {
         throw err;
       }
     })();
+    // Attach an early no-op handler so a fast model rejection while start() is
+    // still awaiting the camera doesn't surface as an unhandled rejection;
+    // the real handling happens at `await modelPromise` below.
+    modelPromise.catch(() => {});
 
     // 1. Shared camera stream (coalesced; release on stop).
     console.info("[face-tracker] acquiring camera stream...");
@@ -163,86 +194,83 @@ export class FaceTracker implements IFaceTracker {
       this.cameraToken = null;
       return;
     }
-    let stream: MediaStream;
+
     try {
-      stream = resolveStream(this.cameraToken);
-    } catch (err) {
+      const stream = resolveStream(this.cameraToken);
+      this.stream = stream;
+      this.video.srcObject = stream;
+      this.video.muted = true;
+      this.video.playsInline = true;
+      console.info("[face-tracker] video srcObject set, readyState:", this.video.readyState);
+
+      if (this.video.readyState < 1) {
+        console.info("[face-tracker] waiting for video metadata...");
+        await Promise.race([
+          new Promise<void>((resolve) => {
+            this.loadedMetadataHandler = () => {
+              console.info("[face-tracker] onloadedmetadata fired");
+              resolve();
+            };
+            this.video.onloadedmetadata = this.loadedMetadataHandler;
+          }),
+          new Promise<void>((resolve) => {
+            this.loadedMetadataTimer = setTimeout(() => {
+              console.info("[face-tracker] loadedMetadataTimer expired (3s fallback)");
+              resolve();
+            }, 3000);
+          }),
+        ]);
+        if (this.loadedMetadataTimer) {
+          clearTimeout(this.loadedMetadataTimer);
+          this.loadedMetadataTimer = null;
+        }
+      }
+
       if (this.disposed) {
-        releaseCameraStream(this.cameraToken);
-        this.cameraToken = null;
-      }
-      throw err;
-    }
-
-    this.stream = stream;
-    this.video.srcObject = stream;
-    this.video.muted = true;
-    this.video.playsInline = true;
-    console.info("[face-tracker] video srcObject set, readyState:", this.video.readyState);
-
-    if (this.video.readyState < 1) {
-      console.info("[face-tracker] waiting for video metadata...");
-      await Promise.race([
-        new Promise<void>((resolve) => {
-          this.loadedMetadataHandler = () => {
-            console.info("[face-tracker] onloadedmetadata fired");
-            resolve();
-          };
-          this.video.onloadedmetadata = this.loadedMetadataHandler;
-        }),
-        new Promise<void>((resolve) => {
-          this.loadedMetadataTimer = setTimeout(() => {
-            console.info("[face-tracker] loadedMetadataTimer expired (3s fallback)");
-            resolve();
-          }, 3000);
-        }),
-      ]);
-      if (this.loadedMetadataTimer) {
-        clearTimeout(this.loadedMetadataTimer);
-        this.loadedMetadataTimer = null;
-      }
-    }
-
-    if (this.disposed) {
-      console.info("[face-tracker] disposed before play");
-      this.releaseCamera();
-      return;
-    }
-
-    try {
-      console.info("[face-tracker] calling video.play()...");
-      await Promise.race([
-        this.video.play(),
-        new Promise<void>((resolve) => setTimeout(resolve, 500)),
-      ]);
-      console.info("[face-tracker] video.play() resolved/proceeded");
-    } catch (err) {
-      if (this.disposed || (err instanceof Error && err.name === "AbortError")) {
-        console.info("[face-tracker] play() aborted due to disposal/abort");
+        console.info("[face-tracker] disposed before play");
         this.releaseCamera();
         return;
       }
-      console.warn("[face-tracker] play() non-fatal warning:", err);
-    }
 
-    // 2. Await the concurrent model creation
-    console.info("[face-tracker] awaiting model creation...");
-    this.landmarker = await modelPromise;
-    console.info("[face-tracker] model creation ready, landmarker present:", !!this.landmarker);
+      try {
+        console.info("[face-tracker] calling video.play()...");
+        await Promise.race([
+          this.video.play(),
+          new Promise<void>((resolve) => setTimeout(resolve, 500)),
+        ]);
+        console.info("[face-tracker] video.play() resolved/proceeded");
+      } catch (err) {
+        if (this.disposed || (err instanceof Error && err.name === "AbortError")) {
+          console.info("[face-tracker] play() aborted due to disposal/abort");
+          this.releaseCamera();
+          return;
+        }
+        console.warn("[face-tracker] play() non-fatal warning:", err);
+      }
 
-    if (this.disposed) {
+      // 2. Await the concurrent model creation
+      console.info("[face-tracker] awaiting model creation...");
+      this.landmarker = await modelPromise;
+      console.info("[face-tracker] model creation ready, landmarker present:", !!this.landmarker);
+
+      if (this.disposed) {
+        this.closeModels();
+        this.releaseCamera();
+        return;
+      }
+
+      // 3. rAF detection loop (capped ~30fps; skips while the tab is hidden).
+      this.visibilityHandler = () => {
+        this.lastFrameAt = 0;
+      };
+      document.addEventListener("visibilitychange", this.visibilityHandler);
+      this.rafId = requestAnimationFrame((now) => this.detectLoop(now));
+      console.info("[face-tracker] start() completed successfully!");
+    } catch (err) {
       this.closeModels();
       this.releaseCamera();
-      return;
+      throw err;
     }
-
-    // 3. rAF detection loop (capped ~30fps; skips while the tab is hidden).
-    this.visibilityHandler = () => {
-      this.lastFrameAt = 0;
-    };
-    document.addEventListener("visibilitychange", this.visibilityHandler);
-    this.rafId = requestAnimationFrame((now) => this.detectLoop(now));
-    console.info("[face-tracker] start() completed successfully!");
   }
 
   /**
@@ -595,9 +623,14 @@ export class FaceTracker implements IFaceTracker {
         }
       }
       this.rafId = requestAnimationFrame((t) => this.detectLoop(t));
-    } catch {
+    } catch (err) {
       if (this.rafId !== null) cancelAnimationFrame(this.rafId);
       this.rafId = null;
+      this.releaseCamera();
+      // Surface the death — a silently frozen loop bricks blink recovery and
+      // keeps recording verify fails against the student.
+      console.error("[face-tracker] detection loop failed:", err);
+      this.emitError(err);
     }
   }
 

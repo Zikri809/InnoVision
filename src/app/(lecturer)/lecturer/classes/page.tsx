@@ -31,10 +31,12 @@ export default async function LecturerClassesPage() {
 
   if (profile.role !== "lecturer") redirect("/student/classes");
 
+  // Fetch only active classes for the main dashboard
   const { data: classes, error } = await supabase
     .from("classes")
-    .select("id, title, join_code, created_at")
+    .select("id, title, join_code, created_at, archived_at")
     .eq("lecturer_id", user.id)
+    .is("archived_at", null)
     .order("created_at", { ascending: false })
     .limit(CLASS_LIST_LIMIT);
 
@@ -49,6 +51,13 @@ export default async function LecturerClassesPage() {
     );
   }
 
+  // Fast count query for archived classes (used by the header action pill & hero stat)
+  const { count: archivedCount } = await supabase
+    .from("classes")
+    .select("id", { count: "exact", head: true })
+    .eq("lecturer_id", user.id)
+    .not("archived_at", "is", null);
+
   // Quiz counts per class (for the stat tiles + class cards). Lecturer-owned
   // quizzes are RLS-visible to the owner, so a single grouped fetch is enough.
   const classIds = (classes ?? []).map((c) => c.id);
@@ -57,7 +66,8 @@ export default async function LecturerClassesPage() {
     const { data: quizRows } = await supabase
       .from("quizzes")
       .select("class_id")
-      .in("class_id", classIds);
+      .in("class_id", classIds)
+      .limit(10_000);
     for (const q of quizRows ?? []) {
       if (q.class_id) countByClass.set(q.class_id, (countByClass.get(q.class_id) ?? 0) + 1);
     }
@@ -68,5 +78,5 @@ export default async function LecturerClassesPage() {
     quizCount: countByClass.get(c.id) ?? 0,
   }));
 
-  return <ClassesPageClient classes={cards} />;
+  return <ClassesPageClient classes={cards} archivedCount={archivedCount ?? 0} />;
 }

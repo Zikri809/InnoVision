@@ -46,6 +46,13 @@ export interface IFaceTracker {
   waitForBlink(timeoutMs: number): Promise<"passed" | "failed">;
   /** Optional subscriber for real-time face pose updates (yaw, balance, centering). */
   onPoseChange?(cb: (pose: LivePose) => void): () => void;
+  /**
+   * Optional subscriber for FATAL tracking-loop errors. When the detection
+   * loop dies mid-session the tracker can no longer produce poses or blinks —
+   * subscribers must degrade to `'unavailable'` (passthrough) instead of
+   * silently freezing. Fires at most once per tracker instance.
+   */
+  onError?(cb: (err: unknown) => void): () => void;
   /** Read current framing & lighting health. */
   getFaceHealth?(): { aligned: boolean; lightingOk: boolean; faceDetected: boolean };
   stop(): void;

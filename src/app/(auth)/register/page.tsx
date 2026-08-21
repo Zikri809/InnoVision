@@ -28,6 +28,7 @@ import { LanguageToggle } from "@/components/layout/language-toggle";
 export default function RegisterPage() {
   const router = useRouter();
   const t = useTranslations("auth");
+  const tCommon = useTranslations("common");
 
   const activeLocale = useLocale() as SupportedLocale;
   const [fullName, setFullName] = useState("");
@@ -63,26 +64,31 @@ export default function RegisterPage() {
 
     setLoading(true);
 
-    const { session, error } = await register({
-      email,
-      password,
-      fullName: fullName || undefined,
-      inviteCode: role === "lecturer" ? inviteCode : undefined,
-      locale,
-    });
+    try {
+      const { session, error } = await register({
+        email,
+        password,
+        fullName: fullName || undefined,
+        inviteCode: role === "lecturer" ? inviteCode : undefined,
+        locale,
+      });
 
-    if (error) {
-      setError(error);
+      if (error) {
+        setError(error);
+        return;
+      }
+
+      if (session) {
+        router.push("/dashboard");
+        router.refresh();
+      } else {
+        // Email confirmation required — redirect to login with a message
+        router.push("/login?message=check-email");
+      }
+    } catch {
+      setError(tCommon("errorGeneric"));
+    } finally {
       setLoading(false);
-      return;
-    }
-
-    if (session) {
-      router.push("/dashboard");
-      router.refresh();
-    } else {
-      // Email confirmation required — redirect to login with a message
-      router.push("/login?message=check-email");
     }
   }
 
