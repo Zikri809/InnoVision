@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useFaceTracker } from "@/components/face/use-face-tracker";
+import type { LivePose } from "@/lib/face/types";
 import {
   ENROLL_ANGLES,
   ENROLL_CAPTURE_MAX_ATTEMPTS,
@@ -33,10 +34,11 @@ export function FaceEnrollClient({
   const [notice, setNotice] = useState<string | null>(null);
   const [revoking, setRevoking] = useState(false);
   const [currentAngle, setCurrentAngle] = useState<number>(0);
-  const [pose, setPose] = useState<{ yaw: number; centered: boolean; faceDetected: boolean }>({
+  const [pose, setPose] = useState<LivePose>({
     yaw: 0,
     centered: false,
     faceDetected: false,
+    lighting: "good",
   });
 
   const framesRef = useRef<string[]>([]);
@@ -57,6 +59,29 @@ export function FaceEnrollClient({
     if (index === 0) return t("angleFront");
     if (index === 1) return t("angleLeft");
     return t("angleRight");
+  }
+
+  function getLightingText(lighting?: "good" | "too_dark" | "too_bright") {
+    try {
+      const key = lighting === "too_dark" ? ("lightingTooDark" as const) : lighting === "too_bright" ? ("lightingTooBright" as const) : ("lightingGood" as const);
+      const val = t(key);
+      if (typeof val === "string" && !val.includes("student.face.")) return val;
+    } catch {
+      // fallback
+    }
+    if (lighting === "too_dark") return "Too dark — increase lighting";
+    if (lighting === "too_bright") return "Too bright — avoid backlight glare";
+    return "Lighting: Good ✓";
+  }
+
+  function getLightingTipText() {
+    try {
+      const val = t("lightingTip" as const);
+      if (typeof val === "string" && !val.includes("student.face.")) return val;
+    } catch {
+      // fallback
+    }
+    return "Ensure your face is evenly lit with no heavy shadows for highest accuracy.";
   }
 
   async function handleConsent() {
@@ -103,8 +128,17 @@ export function FaceEnrollClient({
     if (!tracker) return null;
     const blink = await tracker.waitForBlink(LIVENESS_TIMEOUT_MS);
     if (blink !== "passed") return null;
-    await new Promise((resolve) => setTimeout(resolve, 350));
+    // Allow eyes to fully reopen and pose to stabilize after the blink
+    await new Promise((resolve) => setTimeout(resolve, 450));
     if (disposedRef.current) return null;
+    if (typeof tracker.captureBestFrame === "function") {
+      return tracker.captureBestFrame({
+        maxWaitMs: 2000,
+        requireCentered: true,
+        requireOpenEyes: true,
+        requireIdealLighting: true,
+      });
+    }
     return tracker.captureFrame();
   }
 
@@ -242,7 +276,6 @@ export function FaceEnrollClient({
 
             <div className="max-w-[92%] flex flex-wrap items-center justify-center gap-1.5 rounded-2xl sm:rounded-full bg-black/75 px-3 py-1.5 text-[11px] sm:text-xs font-bold text-white text-center backdrop-blur-md">
               {!pose.faceDetected ? (
-
                 <span className="text-amber-300">{t("posNotCentered")}</span>
               ) : (
                 <>
@@ -250,8 +283,11 @@ export function FaceEnrollClient({
                     {pose.centered ? t("posCentered") : t("posNotCentered")}
                   </span>
                   <span className="text-white/40">|</span>
-                  <span>{t("angleStatus", { deg: Math.abs(pose.yaw) })}</span>
+                  <span className={pose.lighting === "good" ? "text-emerald-400" : "text-amber-300"}>
+                    {getLightingText(pose.lighting)}
+                  </span>
                   <span className="text-white/40">|</span>
+                  <span>{t("angleStatus", { deg: Math.abs(pose.yaw) })}</span>
                   <span className="text-emerald-300">
                     {currentAngle === 0 && (Math.abs(pose.yaw) <= 15 ? t("goodBlink") : t("lookStraight"))}
                     {currentAngle === 1 && (pose.yaw >= 10 ? t("goodBlink") : t("turnLeft"))}
@@ -269,6 +305,12 @@ export function FaceEnrollClient({
           </div>
         )}
       </div>
+
+      {available && (
+        <p className="text-center text-xs font-bold text-muted-foreground">
+          💡 {getLightingTipText()}
+        </p>
+      )}
 
       {!available && !booting ? (
         <div className="rounded-[28px] border-[3px] border-border bg-card p-8 shadow-[var(--shadow-clay)]">

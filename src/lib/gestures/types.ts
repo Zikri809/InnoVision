@@ -19,6 +19,8 @@ export type HandFrame = {
   fingerCount: number;
   /** MediaPipe handedness of the detected hand (absent when no hand). */
   handedness?: Handedness;
+  /** Evaluated lighting status for hand recognition. */
+  lighting?: "good" | "too_dark" | "too_bright";
 };
 
 /** Hold progress for a given 1-based finger (0..1). */
@@ -47,6 +49,7 @@ export type HandSegment = {
 export interface IHandTracker {
   start(onFrame: (frame: HandFrame) => void): Promise<void> | void;
   stop(): void;
+  bindDOMElements?(elements: { video: HTMLVideoElement; canvas: HTMLCanvasElement }): void;
 }
 
 /** E2E control surface for scripting fake frames. */

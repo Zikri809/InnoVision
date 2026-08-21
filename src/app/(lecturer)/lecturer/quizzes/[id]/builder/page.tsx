@@ -122,10 +122,9 @@ export default async function QuizBuilderPage({
       questions={questions ?? []}
       userId={user.id}
       ocrConfig={{
-        defaultEngine: (process.env.OCR_DEFAULT_ENGINE as "tesseract" | "glm" | "vision") ?? "tesseract",
+        defaultEngine: (process.env.OCR_DEFAULT_ENGINE as "tesseract" | "glm") ?? "tesseract",
         glmBaseUrl: process.env.GLM_BASE_URL ?? "http://localhost:11434",
         glmModel: process.env.OCR_GLM_MODEL ?? "glm-ocr",
-        visionModel: process.env.OCR_VISION_MODEL ?? "gpt-4o-mini",
       }}
     />
   );

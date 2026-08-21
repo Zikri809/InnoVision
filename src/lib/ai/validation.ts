@@ -4,20 +4,10 @@ import {
   AI_QUESTIONS_MAX,
   AI_QUESTIONS_MIN,
 } from "@/lib/ai/quiz-schema";
+import { MAX_AGGREGATE_CHARS } from "@/lib/extract/types";
 
 /**
- * Zod schemas for the Phase 4 AI routes (PLAN_PHASE4 §Step 4).
- *
- * Boundary rules (from the P4 plan review):
- *  - `extractedText` is capped server-side at 15k (S2) — the client-side cap
- *    alone is not a security boundary.
- *  - `sourcePath` matches a strict shape (no `.`/`..` segments, no `//`, no `%`,
- *    leading/trailing `/`) AND the route separately checks the first segment
- *    == caller uid. The regex drops `.` from the segment class (so `..`
- *    segments cannot slip through) and we additionally reject any literal
- *    `..` substring and any path whose POSIX-normalized form differs from the
- *    original (catches remaining bypass tricks).
- *  - `instruction` on regenerate is capped to bound prompt size.
+ * Zod schemas for AI quiz generation routes.
  */
 
 // Storage path shape: `<uuid>/<uuid>/<file-with-dots>[/<file-with-dots>]*`
@@ -32,26 +22,46 @@ const SOURCE_PATH_REGEX = new RegExp(
   `^[0-9a-fA-F-]{36}/[0-9a-fA-F-]{36}/${SEGMENT}(?:/${SEGMENT})*$`,
 );
 
+export const QuizDifficultySchema = z
+  .enum(["easy", "medium", "hard", "mixed"])
+  .default("mixed");
+export type QuizDifficulty = z.infer<typeof QuizDifficultySchema>;
+
+export const QuestionFormatDistributionSchema = z
+  .enum(["mixed", "mcq_only", "true_false_only"])
+  .default("mixed");
+export type QuestionFormatDistribution = z.infer<
+  typeof QuestionFormatDistributionSchema
+>;
+
+export const QuizGenerationModeSchema = z
+  .enum(["replace", "append"])
+  .default("replace");
+export type QuizGenerationMode = z.infer<typeof QuizGenerationModeSchema>;
+
+export const sourcePathSchema = z
+  .string()
+  .regex(SOURCE_PATH_REGEX, "sourcePath is not a valid storage path.")
+  .max(512, "sourcePath is too long.")
+  .refine((p) => !p.includes(".."), "sourcePath contains a parent-directory reference.")
+  .refine((p) => !p.includes("//"), "sourcePath contains an empty segment.")
+  .refine(
+    (p) => normalizePath(p) === p,
+    "sourcePath is not a canonical storage path.",
+  );
+
 export const GenerateQuizSchema = z.object({
   quizId: z.string().uuid("quizId must be a valid UUID."),
+  mode: QuizGenerationModeSchema.optional().default("replace"),
   extractedText: z
     .string()
+    .max(MAX_AGGREGATE_CHARS, `Extracted text exceeds the maximum cap of ${MAX_AGGREGATE_CHARS} characters.`)
     .optional(),
-  sourcePath: z
-    .string()
-    .regex(SOURCE_PATH_REGEX, "sourcePath is not a valid storage path.")
-    .max(512, "sourcePath is too long.")
-    .refine((p) => !p.includes(".."), "sourcePath contains a parent-directory reference.")
-    .refine((p) => !p.includes("//"), "sourcePath contains an empty segment.")
-    .refine(
-      // POSIX-normalize the path and reject if it changes — catches any
-      // remaining traversal trick (e.g. `./`, `../foo`, mixed slashes). The
-      // normalizer preserves a leading slash if the input had one; since the
-      // regex already rejects leading/trailing slashes, this comparison is
-      // exact for the valid input space.
-      (p) => normalizePath(p) === p,
-      "sourcePath is not a canonical storage path.",
-    )
+  sourcePath: sourcePathSchema.optional(),
+  sourcePaths: z
+    .array(sourcePathSchema)
+    .min(1, "Provide at least one source path.")
+    .max(5, "Maximum 5 source files allowed per generation.")
     .optional(),
   questionCount: z
     .number()
@@ -59,6 +69,14 @@ export const GenerateQuizSchema = z.object({
     .min(AI_QUESTIONS_MIN)
     .max(AI_QUESTIONS_MAX)
     .optional(),
+  difficulty: QuizDifficultySchema.optional().default("mixed"),
+  formatDistribution: QuestionFormatDistributionSchema.optional().default("mixed"),
+  steeringPrompt: z
+    .string()
+    .trim()
+    .max(AI_INSTRUCTION_MAX, `Steering prompt must be at most ${AI_INSTRUCTION_MAX} characters.`)
+    .optional(),
+  language: z.enum(["en", "ms", "auto"]).optional().default("auto"),
 });
 
 export type GenerateQuizInput = z.infer<typeof GenerateQuizSchema>;

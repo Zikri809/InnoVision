@@ -276,7 +276,7 @@ async function main() {
     createdBy: lecturer.id,
     title: "Draft: Graph Theory (WIP)",
     mode: "practice",
-    timeLimitSec: 300,
+    timeLimitSec: null,
     status: "draft",
     questions: [
       { type: "mcq", prompt: "A graph with no cycles is called a…", options: ["Tree", "Complete graph", "Bipartite graph", "DAG only"], correctIndex: 0, explanation: "A connected acyclic graph is a tree." },

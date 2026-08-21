@@ -350,21 +350,36 @@ export class FakeSupabase {
       return { data: row, error: null };
     }
 
-    if (name === "replace_quiz_questions") {
+    if (name === "save_quiz_questions" || name === "replace_quiz_questions") {
       if (this.rpcError) return { data: null, error: this.rpcError };
       const quizId = String(args?.p_quiz_id);
-      const questions = (this.tables["questions"] ?? []).filter((q) => q.quiz_id !== quizId);
-      // The route passes p_questions as an ARRAY; PostgREST serializes the jsonb
-      // arg. Parse JSON strings for robustness against future regressions.
+      const mode = (args?.p_mode as string) ?? "replace";
+      const allQuestions = this.tables["questions"] ?? [];
+      const quizQuestions = allQuestions.filter((q) => q.quiz_id === quizId);
+      const otherQuestions = allQuestions.filter((q) => q.quiz_id !== quizId);
+
       const raw = args?.p_questions;
       const parsed: unknown[] =
         typeof raw === "string" ? JSON.parse(raw) : Array.isArray(raw) ? raw : [];
+
+      if (mode === "append" && quizQuestions.length + parsed.length > 30) {
+        return { data: null, error: { message: "quiz_question_limit_exceeded" } };
+      }
+
+      const startIndex =
+        mode === "replace"
+          ? 0
+          : quizQuestions.reduce(
+              (m, q) => Math.max(m, (q.order_index as number) ?? -1),
+              -1,
+            ) + 1;
+
       const rows = parsed.map((q, i) => {
         const row = q as Row;
         return {
           id: randomUuid(),
           quiz_id: quizId,
-          order_index: i,
+          order_index: startIndex + i,
           type: row.type,
           prompt: row.prompt,
           options: row.options,
@@ -373,13 +388,43 @@ export class FakeSupabase {
           created_at: "2026-01-01T00:00:00Z",
         };
       });
-      this.tables["questions"] = [...questions, ...rows];
+
+      this.tables["questions"] =
+        mode === "replace"
+          ? [...otherQuestions, ...rows]
+          : [...allQuestions, ...rows];
+
       // Update the quiz row's title/source fields.
       const quizRow = (this.tables["quizzes"] ?? []).find((q) => q.id === quizId);
       if (quizRow) {
-        if (args?.p_title) quizRow.title = String(args.p_title);
-        if (args?.p_source_file_url !== undefined) quizRow.source_file_url = args.p_source_file_url;
-        if (args?.p_source_text !== undefined) quizRow.source_text = args.p_source_text;
+        const sourceEntry =
+          args?.p_source_file_url || args?.p_source_text
+            ? {
+                file_url: args.p_source_file_url ?? null,
+                added_at: "2026-01-01T00:00:00Z",
+                question_count: parsed.length,
+                mode,
+              }
+            : null;
+
+        if (args?.p_title && (mode === "replace" || !quizRow.title)) quizRow.title = String(args.p_title);
+        if (mode === "replace") {
+          quizRow.source_file_url = args?.p_source_file_url ?? null;
+          quizRow.sources = sourceEntry ? [sourceEntry] : [];
+        } else {
+          if (args?.p_source_file_url) quizRow.source_file_url = args.p_source_file_url;
+          const existingSources = Array.isArray(quizRow.sources) ? quizRow.sources : [];
+          quizRow.sources = sourceEntry ? [...existingSources, sourceEntry] : existingSources;
+        }
+
+        if (args?.p_source_text !== undefined) {
+          quizRow.source_text =
+            mode === "replace"
+              ? args.p_source_text
+              : quizRow.source_text
+                ? `${quizRow.source_text}\n\n--- [Additional Source Material] ---\n\n${args.p_source_text}`
+                : args.p_source_text;
+        }
       }
       return { data: rows, error: null };
     }
@@ -1075,6 +1120,7 @@ export function makeOwnerContext(opts?: {
     time_limit_sec: null,
     source_file_url: null,
     source_text: null,
+    sources: [],
     created_at: "2026-01-01T00:00:00Z",
   });
   for (const q of opts?.questions ?? []) client.seedQuestion(q);

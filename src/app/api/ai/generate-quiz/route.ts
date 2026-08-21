@@ -8,8 +8,9 @@ import { GenerateQuizSchema } from "@/lib/ai/validation";
 import { createAiClient, chatCompletions, AI_MODEL } from "@/lib/ai/client";
 import { generateQuiz, type GenerateQuizResult } from "@/lib/ai/quiz-prompt";
 import { aiQuizToRows } from "@/lib/ai/quiz-schema";
+import { normalizePath } from "@/lib/ai/validation";
 import { nativeExtract } from "@/lib/extract/native";
-import { MAX_FILE_BYTES } from "@/lib/extract/types";
+import { MAX_AGGREGATE_CHARS, MAX_FILE_BYTES, MAX_TOTAL_UPLOAD_BYTES } from "@/lib/extract/types";
 import {
   firstIssueMessage,
   internalError,
@@ -133,22 +134,70 @@ async function handleGenerate(
   // generous 15m budget; see GENERATION_BUDGET_MS).
   const deadlineMs = Date.now() + GENERATION_BUDGET_MS;
 
-  const { extractedText, sourcePath, questionCount } = body;
+  const {
+    extractedText,
+    sourcePath,
+    sourcePaths,
+    questionCount,
+    mode = "replace",
+    difficulty = "mixed",
+    formatDistribution = "mixed",
+    steeringPrompt,
+    language = "auto",
+  } = body;
+
+  // Pre-flight check for append mode capacity
+  if (mode === "append") {
+    const { count: existingCount, error: countError } = await supabase
+      .from("questions")
+      .select("*", { count: "exact", head: true })
+      .eq("quiz_id", quizId);
+
+    if (countError) {
+      return internalError("Could not check existing quiz questions.");
+    }
+    const current = existingCount ?? 0;
+    if (current >= 30) {
+      return unprocessable(
+        "This quiz already has the maximum limit of 30 questions.",
+        "quiz_question_limit_exceeded",
+      );
+    }
+    const requested = questionCount ?? 10;
+    const maxAppendable = 30 - current;
+    if (requested > maxAppendable) {
+      return invalidBody(
+        `Cannot append ${requested} questions. Only ${maxAppendable} more questions can be added to reach the 30-question limit.`,
+      );
+    }
+  }
 
   let text = extractedText;
-  let sourcePathFinal = sourcePath;
+  const pathsToProcess: string[] = [];
 
-  // No client text → server-side native parse of the stored file.
+  if (sourcePaths && sourcePaths.length > 0) {
+    pathsToProcess.push(...sourcePaths);
+  } else if (sourcePath) {
+    pathsToProcess.push(sourcePath);
+  }
+
+  // Strict tenant + quiz isolation verification on all paths
+  const expectedPrefix = `${userId.toLowerCase()}/${quizId.toLowerCase()}/`;
+  for (const p of pathsToProcess) {
+    const lower = p.toLowerCase();
+    if (!lower.startsWith(expectedPrefix)) {
+      return invalidBody("All source files must reside in your quiz storage folder.");
+    }
+    if (p.includes("..") || p.includes("//") || normalizePath(p) !== p) {
+      return invalidBody("sourcePath contains invalid path traversal segments.");
+    }
+  }
+
+  let sourcePathFinal: string | null = pathsToProcess[0] ?? null;
+
+  // No client text → server-side native parse of the stored file(s).
   if (!text) {
-    if (sourcePathFinal) {
-      // Defense-in-depth: Zod already rejects `..` and `//` in the regex +
-      // refinements, but re-verify the path STARTS with `${userId}/` so a
-      // future Zod-schema drift can't silently bypass the per-tenant boundary.
-      const prefix = `${userId.toLowerCase()}/`;
-      if (!sourcePathFinal.toLowerCase().startsWith(prefix)) {
-        return invalidBody("The source file must be in your own storage folder.");
-      }
-    } else {
+    if (pathsToProcess.length === 0) {
       // Fall back to the quiz's stored source_file_url.
       const { data: quizRow } = await supabase
         .from("quizzes")
@@ -157,31 +206,60 @@ async function handleGenerate(
         .maybeSingle();
       if (quizRow?.source_file_url) {
         sourcePathFinal = quizRow.source_file_url;
-        // Defense-in-depth: the stored source_file_url must also live in the
-        // owner's own folder. Re-apply the same per-tenant prefix check the
-        // body path gets, so a stored path with `..` can't be downloaded.
-        const prefix = `${userId.toLowerCase()}/`;
-        if (!sourcePathFinal.toLowerCase().startsWith(prefix)) {
-          return invalidBody("The source file must be in your own storage folder.");
+        const lower = sourcePathFinal.toLowerCase();
+        if (!lower.startsWith(expectedPrefix)) {
+          return invalidBody("The source file must be in your quiz storage folder.");
         }
+        if (
+          sourcePathFinal.includes("..") ||
+          sourcePathFinal.includes("//") ||
+          normalizePath(sourcePathFinal) !== sourcePathFinal
+        ) {
+          return invalidBody("The source file path contains invalid path traversal segments.");
+        }
+        pathsToProcess.push(sourcePathFinal);
       } else {
         return invalidBody("No extracted text or source file provided.");
       }
     }
 
-    const parse = await downloadAndParseNative(supabase, sourcePathFinal);
-    if (parse.error) return parse.error;
-    if (parse.lowConfidence) {
-      return unprocessable(
-        "This file has too little extractable text. Re-upload it and run OCR in the browser.",
-        "use_browser_ocr",
-      );
+    const extractedTexts: string[] = [];
+    let totalDownloadedBytes = 0;
+    for (let i = 0; i < pathsToProcess.length; i++) {
+      const p = pathsToProcess[i];
+      const parse = await downloadAndParseNative(supabase, p);
+      if (parse.error) return parse.error;
+      totalDownloadedBytes += parse.byteLength ?? 0;
+      if (totalDownloadedBytes > MAX_TOTAL_UPLOAD_BYTES) {
+        return payloadTooLarge(
+          `Total size of all source files exceeds the ${MAX_TOTAL_UPLOAD_BYTES / 1_000_000} MB limit.`,
+        );
+      }
+      if (parse.lowConfidence && pathsToProcess.length === 1) {
+        return unprocessable(
+          "This file has too little extractable text. Re-upload it and run OCR in the browser.",
+          "use_browser_ocr",
+        );
+      }
+      if (parse.text?.trim()) {
+        const filename = p.split("/").pop() ?? `Document ${i + 1}`;
+        extractedTexts.push(
+          pathsToProcess.length > 1
+            ? `=== SOURCE [${i + 1}/${pathsToProcess.length}]: ${filename} ===\n${parse.text.trim()}`
+            : parse.text.trim(),
+        );
+      }
     }
-    text = parse.text;
+    text = extractedTexts.join("\n\n");
   }
 
   if (!text?.trim()) {
     return unprocessable("Extracted text is empty. Try a different file.", "empty_text");
+  }
+
+  // Guard: enforce MAX_AGGREGATE_CHARS ceiling on server-extracted multi-file text
+  if (text.length > MAX_AGGREGATE_CHARS) {
+    text = text.slice(0, MAX_AGGREGATE_CHARS);
   }
 
   // Run the AI generation (one retry inside generateQuiz). Share a single
@@ -193,6 +271,10 @@ async function handleGenerate(
       chatCompletions({ client: ai, model: AI_MODEL, messages, timeoutMs }),
     text,
     questionCount: questionCount ?? 10,
+    language,
+    difficulty,
+    formatDistribution,
+    steeringPrompt,
     deadlineMs,
   });
 
@@ -211,41 +293,40 @@ async function handleGenerate(
 
   const rows = aiQuizToRows(result.quiz);
 
-  // Build the RPC args with a typed boundary. The generated `Args` type marks
-  // the source fields non-null and `p_questions: Json`, but the SQL accepts
-  // NULL sources and an array serializes to jsonb — so we cast only the
-  // nullability/array shape via `unknown`, keeping all field names checked by
-  // the `ReplaceQuizQuestionsArgs` type.
-  type ReplaceQuizQuestionsArgs = {
+  // Build the RPC args with a typed boundary.
+  type SaveQuizQuestionsArgs = {
     p_quiz_id: string;
     p_title: string;
     p_source_file_url: string | null;
     p_source_text: string | null;
     p_questions: unknown;
+    p_mode: string;
   };
-  const rpcArgs: ReplaceQuizQuestionsArgs = {
+  const rpcArgs: SaveQuizQuestionsArgs = {
     p_quiz_id: quizId,
     p_title: result.quiz.title,
     p_source_file_url: sourcePathFinal ?? null,
     p_source_text: text,
-    // Pass the array directly (not JSON.stringify): PostgREST serializes a
-    // jsonb arg as a real JSON array, so jsonb_typeof(p_questions) = 'array'.
     p_questions: rows,
+    p_mode: mode,
   };
 
   const { data: questions, error: rpcError } = await supabase.rpc(
-    "replace_quiz_questions",
+    "save_quiz_questions",
     rpcArgs as unknown as never,
   );
 
   if (rpcError) {
     const msg = rpcError.message ?? "";
-    console.error("replace_quiz_questions error:", rpcError);
+    console.error("save_quiz_questions error:", rpcError);
     if (msg.includes("not_owner") || msg.includes("quiz_not_found")) return notFound();
     if (msg.includes("questions_locked_quiz_not_draft")) return notDraft();
-    // Distinguish "model emitted malformed JSON" (could fix with retry / file
-    // choice) from "content exceeds DB limits" (route should report which
-    // field so the lecturer can act on it).
+    if (msg.includes("quiz_question_limit_exceeded")) {
+      return unprocessable(
+        "Appending these questions exceeds the maximum limit of 30 questions per quiz.",
+        "quiz_question_limit_exceeded",
+      );
+    }
     if (msg.includes("invalid_questions_json")) {
       return unprocessable(
         "The AI returned malformed JSON. Try a different file or model.",
@@ -275,7 +356,7 @@ async function handleGenerate(
 
   const { data: quiz, error: quizError } = await supabase
     .from("quizzes")
-    .select("id, class_id, title, mode, status, time_limit_sec, source_text, source_file_url, created_at")
+    .select("id, class_id, title, mode, status, time_limit_sec, source_text, source_file_url, sources, created_at")
     .eq("id", quizId)
     .single();
 
@@ -291,7 +372,7 @@ async function handleGenerate(
 async function downloadAndParseNative(
   supabase: Awaited<ReturnType<typeof createClient>>,
   path: string,
-): Promise<{ text?: string; lowConfidence?: boolean; error?: NextResponse }> {
+): Promise<{ text?: string; lowConfidence?: boolean; byteLength?: number; error?: NextResponse }> {
   // Parse with a wall-clock timeout so a pathological file can't stall the
   // route indefinitely. We race the ENTIRE download+arrayBuffer+parse chain
   // against the PARSE_TIMEOUT_MS deadline: the storage download, the size
@@ -323,7 +404,7 @@ async function downloadAndParseNative(
 async function downloadParse(
   supabase: Awaited<ReturnType<typeof createClient>>,
   path: string,
-): Promise<{ text?: string; lowConfidence?: boolean; error?: NextResponse }> {
+): Promise<{ text?: string; lowConfidence?: boolean; byteLength?: number; error?: NextResponse }> {
   let blob: Blob;
   try {
     const { data, error } = await supabase.storage.from("quiz-sources").download(path);
@@ -343,7 +424,7 @@ async function downloadParse(
 
   try {
     const result = await nativeExtract(bytes, path.split("/").pop() ?? "file", { node: true });
-    return { text: result.text, lowConfidence: result.lowConfidence };
+    return { text: result.text, lowConfidence: result.lowConfidence, byteLength: bytes.byteLength };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "";
     if (msg === "unsupported_file_type") {

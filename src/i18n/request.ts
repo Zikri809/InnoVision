@@ -16,5 +16,13 @@ export default getRequestConfig(async () => {
   return {
     locale,
     messages: (await import(`../messages/${locale}.json`)).default,
+    onError(error) {
+      if (process.env.NODE_ENV !== "production") {
+        console.warn("[i18n]", error.message);
+      }
+    },
+    getMessageFallback({ namespace, key }) {
+      return namespace ? `${namespace}.${key}` : key;
+    },
   };
 });

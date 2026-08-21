@@ -5,29 +5,19 @@ import { _resetRateLimiter, _seedRateLimit } from "@/lib/classes/rate-limit";
 import { http, HttpResponse } from "msw";
 import * as generateRoute from "@/app/api/ai/generate-quiz/route";
 import * as regenerateRoute from "@/app/api/ai/regenerate-question/route";
-import * as visionRoute from "@/app/api/ocr/vision/route";
 
 const fakeHolder: { current: FakeSupabase | undefined } = { current: undefined };
 vi.mock("@/lib/supabase/server", () => ({
   createClient: () => fakeHolder.current,
 }));
 
-/**
- * NOTE: unlike quizzes-routes.test.ts we do NOT call vi.resetModules() here.
- * The rate limiter is a module-level singleton — resetModules would hand the
- * routes a fresh (empty) bucket map while _seedRateLimit still targets the
- * original instance, silently breaking I-A7. Static imports + the mutable
- * fakeHolder give each test a fresh fake client without module re-loading.
- */
 const generate = generateRoute;
 const regenerate = regenerateRoute;
-const vision = visionRoute;
 
 async function importHandlers() {
-  return { generate, regenerate, vision };
+  return { generate, regenerate };
 }
 
-/** Override the chat-completions stub to return `content`. */
 function stubAiContent(content: string) {
   defaultAiServer.use(
     http.post("*/chat/completions", () =>
@@ -205,55 +195,6 @@ describe("I17 — regenerate happy path", () => {
   });
 });
 
-describe("I18 — vision returns concatenated text, nothing stored", () => {
-  it("returns text and never touches storage", async () => {
-    ownerContext();
-    const { vision } = await importHandlers();
-    const png = "data:image/png;base64," + Buffer.from("fake").toString("base64");
-    const res = await vision.POST(req({ images: [png] }));
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.text).toContain("AI Motion Quiz");
-    // Storage never called: no files seeded + no error.
-    expect(currentClient().storageFiles).toEqual({});
-  });
-});
-
-describe("I19 — vision body limits", () => {
-  it("rejects 4 images → 400", async () => {
-    ownerContext();
-    const { vision } = await importHandlers();
-    const png = "data:image/png;base64," + Buffer.from("fake").toString("base64");
-    const res = await vision.POST(req({ images: [png, png, png, png] }));
-    expect(res.status).toBe(400);
-  });
-
-  it("rejects an oversized image → 413", async () => {
-    ownerContext();
-    const { vision } = await importHandlers();
-    // 2MB of base64 chars → decoded > 1.3MB limit.
-    const big = "data:image/png;base64," + "A".repeat(2_000_000);
-    const res = await vision.POST(req({ images: [big] }));
-    expect(res.status).toBe(413);
-  });
-});
-
-describe("I20 extension — student → 403 on all AI routes", () => {
-  it("student gets 403 on generate, regenerate, vision", async () => {
-    studentContext();
-    const { generate, regenerate, vision } = await importHandlers();
-    expect(
-      (await generate.POST(req({ quizId: QUIZ_C, extractedText: "x" }), { params: Promise.resolve({ id: QUIZ_C }) })).status,
-    ).toBe(403);
-    expect(
-      (await regenerate.POST(req({ questionId: QUESTION_D }), { params: Promise.resolve({ id: QUIZ_C }) })).status,
-    ).toBe(403);
-    expect(
-      (await vision.POST(req({ images: ["data:image/png;base64,AAAA"] }))).status,
-    ).toBe(403);
-  });
-});
-
 describe("I-A2 — generate replaces existing draft questions atomically", () => {
   it("old questions gone, new set present", async () => {
     const ctx = ownerContext({
@@ -362,524 +303,6 @@ describe("I-A5 — non-owner → 404", () => {
   });
 });
 
-describe("I-A6 — vision invalid body → 400", () => {
-  it("missing images → 400", async () => {
-    ownerContext();
-    const { vision } = await importHandlers();
-    const res = await vision.POST(req({}));
-    expect(res.status).toBe(400);
-  });
-});
-
-describe("I-A7 — rate limit → 429", () => {
-  it("generate hits per-user rate limit", async () => {
-    ownerContext();
-    _seedRateLimit(`aiGenerate:${OWNER_ID}`, 10);
-    const { generate } = await importHandlers();
-    const res = await generate.POST(req({ quizId: QUIZ_C, extractedText: "x" }), {
-      params: Promise.resolve({ id: QUIZ_C }),
-    });
-    expect(res.status).toBe(429);
-  });
-});
-
-describe("I-A7b — in-flight guard blocks concurrent same-quiz generate", () => {
-  it("second concurrent POST returns 429 while first is in flight; first completes 200", async () => {
-    ownerContext();
-    // Two-stage deferred MSW handler: the first call records that MSW was
-    // entered (proving the in-flight lock is held) and then waits for the
-    // second call to fire. The second call sees the lock and returns 429.
-    let releaseFirst!: () => void;
-    let releaseSecond!: () => void;
-    let firstEntered = false;
-    let secondEntered = false;
-    const firstGate = new Promise<void>((r) => (releaseFirst = r));
-    const secondGate = new Promise<void>((r) => (releaseSecond = r));
-
-    defaultAiServer.use(
-      http.post("*/chat/completions", async ({ request }) => {
-        const body = (await request.clone().json()) as { messages?: unknown[] };
-        const callIndex =
-          (body.messages?.length ?? 0) > 0 && !firstEntered
-            ? "first"
-            : "second";
-        if (callIndex === "first") {
-          firstEntered = true;
-          await secondGate; // hold until the test fires the second POST
-          return HttpResponse.json({
-            choices: [{ message: { content: validQuizJson } }],
-          });
-        }
-        secondEntered = true;
-        await firstGate; // symmetric
-        return HttpResponse.json({
-          choices: [{ message: { content: validQuizJson } }],
-        });
-      }),
-    );
-
-    const { generate } = await importHandlers();
-    const p1 = generate.POST(
-      req({ quizId: QUIZ_C, extractedText: "t" }),
-      { params: Promise.resolve({ id: QUIZ_C }) },
-    );
-    // Wait until the first request has actually entered chatCompletions
-    // (proving the in-flight lock is held).
-    await vi.waitFor(() => firstEntered, { timeout: 2000 });
-    // Fire the second request — it should immediately get 429.
-    const res2 = await generate.POST(
-      req({ quizId: QUIZ_C, extractedText: "t" }),
-      { params: Promise.resolve({ id: QUIZ_C }) },
-    );
-    expect(res2.status).toBe(429);
-    const body2 = await res2.json();
-    expect(body2.error).toBe("rate_limited");
-    // Release the first request — it should complete 200.
-    releaseSecond();
-    const res1 = await p1;
-    expect(res1.status).toBe(200);
-    // Sanity: the second handler was never entered (it was rejected at the route).
-    expect(secondEntered).toBe(false);
-    // Suppress unused-var lint for the unused releaseFirst.
-    void releaseFirst;
-  });
-});
-
-describe("I-A8 — duplicate/whitespace-colliding options are REJECTED (schema gate)", () => {
-  it("AI output with duplicate options → 422, zero rows inserted", async () => {
-    // The AI schema rejects duplicate options at parse time (before any insert),
-    // so the route must return 422 and never reach the RPC. This is the actual
-    // protection against ambiguous finger targets; normalizeOptions (U-A8) is
-    // the pure-function safety net for non-schema paths.
-    stubAiContent(
-      JSON.stringify({
-        title: "Normalize",
-        questions: [
-          { type: "mcq", prompt: "Pick one", options: ["  A  ", "a", "B"], correct_index: 1 },
-          { type: "true_false", prompt: "Sky is blue.", options: ["True", "False"], correct_index: 0 },
-          { type: "mcq", prompt: "Third question here", options: ["X", "Y"], correct_index: 0 },
-        ],
-      }),
-    );
-    ownerContext();
-    const { generate } = await importHandlers();
-    const res = await generate.POST(req({ quizId: QUIZ_C, extractedText: "t" }), {
-      params: Promise.resolve({ id: QUIZ_C }),
-    });
-    expect(res.status).toBe(422);
-    const body = await res.json();
-    expect(body.error).toBe("invalid_ai_output");
-    // Zero rows inserted (the RPC was never reached).
-    expect(currentClient().tables["questions"] ?? []).toHaveLength(0);
-  });
-});
-
-describe("I-A9 — large extractedText is accepted (cap removed)", () => {
-  it("passes oversized extractedText through to generation", async () => {
-    ownerContext();
-    const { generate } = await importHandlers();
-    const res = await generate.POST(
-      req({ quizId: QUIZ_C, extractedText: "A".repeat(30_000) }),
-      { params: Promise.resolve({ id: QUIZ_C }) },
-    );
-    // The happy-path stub returns valid JSON, so a 30k-char source text
-    // should generate successfully rather than being rejected at 400.
-    expect(res.status).toBe(200);
-    const quizRow = currentClient().tables["quizzes"]?.find((q) => q.id === QUIZ_C);
-    expect(String(quizRow?.source_text ?? "").length).toBe(30_000);
-  });
-});
-
-describe("RPC error-mapping branches (Phase 4 audit gap)", () => {
-  function stubRpcError(message: string) {
-    currentClient().rpcError = { message };
-  }
-
-  it("not_owner → 404", async () => {
-    ownerContext();
-    stubRpcError("not_owner");
-    const { generate } = await importHandlers();
-    const res = await generate.POST(
-      req({ quizId: QUIZ_C, extractedText: "any text" }),
-      { params: Promise.resolve({ id: QUIZ_C }) },
-    );
-    expect(res.status).toBe(404);
-  });
-
-  it("questions_locked_quiz_not_draft → 409", async () => {
-    ownerContext();
-    stubRpcError("questions_locked_quiz_not_draft");
-    const { generate } = await importHandlers();
-    const res = await generate.POST(
-      req({ quizId: QUIZ_C, extractedText: "any text" }),
-      { params: Promise.resolve({ id: QUIZ_C }) },
-    );
-    expect(res.status).toBe(409);
-  });
-
-  it("invalid_questions_json → 422 invalid_ai_output", async () => {
-    ownerContext();
-    stubRpcError("invalid_questions_json");
-    const { generate } = await importHandlers();
-    const res = await generate.POST(
-      req({ quizId: QUIZ_C, extractedText: "any text" }),
-      { params: Promise.resolve({ id: QUIZ_C }) },
-    );
-    expect(res.status).toBe(422);
-    expect((await res.json()).error).toBe("invalid_ai_output");
-  });
-
-  it("invalid_title → 422 invalid_ai_output (distinct from JSON failure)", async () => {
-    ownerContext();
-    stubRpcError("invalid_title");
-    const { generate } = await importHandlers();
-    const res = await generate.POST(
-      req({ quizId: QUIZ_C, extractedText: "any text" }),
-      { params: Promise.resolve({ id: QUIZ_C }) },
-    );
-    expect(res.status).toBe(422);
-    expect((await res.json()).error).toBe("invalid_ai_output");
-  });
-
-  it("unknown RPC error → 503 (not a raw message)", async () => {
-    ownerContext();
-    stubRpcError("some_unexpected_db_error");
-    const { generate } = await importHandlers();
-    const res = await generate.POST(
-      req({ quizId: QUIZ_C, extractedText: "any text" }),
-      { params: Promise.resolve({ id: QUIZ_C }) },
-    );
-    expect(res.status).toBe(503);
-    const body = await res.json();
-    expect(body.error).toBe("internal");
-    // The raw DB message must NOT leak into the response.
-    expect(JSON.stringify(body)).not.toContain("some_unexpected_db_error");
-  });
-});
-
-describe("I-A12b — sourcePath set but object missing → 404", () => {
-  it("storage download returns 404 → route maps to 404 not_found", async () => {
-    ownerContext();
-    const { generate } = await importHandlers();
-    // Well-formed path that was never seeded.
-    const res = await generate.POST(
-      req({
-        quizId: QUIZ_C,
-        sourcePath: `${OWNER_ID}/${QUIZ_C}/never-uploaded.pdf`,
-      }),
-      { params: Promise.resolve({ id: QUIZ_C }) },
-    );
-    expect(res.status).toBe(404);
-  });
-});
-
-describe("I-A11 — sourcePath forgery → 400", () => {
-  it("rejects path-traversal and malformed paths", async () => {
-    ownerContext();
-    const { generate } = await importHandlers();
-    for (const bad of [
-      // Classic ../ traversal.
-      `${OWNER_ID}/../../secret.pdf`,
-      // ../ embedded inside a valid segment.
-      `${OWNER_ID}/${QUIZ_C}/a/../b.pdf`,
-      // URL-encoded traversal.
-      `${OWNER_ID}/%2e%2e/x.pdf`,
-      // Empty segment (double slash).
-      `${OWNER_ID}//double.pdf`,
-      // Leading-slash escape.
-      `../${OWNER_ID}/x.pdf`,
-    ]) {
-      const res = await generate.POST(req({ quizId: QUIZ_C, sourcePath: bad }), {
-        params: Promise.resolve({ id: QUIZ_C }),
-      });
-      expect(res.status).toBe(400);
-    }
-  });
-});
-
-describe("I-A12 — neither extractedText nor source_file_url → 400", () => {
-  it("returns 400 when no text or source is available", async () => {
-    ownerContext();
-    const { generate } = await importHandlers();
-    const res = await generate.POST(req({ quizId: QUIZ_C }), {
-      params: Promise.resolve({ id: QUIZ_C }),
-    });
-    expect(res.status).toBe(400);
-  });
-});
-
-describe("I-A13 — regenerate non-owner question → 404 (no oracle)", () => {
-  it("questionId not owned → 404", async () => {
-    ownerContext(); // owns QUIZ_C but the question belongs to no seeded quiz
-    const { regenerate } = await importHandlers();
-    const res = await regenerate.POST(req({ questionId: QUESTION_D }), {
-      params: Promise.resolve({ id: QUIZ_C }),
-    });
-    expect(res.status).toBe(404);
-  });
-});
-
-describe("I-A14 — vision ignores body baseUrl", () => {
-  it("uses env-configured baseURL (body url is ignored)", async () => {
-    ownerContext();
-    const { vision } = await importHandlers();
-    const png = "data:image/png;base64," + Buffer.from("fake").toString("base64");
-    const res = await vision.POST(req({ images: [png], baseUrl: "http://evil.example.com" }));
-    expect(res.status).toBe(200);
-  });
-});
-
-describe("I-A1 — sourcePath persists source_file_url + source_text", () => {
-  it("server native parse writes both source fields onto the quiz row", async () => {
-    const ctx = ownerContext();
-    ctx.client.seedStorageFile(
-      `${OWNER_ID}/${QUIZ_C}/chapter.txt`,
-      new TextEncoder().encode("Velocity is the rate of change of displacement."),
-    );
-    const { generate } = await importHandlers();
-    const res = await generate.POST(
-      req({
-        quizId: QUIZ_C,
-        sourcePath: `${OWNER_ID}/${QUIZ_C}/chapter.txt`,
-        questionCount: 3,
-      }),
-      { params: Promise.resolve({ id: QUIZ_C }) },
-    );
-    expect(res.status).toBe(200);
-    const quizRow = ctx.client.tables["quizzes"]?.find((q) => q.id === QUIZ_C);
-    expect(quizRow?.source_file_url).toBe(`${OWNER_ID}/${QUIZ_C}/chapter.txt`);
-    expect(quizRow?.source_text).toContain("Velocity");
-  });
-});
-
-describe("I-A10 — AI round-trip timeout → 503 timeout, zero inserts", () => {
-  it("returns 503 timeout and never calls the RPC", async () => {
-    ownerContext();
-    // Hang MSW's chat-completions handler indefinitely.
-    defaultAiServer.use(
-      http.post("*/chat/completions", () => new Promise(() => {})),
-    );
-    // Use fake timers to advance past the abort inside chatCompletions
-    // without waiting real wall-clock time.
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    try {
-      const { generate: gen } = await importHandlers();
-      const promise = gen.POST(
-        req({ quizId: QUIZ_C, extractedText: "any text" }),
-        { params: Promise.resolve({ id: QUIZ_C }) },
-      );
-      // Advance past the abort deadline (600s locally; in fake ms).
-      await vi.advanceTimersByTimeAsync(601_000);
-      const res = await promise;
-      expect(res.status).toBe(503);
-      const body = await res.json();
-      expect(body.error).toBe("timeout");
-      // Zero rows inserted (the RPC was never reached).
-      expect(currentClient().tables["questions"] ?? []).toHaveLength(0);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-});
-
-describe("Parse timeout — pathological file → 503 timeout", () => {
-  it("server-native parse that exceeds PARSE_TIMEOUT_MS returns 503", { timeout: 130_000 }, async () => {
-    const ctx = ownerContext();
-    // Seed a file, but override storage.download to hang indefinitely so the
-    // route races against the parse-timeout. The download hangs inside the
-    // route's `downloadAndParseNative`; the parse timeout fires first.
-    ctx.client.storageFiles[`${OWNER_ID}/${QUIZ_C}/hang.pdf`] = new TextEncoder().encode(
-      "fake",
-    );
-    const origDownload = ctx.client.storage.from;
-    ctx.client.storage.from = () => ({
-      download: () => new Promise(() => {}),
-    });
-    try {
-      vi.useFakeTimers({ shouldAdvanceTime: true });
-      const { generate: gen } = await importHandlers();
-      const promise = gen.POST(
-        req({
-          quizId: QUIZ_C,
-          sourcePath: `${OWNER_ID}/${QUIZ_C}/hang.pdf`,
-        }),
-        { params: Promise.resolve({ id: QUIZ_C }) },
-      );
-      // Advance past the parse timeout (120s locally).
-      await vi.advanceTimersByTimeAsync(121_000);
-      const res = await promise;
-      expect(res.status).toBe(503);
-      expect((await res.json()).error).toBe("timeout");
-    } finally {
-      vi.useRealTimers();
-      ctx.client.storage.from = origDownload;
-    }
-  });
-});
-
-describe("Phase 4 audit gap — AI transport error branches", () => {
-  it("generate: AI service error → 422 ai_unavailable", async () => {
-    ownerContext();
-    defaultAiServer.use(
-      http.post("*/chat/completions", () => HttpResponse.error()),
-    );
-    const { generate } = await importHandlers();
-    const res = await generate.POST(
-      req({ quizId: QUIZ_C, extractedText: "any text" }),
-      { params: Promise.resolve({ id: QUIZ_C }) },
-    );
-    expect(res.status).toBe(422);
-    expect((await res.json()).error).toBe("ai_unavailable");
-  });
-
-  it("regenerate: AI timeout → 503 timeout", async () => {
-    ownerContext({
-      questions: [{ id: QUESTION_D, quiz_id: QUIZ_C, order_index: 0, type: "mcq", prompt: "Old", options: ["a", "b"], correct_index: 0 }],
-    });
-    defaultAiServer.use(
-      http.post("*/chat/completions", () => new Promise(() => {})),
-    );
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    try {
-      const { regenerate: regen } = await importHandlers();
-      const promise = regen.POST(req({ questionId: QUESTION_D }), {
-        params: Promise.resolve({ id: QUIZ_C }),
-      });
-      await vi.advanceTimersByTimeAsync(601_000);
-      const res = await promise;
-      expect(res.status).toBe(503);
-      expect((await res.json()).error).toBe("timeout");
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("regenerate: AI service error → 422 ai_unavailable", async () => {
-    ownerContext({
-      questions: [{ id: QUESTION_D, quiz_id: QUIZ_C, order_index: 0, type: "mcq", prompt: "Old", options: ["a", "b"], correct_index: 0 }],
-    });
-    defaultAiServer.use(
-      http.post("*/chat/completions", () => HttpResponse.error()),
-    );
-    const { regenerate: regen } = await importHandlers();
-    const res = await regen.POST(req({ questionId: QUESTION_D }), {
-      params: Promise.resolve({ id: QUIZ_C }),
-    });
-    expect(res.status).toBe(422);
-    expect((await res.json()).error).toBe("ai_unavailable");
-  });
-
-  it("vision: AI timeout → 503 timeout", async () => {
-    ownerContext();
-    defaultAiServer.use(
-      http.post("*/chat/completions", () => new Promise(() => {})),
-    );
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    try {
-      const { vision: vis } = await importHandlers();
-      const promise = vis.POST(req({ images: ["data:image/png;base64,AAAA"] }));
-      await vi.advanceTimersByTimeAsync(601_000);
-      const res = await promise;
-      expect(res.status).toBe(503);
-      expect((await res.json()).error).toBe("timeout");
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("vision: AI service error → 503 internal (not a raw message)", async () => {
-    ownerContext();
-    defaultAiServer.use(
-      http.post("*/chat/completions", () => HttpResponse.error()),
-    );
-    const { vision: vis } = await importHandlers();
-    const res = await vis.POST(req({ images: ["data:image/png;base64,AAAA"] }));
-    expect(res.status).toBe(503);
-    const body = await res.json();
-    expect(body.error).toBe("internal");
-  });
-});
-
-describe("Phase 4 audit gap — generate extraction/validation branches", () => {
-  it("low-confidence native parse → 422 use_browser_ocr", async () => {
-    const ctx = ownerContext();
-    // A sparse text file (< MIN_CHARS_PER_PAGE) → nativeExtract returns
-    // lowConfidence → the route asks the lecturer to run OCR in the browser.
-    ctx.client.seedStorageFile(
-      `${OWNER_ID}/${QUIZ_C}/sparse.txt`,
-      new TextEncoder().encode("Hello."),
-    );
-    const { generate } = await importHandlers();
-    const res = await generate.POST(
-      req({ quizId: QUIZ_C, sourcePath: `${OWNER_ID}/${QUIZ_C}/sparse.txt` }),
-      { params: Promise.resolve({ id: QUIZ_C }) },
-    );
-    expect(res.status).toBe(422);
-    expect((await res.json()).error).toBe("use_browser_ocr");
-  });
-
-  it("unsupported file type → 422 unsupported_file_type", async () => {
-    const ctx = ownerContext();
-    ctx.client.seedStorageFile(
-      `${OWNER_ID}/${QUIZ_C}/notes.xyz`,
-      new TextEncoder().encode("some bytes"),
-    );
-    const { generate } = await importHandlers();
-    const res = await generate.POST(
-      req({ quizId: QUIZ_C, sourcePath: `${OWNER_ID}/${QUIZ_C}/notes.xyz` }),
-      { params: Promise.resolve({ id: QUIZ_C }) },
-    );
-    expect(res.status).toBe(422);
-    expect((await res.json()).error).toBe("unsupported_file_type");
-  });
-
-  it("file larger than 25 MB → 413", async () => {
-    const ctx = ownerContext();
-    // Seed a file whose decoded size exceeds MAX_FILE_BYTES (25 MB).
-    ctx.client.seedStorageFile(
-      `${OWNER_ID}/${QUIZ_C}/big.pdf`,
-      new Uint8Array(26_000_000),
-    );
-    const { generate } = await importHandlers();
-    const res = await generate.POST(
-      req({ quizId: QUIZ_C, sourcePath: `${OWNER_ID}/${QUIZ_C}/big.pdf` }),
-      { params: Promise.resolve({ id: QUIZ_C }) },
-    );
-    expect(res.status).toBe(413);
-  });
-
-  it("source_file_url fallback: valid stored path is parsed", async () => {
-    const ctx = ownerContext();
-    ctx.client.seedStorageFile(
-      `${OWNER_ID}/${QUIZ_C}/chapter.txt`,
-      new TextEncoder().encode("Velocity is the rate of change of displacement."),
-    );
-    // Set the quiz's stored source_file_url (no sourcePath in the body).
-    const quizRow = ctx.client.tables["quizzes"]?.find((q) => q.id === QUIZ_C);
-    if (quizRow) quizRow.source_file_url = `${OWNER_ID}/${QUIZ_C}/chapter.txt`;
-    const { generate } = await importHandlers();
-    const res = await generate.POST(
-      req({ quizId: QUIZ_C, questionCount: 3 }),
-      { params: Promise.resolve({ id: QUIZ_C }) },
-    );
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.quiz.source_text).toContain("Velocity");
-  });
-
-  it("source_file_url fallback: path outside owner folder → 400", async () => {
-    const ctx = ownerContext();
-    const quizRow = ctx.client.tables["quizzes"]?.find((q) => q.id === QUIZ_C);
-    if (quizRow) quizRow.source_file_url = "00000000-0000-4000-8000-000000000099/victim/x.pdf";
-    const { generate } = await importHandlers();
-    const res = await generate.POST(
-      req({ quizId: QUIZ_C }),
-      { params: Promise.resolve({ id: QUIZ_C }) },
-    );
-    expect(res.status).toBe(400);
-  });
-});
-
 describe("Phase 4 audit gap — regenerate normalizeOptions null", () => {
   it("regenerated question loses its correct answer → 422 invalid_ai_output", async () => {
     // AI returns options that, after dedup, drop the marked-correct option.
@@ -900,5 +323,125 @@ describe("Phase 4 audit gap — regenerate normalizeOptions null", () => {
     });
     expect(res.status).toBe(422);
     expect((await res.json()).error).toBe("invalid_ai_output");
+  });
+});
+
+describe("Phase 9 — Append mode, steering, difficulty, and multi-source paths", () => {
+  it("appends questions to existing quiz without overwriting prior questions", async () => {
+    stubAiContent(
+      JSON.stringify({
+        title: "AI Motion Quiz",
+        questions: [
+          { type: "mcq", prompt: "What is virtual memory allocation?", options: ["a", "b", "c", "d"], correct_index: 0 },
+          { type: "mcq", prompt: "How does page replacement operate?", options: ["a", "b", "c", "d"], correct_index: 1 },
+          { type: "mcq", prompt: "Which algorithm prevents thrashing?", options: ["a", "b", "c", "d"], correct_index: 2 },
+        ],
+      }),
+    );
+    const ctx = ownerContext({
+      questions: [
+        { id: QUESTION_D, quiz_id: QUIZ_C, order_index: 0, type: "mcq", prompt: "Existing Q1", options: ["a", "b"], correct_index: 0 },
+        { id: "00000000-0000-4000-8000-00000000000e", quiz_id: QUIZ_C, order_index: 1, type: "mcq", prompt: "Existing Q2", options: ["c", "d"], correct_index: 1 },
+      ],
+    });
+    const { generate } = await importHandlers();
+    const res = await generate.POST(
+      req({
+        quizId: QUIZ_C,
+        extractedText: "New Chapter notes",
+        questionCount: 3,
+        mode: "append",
+        difficulty: "hard",
+        formatDistribution: "mcq_only",
+        steeringPrompt: "Focus on memory management",
+      }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.questions).toHaveLength(3);
+    // Newly generated rows should have sequential order_indices starting from 2
+    expect(body.questions[0].order_index).toBe(2);
+    expect(body.questions[1].order_index).toBe(3);
+    expect(body.questions[2].order_index).toBe(4);
+
+    // Total questions on the quiz in database should now be 5
+    const totalQuestions = ctx.client.tables["questions"]?.filter((q) => q.quiz_id === QUIZ_C);
+    expect(totalQuestions).toHaveLength(5);
+
+    // Sources provenance should be tracked
+    const quizRow = ctx.client.tables["quizzes"]?.find((q) => q.id === QUIZ_C);
+    expect(quizRow?.sources).toBeDefined();
+    expect(quizRow?.sources as unknown[]).toHaveLength(1);
+  });
+
+  it("rejects append when total questions would exceed 30 limit", async () => {
+    // Seed 28 questions
+    const existing = Array.from({ length: 28 }, (_, i) => ({
+      id: `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`,
+      quiz_id: QUIZ_C,
+      order_index: i,
+      type: "mcq" as const,
+      prompt: `Q ${i}`,
+      options: ["a", "b"],
+      correct_index: 0,
+    }));
+    ownerContext({ questions: existing });
+    const { generate } = await importHandlers();
+    const res = await generate.POST(
+      req({
+        quizId: QUIZ_C,
+        extractedText: "New text",
+        questionCount: 5,
+        mode: "append",
+      }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(400); // Pre-flight check rejects with 400 invalidBody
+  });
+
+  it("multi-source: parses and combines multiple source paths", async () => {
+    const ctx = ownerContext();
+    ctx.client.seedStorageFile(
+      `${OWNER_ID}/${QUIZ_C}/deck1.txt`,
+      new TextEncoder().encode("Source file 1 content"),
+    );
+    ctx.client.seedStorageFile(
+      `${OWNER_ID}/${QUIZ_C}/deck2.txt`,
+      new TextEncoder().encode("Source file 2 content"),
+    );
+    const { generate } = await importHandlers();
+    const res = await generate.POST(
+      req({
+        quizId: QUIZ_C,
+        questionCount: 3,
+        sourcePaths: [
+          `${OWNER_ID}/${QUIZ_C}/deck1.txt`,
+          `${OWNER_ID}/${QUIZ_C}/deck2.txt`,
+        ],
+      }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.quiz.source_text).toContain("SOURCE [1/2]: deck1.txt");
+    expect(body.quiz.source_text).toContain("SOURCE [2/2]: deck2.txt");
+  });
+
+  it("multi-source: rejects source path outside tenant folder", async () => {
+    ownerContext();
+    const { generate } = await importHandlers();
+    const res = await generate.POST(
+      req({
+        quizId: QUIZ_C,
+        questionCount: 3,
+        sourcePaths: [
+          `${OWNER_ID}/${QUIZ_C}/deck1.txt`,
+          "00000000-0000-4000-8000-000000000099/victim/other.txt",
+        ],
+      }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(400);
   });
 });

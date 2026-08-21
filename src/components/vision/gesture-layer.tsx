@@ -18,6 +18,7 @@ import {
 import { getFakeHandTracker } from "@/lib/gestures/fake-seam";
 import { HandLandmarkerTracker } from "@/lib/gestures/hand-tracker";
 import type { HandFrame, HoldProgress, IHandTracker } from "@/lib/gestures/types";
+import type { FaceStatus } from "@/lib/face/types";
 import { GestureCalibration } from "@/components/vision/gesture-calibration";
 
 
@@ -26,9 +27,6 @@ type HandLost = "warn" | "paused" | null;
 
 /** Throttle for the calibration finger-count readout (~5Hz, no render storm). */
 const CALIBRATION_READOUT_INTERVAL_MS = 200;
-
-const PRIVACY_NOTICE =
-  "Your camera is used only to count fingers. Video is processed on your device and never uploaded. Only the selected answer is sent, exactly as a click would.";
 
 /**
  * GestureLayer — the Phase 6 wrapper that owns ALL gesture state/UI:
@@ -60,6 +58,7 @@ export function GestureLayer({
   nextArmed,
   blockInput,
   sessionPaused,
+  faceStatus,
   onPause,
   onSelect,
   onNext,
@@ -75,6 +74,8 @@ export function GestureLayer({
   blockInput: boolean;
   /** Server-side pause gate (P7): while true, the frame handler emits NO input. */
   sessionPaused?: boolean;
+  /** Face status for live status ring feedback (Phase 7). */
+  faceStatus?: FaceStatus;
   /** P7: called when the hand-loss monitor fires `pause` (server-side pause). */
   onPause?: () => void;
   onSelect: (index: number) => void;
@@ -92,7 +93,7 @@ export function GestureLayer({
   const [simulated, setSimulated] = useState(false);
   const [calibFingerCount, setCalibFingerCount] = useState(0);
   const [calibHandDetected, setCalibHandDetected] = useState(false);
-  const [pipCollapsed, setPipCollapsed] = useState(false);
+  const [calibLighting, setCalibLighting] = useState<"good" | "too_dark" | "too_bright">("good");
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -175,41 +176,32 @@ export function GestureLayer({
       const s = stateRef.current;
       const now = performance.now();
 
-      // Calibration readout (throttled). The tracker runs but the status gate
-      // below means no answer/next can fire before Continue.
+      // Calibration readout (throttled).
       if (s.status === "calibrating") {
         if (now - lastCalibEmitRef.current >= CALIBRATION_READOUT_INTERVAL_MS) {
           lastCalibEmitRef.current = now;
           setCalibFingerCount(frame.fingerCount);
           setCalibHandDetected(frame.handPresent);
+          if (frame.lighting) setCalibLighting(frame.lighting);
         }
         return;
       }
 
-      // 0. Status gate — single enforcement point. `sessionPaused` (P7) blocks
-      //    ALL finger input even if the hand is visible: a re-shown hand can't
-      //    answer a server-paused session before blink-recovery.
-      if (s.status !== "active" || sessionPausedRef.current) {
-        answerHoldRef.current.reset();
-        nextHoldRef.current.reset();
-        emitHold(null);
-        return;
-      }
-
       // 1. Hand-loss bookkeeping — only while answerable or scanning, so
-      //    "hands down while reading feedback" never warns/pauses.
+      //    locked/feedback/submitting don't trip spurious loss warnings.
       if (s.armed || s.scanning) {
         const res = lossRef.current.update(frame.handPresent, now);
         if (res.pause) {
           setHandLostState("paused");
-          // P7: the hand-loss pause is server-side — notify the pipeline,
-          // which POSTs /api/sessions/[id]/pause and flips status to paused.
           onPauseRef.current?.();
         } else if (res.warn && handLostRef.current !== "paused") {
           setHandLostState("warn");
         } else if (frame.handPresent && handLostRef.current === "warn") {
-          // The hand is back — clear the warn chip (a present frame resets the
-          // monitor's episode but does not clear the UI state on its own).
+          setHandLostState(null);
+        }
+      } else {
+        lossRef.current.reset();
+        if (handLostRef.current !== null) {
           setHandLostState(null);
         }
       }
@@ -422,8 +414,7 @@ export function GestureLayer({
     }
   }, [armed, nextArmed, scanning]);
 
-  // `onStatusChange` fires ONLY on transitions to active/off (never per-render;
-  // booting/calibrating are silent so PlayClient's `gestureActive` starts false).
+  // Notify parent of status changes.
   useEffect(() => {
     const prev = prevStatusRef.current;
     if (status === "active" && prev !== "active") {
@@ -434,122 +425,163 @@ export function GestureLayer({
     prevStatusRef.current = status;
   }, [status]);
 
+  // Re-bind DOM elements to tracker on status changes (safeguard for DOM transitions).
+  useEffect(() => {
+    if (videoRef.current && canvasRef.current && trackerRef.current) {
+      trackerRef.current.bindDOMElements?.({
+        video: videoRef.current,
+        canvas: canvasRef.current,
+      });
+    }
+  }, [status]);
+
+  // Status ring border colors (clay pastel palette)
+  const isFlagged = faceStatus === "flagged";
+  const isVerifying = faceStatus === "paused" || faceStatus === "recovering" || faceStatus === "gate";
+  const isVerified = faceStatus === "ready";
+
+  const statusRingClass = isFlagged
+    ? "border-rose-300 ring-[3.5px] ring-rose-400/50"
+    : isVerifying
+    ? "border-amber-300 ring-[3.5px] ring-amber-400/60 animate-pulse"
+    : isVerified
+    ? "border-emerald-300 ring-[3.5px] ring-emerald-400/40"
+    : "border-[#fed7aa] ring-[3.5px] ring-orange-200/50";
+
   // ── Persistent video/canvas container (always mounted) ─────────────
   let videoContainerClass = "hidden";
-  if (status === "calibrating") {
+  if (status === "calibrating" || status === "booting") {
     videoContainerClass =
-      "relative mx-auto mt-8 aspect-video w-full max-w-2xl overflow-hidden rounded-[22px] border-[3px] border-border bg-muted shadow-[var(--shadow-clay)]";
+      "relative mx-auto aspect-video w-full max-w-2xl overflow-hidden rounded-[2rem] border-[3.5px] border-border bg-muted shadow-[var(--shadow-clay)]";
   } else if (status === "active") {
-    videoContainerClass = pipCollapsed
-      ? "hidden"
-      : "pointer-events-none fixed top-4 right-4 z-40 size-24 sm:size-32 md:size-40 md:top-auto md:bottom-4 md:right-4 overflow-hidden rounded-2xl border-[3px] border-border bg-black shadow-[var(--shadow-clay-sm)]";
+    videoContainerClass = `relative w-full h-full flex-1 min-h-[350px] lg:min-h-0 overflow-hidden rounded-[2rem] border-[3.5px] ${statusRingClass} bg-[#fff7ed] p-2.5 shadow-[var(--shadow-clay)] transition-all duration-300 pointer-events-none`;
   }
 
   return (
-    <div className="relative">
-      {/* Persistent video/canvas pair — never conditionally mounted, so the
-          calibration→PIP transition cannot detach `srcObject`/orphan the tracker. */}
-      <div className={videoContainerClass} data-testid="gesture-video-container">
-        <video
-          ref={videoRef}
-          className="absolute inset-0 h-full w-full object-cover"
-          autoPlay
-          playsInline
-          muted
-          aria-hidden={status === "active" ? true : undefined}
-        />
-        <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" aria-hidden />
-        {simulated && status === "calibrating" && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/40 text-sm text-white">
-            Simulated hand tracking (test mode)
+    <div className="relative w-full min-h-full">
+      {/* ── Calibration & Booting Mode: Centered single-column calibration guide ── */}
+      {(status === "calibrating" || status === "booting") && (
+        <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
+          <div className={videoContainerClass} data-testid="gesture-video-container">
+            <div className="relative h-full w-full overflow-hidden rounded-[1.5rem] bg-black">
+              <video
+                ref={videoRef}
+                className="absolute inset-0 h-full w-full object-cover -scale-x-100"
+                autoPlay
+                playsInline
+                muted
+              />
+              <canvas ref={canvasRef} className="absolute inset-0 h-full w-full object-cover" aria-hidden />
+              {simulated && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/40 text-sm text-white">
+                  Simulated hand tracking (test mode)
+                </div>
+              )}
+            </div>
           </div>
-        )}
-        {status === "active" && !pipCollapsed && (
-          <button
-            type="button"
-            onClick={() => setPipCollapsed(true)}
-            aria-label="Hide camera preview"
-            className="pointer-events-auto absolute right-1.5 top-1.5 grid size-7 place-items-center rounded-lg bg-black/70 text-sm font-bold text-white hover:bg-black/90 cursor-pointer"
-          >
-            ×
-          </button>
-        )}
-      </div>
-      {status === "active" && pipCollapsed && (
-        <button
-          type="button"
-          onClick={() => setPipCollapsed(false)}
-          aria-label="Show camera preview"
-          className="fixed top-4 right-4 z-40 md:top-auto md:bottom-4 md:right-4 rounded-full border-[3px] border-border bg-card px-3 py-1.5 text-xs font-bold text-foreground shadow-[var(--shadow-clay-sm)] hover:bg-muted cursor-pointer"
-        >
-          {t("cameraPreview")}
-        </button>
+
+          <GestureCalibration
+            fingerCount={calibFingerCount}
+            handDetected={calibHandDetected}
+            lighting={calibLighting}
+            notice={t("privacyNotice")}
+            onContinue={() => {
+              setHandLostState(null);
+              lossRef.current.reset();
+              emitHold(null);
+              setStatus("active");
+            }}
+            onSkip={() => {
+              trackerRef.current?.stop();
+              trackerRef.current = null;
+              setHandLostState(null);
+              emitHold(null);
+              setStatus("off");
+            }}
+            continueDisabled={!trackerReady}
+          />
+        </div>
       )}
 
-      {status === "calibrating" ? (
-        <GestureCalibration
-          fingerCount={calibFingerCount}
-          handDetected={calibHandDetected}
-          notice={t("privacyNotice")}
-          onContinue={() => {
-            setHandLostState(null);
-            lossRef.current.reset();
-            emitHold(null);
-            setStatus("active");
-          }}
-          onSkip={() => {
-            trackerRef.current?.stop();
-            trackerRef.current = null;
-            setHandLostState(null);
-            emitHold(null);
-            setStatus("off");
-          }}
-          continueDisabled={!trackerReady}
-        />
-      ) : (
-        <div>{children}</div>
-      )}
-
+      {/* ── Active Quiz Mode: 40/60 Split Layout (Camera Left Full-Height, Quiz Right) ── */}
       {status === "active" && (
-        <>
-          {handLost === "warn" && (
-            <div
-              className="fixed bottom-4 left-1/2 z-50 max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-full border-[3px] border-amber-300 bg-amber-100 px-4 py-1.5 text-center text-xs font-extrabold text-amber-800 shadow-[var(--shadow-clay-sm)]"
-              role="status"
-            >
-              {t("keepHandVisible")}
-            </div>
-          )}
+        <div className="grid w-full grid-cols-1 items-stretch gap-8 lg:grid-cols-[2fr_3fr] lg:gap-12 min-h-[calc(100vh-6rem)]">
+          {/* LEFT COLUMN — CAMERA (~40% full width and full height) */}
+          <div className="flex w-full h-full flex-col items-center lg:sticky lg:top-6 lg:h-[calc(100vh-6rem)]">
+            <div className={videoContainerClass} data-testid="gesture-video-container">
+              <div className="relative h-full w-full overflow-hidden rounded-[1.5rem] bg-black">
+                <video
+                  ref={videoRef}
+                  className="absolute inset-0 h-full w-full object-cover -scale-x-100"
+                  autoPlay
+                  playsInline
+                  muted
+                  aria-hidden={status === "active" ? true : undefined}
+                />
+                <canvas ref={canvasRef} className="absolute inset-0 h-full w-full object-cover" aria-hidden />
 
-          {handLost === "paused" && !blockInput && (
-            <div
-              className="fixed inset-0 z-[60] flex items-center justify-center bg-background/80 p-4"
-              role="alert"
-            >
-              <div className="rounded-2xl border-[3px] border-border bg-card p-6 text-center shadow-[var(--shadow-clay)]">
-                <p className="font-heading text-base font-semibold">{t("handPaused")}</p>
-                <p className="mt-2 text-sm font-semibold text-muted-foreground">
-                  {t("handPausedResume")}
-                </p>
+                {/* Flashing amber text indicator over top-left of video feed */}
+                {handLost === "warn" && (
+                  <div
+                    className="absolute top-4 left-4 z-20 flex items-center gap-2 rounded-full bg-black/45 px-3 py-1.5 backdrop-blur-xs animate-pulse"
+                    role="status"
+                  >
+                    <span className="size-2 rounded-full bg-amber-400" aria-hidden />
+                    <span className="text-xs font-extrabold tracking-wide text-amber-300 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                      {t("keepHandVisible")}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
-          )}
-          {scanning && (
-            <div
-              className="pointer-events-none fixed inset-0 z-30 flex items-center justify-center"
-              data-testid="scan-overlay"
-            >
-              <div className="rounded-xl bg-black/70 px-6 py-3 text-2xl font-semibold text-white">
-                {t("scanCountdown")}
-              </div>
-            </div>
-          )}
-        </>
+          </div>
+
+          {/* RIGHT COLUMN — QUIZ (~60%) */}
+          <div className="mx-auto flex w-full max-w-2xl min-w-0 flex-col lg:max-w-none">
+            {children}
+          </div>
+        </div>
       )}
 
+      {/* ── Offline Mode fallback: Centered single-column ── */}
       {status === "off" && (
-        <div className="mt-4 text-center text-xs text-muted-foreground" role="status">
-          {t("gesturesUnavailable")}
+        <div className="mx-auto flex w-full max-w-3xl flex-col">
+          {/* Hidden persistent video node */}
+          <div className="hidden" data-testid="gesture-video-container">
+            <video ref={videoRef} autoPlay playsInline muted aria-hidden />
+            <canvas ref={canvasRef} aria-hidden />
+          </div>
+          {children}
+          <div className="mt-4 text-center text-xs text-muted-foreground" role="status">
+            {t("gesturesUnavailable")}
+          </div>
+        </div>
+      )}
+
+      {/* Hand loss full pause overlay (dialog when paused in assessment) */}
+      {status === "active" && handLost === "paused" && !blockInput && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-background/80 p-4"
+          role="alert"
+        >
+          <div className="rounded-2xl border-[3px] border-border bg-card p-6 text-center shadow-[var(--shadow-clay)]">
+            <p className="font-heading text-base font-semibold">{t("handPaused")}</p>
+            <p className="mt-2 text-sm font-semibold text-muted-foreground">
+              {t("handPausedResume")}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Scan countdown overlay */}
+      {status === "active" && scanning && (
+        <div
+          className="pointer-events-none fixed inset-0 z-30 flex items-center justify-center"
+          data-testid="scan-overlay"
+        >
+          <div className="rounded-xl bg-black/70 px-6 py-3 text-2xl font-semibold text-white">
+            {t("scanCountdown")}
+          </div>
         </div>
       )}
     </div>

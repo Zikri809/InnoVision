@@ -173,7 +173,8 @@ async function extractPptxText(data: ArrayBuffer): Promise<{ pages: string[] }> 
     });
 
   const pages: string[] = [];
-  for (const entry of slideFiles) {
+  const cappedSlides = slideFiles.slice(0, MAX_PARSE_PAGES);
+  for (const entry of cappedSlides) {
     // Read the entry ONCE (avoid double-decompress); decode the bytes as text.
     const bytes = (await entry.async("uint8array")) as Uint8Array;
     const xml = new TextDecoder("utf-8").decode(bytes);
@@ -249,9 +250,9 @@ export async function nativeExtract(
   const joined = pages.join("\n\n");
   const text = joined;
 
-  const nonEmpty = pages.filter((p) => charCount(p.trim()) > 0).length;
-  const avgPerPage = nonEmpty > 0 ? charCount(text) / nonEmpty : 0;
-  const lowConfidence = nonEmpty > 0 && avgPerPage < MIN_CHARS_PER_PAGE;
+  const totalPages = pages.length;
+  const avgPerPage = totalPages > 0 ? charCount(text.trim()) / totalPages : 0;
+  const lowConfidence = totalPages > 0 && (avgPerPage < MIN_CHARS_PER_PAGE || text.trim().length === 0);
 
-  return { text, pages: pages.length, engine: "native", lowConfidence };
+  return { text, pages: totalPages, engine: "native", lowConfidence };
 }

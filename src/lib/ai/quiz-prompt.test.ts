@@ -236,3 +236,101 @@ describe("buildRegeneratePrompt", () => {
     expect(p).toContain("Old question");
   });
 });
+
+describe("difficulty & format distribution prompt generation", () => {
+  it("generates easy recall constraints", () => {
+    const prompt = buildQuizSystemPrompt({ difficulty: "easy", formatDistribution: "mcq_only" });
+    expect(prompt).toContain("EASY (Recall & Foundations)");
+    expect(prompt).toContain("ONLY multiple-choice questions");
+  });
+
+  it("generates hard analysis constraints", () => {
+    const prompt = buildQuizSystemPrompt({ difficulty: "hard", formatDistribution: "true_false_only" });
+    expect(prompt).toContain("HARD (Analysis & Evaluation)");
+    expect(prompt).toContain("ONLY True/False questions");
+  });
+
+  it("includes lecturer steering instructions in user prompt", () => {
+    const userPrompt = buildQuizUserPrompt({
+      text: "Chapter content",
+      questionCount: 5,
+      steeringPrompt: "Focus on memory management algorithms",
+    });
+    expect(userPrompt).toContain("=== LECTURER STEERING INSTRUCTIONS ===");
+    expect(userPrompt).toContain("Focus on memory management algorithms");
+    expect(userPrompt).toContain("=== SOURCE MATERIAL (UNTRUSTED DATA) ===");
+    expect(userPrompt).toContain("exactly 5 questions");
+  });
+
+  it("escapes markdown code blocks inside source text", () => {
+    const userPrompt = buildQuizUserPrompt({
+      text: "Code example:\n```js\nconsole.log(1);\n```",
+      questionCount: 5,
+    });
+    expect(userPrompt).not.toContain("```js");
+    expect(userPrompt).toContain("'''js");
+  });
+
+  it("retries when formatDistribution is violated (e.g. true_false in mcq_only)", async () => {
+    const chat = vi
+      .fn<(messages: ChatMessage[]) => Promise<ChatResult>>()
+      .mockResolvedValueOnce({
+        ok: true,
+        text: JSON.stringify({
+          title: "Title",
+          questions: [
+            { type: "true_false", prompt: "TF 1", options: ["True", "False"], correct_index: 0 },
+            { type: "mcq", prompt: "MCQ 1", options: ["A", "B"], correct_index: 0 },
+            { type: "mcq", prompt: "MCQ 2", options: ["A", "B"], correct_index: 1 },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: JSON.stringify({
+          title: "Title",
+          questions: [
+            { type: "mcq", prompt: "MCQ 1", options: ["A", "B"], correct_index: 0 },
+            { type: "mcq", prompt: "MCQ 2", options: ["A", "B"], correct_index: 1 },
+            { type: "mcq", prompt: "MCQ 3", options: ["A", "B"], correct_index: 0 },
+          ],
+        }),
+      });
+
+    const res = await generateQuiz({
+      chat,
+      text: "chapter text",
+      questionCount: 3,
+      formatDistribution: "mcq_only",
+    });
+
+    expect(res.ok).toBe(true);
+    expect(chat).toHaveBeenCalledTimes(2);
+  });
+
+  it("regenerateQuestion rejects type mismatch between original and regenerated question", async () => {
+    const chat = vi
+      .fn<(messages: ChatMessage[]) => Promise<ChatResult>>()
+      .mockResolvedValue({
+        ok: true,
+        text: JSON.stringify({
+          type: "true_false", // original was mcq
+          prompt: "TF question",
+          options: ["True", "False"],
+          correct_index: 0,
+        }),
+      });
+
+    const res = await regenerateQuestion({
+      chat,
+      question: sampleQuestion, // mcq
+      siblings: [],
+    });
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toBe("invalid_ai_output");
+    expect(chat).toHaveBeenCalledTimes(2); // Retried once before failing
+  });
+});
+
+

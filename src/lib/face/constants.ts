@@ -20,10 +20,11 @@ export const FACE_SIMILARITY_MIN = 0.5;
 
 /**
  * Minimum gap between the top match and the second-best match (SQL constant
- * 0.15). Kills lookalike misidentifications (design doc §4). A null
+ * 0.05). Kills lookalike misidentifications while preventing false rejections
+ * from ambient baseline similarities in multi-subject setups. A null
  * second-best satisfies the margin automatically.
  */
-export const FACE_MARGIN_MIN = 0.15;
+export const FACE_MARGIN_MIN = 0.05;
 
 /**
  * Enrollment duplicate-flag threshold (SQL constant 0.45). LOWER than

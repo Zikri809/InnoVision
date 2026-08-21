@@ -1,4 +1,4 @@
-﻿// Phase 7 CompreFace migration: security/RLS/RPC verification harness — runs
+// Phase 7 CompreFace migration: security/RLS/RPC verification harness — runs
 // against live local Supabase. This harness — NOT FakeSupabase — is the SOLE
 // authoritative check for face-RPC semantics (consent gate, guard trigger,
 // nonce rotation, FLAT window, RLS). FakeSupabase branches are route-mapping
@@ -627,11 +627,11 @@ async function main() {
       r2.data?.error === "not_assessment", `${JSON.stringify(r2.data)} err=${r2.error?.message ?? ""}`);
   }
 
-  // ── Margin rule: top gap vs second < 0.15 → fail (matches as self) ──
+  // ── Margin rule: top gap vs second < 0.05 → fail (matches as self) ──
   {
     // S3 re-enrolled clean (above); consent was already set. Verify a lookalike
     // scenario: CompreFace returns the student's own uid at 0.9 BUT a different
-    // subject close behind (0.8) → gap 0.10 < 0.15 → not matched. Each case uses
+    // subject close behind (0.88) → gap 0.02 < 0.05 → not matched. Each case uses
     // a FRESH session (a single fail pauses the session, blocking the next).
     const { sessionId } = await makeLiveAssessment("Margin Fail", clientS3);
     const nonce = await currentNonce(clientS3, sessionId);
@@ -640,16 +640,16 @@ async function main() {
       p_subject: studentS3.id,
       p_similarity: 0.9,
       p_second_subject: studentS1.id,
-      p_second_similarity: 0.8,
+      p_second_similarity: 0.88,
       p_trigger: "periodic",
       p_nonce: nonce,
       p_frame: "margin-lookalike-frame",
     });
-    record("margin rule: top−second gap 0.10 < 0.15 → fail (paused)",
+    record("margin rule: top−second gap 0.02 < 0.05 → fail (paused)",
       r.data?.matched === false && r.data?.sessionStatus === "paused",
       `${JSON.stringify(r.data)} err=${r.error?.message ?? ""}`);
 
-    // Margin satisfied: gap 0.35 ≥ 0.15 → match (fresh session).
+    // Margin satisfied: gap 0.35 ≥ 0.05 → match (fresh session).
     const { sessionId: s2 } = await makeLiveAssessment("Margin Pass", clientS3);
     const nonce2 = await currentNonce(clientS3, s2);
     const r2 = await clientS3.rpc("record_face_check", {
@@ -662,7 +662,7 @@ async function main() {
       p_nonce: nonce2,
       p_frame: "margin-clear-frame",
     });
-    record("margin rule: top−second gap 0.35 ≥ 0.15 → match (active)",
+    record("margin rule: top−second gap 0.35 ≥ 0.05 → match (active)",
       r2.data?.matched === true && r2.data?.sessionStatus === "active",
       JSON.stringify(r2.data));
   }

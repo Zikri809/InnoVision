@@ -234,7 +234,7 @@ grant execute on function public.enroll_face(text, real) to authenticated;
 -- (p_subject / p_similarity / p_second_subject / p_second_similarity) PLUS the
 -- raw frame (p_frame, which the RPC hashes itself — the frame is never
 -- stored). The RPC computes `matched` from SQL constants (FACE_SIMILARITY_MIN
--- = 0.5, FACE_MARGIN_MIN = 0.15). No `p_matched` parameter exists.
+-- = 0.5, FACE_MARGIN_MIN = 0.05). No `p_matched` parameter exists.
 create or replace function public.record_face_check(
   p_session_id       uuid,
   p_subject          text,
@@ -374,7 +374,7 @@ begin
 
   -- (10) Server-computed verdict from CompreFace metadata — NEVER a caller-
   -- supplied `matched`. SQL constants: similarity ≥ 0.5 AND (top − second) ≥
-  -- 0.15 (margin rule kills lookalike misidentifications). The subject must
+  -- 0.05 (margin rule kills lookalike misidentifications). The subject must
   -- be the caller's own uid (a student can only pass as themselves).
   -- `coalesce(p_subject,'')` (NOT a bare NULL check): a NULL subject — the
   -- no-face sentinel, or a CompreFace recognize with no top subject — must
@@ -384,7 +384,7 @@ begin
     coalesce(p_subject, '') = auth.uid()::text
     and p_similarity >= 0.5
     and (p_second_similarity is null
-         or (p_similarity - p_second_similarity) >= 0.15)
+         or (p_similarity - p_second_similarity) >= 0.05)
   );
   v_distance := 1.0 - p_similarity;
   -- RPC-computed frame hash (never caller-supplied) — feeds the advisory.

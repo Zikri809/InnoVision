@@ -1,9 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { runExtractionPipeline } from "@/lib/extract/pipeline";
 import { probeGlmModel } from "@/lib/ai/http-compat";
-import { base64ByteLength, batch, MAX_VISION_PAGES } from "@/lib/extract/types";
 
-// Mock the OCR modules so pipeline-level tests can exercise the GLM/vision
+// Mock the OCR modules so pipeline-level tests can exercise the GLM/Tesseract
 // branches without the browser-only pdf.js/tesseract.js canvases.
 vi.mock("@/lib/extract/tesseract", () => ({
   tesseractExtract: vi.fn(async () => ({
@@ -19,13 +18,6 @@ vi.mock("@/lib/extract/glm-ocr", () => ({
     engine: "glm",
   })),
   glmAvailable: vi.fn(async () => true),
-}));
-vi.mock("@/lib/extract/vision", () => ({
-  visionExtract: vi.fn(async () => ({
-    text: "Vision result",
-    pages: 1,
-    engine: "vision",
-  })),
 }));
 
 describe("U-E2 — low chars/page falls through to OCR picker", () => {
@@ -107,27 +99,6 @@ describe("U-E4 — GLM availability probe gating", () => {
   });
 });
 
-describe("U-E9b — vision orchestration batches sequentially", () => {
-  it("batch() groups pages into ≤MAX_VISION_PAGES", () => {
-    const pages = Array.from({ length: 7 }, (_, i) => `img${i}`);
-    const groups = batch(pages, MAX_VISION_PAGES);
-    expect(groups.map((g) => g.length)).toEqual([3, 3, 1]);
-    // Concatenation order is preserved.
-    expect(groups.flat()).toEqual(pages);
-  });
-});
-
-describe("U-E10 — base64 byte estimator edge cases", () => {
-  it("computes correct bytes for padded base64", () => {
-    // "abc" → base64 "YWJj" (4 chars, no padding) = 3 bytes.
-    expect(base64ByteLength("YWJj")).toBe(3);
-    // "abcd" → "YWJjZA==" (8 chars, == padding) = 4 bytes.
-    expect(base64ByteLength("YWJjZA==")).toBe(4);
-    // "abcde" → "YWJjZGU=" (8 chars, = padding) = 5 bytes.
-    expect(base64ByteLength("YWJjZGU=")).toBe(5);
-  });
-});
-
 describe("Pipeline engine branching", () => {
   // The pipeline requires a `File` for the OCR branches (server-side path
   // throws `ocr_required_browser` to avoid Node-only canvas code). A tiny
@@ -181,14 +152,24 @@ describe("Pipeline engine branching", () => {
     expect(glm.glmExtract).toHaveBeenCalled();
   });
 
-  it("selects vision when engine='vision'", async () => {
-    const vision = await import("@/lib/extract/vision");
+  it("structured formats (pptx, docx) bypass optical GLM OCR and extract natively", async () => {
+    const glm = await import("@/lib/extract/glm-ocr");
+    const JSZip = (await import("jszip")).default;
+    const zip = new JSZip();
+    zip.file("ppt/slides/slide1.xml", "<p:txBody><a:t>Class inheritance and polymorphism.</a:t></p:txBody>");
+    const buffer = await zip.generateAsync({ type: "arraybuffer" });
+
     const r = await runExtractionPipeline({
-      file: fileStub("scan.pdf"),
-      engine: "vision",
+      file: {
+        name: "Chapter 7 - Object-Oriented Programming.pptx",
+        arrayBuffer: async () => buffer,
+      } as unknown as File,
+      engine: "glm",
     });
-    expect(r.engine).toBe("vision");
-    expect(vision.visionExtract).toHaveBeenCalled();
+
+    expect(r.engine).toBe("native");
+    expect(r.text).toContain("Class inheritance and polymorphism.");
+    expect(glm.glmExtract).not.toHaveBeenCalled();
   });
 
   it("uses dense native text and skips OCR entirely (default tesseract cascade)", async () => {
@@ -217,7 +198,7 @@ describe("Pipeline engine branching", () => {
         arrayBuffer: async () =>
           new TextEncoder().encode(dense).buffer as ArrayBuffer,
       } as unknown as File,
-      config: { defaultEngine: "vision", glmBaseUrl: "x", glmModel: "y", visionModel: "z" },
+      config: { defaultEngine: "glm", glmBaseUrl: "x", glmModel: "y" },
     });
     expect(r.engine).toBe("native");
   });

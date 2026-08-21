@@ -29,6 +29,7 @@ export function fakeFaceInit(): void {
     start(): void;
     stop(): void;
     captureFrame(): Promise<string | null>;
+    captureBestFrame?(): Promise<string | null>;
     waitForBlink(timeoutMs: number): Promise<"passed" | "failed">;
   };
 
@@ -56,6 +57,9 @@ export function fakeFaceInit(): void {
       }
     },
     async captureFrame(): Promise<string | null> {
+      return verifyMode === "match" ? MATCH_MARKER : MISMATCH_MARKER;
+    },
+    async captureBestFrame(): Promise<string | null> {
       return verifyMode === "match" ? MATCH_MARKER : MISMATCH_MARKER;
     },
     async waitForBlink(timeoutMs: number): Promise<"passed" | "failed"> {

@@ -49,6 +49,7 @@ function DialogContent({
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean
 }) {
+  const t = useTranslations("common");
   return (
     <DialogPortal>
       <DialogOverlay />
@@ -75,14 +76,7 @@ function DialogContent({
             <RiCloseLine
             />
             <span className="sr-only">
-              {(() => {
-                try {
-                  const t = useTranslations("common");
-                  return t("close");
-                } catch {
-                  return "Close";
-                }
-              })()}
+              {t("close")}
             </span>
           </DialogPrimitive.Close>
         )}

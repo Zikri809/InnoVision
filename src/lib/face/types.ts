@@ -16,6 +16,7 @@ export type LivePose = {
   yaw: number;
   centered: boolean;
   faceDetected: boolean;
+  lighting?: "good" | "too_dark" | "too_bright";
 };
 
 /**
@@ -33,10 +34,20 @@ export interface IFaceTracker {
   start(): Promise<void> | void;
   /** Capture a base64 JPEG frame, or null when no valid face is tracked. */
   captureFrame(): Promise<string | null>;
+  /** Capture the highest quality frame available (face detected, centered, open eyes) within a time window. */
+  captureBestFrame?(opts?: {
+    maxWaitMs?: number;
+    requireCentered?: boolean;
+    requireOpenEyes?: boolean;
+    requireGoodLighting?: boolean;
+    requireIdealLighting?: boolean;
+  }): Promise<string | null>;
   /** Wait for a blink within `timeoutMs`; resolves 'passed' or 'failed'. */
   waitForBlink(timeoutMs: number): Promise<"passed" | "failed">;
   /** Optional subscriber for real-time face pose updates (yaw, balance, centering). */
   onPoseChange?(cb: (pose: LivePose) => void): () => void;
+  /** Read current framing & lighting health. */
+  getFaceHealth?(): { aligned: boolean; lightingOk: boolean; faceDetected: boolean };
   stop(): void;
 }
 

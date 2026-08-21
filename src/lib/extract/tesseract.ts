@@ -64,7 +64,7 @@ export async function tesseractExtract(
     await worker.terminate().catch(() => undefined);
   }
 
-  let text = parts.join("\n\n").trim();
+  const text = parts.join("\n\n").trim();
 
   const nonEmpty = parts.filter((p) => p.trim().length > 0).length;
   const avgPerPage = nonEmpty > 0 ? text.length / nonEmpty : 0;

@@ -174,6 +174,7 @@ export function PlayClient({
     questionId: question?.id ?? null,
     questionVisible: phase === "question" || phase === "locked",
     phase,
+    isHandActive: holdProgress !== null,
     onHandLossPause: () => {
       // The server pause POST happens in the hook; here we keep the gesture
       // layer from emitting input while paused (sessionPaused gate).
@@ -626,42 +627,11 @@ export function PlayClient({
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8">
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-        <div className="min-w-0">
-          <span className={`inline-block rounded-full border-[3px] px-3.5 py-1 text-xs font-extrabold ${
-            isPractice
-              ? "border-emerald-300 bg-emerald-100 text-emerald-800"
-              : "border-accent/40 bg-blue-100 text-accent"
-          }`}>
-            {isPractice ? tCommon("practice") : tCommon("assessment")}
-          </span>
-          <h1 className="mt-2 font-heading text-2xl font-semibold [text-wrap:balance]">{quiz.title}</h1>
-        </div>
-        <ProgressHud
-          current={index + 1}
-          total={questions.length}
-          remainingMs={remainingMs}
-        />
-      </div>
-
-      <div aria-live="polite">
-        {error && (
-          <p className="mb-4 rounded-2xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-3 text-sm font-bold text-destructive" role="alert">
-            {error}
-          </p>
-        )}
-        {notice && (
-          <p className="mb-4 rounded-2xl border-[3px] border-amber-300 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800" role="status">
-            {notice}
-          </p>
-        )}
-      </div>
-
-      {/* Persistent video node for the FACE tracker */}
+    <div className="mx-auto w-full max-w-[1600px] min-h-[calc(100vh-3rem)] px-4 py-4 sm:px-6 sm:py-6 lg:px-8">
+      {/* Persistent video node for the FACE tracker (invisible background node) */}
       <video
         ref={faceTracker.videoRef}
-        className="fixed bottom-0 right-0 h-48 w-64 opacity-0 pointer-events-none -z-50"
+        className="fixed top-0 left-0 size-1 opacity-0 pointer-events-none -z-50"
         autoPlay
         playsInline
         muted
@@ -703,6 +673,7 @@ export function PlayClient({
           nextArmed={phase === "feedback"}
           blockInput={BLOCK_INPUT_PHASES.includes(phase) || faceStatus === "paused" || faceStatus === "recovering" || faceStatus === "flagged"}
           sessionPaused={faceStatus === "paused" || faceStatus === "recovering" || faceStatus === "flagged"}
+          faceStatus={faceStatus}
           onPause={() => {
             void pipeline.handLossPause();
           }}
@@ -711,40 +682,80 @@ export function PlayClient({
           onHoldProgress={setHoldProgress}
           onStatusChange={(s) => setGestureActive(s === "active")}
         >
-          <QuestionCard
-            question={question}
-            answer={answered}
-            mode={quiz.mode}
-            disabled={phase !== "question"}
-            holdProgress={holdProgress}
-            onSelect={selectOption}
-          />
+          <div className="flex flex-col gap-6">
+            <div className="flex flex-wrap items-end justify-between gap-4">
+              <div className="min-w-0">
+                <span className={`inline-block rounded-full border-[3px] px-3.5 py-1 text-xs font-extrabold ${
+                  isPractice
+                    ? "border-emerald-300 bg-emerald-100 text-emerald-800"
+                    : "border-accent/40 bg-blue-100 text-accent"
+                }`}>
+                  {isPractice ? tCommon("practice") : tCommon("assessment")}
+                </span>
+                <h1 className="mt-2 font-heading text-2xl font-semibold [text-wrap:balance]">{quiz.title}</h1>
+              </div>
+              <ProgressHud
+                current={index + 1}
+                total={questions.length}
+                remainingMs={remainingMs}
+                camStatus={
+                  quiz.mode !== "assessment" || faceStatus === "off" || faceStatus === "exempt" || faceStatus === "unavailable"
+                    ? null
+                    : faceStatus === "ready"
+                    ? "aligned"
+                    : "reposition"
+                }
+              />
+            </div>
+
+            <div aria-live="polite">
+              {error && (
+                <p className="rounded-2xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-3 text-sm font-bold text-destructive" role="alert">
+                  {error}
+                </p>
+              )}
+              {notice && (
+                <p className="rounded-2xl border-[3px] border-amber-300 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800" role="status">
+                  {notice}
+                </p>
+              )}
+            </div>
+
+            <QuestionCard
+              question={question}
+              answer={answered}
+              mode={quiz.mode}
+              disabled={phase !== "question"}
+              holdProgress={holdProgress}
+              onSelect={selectOption}
+            />
+
+            <div className="flex min-h-12 items-center justify-end">
+              {phase === "feedback" && (
+                <div className="flex items-center gap-3">
+                  {gestureActive && question.options.length < MAX_ANSWER_FINGERS && (
+                    <span className="text-sm font-bold text-muted-foreground" role="status">
+                      {t("feedback.orHold")}
+                    </span>
+                  )}
+                  <Button size="lg" onClick={goNext}>
+                    {index + 1 >= questions.length ? t("feedback.finish") : t("feedback.next")}
+                  </Button>
+                </div>
+              )}
+              {phase === "submitting" && (
+                <Button size="lg" disabled>{t("feedback.submitting")}</Button>
+              )}
+              {phase === "timeUp" && (
+                <Button size="lg" onClick={() => void submitNow()}>{t("feedback.retrySubmit")}</Button>
+              )}
+              {phase === "locked" && (
+                <Button size="lg" disabled>{t("feedback.recording")}</Button>
+              )}
+            </div>
+          </div>
         </GestureLayer>
       </FaceVerifier>
-
-      <div className="mt-7 flex min-h-12 items-center justify-end">
-        {phase === "feedback" && (
-          <div className="flex items-center gap-3">
-            {gestureActive && question.options.length < MAX_ANSWER_FINGERS && (
-              <span className="text-sm font-bold text-muted-foreground" role="status">
-                {t("feedback.orHold")}
-              </span>
-            )}
-            <Button size="lg" onClick={goNext}>
-              {index + 1 >= questions.length ? t("feedback.finish") : t("feedback.next")}
-            </Button>
-          </div>
-        )}
-        {phase === "submitting" && (
-          <Button size="lg" disabled>{t("feedback.submitting")}</Button>
-        )}
-        {phase === "timeUp" && (
-          <Button size="lg" onClick={() => void submitNow()}>{t("feedback.retrySubmit")}</Button>
-        )}
-        {phase === "locked" && (
-          <Button size="lg" disabled>{t("feedback.recording")}</Button>
-        )}
-      </div>
     </div>
   );
 }

@@ -5,6 +5,11 @@ import {
   releaseCameraStream,
   resolveStream,
 } from "@/lib/vision/camera";
+import {
+  calculatePhotometricLuminance,
+  classifyLighting,
+  getHandPalmRegion,
+} from "@/lib/face/quality";
 
 /**
  * Browser-only MediaPipe glue (Phase 6).
@@ -61,8 +66,8 @@ let cachedHandVision: VisionModule | null = null;
 let cachedHandFileset: unknown = null;
 
 export class HandLandmarkerTracker implements IHandTracker {
-  private readonly video: HTMLVideoElement;
-  private readonly canvas: HTMLCanvasElement;
+  private video: HTMLVideoElement;
+  private canvas: HTMLCanvasElement;
   private landmarker: MediaPipeHandLandmarker | null = null;
   private cameraToken: number | null = null;
   private stream: MediaStream | null = null;
@@ -189,6 +194,21 @@ export class HandLandmarkerTracker implements IHandTracker {
     ctx?.clearRect(0, 0, this.canvas.width, this.canvas.height);
   }
 
+  bindDOMElements(elements: { video: HTMLVideoElement; canvas: HTMLCanvasElement }): void {
+    this.video = elements.video;
+    this.canvas = elements.canvas;
+    if (this.stream && this.video.srcObject !== this.stream) {
+      this.video.srcObject = this.stream;
+      this.video.muted = true;
+      this.video.playsInline = true;
+      void this.video.play().catch(() => {});
+    }
+    const w = this.video.videoWidth || CAMERA_WIDTH_MAX;
+    const h = this.video.videoHeight || CAMERA_HEIGHT_MAX;
+    this.canvas.width = w;
+    this.canvas.height = h;
+  }
+
   private releaseCamera(): void {
     if (this.cameraToken !== null) {
       // camera.ts is the ONLY place tracks stop (refcounted; last release
@@ -253,7 +273,17 @@ export class HandLandmarkerTracker implements IHandTracker {
         if (this.landmarker && this.video.readyState >= 2) {
           const results = this.landmarker.detectForVideo(this.video, now);
           this.renderOverlay(results.landmarks);
-          onFrame(landmarksToHandFrame(results));
+          const frame = landmarksToHandFrame(results);
+          const ctx = this.canvas.getContext("2d");
+          if (ctx) {
+            frame.lighting = this.computeHandLuminance(
+              ctx,
+              this.canvas.width,
+              this.canvas.height,
+              results.landmarks?.[0],
+            );
+          }
+          onFrame(frame);
         }
       }
       this.rafId = requestAnimationFrame((t) => this.detectLoop(t, onFrame, onError));
@@ -266,6 +296,34 @@ export class HandLandmarkerTracker implements IHandTracker {
       if (this.rafId !== null) cancelAnimationFrame(this.rafId);
       this.rafId = null;
       onError?.(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+
+  /**
+   * Compute perceived photometric luminance on the palm / hand bounding box to
+   * detect underexposed or overexposed hand gestures.
+   */
+  private computeHandLuminance(
+    ctx: CanvasRenderingContext2D,
+    w: number,
+    h: number,
+    landmarks?: Landmark[] | null,
+  ): "good" | "too_dark" | "too_bright" {
+    try {
+      const roi = getHandPalmRegion(w, h, landmarks);
+      if (roi.width <= 0 || roi.height <= 0) return "good";
+      const imgData = ctx.getImageData(roi.x, roi.y, roi.width, roi.height);
+      const data = imgData.data;
+      let total = 0;
+      let count = 0;
+      for (let i = 0; i < data.length; i += 16) {
+        total += calculatePhotometricLuminance(data[i], data[i + 1], data[i + 2]);
+        count++;
+      }
+      const lum = count > 0 ? total / count : 128;
+      return classifyLighting(lum, "ideal");
+    } catch {
+      return "good";
     }
   }
 

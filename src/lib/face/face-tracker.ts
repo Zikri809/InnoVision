@@ -10,6 +10,12 @@ import {
   releaseCameraStream,
   resolveStream,
 } from "@/lib/vision/camera";
+import {
+  calculatePhotometricLuminance,
+  classifyLighting,
+  getFacialSkinRegion,
+  scoreFrameQuality,
+} from "./quality";
 
 /**
  * Browser-only MediaPipe face tracker (Phase 7 — CompreFace migration).
@@ -112,6 +118,11 @@ export class FaceTracker implements IFaceTracker {
   private lastFrameAt = 0;
   private lastQualityResult: FaceQuality = { ok: false, reason: "no-frame-yet" };
   private canvas: HTMLCanvasElement | null = null;
+  private currentPose: LivePose = { yaw: 0, centered: false, faceDetected: false };
+  private currentBlendshapes: { left: number; right: number } = { left: 0, right: 0 };
+  private currentLandmarks: { x: number; y: number; z?: number }[] | null = null;
+  private currentLighting: "good" | "too_dark" | "too_bright" = "good";
+  private lastLuminanceSampleAt = 0;
 
   constructor(video: HTMLVideoElement) {
     this.video = video;
@@ -262,6 +273,115 @@ export class FaceTracker implements IFaceTracker {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Compute perceived photometric luminance (0–255) specifically on the inner
+   * face region (excluding background pixels to accurately catch backlit/dark faces).
+   */
+  private computeFaceLuminance(
+    ctx: CanvasRenderingContext2D,
+    w: number,
+    h: number,
+    landmarks?: { x: number; y: number; z?: number }[] | null,
+  ): number {
+    try {
+      const roi = getFacialSkinRegion(w, h, landmarks);
+      if (roi.width <= 0 || roi.height <= 0) return 128;
+      const imgData = ctx.getImageData(roi.x, roi.y, roi.width, roi.height);
+      const data = imgData.data;
+      let total = 0;
+      let count = 0;
+      for (let i = 0; i < data.length; i += 16) {
+        total += calculatePhotometricLuminance(data[i], data[i + 1], data[i + 2]);
+        count++;
+      }
+      return count > 0 ? total / count : 128;
+    } catch {
+      return 128;
+    }
+  }
+
+  /** Read current framing & lighting health. */
+  getFaceHealth(): { aligned: boolean; lightingOk: boolean; faceDetected: boolean } {
+    const aligned = this.currentPose.faceDetected && this.currentPose.centered && Math.abs(this.currentPose.yaw) <= 25;
+    return {
+      aligned,
+      lightingOk: this.currentLighting === "good",
+      faceDetected: this.currentPose.faceDetected,
+    };
+  }
+
+  /**
+   * Capture a high-quality frame where face is present, centered, facing camera,
+   * eyes are open, and lighting is optimal. Polling over a brief window prevents
+   * transient blink/motion/lighting misfires.
+   */
+  async captureBestFrame(opts?: {
+    maxWaitMs?: number;
+    requireCentered?: boolean;
+    requireOpenEyes?: boolean;
+    requireGoodLighting?: boolean;
+    requireIdealLighting?: boolean;
+  }): Promise<string | null> {
+    if (this.disposed || !this.video) return null;
+    if (typeof document !== "undefined" && document.hidden) return null;
+    if (this.video.readyState < 2) return null;
+
+    const maxWaitMs = opts?.maxWaitMs ?? 1500;
+    const requireCentered = opts?.requireCentered ?? true;
+    const requireOpenEyes = opts?.requireOpenEyes ?? true;
+    const requireGoodLighting = opts?.requireGoodLighting ?? true;
+    const requireIdealLighting = opts?.requireIdealLighting ?? false;
+    const startTime = Date.now();
+
+    let bestFrame: string | null = null;
+    let bestScore = -1;
+
+    const minLum = requireIdealLighting ? 80 : 65;
+    const maxLum = requireIdealLighting ? 195 : 215;
+
+    while (Date.now() - startTime < maxWaitMs && !this.disposed) {
+        const isEyesOpen = !requireOpenEyes || (this.currentBlendshapes.left < 0.4 && this.currentBlendshapes.right < 0.4);
+        const isCentered = !requireCentered || this.currentPose.centered;
+
+        const baseScore = scoreFrameQuality({
+          faceDetected: this.currentPose.faceDetected,
+          centered: isCentered,
+          yaw: this.currentPose.yaw,
+          eyesOpen: isEyesOpen,
+          lightingOk: false,
+        });
+
+        // If geometric quality is strong, verify lighting on canvas
+        if (baseScore >= 70) {
+          const frame = await this.captureFrame();
+          if (frame && this.canvas) {
+            const ctx = this.canvas.getContext("2d");
+            if (ctx) {
+              const lum = this.computeFaceLuminance(ctx, this.canvas.width, this.canvas.height, this.currentLandmarks);
+              const goodLum = lum >= minLum && lum <= maxLum;
+              const totalScore = scoreFrameQuality({
+                faceDetected: this.currentPose.faceDetected,
+                centered: isCentered,
+                yaw: this.currentPose.yaw,
+                eyesOpen: isEyesOpen,
+                lightingOk: goodLum || (!requireGoodLighting && !requireIdealLighting),
+              });
+
+              if (totalScore >= 90) return frame;
+              if (totalScore > bestScore) {
+                bestScore = totalScore;
+                bestFrame = frame;
+              }
+            }
+          }
+        }
+
+      await new Promise((r) => setTimeout(r, 60));
+    }
+
+    return bestFrame ?? this.captureFrame();
   }
 
   private lastBlinkAt = 0;
@@ -426,27 +546,48 @@ export class FaceTracker implements IFaceTracker {
         if (this.landmarker && this.video.readyState >= 2) {
           const results = this.landmarker.detectForVideo(this.video, now);
           this.feedLiveness(results);
-          if (this.poseListeners.size > 0) {
-            let yaw = 0;
-            let centered = false;
-            let faceDetected = false;
-            const landmarks = results.faceLandmarks?.[0];
-            if (landmarks && landmarks.length > 0) {
-              faceDetected = true;
-              const nose = landmarks[1];
-              const leftCheek = landmarks[234];
-              const rightCheek = landmarks[454];
-              if (nose && leftCheek && rightCheek) {
-                const span = rightCheek.x - leftCheek.x;
-                if (span > 0.01) {
-                  const ratio = (nose.x - leftCheek.x) / span;
-                  // Ratio ~0.5 when looking straight; >0.55 when turning left; <0.45 when turning right
-                  yaw = Math.round((ratio - 0.5) * 100);
-                }
-                centered = nose.x >= 0.30 && nose.x <= 0.70 && nose.y >= 0.20 && nose.y <= 0.80;
+          let yaw = 0;
+          let centered = false;
+          let faceDetected = false;
+          const landmarks = results.faceLandmarks?.[0];
+          if (landmarks && landmarks.length > 0) {
+            faceDetected = true;
+            this.currentLandmarks = landmarks;
+            const nose = landmarks[1];
+            const leftCheek = landmarks[234];
+            const rightCheek = landmarks[454];
+            if (nose && leftCheek && rightCheek) {
+              const span = rightCheek.x - leftCheek.x;
+              if (span > 0.01) {
+                const ratio = (nose.x - leftCheek.x) / span;
+                // Ratio ~0.5 when looking straight; >0.55 when turning left; <0.45 when turning right
+                yaw = Math.round((ratio - 0.5) * 100);
               }
+              centered = nose.x >= 0.30 && nose.x <= 0.70 && nose.y >= 0.20 && nose.y <= 0.80;
             }
-            const pose: LivePose = { yaw, centered, faceDetected };
+          } else {
+            this.currentLandmarks = null;
+          }
+          let lighting: "good" | "too_dark" | "too_bright" = this.currentLighting;
+          if (faceDetected && now - this.lastLuminanceSampleAt >= 250) {
+            this.lastLuminanceSampleAt = now;
+            const canvas = this.ensureCanvas();
+            const ctx = canvas.getContext("2d");
+            if (ctx) {
+              const vw = this.video.videoWidth || 640;
+              const vh = this.video.videoHeight || 480;
+              const scale = Math.min(1, CAPTURE_CANVAS_MAX / vw);
+              canvas.width = Math.round(vw * scale);
+              canvas.height = Math.round(vh * scale);
+              ctx.drawImage(this.video, 0, 0, canvas.width, canvas.height);
+              const lum = this.computeFaceLuminance(ctx, canvas.width, canvas.height, landmarks);
+              lighting = classifyLighting(lum, "ideal");
+              this.currentLighting = lighting;
+            }
+          }
+          const pose: LivePose = { yaw, centered, faceDetected, lighting };
+          this.currentPose = pose;
+          if (this.poseListeners.size > 0) {
             for (const listener of this.poseListeners) {
               listener(pose);
             }
@@ -471,6 +612,7 @@ export class FaceTracker implements IFaceTracker {
       if (c.categoryName === "eyeBlinkLeft") left = c.score ?? 0;
       else if (c.categoryName === "eyeBlinkRight") right = c.score ?? 0;
     }
+    this.currentBlendshapes = { left, right };
     const updateResult = this.blinkDetector.update(left, right);
     if (updateResult === "passed") {
       this.handleBlinkObserved();

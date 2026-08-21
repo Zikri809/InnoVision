@@ -364,6 +364,7 @@ export type Database = {
           results_revealed_at: string | null
           source_file_url: string | null
           source_text: string | null
+          sources: Json
           status: Database["public"]["Enums"]["quiz_status"]
           time_limit_sec: number | null
           title: string
@@ -378,6 +379,7 @@ export type Database = {
           results_revealed_at?: string | null
           source_file_url?: string | null
           source_text?: string | null
+          sources?: Json
           status?: Database["public"]["Enums"]["quiz_status"]
           time_limit_sec?: number | null
           title: string
@@ -392,6 +394,7 @@ export type Database = {
           results_revealed_at?: string | null
           source_file_url?: string | null
           source_text?: string | null
+          sources?: Json
           status?: Database["public"]["Enums"]["quiz_status"]
           time_limit_sec?: number | null
           title?: string
@@ -981,6 +984,33 @@ export type Database = {
           p_source_file_url: string
           p_source_text: string
           p_title: string
+        }
+        Returns: {
+          correct_index: number
+          created_at: string
+          explanation: string | null
+          id: string
+          options: string[]
+          order_index: number
+          prompt: string
+          quiz_id: string
+          type: Database["public"]["Enums"]["question_type"]
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "questions"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      save_quiz_questions: {
+        Args: {
+          p_mode?: string
+          p_questions: Json
+          p_quiz_id: string
+          p_source_file_url?: string | null
+          p_source_text?: string | null
+          p_title?: string | null
         }
         Returns: {
           correct_index: number

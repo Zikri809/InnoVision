@@ -30,7 +30,6 @@ import {
 import { nativeExtract } from "@/lib/extract/native";
 import { tesseractExtract } from "@/lib/extract/tesseract";
 import { glmExtract } from "@/lib/extract/glm-ocr";
-import { visionExtract } from "@/lib/extract/vision";
 
 export type PipelineProgress = {
   stage: "native" | "ocr";
@@ -87,12 +86,12 @@ export async function runExtractionPipeline(
   }
 
   // ── [1] Native extractor ────────────────────────────────────────
-  // An EXPLICITLY selected OCR engine (glm/vision) is authoritative: it runs
-  // directly on the file without the native shortcut. The lecturer chose it
-  // for accuracy (scanned slides, tables, embedded/partial text layers), so a
-  // sparse native text layer must not silently win. Only the default cascade
-  // (native → tesseract) keeps the free native-first shortcut.
-  if (engine === "glm" || engine === "vision") {
+  // An EXPLICITLY selected OCR engine (glm) is authoritative for raster
+  // inputs (PDFs and image files): it runs directly without the native shortcut.
+  // Structured presentation/document archives (.pptx, .docx) contain XML streams
+  // that vision models cannot decode directly as images; they are always parsed natively.
+  const isImageOrPdf = /\.(pdf|png|jpe?g|webp)$/i.test(filename);
+  if (engine === "glm" && isImageOrPdf) {
     return runOcr(opts, engine, cfg);
   }
 
@@ -103,9 +102,6 @@ export async function runExtractionPipeline(
     native = await nativeExtract(data, filename, { node: !opts.file });
   } catch (err) {
     if ((err as Error)?.message === "unsupported_file_type") {
-      // Image files (PNG/JPG/WEBP) have no "native text layer" — they are
-      // first-class extraction inputs and should fall through to OCR. Return a
-      // low-confidence empty result so the cascade continues.
       const isImage = /\.(png|jpe?g|webp)$/i.test(filename);
       if (isImage) {
         native = { text: "", pages: 0, engine: "native", lowConfidence: true };
@@ -113,17 +109,14 @@ export async function runExtractionPipeline(
         throw err;
       }
     } else {
-      // Corrupt / unparseable native extraction: fall through to OCR instead of
-      // failing the whole pipeline (U-E7 requires a clean error for zero-byte
-      // files though — handled by the caller's pre-check).
       native = { text: "", pages: 0, engine: "native", lowConfidence: true };
     }
   }
 
+  const isOfficeDoc = /\.(pptx|docx)$/i.test(filename);
   const usable =
-    native.text.trim().length > 0 &&
-    !native.lowConfidence &&
-    native.pages > 0;
+    (native.text.trim().length > 0 && !native.lowConfidence && native.pages > 0) ||
+    isOfficeDoc;
 
   if (usable) {
     return native;
@@ -157,15 +150,6 @@ async function runOcr(
       (page, total) => opts.onProgress?.({ stage: "ocr", page, total, engine: "glm" }),
     );
     return glm;
-  }
-
-  if (engine === "vision") {
-    const vision = await visionExtract(
-      file,
-      {},
-      (done, total) => opts.onProgress?.({ stage: "ocr", page: done, total, engine: "vision" }),
-    );
-    return vision;
   }
 
   // Default: tesseract.

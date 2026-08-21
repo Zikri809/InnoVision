@@ -104,49 +104,56 @@ export function useFaceTracker(opts?: {
       return;
     }
 
-    const video = videoRef.current;
-    if (!video) {
-      queueMicrotask(() => {
-        if (bootId !== bootIdRef.current || disposedRef.current) return;
-        setBooting(false);
-        setAvailable(false);
-        onUnavailableRef.current?.();
-      });
-      return;
-    }
-
-    const tracker = new FaceTracker(video);
-    trackerRef.current = tracker;
-
-    let timedOut = false;
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      tracker.stop();
-      if (bootId === bootIdRef.current && !disposedRef.current) {
-        console.error("[face-boot] timed out after", FACE_BOOT_TIMEOUT_MS, "ms");
-        setBooting(false);
-        setAvailable(false);
-        onUnavailableRef.current?.();
+    async function bootWithRetry() {
+      // 1. Wait for video ref if component is mounting
+      let video = videoRef.current;
+      const refWaitStart = Date.now();
+      while (!video && Date.now() - refWaitStart < 800 && !disposedRef.current && bootId === bootIdRef.current) {
+        await new Promise((r) => setTimeout(r, 80));
+        video = videoRef.current;
       }
-    }, FACE_BOOT_TIMEOUT_MS);
 
-    // CompreFace health probe (L14): BOTH the tracker boot AND the health
-    // check must succeed. In E2E mock mode the health route returns 200.
-    console.info("[face-boot] starting tracker.start() and healthProbe...");
-    const healthProbe = fetch("/api/face/health", { method: "GET", cache: "no-store" })
-      .then((res) => (res.ok ? res.json() : { available: false }))
-      .then((data: { available?: boolean }) => {
-        console.info("[face-boot] healthProbe resolved with available:", data.available);
-        return data.available === true;
-      })
-      .catch((err) => {
-        console.error("[face-boot] healthProbe failed with error:", err);
+      if (!video || disposedRef.current || bootId !== bootIdRef.current) {
+        if (bootId === bootIdRef.current && !disposedRef.current) {
+          setBooting(false);
+          setAvailable(false);
+          onUnavailableRef.current?.();
+        }
+        return;
+      }
+
+      const tracker = new FaceTracker(video);
+      trackerRef.current = tracker;
+
+      let timedOut = false;
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        tracker.stop();
+        if (bootId === bootIdRef.current && !disposedRef.current) {
+          console.error("[face-boot] timed out after", FACE_BOOT_TIMEOUT_MS, "ms");
+          setBooting(false);
+          setAvailable(false);
+          onUnavailableRef.current?.();
+        }
+      }, FACE_BOOT_TIMEOUT_MS);
+
+      async function probeHealthWithRetry(): Promise<boolean> {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const res = await fetch("/api/face/health", { method: "GET", cache: "no-store" });
+            const data = (res.ok ? await res.json() : { available: false }) as { available?: boolean };
+            if (data.available === true) return true;
+          } catch {
+            // brief retry delay
+          }
+          if (attempt === 0) await new Promise((r) => setTimeout(r, 400));
+        }
         return false;
-      });
+      }
 
-    Promise.all([tracker.start(), healthProbe])
-      .then(([, healthy]) => {
-        console.info("[face-boot] Promise.all completed! healthy:", healthy);
+      try {
+        console.info("[face-boot] starting tracker.start() and healthProbe...");
+        const [, healthy] = await Promise.all([tracker.start(), probeHealthWithRetry()]);
         clearTimeout(timeout);
         if (bootId !== bootIdRef.current || disposedRef.current || timedOut) {
           console.info("[face-boot] boot was superseded or timed out");
@@ -164,17 +171,43 @@ export function useFaceTracker(opts?: {
         console.info("[face-boot] boot successful -> available: true");
         setBooting(false);
         setAvailable(true);
-      })
-      .catch((err) => {
+      } catch (err) {
         clearTimeout(timeout);
         tracker.stop();
-        console.error("[face-boot] failed:", err);
+        console.error("[face-boot] primary boot failed, attempting fallback retry:", err);
+
+        // Transient camera/wasm lock fallback retry
+        if (bootId === bootIdRef.current && !disposedRef.current && !timedOut) {
+          await new Promise((r) => setTimeout(r, 500));
+          if (bootId !== bootIdRef.current || disposedRef.current) return;
+          try {
+            const retryTracker = new FaceTracker(video);
+            trackerRef.current = retryTracker;
+            const [, healthy] = await Promise.all([retryTracker.start(), probeHealthWithRetry()]);
+            if (bootId !== bootIdRef.current || disposedRef.current) {
+              retryTracker.stop();
+              return;
+            }
+            if (healthy) {
+              console.info("[face-boot] retry boot successful -> available: true");
+              setBooting(false);
+              setAvailable(true);
+              return;
+            }
+          } catch (retryErr) {
+            console.error("[face-boot] retry boot also failed:", retryErr);
+          }
+        }
+
         if (bootId === bootIdRef.current && !disposedRef.current) {
           setBooting(false);
           setAvailable(false);
           onUnavailableRef.current?.();
         }
-      });
+      }
+    }
+
+    void bootWithRetry();
   }, [enabled]);
 
   useEffect(() => {

@@ -37,6 +37,8 @@ export type FacePipelineProps = {
   onHandLossPause: () => void;
   onPhaseChange: (p: FacePipelinePhase) => void;
   onFaceStatus: (s: FaceStatus) => void;
+  /** True when a hand gesture (hold to answer/next) is currently in progress. */
+  isHandActive?: boolean;
   /** D13 — a lecturer reset the session mid-flight (verify → 404 no longer owned). */
   onReset?: () => void;
 };
@@ -86,6 +88,7 @@ export function useFacePipeline(props: FacePipelineProps) {
     onHandLossPause,
     onPhaseChange,
     onFaceStatus,
+    isHandActive = false,
     onReset,
   } = props;
 
@@ -110,6 +113,7 @@ export function useFacePipeline(props: FacePipelineProps) {
   const onPhaseChangeRef = useRef(onPhaseChange);
   const onHandLossPauseRef = useRef(onHandLossPause);
   const onFaceStatusRef = useRef(onFaceStatus);
+  const isHandActiveRef = useRef(isHandActive);
   const onResetRef = useRef(onReset);
 
   const nonceRef = useRef(initialNonce);
@@ -143,6 +147,7 @@ export function useFacePipeline(props: FacePipelineProps) {
     onPhaseChangeRef.current = onPhaseChange;
     onHandLossPauseRef.current = onHandLossPause;
     onFaceStatusRef.current = onFaceStatus;
+    isHandActiveRef.current = isHandActive;
     onResetRef.current = onReset;
     isTerminalRef.current = isTerminal;
   });
@@ -465,13 +470,36 @@ export function useFacePipeline(props: FacePipelineProps) {
     // Capture the current question id for the fire-time re-check.
     const questionIdAtStart = lastQuestionIdRef.current;
     try {
-      let frame = await tracker.captureFrame();
-      const startPoll = Date.now();
-      while (!frame && Date.now() - startPoll < 800 && !disposedRef.current) {
-        await new Promise((r) => setTimeout(r, 100));
-        frame = await tracker.captureFrame();
+      // If the student is actively holding a hand gesture (answering/next),
+      // wait briefly for the gesture to complete and hand to lower.
+      if (isHandActiveRef.current) {
+        const handWaitStart = Date.now();
+        while (isHandActiveRef.current && Date.now() - handWaitStart < 1200 && !disposedRef.current) {
+          await new Promise((r) => setTimeout(r, 100));
+        }
       }
       if (disposedRef.current) return;
+
+      let frame: string | null = null;
+      if (typeof tracker.captureBestFrame === "function") {
+        frame = await tracker.captureBestFrame({ maxWaitMs: 1500, requireCentered: true, requireOpenEyes: true });
+      } else {
+        frame = await tracker.captureFrame();
+        const startPoll = Date.now();
+        while (!frame && Date.now() - startPoll < 800 && !disposedRef.current) {
+          await new Promise((r) => setTimeout(r, 100));
+          frame = await tracker.captureFrame();
+        }
+      }
+      if (disposedRef.current) return;
+
+      // If frame is still null, give one final brief fallback poll before sending empty sentinel
+      if (!frame) {
+        await new Promise((r) => setTimeout(r, 400));
+        if (disposedRef.current) return;
+        frame = await tracker.captureFrame();
+      }
+
       // Persistent camera-null mid-quiz: indistinguishable from a wrong face by
       // design — POST a sentinel empty frame → CompreFace returns no subject →
       // RPC computes matched=false → the null lands as a fail row in the FLAT
@@ -635,7 +663,7 @@ export function useFacePipeline(props: FacePipelineProps) {
       if (statusRef.current === "ready" && !isTerminalRef.current && !disposedRef.current) {
         void runVerify("question");
       }
-    }, 1500);
+    }, 2000);
 
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -57,10 +57,8 @@ const GLM_TRANSCRIBE_PROMPT =
   "faithfully, preserving structure (headings, bullets, tables as text). " +
   "Output ONLY the transcribed text, no commentary.";
 
-// Overall wall-clock budget for a whole GLM OCR run (all pages). Each page
-// call has its own 90s timeout, but a 50-page PDF would otherwise run
-// unbounded sequentially — this caps the total so the dialog can't hang.
-const GLM_OCR_BUDGET_MS = 5 * 60_000;
+// Overall wall-clock budget for a whole GLM OCR run (all pages up to 200).
+const GLM_OCR_BUDGET_MS = 20 * 60_000;
 
 /**
  * OCR a file with the local GLM-OCR model (Docker/vLLM). Images/PDF pages are

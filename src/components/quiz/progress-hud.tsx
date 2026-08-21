@@ -13,10 +13,12 @@ export function ProgressHud({
   current,
   total,
   remainingMs,
+  camStatus = null,
 }: {
   current: number;
   total: number;
   remainingMs: number | null;
+  camStatus?: "aligned" | "reposition" | null;
 }) {
   const t = useTranslations("play.hud");
   const pct = total <= 0 ? 0 : Math.min(100, Math.round((current / total) * 100));
@@ -34,8 +36,18 @@ export function ProgressHud({
   return (
     <div className="w-44 sm:w-48 space-y-2">
       <div className="flex items-center justify-between text-sm font-extrabold">
-        <span className="text-foreground">
+        <span className="text-foreground flex items-center gap-1.5">
           {t("questionOf", { current: Math.min(current, total), total })}
+          {camStatus && (
+            <span
+              className={`inline-block h-2 w-2 rounded-full transition-colors duration-300 ${
+                camStatus === "aligned" ? "bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.7)]" : "bg-amber-400 animate-pulse"
+              }`}
+              title={camStatus === "aligned" ? t("camAligned") : t("camReposition")}
+              role="status"
+              aria-label={camStatus === "aligned" ? t("camAligned") : t("camReposition")}
+            />
+          )}
         </span>
         {remainingMs !== null && (
           <span

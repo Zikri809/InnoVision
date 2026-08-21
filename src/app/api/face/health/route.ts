@@ -24,6 +24,7 @@ export async function GET() {
   if (!auth.ok) return auth.response;
 
   if (!rateLimit(`face-health:${auth.userId}`, HEALTH_RATE)) {
+    console.warn(`[api/face/health] user ${auth.userId} rate limited`);
     return Response.json(
       { available: false, rate_limited: true },
       { status: 429, headers: { "content-type": "application/json" } },
@@ -31,6 +32,7 @@ export async function GET() {
   }
 
   const available = await compreface.health();
+  console.info(`[api/face/health] user=${auth.userId} available=${available}`);
   return Response.json(
     { available },
     { status: 200, headers: { "content-type": "application/json" } },
