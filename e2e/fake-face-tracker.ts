@@ -25,12 +25,22 @@ export function fakeFaceInit(): void {
   const MATCH_MARKER = "data:image/jpeg;base64,FAKE_FRAME_MATCH";
   const MISMATCH_MARKER = "data:image/jpeg;base64,FAKE_FRAME_MISMATCH";
 
+  type FakePose = {
+    yaw: number;
+    centered: boolean;
+    faceDetected: boolean;
+    facesSeen: number;
+    lighting: "good" | "too_dark" | "too_bright";
+  };
+
   type FakeTracker = {
     start(): void;
     stop(): void;
     captureFrame(): Promise<string | null>;
     captureBestFrame?(): Promise<string | null>;
     waitForBlink(timeoutMs: number): Promise<"passed" | "failed">;
+    onPoseChange?(cb: (pose: FakePose) => void): () => void;
+    getFaceHealth?(): { aligned: boolean; lightingOk: boolean; faceDetected: boolean };
   };
 
   let verifyMode: "match" | "mismatch" = "match";
@@ -40,6 +50,19 @@ export function fakeFaceInit(): void {
   // NEXT wait immediately (removes the click→register race in the E2E helper).
   let pendingBlink = false;
   let periodic: { minMs: number; maxMs: number } = { minMs: 30000, maxMs: 45000 };
+  // Scriptable pose state — the advisories hook (AttentionMonitor) and the
+  // pipeline's lighting precheck consume this through onPoseChange /
+  // getFaceHealth.
+  let pose: FakePose = { yaw: 0, centered: true, faceDetected: true, facesSeen: 1, lighting: "good" };
+  const poseListeners = new Set<(p: FakePose) => void>();
+  let poseTimer: ReturnType<typeof setInterval> | null = null;
+
+  function ensurePoseLoop(): void {
+    if (poseTimer !== null || poseListeners.size === 0) return;
+    poseTimer = setInterval(() => {
+      for (const cb of poseListeners) cb(pose);
+    }, 200);
+  }
 
   const tracker: FakeTracker = {
     start(): void {
@@ -49,6 +72,10 @@ export function fakeFaceInit(): void {
       if (blinkTimer !== null) {
         clearTimeout(blinkTimer);
         blinkTimer = null;
+      }
+      if (poseTimer !== null) {
+        clearInterval(poseTimer);
+        poseTimer = null;
       }
       pendingBlink = false;
       if (blinkResolver) {
@@ -80,6 +107,24 @@ export function fakeFaceInit(): void {
         }, timeoutMs);
       });
     },
+    onPoseChange(cb: (p: FakePose) => void): () => void {
+      poseListeners.add(cb);
+      ensurePoseLoop();
+      return () => {
+        poseListeners.delete(cb);
+        if (poseListeners.size === 0 && poseTimer !== null) {
+          clearInterval(poseTimer);
+          poseTimer = null;
+        }
+      };
+    },
+    getFaceHealth(): { aligned: boolean; lightingOk: boolean; faceDetected: boolean } {
+      return {
+        aligned: pose.faceDetected && pose.centered && Math.abs(pose.yaw) <= 25,
+        lightingOk: pose.lighting === "good",
+        faceDetected: pose.faceDetected,
+      };
+    },
   };
 
   window.__INNOVISION_FAKE_FACE_TRACKER__ = tracker;
@@ -104,6 +149,21 @@ export function fakeFaceInit(): void {
     },
     setFacePeriodic(opts: { minMs: number; maxMs: number }): void {
       periodic = { minMs: opts.minMs, maxMs: opts.maxMs };
+    },
+    setFacePose(opts: {
+      yaw?: number;
+      centered?: boolean;
+      faceDetected?: boolean;
+      facesSeen?: number;
+      lighting?: "good" | "too_dark" | "too_bright";
+    }): void {
+      pose = {
+        yaw: opts.yaw ?? pose.yaw,
+        centered: opts.centered ?? pose.centered,
+        faceDetected: opts.faceDetected ?? pose.faceDetected,
+        facesSeen: opts.facesSeen ?? pose.facesSeen,
+        lighting: opts.lighting ?? pose.lighting,
+      };
     },
     // Exposed for the pipeline's `getFakePeriodicOverride()` read.
     get _periodic(): { minMs: number; maxMs: number } {

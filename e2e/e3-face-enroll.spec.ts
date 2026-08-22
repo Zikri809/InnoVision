@@ -52,7 +52,7 @@ test.describe("E3/E3b — face enrollment + assessment gate", () => {
     await lecturerPage.getByLabel("Quiz title").fill(QUIZ_TITLE);
     await lecturerPage.getByLabel("Mode").click();
     await lecturerPage.getByRole("option", { name: "Assessment" }).click();
-    await lecturerPage.getByRole("button", { name: /new quiz/i }).click();
+    await lecturerPage.getByRole("button", { name: /create quiz|new quiz/i }).click();
     await expect(lecturerPage.getByText(QUIZ_TITLE, { exact: true })).toBeVisible();
     await lecturerPage.getByText(QUIZ_TITLE, { exact: true }).click();
     await expect(lecturerPage).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
@@ -72,7 +72,7 @@ test.describe("E3/E3b — face enrollment + assessment gate", () => {
     const publishButton = lecturerPage.getByRole("button", { name: /publish/i });
     await expect(publishButton).toBeEnabled();
     await publishButton.click();
-    await expect(lecturerPage.getByText(/published/i)).toBeVisible();
+    await expect(lecturerPage.getByText(/^Live/)).toBeVisible();
 
     // Reveal the assessment results so the EndScreen shows the score (hidden
     // assessments show the "awaiting release" state instead).
@@ -128,7 +128,7 @@ test.describe("E3/E3b — face enrollment + assessment gate", () => {
     await lecturerPage.getByLabel("Quiz title").fill(QUIZ_TITLE);
     await lecturerPage.getByLabel("Mode").click();
     await lecturerPage.getByRole("option", { name: "Assessment" }).click();
-    await lecturerPage.getByRole("button", { name: /new quiz/i }).click();
+    await lecturerPage.getByRole("button", { name: /create quiz|new quiz/i }).click();
     await expect(lecturerPage.getByText(QUIZ_TITLE, { exact: true })).toBeVisible();
     await lecturerPage.getByText(QUIZ_TITLE, { exact: true }).click();
     await expect(lecturerPage).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
@@ -140,7 +140,7 @@ test.describe("E3/E3b — face enrollment + assessment gate", () => {
     const publishButton = lecturerPage.getByRole("button", { name: /publish/i });
     await expect(publishButton).toBeEnabled();
     await publishButton.click();
-    await expect(lecturerPage.getByText(/published/i)).toBeVisible();
+    await expect(lecturerPage.getByText(/^Live/)).toBeVisible();
 
     // Student B: register WITHOUT biometric consent (uncheck the box).
     await studentPage.goto("/register");
@@ -194,7 +194,7 @@ test.describe("E3/E3b — face enrollment + assessment gate", () => {
     await lecturerPage.getByLabel("Quiz title").fill("E13 Timed");
     await lecturerPage.getByLabel("Mode").click();
     await lecturerPage.getByRole("option", { name: "Assessment" }).click();
-    await lecturerPage.getByRole("button", { name: /new quiz/i }).click();
+    await lecturerPage.getByRole("button", { name: /create quiz|new quiz/i }).click();
     await expect(lecturerPage.getByText("E13 Timed", { exact: true })).toBeVisible();
     await lecturerPage.getByText("E13 Timed", { exact: true }).click();
     await expect(lecturerPage).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
@@ -222,7 +222,7 @@ test.describe("E3/E3b — face enrollment + assessment gate", () => {
     const publishButton = lecturerPage.getByRole("button", { name: /publish/i });
     await expect(publishButton).toBeEnabled();
     await publishButton.click();
-    await expect(lecturerPage.getByText(/published/i)).toBeVisible();
+    await expect(lecturerPage.getByText(/^Live/)).toBeVisible();
 
     // Reveal results so the timer-expiry EndScreen shows the score.
     await revealQuiz(lecturerPage, CLASS_TITLE, "E13 Timed");

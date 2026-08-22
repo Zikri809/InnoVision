@@ -16,8 +16,10 @@ export async function registerUser(
   inviteCode: string,
 ) {
   await page.goto("/register");
-  await page.getByLabel("Full name (optional)").fill(`${role}-${email.split("@")[0]}`);
-  await page.getByLabel("Email").fill(email);
+  // The label was renamed "Full name" (no "(optional)") by the i18n pass —
+  // match loosely so either era of the form works.
+  await page.getByLabel(/Full name/).fill(`${role}-${email.split("@")[0]}`);
+  await page.getByLabel(/Email/).fill(email);
   await page.getByLabel("Password", { exact: true }).fill(E2E_PASSWORD);
 
   const roleLabel = role.charAt(0).toUpperCase() + role.slice(1);
@@ -28,7 +30,9 @@ export async function registerUser(
   }
 
   await page.getByRole("checkbox").check();
-  await page.getByRole("button", { name: /register/i }).click();
+  // The submit CTA was renamed "Create account" by the i18n pass — match
+  // either era.
+  await page.getByRole("button", { name: /create account|register/i }).click();
 
   // Wait for the role-based landing page (also settles the hydration race).
   await page.waitForURL(
@@ -100,7 +104,7 @@ export async function createQuizWithQuestions(
     await page.getByLabel("Mode").click();
     await page.getByRole("option", { name: "Assessment" }).click();
   }
-  await page.getByRole("button", { name: /new quiz/i }).click();
+  await page.getByRole("button", { name: /create quiz|new quiz/i }).click();
   await expect(page.getByText(opts.quizTitle, { exact: true })).toBeVisible();
   await page.getByText(opts.quizTitle, { exact: true }).click();
   await expect(page).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
@@ -146,7 +150,7 @@ export async function createQuizWithQuestions(
     const publishButton = page.getByRole("button", { name: /publish/i });
     await expect(publishButton).toBeEnabled();
     await publishButton.click();
-    await expect(page.getByText(/published/i)).toBeVisible();
+    await expect(page.getByText(/^Live/)).toBeVisible();
     await expect(page.getByText("Live", { exact: true })).toBeVisible();
   }
 }
@@ -329,6 +333,37 @@ export async function setFacePeriodic(page: Page, opts: { minMs: number; maxMs: 
   }, opts);
 }
 
+/**
+ * Script the fake tracker's pose state — drives the `second_face` /
+ * `looked_away` advisories and the pipeline's lighting precheck in E2E.
+ */
+export async function setFacePose(
+  page: Page,
+  opts: {
+    yaw?: number;
+    centered?: boolean;
+    faceDetected?: boolean;
+    facesSeen?: number;
+    lighting?: "good" | "too_dark" | "too_bright";
+  },
+) {
+  await page.evaluate((o) => {
+    const ctrl = (window as unknown as {
+      __INNOVISION_FAKE_FACE_CONTROL__?: {
+        setFacePose?(o: {
+          yaw?: number;
+          centered?: boolean;
+          faceDetected?: boolean;
+          facesSeen?: number;
+          lighting?: "good" | "too_dark" | "too_bright";
+        }): void;
+      };
+    }).__INNOVISION_FAKE_FACE_CONTROL__;
+    if (!ctrl?.setFacePose) throw new Error("fake face control lacks setFacePose");
+    ctrl.setFacePose(o);
+  }, opts);
+}
+
 /** Enroll via the face-enroll page (consent + 3-angle capture + submit). */
 export async function enrollViaFacePage(page: Page) {
   await page.goto("/student/face/enroll");
@@ -347,21 +382,33 @@ export async function enrollViaFacePage(page: Page) {
   });
   if (await startBtn.isVisible().catch(() => false)) {
     await startBtn.click();
-    // 3 guided angles (front → left → right); one blink per angle.
-    for (let i = 0; i < 3; i++) {
-      await expect(page.getByText(/Blink now|Waiting for you to blink/)).toBeVisible({ timeout: 10_000 });
+    // 3 guided angles (front → left → right); one blink per angle, synced on
+    // the EXACT per-angle prompt. The wizard also gates each SIDE angle on
+    // head pose — the fake pose stream must turn with the prompt.
+    const angleScript = [
+      { label: "Front", yaw: 0 },
+      { label: "Left", yaw: 25 },
+      { label: "Right", yaw: -25 },
+    ] as const;
+    for (const angle of angleScript) {
+      await setFacePose(page, {
+        yaw: angle.yaw,
+        centered: true,
+        faceDetected: true,
+        facesSeen: 1,
+        lighting: "good",
+      });
+      await expect(
+        page.getByText(new RegExp(`Blink now[^\\n]*${angle.label}`, "i")),
+      ).toBeVisible({ timeout: 15_000 });
       await triggerFaceBlink(page);
-      // The capture advances between angles; wait for the next blink prompt
-      // (or the redirect after the final angle).
-      if (i < 2) {
-        await page
-          .getByText(/Blink now|Waiting for you to blink|Turn your head/)
-          .first()
-          .waitFor({ state: "visible", timeout: 10_000 });
-      }
     }
-    // Capture completes (3 angles) → redirect to /student/quizzes.
-    await page.waitForURL(/\/student\/quizzes/, { timeout: 15_000 });
+    // Capture completes (3 angles) → success panel (the wizard no longer
+    // auto-redirects); land on quizzes for the caller.
+    await expect(
+      page.getByText("Enrolled successfully", { exact: false }),
+    ).toBeVisible({ timeout: 15_000 });
+    await page.goto("/student/quizzes");
   } else {
     // Already enrolled — nothing to do.
     await expect(page.getByText("Face already enrolled", { exact: false })).toBeVisible();
@@ -452,12 +499,14 @@ export async function createAssessmentAndPublish(
 export async function openResults(page: Page, classTitle: string, quizTitle: string) {
   // Return to the class list first (the caller may be on the builder).
   await page.goto("/lecturer/classes");
-  await expect(page.getByRole("heading", { name: "My Classes" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /My Classes|Kelas Saya/i })).toBeVisible();
   await page.getByText(classTitle, { exact: true }).click();
   await expect(page).toHaveURL(/\/lecturer\/classes\/[^/]+$/);
   await page.getByText(quizTitle, { exact: true }).click();
   await expect(page).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
-  await page.getByRole("link", { name: "Results", exact: true }).click();
+  // The entry point moved over time ("Results" header link → "View results"
+  // button on the class card) — match either.
+  await page.getByRole("link", { name: /results/i }).first().click();
   await expect(page).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/results/);
 }
 
@@ -471,7 +520,9 @@ export async function revealQuiz(page: Page, classTitle: string, quizTitle: stri
   const revealButton = page.getByRole("button", { name: /reveal to students/i });
   await expect(revealButton).toBeVisible();
   await revealButton.click();
-  const confirmBtn = page.getByRole("button", { name: /reveal results/i });
+  // The confirm button reuses the same label ("Reveal to students") inside
+  // the dialog — pick the one that is now ENABLED.
+  const confirmBtn = page.getByRole("button", { name: /reveal/i }).last();
   await expect(confirmBtn).toBeEnabled();
   await confirmBtn.click();
   await expect(page.getByText("Results revealed", { exact: true })).toBeVisible({ timeout: 10_000 });

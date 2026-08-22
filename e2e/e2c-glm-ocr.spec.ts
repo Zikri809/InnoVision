@@ -48,7 +48,7 @@ test.describe("E2-GLM — GLM-OCR extraction from a scanned image", () => {
     await expect(page).toHaveURL(/\/lecturer\/classes\/[^/]+$/);
 
     await page.getByLabel("Quiz title").fill("Chapter 1: Motion");
-    await page.getByRole("button", { name: /new quiz/i }).click();
+    await page.getByRole("button", { name: /create quiz|new quiz/i }).click();
     await page.getByText("Chapter 1: Motion", { exact: true }).click();
     await expect(page).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
 

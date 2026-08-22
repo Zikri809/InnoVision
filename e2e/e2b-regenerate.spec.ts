@@ -27,7 +27,7 @@ async function createDraftQuizWithQuestions(page: Page, classTitle: string, quiz
   await expect(page).toHaveURL(/\/lecturer\/classes\/[^/]+$/);
 
   await page.getByLabel("Quiz title").fill(quizTitle);
-  await page.getByRole("button", { name: /new quiz/i }).click();
+  await page.getByRole("button", { name: /create quiz|new quiz/i }).click();
   await page.getByText(quizTitle, { exact: true }).click();
   await expect(page).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
 

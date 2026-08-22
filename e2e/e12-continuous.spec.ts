@@ -51,7 +51,7 @@ test.describe("E12 — continuous verify", () => {
     await lecturerPage.getByLabel("Quiz title").fill(QUIZ_TITLE);
     await lecturerPage.getByLabel("Mode").click();
     await lecturerPage.getByRole("option", { name: "Assessment" }).click();
-    await lecturerPage.getByRole("button", { name: /new quiz/i }).click();
+    await lecturerPage.getByRole("button", { name: /create quiz|new quiz/i }).click();
     await expect(lecturerPage.getByText(QUIZ_TITLE, { exact: true })).toBeVisible();
     await lecturerPage.getByText(QUIZ_TITLE, { exact: true }).click();
     await expect(lecturerPage).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
@@ -67,7 +67,7 @@ test.describe("E12 — continuous verify", () => {
     const publishButton = lecturerPage.getByRole("button", { name: /publish/i });
     await expect(publishButton).toBeEnabled();
     await publishButton.click();
-    await expect(lecturerPage.getByText(/published/i)).toBeVisible();
+    await expect(lecturerPage.getByText(/^Live/)).toBeVisible();
 
     // Student: register + join + enroll + start.
     await registerUser(studentPage, STUDENT_EMAIL, "student", LECTURER_INVITE_CODE);

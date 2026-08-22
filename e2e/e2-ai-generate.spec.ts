@@ -51,7 +51,7 @@ test.describe("E2 — AI quiz from a PDF is editable and publishable", () => {
     await expect(lecturerPage).toHaveURL(/\/lecturer\/classes\/[^/]+$/);
 
     await lecturerPage.getByLabel("Quiz title").fill("Chapter 1: Motion");
-    await lecturerPage.getByRole("button", { name: /new quiz/i }).click();
+    await lecturerPage.getByRole("button", { name: /create quiz|new quiz/i }).click();
     await lecturerPage.getByText("Chapter 1: Motion", { exact: true }).click();
     await expect(lecturerPage).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
 
@@ -107,7 +107,7 @@ test.describe("E2 — AI quiz from a PDF is editable and publishable", () => {
     const publishButton = lecturerPage.getByRole("button", { name: /publish/i });
     await expect(publishButton).toBeEnabled();
     await publishButton.click();
-    await expect(lecturerPage.getByText(/published/i)).toBeVisible();
+    await expect(lecturerPage.getByText(/^Live/)).toBeVisible();
     await expect(lecturerPage.getByText("Live", { exact: true })).toBeVisible();
 
     // ── 5. Student sees the live quiz ───────────────────────────

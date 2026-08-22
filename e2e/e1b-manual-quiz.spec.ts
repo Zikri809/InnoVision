@@ -53,7 +53,7 @@ test.describe("E1b — Manual quiz → publish → visible to student", () => {
     await expect(lecturerPage.getByRole("heading", { name: "E1b Physics" })).toBeVisible();
 
     await lecturerPage.getByLabel("Quiz title").fill("Chapter 1: Motion");
-    await lecturerPage.getByRole("button", { name: /new quiz/i }).click();
+    await lecturerPage.getByRole("button", { name: /create quiz|new quiz/i }).click();
     const quizLink = lecturerPage.getByText("Chapter 1: Motion", { exact: true });
     await expect(quizLink).toBeVisible();
     await quizLink.click();
@@ -97,7 +97,7 @@ test.describe("E1b — Manual quiz → publish → visible to student", () => {
     const publishButton = lecturerPage.getByRole("button", { name: /publish/i });
     await expect(publishButton).toBeEnabled();
     await publishButton.click();
-    await expect(lecturerPage.getByText(/published/i)).toBeVisible();
+    await expect(lecturerPage.getByText(/^Live/)).toBeVisible();
     // The quiz is now Live and questions are locked (read-only banner).
     await expect(lecturerPage.getByText("Live", { exact: true })).toBeVisible();
     await expect(lecturerPage.getByText(/can no longer be edited/i)).toBeVisible();

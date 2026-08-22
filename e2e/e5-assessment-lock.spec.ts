@@ -47,7 +47,7 @@ test.describe("E5 — assessment one-attempt lock", () => {
     await lecturerPage.getByLabel("Quiz title").fill(QUIZ_TITLE);
     await lecturerPage.getByLabel("Mode").click();
     await lecturerPage.getByRole("option", { name: "Assessment" }).click();
-    await lecturerPage.getByRole("button", { name: /new quiz/i }).click();
+    await lecturerPage.getByRole("button", { name: /create quiz|new quiz/i }).click();
     await expect(lecturerPage.getByText(QUIZ_TITLE, { exact: true })).toBeVisible();
     await lecturerPage.getByText(QUIZ_TITLE, { exact: true }).click();
     await expect(lecturerPage).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
@@ -68,7 +68,7 @@ test.describe("E5 — assessment one-attempt lock", () => {
     const publishButton = lecturerPage.getByRole("button", { name: /publish/i });
     await expect(publishButton).toBeEnabled();
     await publishButton.click();
-    await expect(lecturerPage.getByText(/published/i)).toBeVisible();
+    await expect(lecturerPage.getByText(/^Live/)).toBeVisible();
 
     // â”€â”€ 2. Student A: register + join + start + answer + submit â”€â”€
     await registerUser(studentAPage, STUDENT_A_EMAIL, "student", LECTURER_INVITE_CODE);

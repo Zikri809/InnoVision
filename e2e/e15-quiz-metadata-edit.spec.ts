@@ -23,7 +23,7 @@ test.describe("E15 — Quiz Metadata Editing (Title, Mode, Time Limit)", () => {
     await page.getByLabel("Mode").click();
     await page.getByRole("option", { name: "Assessment" }).click();
     await page.getByLabel("Time limit (minutes)").fill("30");
-    await page.getByRole("button", { name: /new quiz/i }).click();
+    await page.getByRole("button", { name: /create quiz|new quiz/i }).click();
 
     await expect(page.getByText(INITIAL_QUIZ_TITLE, { exact: true })).toBeVisible();
     await page.getByText(INITIAL_QUIZ_TITLE, { exact: true }).click();

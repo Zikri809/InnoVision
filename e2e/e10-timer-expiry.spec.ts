@@ -41,7 +41,7 @@ async function createTimedAssessment(
   await expect(page).toHaveURL(/\/lecturer\/classes\/[^/]+$/);
   await page.getByLabel("Quiz title").fill(opts.quizTitle);
   await page.getByLabel("Mode").click();
-  await page.getByRole("button", { name: /new quiz/i }).click();
+  await page.getByRole("button", { name: /create quiz|new quiz/i }).click();
   await expect(page.getByText(opts.quizTitle, { exact: true })).toBeVisible();
   await page.getByText(opts.quizTitle, { exact: true }).click();
   await expect(page).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
@@ -71,7 +71,7 @@ async function createTimedAssessment(
   const publishButton = page.getByRole("button", { name: /publish/i });
   await expect(publishButton).toBeEnabled();
   await publishButton.click();
-  await expect(page.getByText(/published/i)).toBeVisible();
+  await expect(page.getByText(/^Live/)).toBeVisible();
   return quizId;
 }
 
