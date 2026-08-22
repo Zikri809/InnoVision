@@ -302,6 +302,9 @@ export class FakeSupabase {
     if (name === "pause_session") {
       return this._pauseSession(args);
     }
+    if (name === "report_session_advisory") {
+      return this._reportSessionAdvisory(args);
+    }
     if (name === "unlock_session") {
       return this._unlockSession(args);
     }
@@ -815,23 +818,26 @@ export class FakeSupabase {
     const nonce = String(args?.p_nonce ?? "");
     if (session.verify_nonce !== nonce) return { data: { error: "nonce_mismatch" }, error: null };
 
-    // Compute `matched` from CompreFace metadata + SQL constants (mirror 0010):
-    // p_subject must equal the caller's uid AND similarity ≥ 0.5 AND (top −
-    // second) ≥ 0.15. No `p_matched` parameter exists — never caller-supplied.
+    // Compute `matched` from per-frame votes + SQL constants (mirror 0020):
+    // p_subject must equal the caller's uid AND a STRICT MAJORITY of the
+    // submitted similarities ≥ 0.5. No `p_matched` parameter exists — never
+    // caller-supplied.
     const subject = String(args?.p_subject ?? "");
-    const similarity = Number(args?.p_similarity ?? 0);
-    const secondSimilarity = args?.p_second_similarity == null
-      ? null
-      : Number(args?.p_second_similarity);
-    const marginOk = secondSimilarity == null || similarity - secondSimilarity >= 0.15;
-    const matched = subject === studentId && similarity >= 0.5 && marginOk;
-    const distance = 1 - similarity;
+    const similarities = Array.isArray(args?.p_similarities)
+      ? (args.p_similarities as unknown[]).map((s) => Number(s ?? 0))
+      : [];
+    let hits = 0;
+    for (const s of similarities) if (s >= 0.5) hits++;
+    const matched =
+      subject === studentId && similarities.length > 0 && hits * 2 > similarities.length;
+    const distance = similarities.length > 0 ? 1 - Math.max(...similarities) : null;
 
     // Advisory flags: suspected_replay = the same frame hash as the previous
-    // check (server-computed sha256 of the frame, never caller-supplied);
-    // too_frequent = a previous check exists.
+    // check (server-computed over the concatenated frames); too_frequent = a
+    // previous check exists.
     const checks = (this.tables["face_checks"] ?? []).filter((c) => c.session_id === sessionId);
-    const frameHash = `h-${String(args?.p_frame ?? "")}`;
+    const frames = Array.isArray(args?.p_frames) ? (args.p_frames as unknown[]) : [];
+    const frameHash = `h-${frames.join("|")}`;
     const prevHash = checks[checks.length - 1]?.frame_hash;
     const suspectedReplay = frameHash !== "h-" && frameHash === prevHash;
     const tooFrequent = checks.length > 0;
@@ -906,17 +912,79 @@ export class FakeSupabase {
   private async _pauseSession(args?: Record<string, unknown>) {
     if (this.rpcResult.data !== null || this.rpcResult.error !== null) return this.rpcResult;
     const sessionId = String(args?.p_session_id);
+    const reason = args?.p_reason === undefined ? "hand_loss" : String(args.p_reason);
     const studentId = this.user?.id ?? "";
     const session = (this.tables["quiz_sessions"] ?? []).find(
       (s) => s.id === sessionId && s.student_id === studentId,
     );
     if (!session) return { data: { error: "not_owner" }, error: null };
+    if (reason !== "hand_loss" && reason !== "focus_lost") {
+      return { data: { error: "invalid_reason" }, error: null };
+    }
     if (session.mode !== "assessment") return { data: { error: "not_assessment" }, error: null };
     if (session.status === "completed" || session.status === "flagged") {
       return { data: { error: "session_not_active" }, error: null };
     }
+    let flagged = false;
+    if (reason === "focus_lost") {
+      session.focus_pause_count =
+        ((session.focus_pause_count as number | undefined) ?? 0) + 1;
+      flagged = (session.focus_pause_count as number) >= 3;
+      if (flagged) {
+        this.tables["audit_events"] ??= [];
+        this.tables["audit_events"].push({
+          id: randomUuid(),
+          actor_id: studentId,
+          subject_id: studentId,
+          action: "auto_flag_focus_loss",
+          metadata: { focus_pause_count: session.focus_pause_count },
+          created_at: "2026-01-01T00:00:00Z",
+        });
+      }
+    }
+    if (flagged) {
+      session.status = "flagged";
+      return { data: { sessionStatus: "flagged" }, error: null };
+    }
     if (session.status === "active") session.status = "paused";
     return { data: { sessionStatus: "paused" }, error: null };
+  }
+
+  private async _reportSessionAdvisory(args?: Record<string, unknown>) {
+    if (this.rpcResult.data !== null || this.rpcResult.error !== null) return this.rpcResult;
+    const sessionId = String(args?.p_session_id);
+    const type = String(args?.p_type);
+    const VALID = ["second_face", "looked_away", "voice_activity", "headset_active"];
+    const studentId = this.user?.id ?? "";
+    const session = (this.tables["quiz_sessions"] ?? []).find(
+      (s) => s.id === sessionId && s.student_id === studentId,
+    );
+    if (!VALID.includes(type)) return { data: { error: "invalid_type" }, error: null };
+    if (
+      !session ||
+      session.mode !== "assessment" ||
+      !(session.status === "active" || session.status === "paused")
+    ) {
+      return { data: { error: "not_owner" }, error: null };
+    }
+    this.tables["session_advisories"] ??= [];
+    const existing = this.tables["session_advisories"].find(
+      (a) => a.session_id === sessionId && a.adv_type === type,
+    );
+    if (existing) {
+      existing.occurrences = ((existing.occurrences as number) ?? 1) + 1;
+      existing.last_seen_at = new Date().toISOString();
+    } else {
+      this.tables["session_advisories"].push({
+        id: randomUuid(),
+        session_id: sessionId,
+        adv_type: type,
+        first_seen_at: new Date().toISOString(),
+        last_seen_at: new Date().toISOString(),
+        occurrences: 1,
+      });
+    }
+    return { data: { ok: true }, error: null };
   }
 
   private async _unlockSession(args?: Record<string, unknown>) {

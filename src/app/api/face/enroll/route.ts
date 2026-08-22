@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { requireStudent } from "@/lib/classes/guards";
 import { rateLimit } from "@/lib/classes/rate-limit";
 import { EnrollSchema } from "@/lib/face/schemas";
-import { ENROLL_ANGLE_YAW_RANGE, MAX_FRAME_BASE64_CHARS } from "@/lib/face/constants";
+import { MAX_FRAME_BASE64_CHARS } from "@/lib/face/constants";
 import { mapFaceError } from "@/lib/face/rpc-mapping";
 import * as compreface from "@/lib/face/server/compreface-client";
 import {
@@ -31,8 +31,8 @@ const ENROLL_RATE = { limit: 5, windowMs: 60 * 1000 };
  *
  * Flow (L9/L10):
  *  1. Validate 3 frames (front / left / right), each ≤ MAX_FRAME_BASE64_CHARS.
- *  2. Per frame: CompreFace `/detect` → validate pose (front |yaw|<25°,
- *     left +25..60°, right -60..-25°). Reject → 400 pose_invalid.
+ *  2. Per frame: CompreFace `/detect` → validate pose (front |yaw| ≤ 30°,
+ *     sides 10° ≤ |yaw| ≤ 75°). Reject → 400 pose_invalid.
  *  3. Duplicate check: CompreFace `/recognize` per frame → best NON-self match
  *     (subject ≠ auth.uid()) with similarity ≥ FACE_SUSPICION_MIN (0.45,
  *     applied in the RPC). Passed to `enroll_face` as p_duplicate_*.
@@ -81,11 +81,11 @@ export async function POST(request: Request) {
   }
 
   const [front, left, right] = parsed.data.frames;
-  const SIDE = ENROLL_ANGLE_YAW_RANGE; // { min: 25, max: 60 } — the side-angle magnitude
-  const angles: { frame: string; expectedYaw: { min: number; max: number } }[] = [
-    { frame: front, expectedYaw: { min: -SIDE.min, max: SIDE.min } },
-    { frame: left, expectedYaw: { min: SIDE.min, max: SIDE.max } },
-    { frame: right, expectedYaw: { min: -SIDE.max, max: -SIDE.min } },
+  // Pose validation below enforces: front |yaw| ≤ 30°; sides 10° ≤ |yaw| ≤ 75°.
+  const angles: { frame: string }[] = [
+    { frame: front },
+    { frame: left },
+    { frame: right },
   ];
 
   // If a prior consent-revoke left a CompreFace subject pending deletion

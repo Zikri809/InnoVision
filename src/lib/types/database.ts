@@ -231,6 +231,58 @@ export type Database = {
           },
         ]
       }
+      incident_clips: {
+        Row: {
+          duration_ms: number
+          id: string
+          reason: string
+          recorded_from: string
+          recorded_to: string
+          session_id: string
+          storage_path: string
+        }
+        Insert: {
+          duration_ms?: number
+          id?: string
+          reason: string
+          recorded_from?: string
+          recorded_to?: string
+          session_id: string
+          storage_path: string
+        }
+        Update: {
+          duration_ms?: number
+          id?: string
+          reason?: string
+          recorded_from?: string
+          recorded_to?: string
+          session_id?: string
+          storage_path?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "incident_clips_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "lecturer_session_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "incident_clips_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "quiz_sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "incident_clips_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "student_session_view"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           consent_given_at: string | null
@@ -320,6 +372,7 @@ export type Database = {
           face_exempt: boolean
           face_fail_streak: number
           face_unavailable_at: string | null
+          focus_pause_count: number
           id: string
           last_activity_at: string
           mode: Database["public"]["Enums"]["quiz_mode"]
@@ -336,6 +389,7 @@ export type Database = {
           face_exempt?: boolean
           face_fail_streak?: number
           face_unavailable_at?: string | null
+          focus_pause_count?: number
           id?: string
           last_activity_at?: string
           mode: Database["public"]["Enums"]["quiz_mode"]
@@ -352,6 +406,7 @@ export type Database = {
           face_exempt?: boolean
           face_fail_streak?: number
           face_unavailable_at?: string | null
+          focus_pause_count?: number
           id?: string
           last_activity_at?: string
           mode?: Database["public"]["Enums"]["quiz_mode"]
@@ -454,6 +509,55 @@ export type Database = {
             columns: ["created_by"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      session_advisories: {
+        Row: {
+          adv_type: string
+          first_seen_at: string
+          id: string
+          last_seen_at: string
+          occurrences: number
+          session_id: string
+        }
+        Insert: {
+          adv_type: string
+          first_seen_at?: string
+          id?: string
+          last_seen_at?: string
+          occurrences?: number
+          session_id: string
+        }
+        Update: {
+          adv_type?: string
+          first_seen_at?: string
+          id?: string
+          last_seen_at?: string
+          occurrences?: number
+          session_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "session_advisories_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "lecturer_session_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "session_advisories_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "quiz_sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "session_advisories_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "student_session_view"
             referencedColumns: ["id"]
           },
         ]
@@ -613,6 +717,7 @@ export type Database = {
           face_exempt: boolean | null
           face_fail_streak: number | null
           face_unavailable_at: string | null
+          focus_pause_count: number | null
           id: string | null
           last_activity_at: string | null
           mode: Database["public"]["Enums"]["quiz_mode"] | null
@@ -627,6 +732,7 @@ export type Database = {
           face_exempt?: boolean | null
           face_fail_streak?: number | null
           face_unavailable_at?: string | null
+          focus_pause_count?: number | null
           id?: string | null
           last_activity_at?: string | null
           mode?: Database["public"]["Enums"]["quiz_mode"] | null
@@ -641,6 +747,7 @@ export type Database = {
           face_exempt?: boolean | null
           face_fail_streak?: number | null
           face_unavailable_at?: string | null
+          focus_pause_count?: number | null
           id?: string | null
           last_activity_at?: string | null
           mode?: Database["public"]["Enums"]["quiz_mode"] | null
@@ -974,33 +1081,23 @@ export type Database = {
         Returns: boolean
       }
       join_class: { Args: { code: string }; Returns: Json }
-      pause_session: { Args: { p_session_id: string }; Returns: Json }
+      pause_session: {
+        Args: { p_reason?: string; p_session_id: string }
+        Returns: Json
+      }
       prune_expired_data: { Args: never; Returns: Json }
-      record_face_check:
-        | {
-            Args: {
-              p_claimed_distance?: number
-              p_claimed_matched?: boolean
-              p_client_nonce?: string
-              p_frame: string
-              p_session_id: string
-              p_trigger?: Database["public"]["Enums"]["face_check_trigger"]
-            }
-            Returns: Json
-          }
-        | {
-            Args: {
-              p_frame: string
-              p_nonce: string
-              p_second_similarity: number
-              p_second_subject: string
-              p_session_id: string
-              p_similarity: number
-              p_subject: string
-              p_trigger: Database["public"]["Enums"]["face_check_trigger"]
-            }
-            Returns: Json
-          }
+      prune_expired_incident_clips: { Args: never; Returns: Json }
+      record_face_check: {
+        Args: {
+          p_frames: string[]
+          p_nonce: string
+          p_session_id: string
+          p_similarities: number[]
+          p_subject: string
+          p_trigger: Database["public"]["Enums"]["face_check_trigger"]
+        }
+        Returns: Json
+      }
       reject_face_enrollment: { Args: { p_student_id: string }; Returns: Json }
       reorder_questions: {
         Args: { p_ordered_ids: string[]; p_quiz_id: string }
@@ -1033,6 +1130,10 @@ export type Database = {
         }
       }
       report_face_unavailable: { Args: { p_session_id: string }; Returns: Json }
+      report_session_advisory: {
+        Args: { p_session_id: string; p_type: string }
+        Returns: Json
+      }
       reset_session: { Args: { p_session_id: string }; Returns: Json }
       revoke_face_consent: { Args: never; Returns: Json }
       safe_audit_uuid: { Args: { p_value: string }; Returns: string }

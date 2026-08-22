@@ -7,11 +7,27 @@ import { resolveVerifyOutcome } from "@/lib/face/outcome";
 import { recoverFlow, recoveryLanding } from "@/lib/face/recovery";
 import { getFakeFaceControl } from "@/lib/face/fake-seam";
 import {
+  FOCUS_BLUR_DEBOUNCE_MS,
   FLAGGED_POLL_MS,
+  LIGHTING_RETRY_DELAY_MS,
   LIVENESS_TIMEOUT_MS,
+  MIN_VERIFY_INTERVAL_MS,
   PERIODIC_MAX_MS,
   PERIODIC_MIN_MS,
+  VERIFY_FRAMES_PER_CHECK,
+  VERIFY_FRAME_SPACING_MS,
+  VERIFY_SECONDARY_CAPTURE_TIMEOUT_MS,
 } from "@/lib/face/constants";
+
+/**
+ * Client-side floor between verify POSTs (latest-wins deferral). Below the
+ * route's 10/min limit so Q-transition + periodic + catch-up bursts never
+ * spend the budget into a bricking 429.
+ */
+const MIN_CLIENT_VERIFY_GAP_MS = Math.min(MIN_VERIFY_INTERVAL_MS, 8000);
+
+/** Bounded bad-lighting deferrals before the check proceeds unconditionally. */
+const LIGHTING_RETRIES_MAX = 2;
 
 export type FacePipelinePhase =
   | "question"
@@ -21,6 +37,13 @@ export type FacePipelinePhase =
   | "submitted"
   | "timeUp"
   | "dead";
+
+/**
+ * Why the session is currently paused — the overlay copy differs (a
+ * focus-loss pause means "you left the exam window", not "look at the
+ * camera"), and it clears on any non-paused status.
+ */
+export type PausedReason = "face" | "focus_lost";
 
 export type FacePipelineProps = {
   sessionId: string;
@@ -65,7 +88,14 @@ export type FacePipelineProps = {
  *    re-verify BEFORE clearing the overlay (a failing re-verify re-pauses).
  *  - Hand-loss pause: `onHandLossPause` → POST /api/sessions/[id]/pause
  *    (server-side). A re-shown hand can't answer before blink-recovery.
+ *  - Focus-loss pause: a DEBOUNCED window blur while visible POSTs pause
+ *    with `reason:'focus_lost'`; the RPC escalates to flagged at the 3rd
+ *    confirmed loss (focus_pause_count). Recovery reuses the blink flow —
+ *    clicking Recover refocuses the exam window.
  *  - Tab-hide: cadence paused hidden; catch-up verify on return.
+ *  - Multi-frame verify: each check captures up to 3 frames ~500ms apart;
+ *    the server records ONE row decided by strict majority (a transient
+ *    blur/glance fails one frame, not the check).
  *  - Terminal phases (submitted/dead) cancel cadence/poll/pendingVerify.
  *
  * Following the P6 pure-logic split: this hook is the CLIENT LOGIC; the
@@ -101,6 +131,7 @@ export function useFacePipeline(props: FacePipelineProps) {
     if (!enrolled || !consentGiven) return "gate";
     return initialFaceStatus === "ready" ? "ready" : "gate";
   });
+  const [pausedReason, setPausedReason] = useState<PausedReason>("face");
 
   // Latest-ref mirrors (synced in an effect — React Compiler-safe).
   const statusRef = useRef(status);
@@ -118,6 +149,16 @@ export function useFacePipeline(props: FacePipelineProps) {
 
   const nonceRef = useRef(initialNonce);
   const verifyLock = useRef(false);
+  // Client-side POST pacing: rapid triggers (fast Q-transitions + periodic +
+  // catch-up) must not spend the route's 10/min budget into 429s.
+  const lastVerifyPostAtRef = useRef(0);
+  const minGapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const deferredTriggerRef = useRef<"start" | "question" | "periodic" | null>(null);
+  // One bounded bad-lighting deferral per check (never an infinite loop);
+  // tracked so lifecycle cleanup can cancel it.
+  const lightingRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Focus-loss machinery: debounce timer + the listener teardown.
+  const blurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // `pendingVerifyRef` stores the deferred TRIGGER (latest-wins).
   const pendingVerifyRef = useRef<"start" | "question" | "periodic" | null>(null);
   const nonceRetriedRef = useRef(false);
@@ -156,6 +197,9 @@ export function useFacePipeline(props: FacePipelineProps) {
     statusRef.current = s;
     setStatus(s);
     onFaceStatusRef.current(s);
+    // The paused overlay copy tracks WHY the student is paused; any
+    // non-paused status resets the default (face) reason.
+    if (s !== "paused" && s !== "recovering") setPausedReason("face");
   }
 
   // ── Flagged poll (8s; survives timeUp while flagged) ───────────
@@ -173,6 +217,9 @@ export function useFacePipeline(props: FacePipelineProps) {
           return;
         }
         const body = await res.json().catch(() => ({}));
+        // StrictMode/effect-rerun guard: a superseded poll chain must not
+        // resume its POST work after a newer chain took over the timer.
+        if (disposedRef.current || isTerminalRef.current) return;
         if (body.status === "active") {
           nonceRef.current = body.verify_nonce ?? nonceRef.current;
           if (body.face_exempt === true) {
@@ -182,13 +229,15 @@ export function useFacePipeline(props: FacePipelineProps) {
           // Fire the re-verify BEFORE clearing the overlay (a failing
           // re-verify re-pauses/re-flags — E7 pins this).
           setStatusBoth("recovering");
+          const pollFrame = await captureOrNull();
           const outcome = await postVerifyInternal(
-            await captureOrNull(),
+            [pollFrame ?? ""],
             "periodic",
             nonceRef.current,
             false,
             true, // fromFlaggedPoll — a stale nonce must re-poll, not clear the overlay
           );
+          if (disposedRef.current || isTerminalRef.current) return;
           if (outcome === "ready") {
             setStatusBoth("ready");
             scheduleCadence();
@@ -234,6 +283,21 @@ export function useFacePipeline(props: FacePipelineProps) {
     const tracker = trackerRef.current;
     if (!tracker) return null;
     return tracker.captureFrame();
+  }
+
+  /**
+   * Secondary vote frame: a plain capture polled briefly. Returns null when
+   * no frame is available in the window — the caller OMITS the vote rather
+   * than counting a fail (capture flakiness ≠ cheating).
+   */
+  async function captureSecondary(tracker: IFaceTracker): Promise<string | null> {
+    const start = Date.now();
+    let frame = await tracker.captureFrame();
+    while (!frame && Date.now() - start < VERIFY_SECONDARY_CAPTURE_TIMEOUT_MS && !disposedRef.current) {
+      await new Promise((r) => setTimeout(r, 100));
+      frame = await tracker.captureFrame();
+    }
+    return frame;
   }
 
   // Record a mid-session camera/face outage to the server ONCE per session
@@ -283,27 +347,32 @@ export function useFacePipeline(props: FacePipelineProps) {
    * FaceStatus or null when the pipeline shouldn't change state.
    */
   async function postVerifyInternal(
-    frame: string | null,
+    frames: string[],
     trigger: "start" | "question" | "periodic",
     nonce: string,
     allowNonceRetry: boolean,
     fromFlaggedPoll = false,
   ): Promise<FaceStatus | null> {
     if (disposedRef.current || isTerminalRef.current) return null;
-    // CompreFace migration: an empty sentinel frame → the route calls CompreFace
-    // which returns no subject → the RPC computes matched=false → fail row.
-    const payloadFrame = frame ?? "";
+    // CompreFace migration: empty sentinel frames → the route counts them as
+    // FAIL votes; the RPC computes matched from the strict majority.
+    const payloadFrames = frames.length > 0 ? frames.slice(0, VERIFY_FRAMES_PER_CHECK) : [""];
     let res: Response;
+    // Async POST path — never called during render.
+    // eslint-disable-next-line react-hooks/purity
+    lastVerifyPostAtRef.current = Date.now();
     try {
       res = await fetch(`/api/face/verify`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ frame: payloadFrame, trigger, nonce, sessionId }),
+        body: JSON.stringify({ frames: payloadFrames, trigger, nonce, sessionId }),
       });
     } catch {
       // Network error — re-schedule cadence (bounded retry, no hot-loop).
+      // Only while ready: a flagged-poll caller ('recovering') must not arm
+      // cadence outside the ready invariant.
       if (trigger === "start") setStatusBoth("gate");
-      else scheduleCadence();
+      else if (statusRef.current === "ready") scheduleCadence();
       return null;
     }
     let body: Record<string, unknown> = {};
@@ -322,6 +391,15 @@ export function useFacePipeline(props: FacePipelineProps) {
     if (res.status === 400) {
       setStatusBoth("paused");
       return "paused";
+    }
+    // 429 — the verify route's limiter (fast quizzes: Q-transitions +
+    // periodic + catch-up can exceed 10/min). Staying 'ready' and re-arming
+    // the cadence is correct: a busy server is not an outage, and mapping to
+    // `unavailable` would brick proctoring for the rest of the attempt with
+    // NO recovery path (nothing leaves 'unavailable' automatically).
+    if (res.status === 429) {
+      scheduleCadence();
+      return null;
     }
     if (res.status >= 500) {
       setStatusBoth("unavailable");
@@ -355,7 +433,7 @@ export function useFacePipeline(props: FacePipelineProps) {
       } catch {
         // fall through to surface state
       }
-      const retried = await postVerifyInternal(payloadFrame, trigger, nonceRef.current, false, fromFlaggedPoll);
+      const retried = await postVerifyInternal(payloadFrames, trigger, nonceRef.current, false, fromFlaggedPoll);
       nonceRetriedRef.current = false;
       return retried;
     }
@@ -443,7 +521,10 @@ export function useFacePipeline(props: FacePipelineProps) {
   }
 
   // ── Verify core ────────────────────────────────────────────────
-  async function runVerify(trigger: "start" | "question" | "periodic") {
+  async function runVerify(
+    trigger: "start" | "question" | "periodic",
+    lightingRetries = 0,
+  ) {
     if (isTerminalRef.current) return;
     if (verifyLock.current) {
       // A verify is in flight — defer the new one (latest-wins), fired exactly
@@ -466,6 +547,33 @@ export function useFacePipeline(props: FacePipelineProps) {
       return;
     }
 
+    // Client-side pacing: if the last POST was moments ago, fold this trigger
+    // into a single deferred re-run after the remaining gap (one timer,
+    // latest-wins) instead of burning rate budget on back-to-back POSTs.
+    if (trigger !== "start") {
+      // Async verify path — never called during render.
+      // eslint-disable-next-line react-hooks/purity
+      const sincePost = Date.now() - lastVerifyPostAtRef.current;
+      if (sincePost < MIN_CLIENT_VERIFY_GAP_MS) {
+        deferredTriggerRef.current = trigger;
+        if (minGapTimerRef.current) clearTimeout(minGapTimerRef.current);
+        minGapTimerRef.current = setTimeout(() => {
+          minGapTimerRef.current = null;
+          const deferred = deferredTriggerRef.current;
+          deferredTriggerRef.current = null;
+          if (
+            deferred &&
+            !disposedRef.current &&
+            !isTerminalRef.current &&
+            statusRef.current === "ready"
+          ) {
+            void runVerify(deferred, LIGHTING_RETRIES_MAX);
+          }
+        }, MIN_CLIENT_VERIFY_GAP_MS - sincePost);
+        return;
+      }
+    }
+
     verifyLock.current = true;
     // Capture the current question id for the fire-time re-check.
     const questionIdAtStart = lastQuestionIdRef.current;
@@ -478,33 +586,92 @@ export function useFacePipeline(props: FacePipelineProps) {
           await new Promise((r) => setTimeout(r, 100));
         }
       }
-      if (disposedRef.current) return;
+      if (disposedRef.current || trackerRef.current !== tracker) return;
 
-      let frame: string | null = null;
+      // Lighting precheck: the tracker already classifies face-ROI luminance
+      // every 250ms — a doomed dark/bright frame would land as a FALSE fail
+      // row. Defer THIS check (bounded by LIGHTING_RETRIES_MAX) and retry
+      // shortly; `start` (the gate) always proceeds so the student is never
+      // soft-locked by their desk lamp. The retry flag travels with the
+      // invocation so a DIFFERENT trigger firing inside the wait window
+      // still gets its own full precheck.
+      const health =
+        typeof tracker.getFaceHealth === "function" ? tracker.getFaceHealth() : null;
+      if (
+        health &&
+        health.lightingOk === false &&
+        trigger !== "start" &&
+        lightingRetries < LIGHTING_RETRIES_MAX
+      ) {
+        if (lightingRetryTimerRef.current) clearTimeout(lightingRetryTimerRef.current);
+        lightingRetryTimerRef.current = setTimeout(() => {
+          lightingRetryTimerRef.current = null;
+          if (disposedRef.current || isTerminalRef.current || statusRef.current !== "ready") return;
+          // The moment may have passed (student reached feedback): fall back
+          // to the cadence instead of photographing the wrong moment.
+          if (
+            !shouldScheduleFaceCheck(
+              statusRef.current,
+              questionVisibleRef.current ? "question" : "feedback",
+            )
+          ) {
+            scheduleCadence();
+            return;
+          }
+          void runVerify(trigger, lightingRetries + 1);
+        }, LIGHTING_RETRY_DELAY_MS);
+        return;
+      }
+
+      // ── Multi-frame capture (2-of-3 majority voting) ─────────────
+      // Primary: best-frame selection (centered, open eyes, good lighting)
+      // within 1.5s; fallback: plain capture polled for 800ms; final: one
+      // 400ms-delayed attempt.
+      let primary: string | null = null;
       if (typeof tracker.captureBestFrame === "function") {
-        frame = await tracker.captureBestFrame({ maxWaitMs: 1500, requireCentered: true, requireOpenEyes: true });
+        primary = await tracker.captureBestFrame({ maxWaitMs: 1500, requireCentered: true, requireOpenEyes: true });
       } else {
-        frame = await tracker.captureFrame();
+        primary = await tracker.captureFrame();
         const startPoll = Date.now();
-        while (!frame && Date.now() - startPoll < 800 && !disposedRef.current) {
+        while (!primary && Date.now() - startPoll < 800 && !disposedRef.current) {
           await new Promise((r) => setTimeout(r, 100));
-          frame = await tracker.captureFrame();
+          primary = await tracker.captureFrame();
         }
       }
-      if (disposedRef.current) return;
-
-      // If frame is still null, give one final brief fallback poll before sending empty sentinel
-      if (!frame) {
+      if (disposedRef.current || trackerRef.current !== tracker) return;
+      if (!primary) {
         await new Promise((r) => setTimeout(r, 400));
-        if (disposedRef.current) return;
-        frame = await tracker.captureFrame();
+        if (disposedRef.current || trackerRef.current !== tracker) return;
+        primary = await tracker.captureFrame();
       }
 
-      // Persistent camera-null mid-quiz: indistinguishable from a wrong face by
-      // design — POST a sentinel empty frame → CompreFace returns no subject →
-      // RPC computes matched=false → the null lands as a fail row in the FLAT
-      // window (integrity-conservative; exempt recovery).
-      await postVerifyInternal(frame, trigger, nonceRef.current, true);
+      // Persistent camera-null mid-quiz: indistinguishable from a wrong face
+      // by design — POST the sentinel ([""]) → the RPC records a FAIL row
+      // (integrity-conservative; exempt recovery). A DEAD tracker never
+      // posts: trackerRef identity was re-checked above, so a mid-capture
+      // loop death bails here instead of letting a stale 'ready' overwrite
+      // the 'unavailable' degradation.
+      if (!primary) {
+        await postVerifyInternal([""], trigger, nonceRef.current, true);
+        return;
+      }
+
+      // Secondary frames: quick plain captures spaced ~500ms apart so the
+      // vote spans real time (a transient blur/glance fails ONE frame, not
+      // the check). A failed secondary capture is OMITTED — majority runs
+      // over the frames actually submitted (capture flakiness is not a fail
+      // vote).
+      const frames: string[] = [primary];
+      for (let i = 1; i < VERIFY_FRAMES_PER_CHECK && !disposedRef.current; i++) {
+        await new Promise((r) => setTimeout(r, VERIFY_FRAME_SPACING_MS));
+        if (disposedRef.current || trackerRef.current !== tracker) return;
+        const secondary = await captureSecondary(tracker);
+        if (trackerRef.current !== tracker) return;
+        if (secondary) frames.push(secondary);
+      }
+      if (disposedRef.current) return;
+
+      await postVerifyInternal(frames, trigger, nonceRef.current, true);
     } finally {
       verifyLock.current = false;
       if (pendingVerifyRef.current && !disposedRef.current && !isTerminalRef.current) {
@@ -574,6 +741,43 @@ export function useFacePipeline(props: FacePipelineProps) {
     }
   }
 
+  // ── Focus-loss pause (server-side, debounced window blur) ──────
+  // The exam window stayed VISIBLE but lost OS focus (clicked another app /
+  // second-monitor app). Per policy: pause + overlay; the 3rd confirmed loss
+  // flags server-side (pause_session escalates via focus_pause_count).
+  async function focusLossPause() {
+    if (disposedRef.current || isTerminalRef.current) return;
+    if (statusRef.current !== "ready") return;
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/pause`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ reason: "focus_lost" }),
+      });
+      const body = await res.ok ? await res.json().catch(() => ({})) : ({} as Record<string, unknown>);
+      // The RPC is authoritative: it may have FLAGGED at the 3rd strike.
+      const serverStatus = (body as { sessionStatus?: string }).sessionStatus;
+      if (serverStatus === "flagged") {
+        setStatusBoth("flagged");
+        startFlaggedPoll();
+        return;
+      }
+    } catch {
+      // network — still pause locally so input is blocked until re-verify
+    }
+    if (statusRef.current === "ready") {
+      setPausedReason("focus_lost");
+      setStatusBoth("paused");
+    }
+  }
+
+  function clearBlurTimer() {
+    if (blurTimerRef.current) {
+      clearTimeout(blurTimerRef.current);
+      blurTimerRef.current = null;
+    }
+  }
+
   // ── Tracker setter (called by the parent after boot) ───────────
   function setTracker(tracker: IFaceTracker | null) {
     trackerRef.current = tracker;
@@ -594,6 +798,8 @@ export function useFacePipeline(props: FacePipelineProps) {
     if (isTerminalRef.current) {
       if (cadenceTimerRef.current) clearTimeout(cadenceTimerRef.current);
       if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+      if (minGapTimerRef.current) clearTimeout(minGapTimerRef.current);
+      if (lightingRetryTimerRef.current) clearTimeout(lightingRetryTimerRef.current);
       pendingVerifyRef.current = null;
       return;
     }
@@ -610,7 +816,10 @@ export function useFacePipeline(props: FacePipelineProps) {
       disposedRef.current = true;
       if (cadenceTimerRef.current) clearTimeout(cadenceTimerRef.current);
       if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+      if (minGapTimerRef.current) clearTimeout(minGapTimerRef.current);
+      if (lightingRetryTimerRef.current) clearTimeout(lightingRetryTimerRef.current);
       pendingVerifyRef.current = null;
+      deferredTriggerRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, quizMode]);
@@ -621,6 +830,8 @@ export function useFacePipeline(props: FacePipelineProps) {
     if (isTerminal) {
       if (cadenceTimerRef.current) clearTimeout(cadenceTimerRef.current);
       if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+      if (minGapTimerRef.current) clearTimeout(minGapTimerRef.current);
+      if (lightingRetryTimerRef.current) clearTimeout(lightingRetryTimerRef.current);
       pendingVerifyRef.current = null;
     }
   }, [isTerminal]);
@@ -635,6 +846,9 @@ export function useFacePipeline(props: FacePipelineProps) {
           clearTimeout(cadenceTimerRef.current);
           cadenceTimerRef.current = null;
         }
+        // A tab switch also blurs the window — the visibility path owns it
+        // (catch-up verify on return); never double-pause via focus-loss.
+        clearBlurTimer();
       } else {
         // Catch-up: if ready, verify immediately (a long-hidden student
         // shouldn't wait a full cadence). Other statuses need no catch-up —
@@ -649,9 +863,40 @@ export function useFacePipeline(props: FacePipelineProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Focus handling: visible-but-blurred window → debounced pause. The exam
+  // window is still on screen (visibilitychange does NOT fire), so this is
+  // the ONLY signal that the student clicked into another app — including an
+  // app on a second monitor. Transient blurs (OS screenshot tool, IME,
+  // notification toasts) refocus inside FOCUS_BLUR_DEBOUNCE_MS and never
+  // pause. Armed only while `ready` — gate/paused/flagged have their own
+  // flows, and terminal phases must not fire requests.
+  useEffect(() => {
+    const onBlur = () => {
+      if (document.hidden || isTerminalRef.current) return;
+      if (statusRef.current !== "ready") return;
+      clearBlurTimer();
+      blurTimerRef.current = setTimeout(() => {
+        blurTimerRef.current = null;
+        void focusLossPause();
+      }, FOCUS_BLUR_DEBOUNCE_MS);
+    };
+    const onFocus = () => {
+      clearBlurTimer();
+    };
+    window.addEventListener("blur", onBlur);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      clearBlurTimer();
+      window.removeEventListener("blur", onBlur);
+      window.removeEventListener("focus", onFocus);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Q-transition trigger: the parent reports the CURRENT question id. When it
-  // CHANGES (and is visible), fire a Q-transition verify after a settling delay
-  // (1500ms) so the student has completed their gesture/click and is facing the camera.
+  // CHANGES (and is visible), fire a Q-transition verify after a settling
+  // delay (2000ms) so the student has completed their gesture/click and is
+  // facing the camera.
   useEffect(() => {
     if (!questionVisible || questionId === null) return;
     const prev = lastQuestionIdRef.current;
@@ -701,6 +946,7 @@ export function useFacePipeline(props: FacePipelineProps) {
 
   return {
     status,
+    pausedReason,
     beginGate,
     checkAgain,
     runRecovery,

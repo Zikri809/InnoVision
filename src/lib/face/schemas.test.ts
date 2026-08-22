@@ -35,14 +35,14 @@ describe("face schemas (CompreFace frames)", () => {
   });
 
   it("U-F4: verifyFrameSchema accepts the EMPTY no-face sentinel", () => {
-    // The verify route treats `frame: ""` as the client's "no face captured"
-    // signal and records a FAIL row (never a silent pass). Enrollment frames
+    // The verify route treats an empty frame string as the client's "no face
+    // captured" vote (a FAIL vote — never a silent pass). Enrollment frames
     // stay non-empty via `frameSchema`.
     expect(verifyFrameSchema.safeParse("").success).toBe(true);
     expect(verifyFrameSchema.safeParse("data:image/jpeg;base64,abc").success).toBe(true);
     expect(verifyFrameSchema.safeParse(123).success).toBe(false);
     const base = {
-      frame: "",
+      frames: [""],
       trigger: "start",
       nonce: "00000000-0000-4000-8000-000000000001",
       sessionId: "00000000-0000-4000-8000-000000000002",
@@ -50,15 +50,19 @@ describe("face schemas (CompreFace frames)", () => {
     expect(VerifySchema.safeParse(base).success).toBe(true);
   });
 
-  it("VerifySchema: validates frame + trigger + nonce + sessionId", () => {
+  it("VerifySchema: validates 1–3 frames + trigger + nonce + sessionId", () => {
     const nonce = "00000000-0000-4000-8000-000000000001";
     const sessionId = "00000000-0000-4000-8000-000000000002";
-    const base = { frame: "data:image/jpeg;base64,abc", trigger: "start", nonce, sessionId };
+    const base = { frames: ["data:image/jpeg;base64,abc"], trigger: "start", nonce, sessionId };
     expect(VerifySchema.safeParse({ ...base, trigger: "start" }).success).toBe(true);
     expect(VerifySchema.safeParse({ ...base, trigger: "question" }).success).toBe(true);
     expect(VerifySchema.safeParse({ ...base, trigger: "periodic" }).success).toBe(true);
     expect(VerifySchema.safeParse({ ...base, trigger: "other" }).success).toBe(false);
     expect(VerifySchema.safeParse({ ...base, nonce: "not-a-uuid" }).success).toBe(false);
+    expect(VerifySchema.safeParse({ ...base, frames: [] }).success).toBe(false);
+    expect(
+      VerifySchema.safeParse({ ...base, frames: ["a", "b", "c", "d"] }).success,
+    ).toBe(false);
   });
 
   it("ConsentSchema: requires a boolean", () => {

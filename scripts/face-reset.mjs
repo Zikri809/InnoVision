@@ -80,6 +80,48 @@ async function main() {
       console.warn("  ⚠️ face_checks wipe skipped:", err.message);
     }
 
+    // Clear integrity-suite artifacts: advisories + incident clips (+ storage)
+    try {
+      const { error: aErr } = await admin
+        .from("session_advisories")
+        .delete()
+        .neq("id", "00000000-0000-0000-0000-000000000000");
+      console.log(aErr ? `  ⚠️ Could not clear session_advisories: ${aErr.message}` : "  ✓ Cleared session_advisories");
+    } catch (err) {
+      console.warn("  ⚠️ session_advisories wipe skipped:", err.message);
+    }
+    try {
+      const { data: clips } = await admin
+        .from("incident_clips")
+        .select("id, storage_path")
+        .neq("id", "00000000-0000-0000-0000-000000000000");
+      if (clips && clips.length > 0) {
+        const paths = clips.map((c) => c.storage_path);
+        const { error: rmErr } = await admin.storage.from("incident-footage").remove(paths);
+        if (rmErr) console.warn("  ⚠️ Storage remove failed:", rmErr.message);
+        const { error: dErr } = await admin
+          .from("incident_clips")
+          .delete()
+          .neq("id", "00000000-0000-0000-0000-000000000000");
+        console.log(dErr ? `  ⚠️ Could not clear incident_clips: ${dErr.message}` : `  ✓ Cleared ${clips.length} incident clip(s) + storage objects`);
+      } else {
+        console.log("  ✓ No incident clips to clear");
+      }
+    } catch (err) {
+      console.warn("  ⚠️ incident_clips wipe skipped:", err.message);
+    }
+
+    // Reset focus-loss counters on live sessions
+    try {
+      const { error: fErr } = await admin
+        .from("quiz_sessions")
+        .update({ focus_pause_count: 0 })
+        .neq("id", "00000000-0000-0000-0000-000000000000");
+      console.log(fErr ? `  ⚠️ Could not reset focus_pause_count: ${fErr.message}` : "  ✓ Reset focus_pause_count");
+    } catch {
+      /* column may predate the migration — non-fatal */
+    }
+
     // Reset profile face fields
     try {
       const { error: pErr } = await admin

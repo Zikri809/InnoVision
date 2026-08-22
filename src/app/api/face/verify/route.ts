@@ -3,7 +3,7 @@ import { requireStudent } from "@/lib/classes/guards";
 import { isUuid } from "@/lib/classes/roster";
 import { rateLimit } from "@/lib/classes/rate-limit";
 import { VerifySchema } from "@/lib/face/schemas";
-import { MAX_FRAME_BASE64_CHARS } from "@/lib/face/constants";
+import { MAX_FRAME_BASE64_CHARS, VERIFY_FRAMES_PER_CHECK } from "@/lib/face/constants";
 import { mapFaceError } from "@/lib/face/rpc-mapping";
 import * as compreface from "@/lib/face/server/compreface-client";
 import {
@@ -19,26 +19,28 @@ import type { FaceCheckResult } from "@/lib/face/types";
 
 export const dynamic = "force-dynamic";
 // CompreFace /recognize can be slow under load; give the route breathing room
-// so a slow-but-alive container isn't platform-killed into a silent 504.
+// so a slow-but-alive container isn't platform-killed into a silent 504. The
+// per-frame calls run in parallel (enroll-route pattern), so the budget is a
+// single recognize + overhead.
 export const maxDuration = 20;
 
-// Per-user rate limit on verifies (10/min — cadence is 30–45s + Q-transitions;
-// lowered from 30 because frames are ~25× larger than the old 192-float payload).
+// Per-user rate limit on verifies (10/min — cadence is 30–45s + Q-transitions).
 const VERIFY_RATE = { limit: 10, windowMs: 60 * 1000 };
 
 /**
- * POST /api/face/verify — frame → CompreFace → metadata → record_face_check.
+ * POST /api/face/verify — frames → CompreFace (1:1 by lookup) → record_face_check.
  *
- * The client sends a base64 JPEG frame; the route calls CompreFace
- * `/recognize`, extracts the top-2 subjects, and passes the RAW metadata
- * (p_subject / p_similarity / p_second_subject / p_second_similarity) + the
- * frame to the `record_face_check` RPC. The RPC computes `matched` from SQL
- * constants (0.5 similarity + 0.15 margin) — NO client-supplied verdict.
+ * The client sends up to VERIFY_FRAMES_PER_CHECK base64 JPEG frames captured
+ * over ~2s. For each NON-EMPTY frame the route runs CompreFace `/recognize`
+ * and extracts the CALLER'S OWN subject similarity (`selfSimilarity`) — any
+ * nonzero similarity IS a self-similarity by construction, so a lookalike
+ * classmate ranking top-1 can no longer fail the check (the old margin rule's
+ * entire reason to exist). Empty frames are FAIL votes (the no-face sentinel
+ * stays integrity-conservative). The RPC computes `matched` as the STRICT
+ * MAJORITY of votes ≥ 0.5 — NO client-supplied verdict.
  *
- * Exempt sessions: the RPC short-circuits (step 6) BEFORE the metadata-based
- * computation, returning `{matched:true, distance:null}`. The CompreFace call
- * is "wasted" for exempt sessions (rare; accepted trade-off — see
- * PLAN_PHASE7_COMPREFACE_MIGRATION §7).
+ * Exempt sessions: the RPC short-circuits BEFORE the verdict computation,
+ * returning `{matched:true, distance:null}`.
  *
  * Mappings (overrides only):
  *  - `nonce_mismatch` → 409
@@ -75,51 +77,56 @@ export async function POST(request: Request) {
     return invalidBody(firstIssueMessage(parsed.error.issues, "Invalid verify payload."));
   }
 
-  if (parsed.data.frame.length > MAX_FRAME_BASE64_CHARS) {
-    return payloadTooLarge(`Frame exceeds the ${MAX_FRAME_BASE64_CHARS}-character limit.`);
+  for (const frame of parsed.data.frames) {
+    if (frame.length > MAX_FRAME_BASE64_CHARS) {
+      return payloadTooLarge(`Frame exceeds the ${MAX_FRAME_BASE64_CHARS}-character limit.`);
+    }
   }
 
   if (!isUuid(parsed.data.sessionId)) return notFound();
 
-  const { frame } = parsed.data;
+  const { frames } = parsed.data;
 
-  // No-face sentinel (the client POSTs `""` when captureFrame() returns null —
-  // camera not ready / no face detected). We do NOT call CompreFace: a null
-  // capture must land as a FAIL row in the FLAT window (integrity-conservative;
-  // the "persistent camera-null" edge is indistinguishable from a wrong face by
-  // design). Passing `p_subject=''` + `p_similarity=0` makes the RPC compute
-  // `matched=false` — never a client-supplied verdict.
-  let top: { subject: string | null; similarity: number } | null = null;
-  let second: { subject: string | null; similarity: number } | null = null;
-  if (frame !== "") {
-    // CompreFace /recognize (top-2 for the margin rule). In E2E mock mode the
-    // fake frame marker `FAKE_FRAME_MATCH` returns a canned "mock-subject" —
-    // substitute the authenticated student's uid so the RPC's
-    // `p_subject = auth.uid()` check passes (a "match" must be a self-match).
-    const rec = await compreface.recognize(frame);
-    if ("error" in rec) return mapFaceError(rec) ?? internalError("Something went wrong.");
+  // One CompreFace call per non-empty frame, in parallel (enroll pattern).
+  // An empty string is the no-face sentinel for that slot → a FAIL vote with
+  // similarity 0 (never skipped silently — the row still lands as a fail when
+  // the majority fails).
+  const recognitions = await Promise.all(
+    frames.map(async (frame): Promise<number | { error: string }> => {
+      if (frame === "") return 0;
+      const faces = await compreface.recognizeFaces(frame);
+      if ("error" in faces) return { error: faces.error };
+      // E2E mock seam: the canned response names "mock-subject" — substitute
+      // the authenticated uid so selfSimilarity reads the marker as a
+      // SELF-match (a fake "match" must be a match against the caller).
+      const effective = compreface.isMockMatchFrame(frame)
+        ? faces.map((f) => ({
+            subjects: f.subjects.map((s) => ({ ...s, subject: auth.userId })),
+          }))
+        : faces;
+      return compreface.selfSimilarity(effective, auth.userId);
+    }),
+  );
 
-    const subjects = rec.subjects.map((s) =>
-      compreface.isMockMatchFrame(frame)
-        ? { subject: auth.userId, similarity: s.similarity }
-        : s,
-    );
-    top = subjects[0] ?? null;
-    second = subjects[1] ?? null;
+  // Any CompreFace failure fails the WHOLE check honestly (503 → pipeline
+  // `unavailable` passthrough, never a partial verdict).
+  const firstError = recognitions.find((r): r is { error: string } => typeof r === "object");
+  if (firstError) {
+    return mapFaceError(firstError) ?? internalError("Something went wrong.");
   }
 
-  // The generated RPC args are typed non-null, but the SQL params accept NULL
-  // (a `text`/`real` param without NOT NULL). Casts mirror the enroll route's
-  // `p_duplicate_subject: dupSubject as string` convention.
+  const similarities = recognitions as number[];
+
+  // The subject is ROUTE-derived (always the authenticated uid) — the RPC's
+  // `p_subject = auth.uid()` check stays as defense in depth against direct
+  // RPC callers, but a browser client can never claim another identity here.
   const { data, error } = await supabase.rpc("record_face_check", {
     p_session_id: parsed.data.sessionId,
-    p_subject: (top?.subject ?? null) as string,
-    p_similarity: top?.similarity ?? 0,
-    p_second_subject: (second?.subject ?? null) as string,
-    p_second_similarity: (second?.similarity ?? null) as number,
+    p_subject: auth.userId,
+    p_similarities: similarities,
     p_trigger: parsed.data.trigger,
     p_nonce: parsed.data.nonce,
-    p_frame: frame,
+    p_frames: frames.slice(0, VERIFY_FRAMES_PER_CHECK),
   });
 
   if (error) {

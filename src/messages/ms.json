@@ -361,7 +361,14 @@
         "start": "Mula",
         "question": "Soalan",
         "periodic": "Berkala"
-      }
+      },
+      "advisorySecondFace": "{count, plural, one {Muka kedua dikesan} other {Muka kedua ×#}}",
+      "advisoryLookedAway": "{count, plural, one {Kerap melihat ke luar} other {Melihat ke luar ×#}}",
+      "advisoryVoice": "{count, plural, one {Aktiviti suara} other {Aktiviti suara ×#}}",
+      "advisoryHeadset": "Set fon sebagai mikrofon",
+      "incidentClipsTitle": "Rakaman insiden (direkod automatik sebelum insiden)",
+      "incidentClipMeta": "{reason} · {sec}s · dari {time}",
+      "focusPauses": "{count, plural, other {Jeda kehilangan fokus ×#}}"
     }
   },
   "student": {
@@ -517,7 +524,7 @@
     "gateSubtitle": "Sebelum anda bermula, kami mengesahkan bahawa anda yang menduduki penilaian ini.",
     "timeRemaining": "Masa tinggal: {sec}s",
     "consentRequired": "Kebenaran biometrik diperlukan",
-    "consentCheckbox": "Saya faham dan bersetuju dengan pengesahan wajah untuk penilaian ini.",
+    "consentCheckbox": "Saya faham dan bersetuju dengan pengesahan wajah untuk penilaian ini. Sekiranya berlaku insiden integriti, rakaman kamera dan mikrofon beberapa minit sebelumnya mungkin direkodkan dan disemak oleh pensyarah.",
     "enrollRequired": "Pendaftaran diperlukan",
     "enrollRequiredBody": "Anda perlu mendaftarkan wajah anda sebelum menduduki penilaian.",
     "goToEnrollment": "Pergi ke pendaftaran",
@@ -536,7 +543,10 @@
     "flaggedTitle": "Penilaian ditandakan",
     "flaggedBody": "Sistem kami mengesan ketidakpadanan wajah berulang kali. Pensyarah mesti menyemak dan membuka kunci penilaian anda sebelum anda boleh meneruskan.",
     "checkAgainBtn": "Semak semula",
-    "offlineChip": "Pemeriksaan wajah tidak tersedia — kamera atau model luar talian"
+    "offlineChip": "Pemeriksaan wajah tidak tersedia — kamera atau model luar talian",
+    "focusLostTitle": "Anda keluar dari tetingkap peperiksaan",
+    "focusLostBody": "Peperiksaan anda dijeda kerana aplikasi atau tetingkap lain mengambil fokus. Klik di bawah untuk kembali.",
+    "focusLostBtn": "Kembali ke peperiksaan"
   },
   "extract": {
     "dialogTitle": "Jana kuiz daripada fail",

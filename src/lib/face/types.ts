@@ -17,6 +17,12 @@ export type LivePose = {
   centered: boolean;
   faceDetected: boolean;
   lighting?: "good" | "too_dark" | "too_bright";
+  /**
+   * Number of faces the tracker saw in the frame (absent/1 = one face).
+   * ≥2 feeds the lecturer-visible `second_face` advisory — the tracker runs
+   * with numFaces:2 so a second person is no longer invisible.
+   */
+  facesSeen?: number;
 };
 
 /**
@@ -76,6 +82,19 @@ export type FakeFaceControl = {
   triggerBlink(): void;
   /** Override the periodic cadence for the E2E seam (keys match `PeriodicCadence`). */
   setFacePeriodic(opts: { minMs: number; maxMs: number }): void;
+  /**
+   * Script the fake tracker's pose state (yaw/centering/face count/lighting)
+   * — drives the `second_face`/`looked_away` advisories and the pipeline's
+   * lighting precheck in E2E. Optional: older fake trackers without it stay
+   * valid.
+   */
+  setFacePose?(opts: {
+    yaw?: number;
+    centered?: boolean;
+    faceDetected?: boolean;
+    facesSeen?: number;
+    lighting?: "good" | "too_dark" | "too_bright";
+  }): void;
   /** Read the current periodic override (the pipeline consumes this at cadence construction). */
   readonly _periodic?: { minMs: number; maxMs: number };
 };

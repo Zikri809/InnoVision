@@ -30,6 +30,32 @@ export type CompreFaceRecognizeResult = {
 export type CompreFaceError = { error: "compreface_unavailable" | "compreface_error" };
 
 /**
+ * Full multi-face recognize payload: every detected face with its ranked
+ * subject list. Powers the 1:1-by-lookup verify path — the route extracts
+ * the CALLER's own similarity instead of requiring a top-1 gallery rank
+ * (which made lookalike classmates an escalating false-positive surface).
+ */
+export type CompreFaceFace = { subjects: { subject: string; similarity: number }[] };
+
+/**
+ * The caller's own best similarity across ALL faces in the frame (1:1 by
+ * lookup). A frame containing both the student and a passer-by still yields
+ * the STUDENT's reading — a second person never drags the score down or up.
+ */
+export function selfSimilarity(
+  faces: CompreFaceFace[],
+  uid: string,
+): number {
+  let best = 0;
+  for (const face of faces) {
+    for (const s of face.subjects) {
+      if (s.subject === uid && s.similarity > best) best = s.similarity;
+    }
+  }
+  return best;
+}
+
+/**
  * Fetch timeout toward CompreFace (ms). A hung/half-dead container must NOT
  * hold the Next.js route open until the platform kills it (504) — a platform
  * timeout on a verify would otherwise look like a silent PASS to the client.
@@ -85,17 +111,17 @@ async function comprefaceFetch(
   });
 }
 
-function mockRecognize(frame: string): CompreFaceRecognizeResult {
+function mockRecognizeFaces(frame: string): CompreFaceFace[] {
   if (frame.includes(MOCK_MATCH_MARKER)) {
-    return { subject: "mock-subject", similarity: 0.95, subjects: [{ subject: "mock-subject", similarity: 0.95 }] };
+    return [{ subjects: [{ subject: "mock-subject", similarity: 0.95 }] }];
   }
   if (frame.includes(MOCK_MISMATCH_MARKER)) {
-    return { subject: null, similarity: 0.1, subjects: [] };
+    return [{ subjects: [] }];
   }
   // A REAL frame while the mock flag is on (operator error in dev): return a
   // deterministic NO-match instead of an error — a real webcam frame in mock
   // mode must never 503 into `unavailable`, it must fail as a mismatch.
-  return { subject: null, similarity: 0, subjects: [] };
+  return [{ subjects: [] }];
 }
 
 function frameToBlob(frame: string): Blob {
@@ -105,37 +131,46 @@ function frameToBlob(frame: string): Blob {
 }
 
 /**
- * Recognize a frame against ALL enrolled subjects (1:N). Returns the top
- * match + the full ranked list (the route extracts top-2 for the margin rule).
+ * Recognize a frame against ALL enrolled subjects (1:N), returning every
+ * detected face with its full ranked subject list. The verify route extracts
+ * the caller's own similarity (`selfSimilarity`); the enroll route's
+ * duplicate check reads the top-ranked entry.
  */
 export async function recognize(frame: string): Promise<CompreFaceRecognizeResult | CompreFaceError> {
+  const faces = await recognizeFaces(frame);
+  if ("error" in faces) return faces;
+  const ranked = faces[0]?.subjects ?? [];
+  const top = ranked[0] ?? null;
+  return { subject: top?.subject ?? null, similarity: top?.similarity ?? 0, subjects: ranked };
+}
+
+export async function recognizeFaces(
+  frame: string,
+): Promise<CompreFaceFace[] | CompreFaceError> {
   if (isMockMode()) {
-    return mockRecognize(frame);
+    return mockRecognizeFaces(frame);
   }
 
   try {
     const form = new FormData();
     form.append("file", frameToBlob(frame), "frame.jpg");
     form.append("limit", "0");
+    form.append("prediction_count", "3");
     const res = await comprefaceFetch("/api/v1/recognition/recognize", {
       method: "POST",
       body: form,
     });
     if (res.status === 400) {
-      // No face found in image -> 0 similarity / no subject match
-      return { subject: null, similarity: 0, subjects: [] };
+      // No face found in image -> zero faces
+      return [];
     }
     if (!res.ok) return { error: "compreface_error" };
     const json = (await res.json()) as {
       result?: { subjects?: { subject: string; similarity: number }[] }[];
     };
-    const subjects = (json.result?.[0]?.subjects ?? []).slice(0, 3);
-    const top = subjects[0] ?? null;
-    return {
-      subject: top?.subject ?? null,
-      similarity: top?.similarity ?? 0,
-      subjects,
-    };
+    return (json.result ?? []).map((f) => ({
+      subjects: (f.subjects ?? []).slice(0, 3),
+    }));
   } catch {
     return { error: "compreface_unavailable" };
   }

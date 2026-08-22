@@ -56,6 +56,24 @@ export type FaceCheckSummary = {
   lastAt: number | null;
 };
 
+/** Shape of a session_advisories row fed into the summary builder. */
+export type ResultsAdvisoryInput = {
+  session_id: string;
+  adv_type: string;
+  first_seen_at: string | null;
+  last_seen_at: string | null;
+  occurrences: number;
+};
+
+/** Advisory aggregate chips for a session row (lecturer review hints ONLY). */
+export type AdvisorySummary = {
+  secondFace: number;
+  lookedAway: number;
+  voiceActivity: number;
+  headsetActive: number;
+  lastAt: number | null;
+};
+
 /**
  * A fully-derived dashboard row. `total` = the quiz's question count;
  * `score` stays `null` for active/abandoned (never 0). `studentName` is null
@@ -76,9 +94,11 @@ export type ResultsSessionRow = {
   face_unavailable_at: string | null;
   face_exempt: boolean;
   face_fail_streak: number;
+  focus_pause_count?: number | null;
   studentName: string | null;
   displayStatus: DisplayStatus;
   faceSummary: FaceCheckSummary;
+  advisorySummary: AdvisorySummary;
   integrityTimeline: IntegrityEvent[];
   legacyHistory: IntegrityEvent[];
 };
@@ -97,6 +117,7 @@ export type ResultsSessionInput = {
   face_unavailable_at: string | null;
   face_exempt: boolean;
   face_fail_streak: number;
+  focus_pause_count?: number | null;
 };
 
 /** Shape of a face-check row fed into the timeline builder. */

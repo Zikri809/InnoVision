@@ -1,10 +1,6 @@
 import type { IFaceTracker, LivePose } from "./types";
 import { BlinkDetector } from "./liveness";
-import {
-  FRAME_QUALITY_MAX_SIZE,
-  FRAME_QUALITY_MIN_SIZE,
-  LIVENESS_TIMEOUT_MS,
-} from "./constants";
+import { LIVENESS_TIMEOUT_MS } from "./constants";
 import {
   acquireCameraStream,
   releaseCameraStream,
@@ -35,13 +31,18 @@ import {
  * are GONE — embedding computation moved server-side to CompreFace. This
  * tracker now ONLY:
  *   - boots the vendored `face_landmarker.task` (CPU, blendshapes) for BLINK
- *     liveness (`waitForBlink`), and
- *   - captures a base64 JPEG FRAME (`captureFrame`) with a best-effort client
- *     quality gate (single face, size in range, eyes open). The frame is what
- *     the Next.js route forwards to CompreFace `/recognize`.
+ *     liveness (`waitForBlink`),
+ *   - captures a base64 JPEG FRAME (`captureFrame`) — the Next.js route
+ *     forwards it to CompreFace, and
+ *   - reports per-frame pose state (`yaw`, `centered`, `lighting`, and
+ *     `facesSeen` via numFaces:2) that powers the UX chips and the
+ *     lecturer-visible integrity advisories (`second_face`, `looked_away`).
  *
- * The quality gate is best-effort client-side only — the route does NOT trust
- * it (CompreFace does its own detection).
+ * There is deliberately NO client quality gate on the verify path: the
+ * capture helpers pick a GOOD frame (best-frame scoring), but the SERVER
+ * never trusted client-side gating anyway (CompreFace does its own
+ * detection). The former dead `evaluateQuality` native-detector path was
+ * removed — multi-face now comes from the landmarker itself.
  *
  * 0-key coverage: like `hand-tracker.ts`, browser-only glue is exercised by
  * manual smoke + E2E fake, not the Node unit suite.
@@ -79,10 +80,6 @@ const FRAME_JPEG_QUALITY = 0.85;
 /** Cap the capture canvas so the frame payload stays small (~150 KB). */
 const CAPTURE_CANVAS_MAX = 640;
 
-type FaceQuality =
-  | { ok: true; rect: { left: number; top: number; width: number; height: number } }
-  | { ok: false; reason: string };
-
 // Suppress benign Emscripten/TFLite C++ stderr logs that trigger Next.js dev overlay
 if (typeof window !== "undefined") {
   const origError = console.error;
@@ -118,7 +115,6 @@ export class FaceTracker implements IFaceTracker {
   private errorListeners: Set<(err: unknown) => void> = new Set();
   private errored = false;
   private lastFrameAt = 0;
-  private lastQualityResult: FaceQuality = { ok: false, reason: "no-frame-yet" };
   private canvas: HTMLCanvasElement | null = null;
   private currentPose: LivePose = { yaw: 0, centered: false, faceDetected: false };
   private currentBlendshapes: { left: number; right: number } = { left: 0, right: 0 };
@@ -440,61 +436,6 @@ export class FaceTracker implements IFaceTracker {
     });
   }
 
-  /** Best-effort quality gate — the SERVER never trusts this. */
-  private evaluateQuality(): FaceQuality {
-    // Native FaceDetector (Chromium) — single face + bounding box size.
-    const Detector = (globalThis as { FaceDetector?: unknown }).FaceDetector;
-    if (Detector) {
-      // Fire-and-forget async detection; the synchronous fallback covers the
-      // in-between. (Native FaceDetector is experimental; do NOT gate capture
-      // on it — the landmarker fallback below is the real gate.)
-      void this.detectWithNativeApi();
-      return this.lastQualityResult;
-    }
-    return this.qualityFromLandmarks();
-  }
-
-  private async detectWithNativeApi(): Promise<void> {
-    try {
-      const Detector = (globalThis as { FaceDetector?: new () => { detect: (v: HTMLVideoElement) => Promise<unknown[]> } }).FaceDetector;
-      if (!Detector || !this.landmarker || this.video.readyState < 2) return;
-      const detector = new Detector();
-      const faces = await detector.detect(this.video);
-      const first = faces[0] as { boundingBox?: { width: number; height: number } } | undefined;
-      if (!first?.boundingBox) {
-        this.lastQualityResult = { ok: false, reason: "no-face" };
-        return;
-      }
-      const w = first.boundingBox.width;
-      const h = first.boundingBox.height;
-      if (faces.length > 1) {
-        this.lastQualityResult = { ok: false, reason: "multiple-faces" };
-        return;
-      }
-      if (w < FRAME_QUALITY_MIN_SIZE || h < FRAME_QUALITY_MIN_SIZE || w > FRAME_QUALITY_MAX_SIZE || h > FRAME_QUALITY_MAX_SIZE) {
-        this.lastQualityResult = { ok: false, reason: "face-size-out-of-range" };
-        return;
-      }
-      this.lastQualityResult = { ok: true, rect: { left: 0, top: 0, width: w, height: h } };
-    } catch {
-      // Native FaceDetector unsupported — the landmarker fallback is the gate.
-    }
-  }
-
-  /** Landmarker-based quality fallback: face present + eyes open. */
-  private qualityFromLandmarks(): FaceQuality {
-    // The rAF loop stores blendshape state via the blink detector; for the
-    // quality gate we just require the detector to have seen an OPEN state.
-    if (!this.landmarker || this.video.readyState < 2) {
-      return { ok: false, reason: "not-ready" };
-    }
-    // A cheap proxy: eyes-open is required for a usable frame. If the blink
-    // detector is in the default pending state (no samples yet), fall through
-    // and still capture (the gate is best-effort).
-    if (this.lastQualityResult.ok) return this.lastQualityResult;
-    return { ok: true, rect: { left: 0, top: 0, width: 1, height: 1 } };
-  }
-
   private ensureCanvas(): HTMLCanvasElement {
     if (!this.canvas) {
       this.canvas = document.createElement("canvas");
@@ -577,6 +518,7 @@ export class FaceTracker implements IFaceTracker {
           let yaw = 0;
           let centered = false;
           let faceDetected = false;
+          const facesSeen = results.faceLandmarks?.length ?? 0;
           const landmarks = results.faceLandmarks?.[0];
           if (landmarks && landmarks.length > 0) {
             faceDetected = true;
@@ -613,7 +555,7 @@ export class FaceTracker implements IFaceTracker {
               this.currentLighting = lighting;
             }
           }
-          const pose: LivePose = { yaw, centered, faceDetected, lighting };
+          const pose: LivePose = { yaw, centered, faceDetected, lighting, facesSeen };
           this.currentPose = pose;
           if (this.poseListeners.size > 0) {
             for (const listener of this.poseListeners) {
@@ -677,7 +619,11 @@ export class FaceTracker implements IFaceTracker {
         delegate: "CPU" as const,
       },
       runningMode: "VIDEO" as const,
-      numFaces: 1,
+      // TWO faces (not one): the tracker must be able to SEE a second person
+      // — the pose stream exposes `facesSeen`, which feeds the lecturer-
+      // visible `second_face` advisory. One face stays the blink/embedding
+      // subject (landmarks[0] = the largest/primary face).
+      numFaces: 2,
       outputFaceBlendshapes: true,
     };
     return vision.FaceLandmarker.createFromOptions(cachedFileset, base);

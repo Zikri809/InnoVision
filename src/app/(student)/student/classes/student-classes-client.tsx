@@ -131,6 +131,9 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
                 </Label>
                 <Input
                   id="join-code"
+                  // Stable accessible name for E2E (the sr-only Label follows
+                  // i18n copy).
+                  aria-label="Join code"
                   placeholder={t("joinCodePlaceholder")}
                   value={code}
                   onChange={(e) => setCode(e.target.value)}

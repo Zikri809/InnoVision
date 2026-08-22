@@ -15,23 +15,33 @@
 //   Plus new pins: consent gate; direct face_enrollment_status UPDATE blocked;
 //   duplicate-detected enrollment → pending_review; pending_review verify →
 //   not_enrolled; lecturer reject_face_enrollment → status null + re-enroll;
-//   margin rule (gap < 0.15 → fail); submit from flagged → session_not_active +
-//   status unchanged; unlock/exempt/self-recover of completed →
-//   session_not_active; self-recover of active → idempotent no-op;
-//   not_enrolled; not_assessment; consent_required after revocation +
-//   in-progress assessment flagged on revocation + re-consent does not un-flag;
-//   suspected_replay/too_frequent advisory flags (server-computed frame hash);
-//   report_face_unavailable idempotence; window tie-break (two checks with
-//   identical checked_at ordered by id DESC).
+//   multi-frame majority vote (2-of-3 pass / 1-of-3 fail / lookalike-top1
+//   still passes — the margin rule is GONE as of 0020); submit from flagged →
+//   session_not_active + status unchanged; unlock/exempt/self-recover of
+//   completed → session_not_active; self-recover of active → idempotent
+//   no-op; not_enrolled; not_assessment; consent_required after revocation +
+//   in-progress assessment flagged on revocation + re-consent does not
+//   un-flag; suspected_replay/too_frequent advisory flags (server-computed
+//   frame hash over the concatenated frames); focus-loss pause escalation
+//   (3rd strike → flagged + attributed audit row; paused_at cleared; unlock
+//   resets the counter); report_session_advisory upsert + direct-RPC spam
+//   throttle; report_face_unavailable idempotence; window tie-break (two
+//   checks with identical checked_at ordered by id DESC).
 //
 // Audit-loop additions:
 //   I-window — FLAT last-5 semantics against the REAL SQL: (a) a pass NEVER
 //     flags the current check (4 backfilled fails + live match → active); (b)
 //     a fail AFTER that pass re-flags (standing fails survive); (c) F,P,F,P,F
 //     → flagged; (d) fails spread over 8 (≤2 per 5-window) → never flagged.
+//   I-vote — multi-frame majority against the REAL SQL: strict majority of
+//     per-frame similarities ≥ 0.5 over the SUBMITTED frames; distance =
+//     1 − max(similarity); a lookalike ranking top-1 in the gallery can no
+//     longer fail the check (1:1 by lookup; margin rule removed in 0020).
 //   I-threshold — FACE_SIMILARITY_MIN boundary: similarity exactly 0.5 → match;
 //     0.49 → no match.
-//   I-numeric — NULL p_similarity / out-of-range (> 1) → typed invalid_frame
+//   I-numeric — NULL array element / out-of-range (> 1) / |similarities| ≠
+//     |frames| → typed invalid_frame (never a raw 500; NaN in Postgres
+//     compares > every number, so it MUST be rejected, not trusted).
 //     (never a raw 500; NaN in Postgres compares > every number, so it MUST be
 //     rejected, not trusted).
 //   I-exempt — exempt short-circuit against the SQL: matched:true + distance
@@ -140,27 +150,23 @@ function assertNoError(step, { error }) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * Match probe: CompreFace returns the caller's OWN uid with high similarity.
- * `p_second_similarity` null → margin satisfied automatically.
+ * Match probe: CompreFace returns the caller's OWN uid with high similarity
+ * (single-frame vote — majority-of-1 passes).
  */
 function matchProbe(subjectUid, frame = "test-frame-match") {
   return {
     p_subject: subjectUid,
-    p_similarity: 0.9,
-    p_second_subject: null,
-    p_second_similarity: null,
-    p_frame: frame,
+    p_similarities: [0.9],
+    p_frames: [frame],
   };
 }
 
-/** Mismatch probe: CompreFace returns no subject / low similarity. */
+/** Mismatch probe: CompreFace returns no self reading / low similarity. */
 function mismatchProbe(frame = "test-frame-mismatch") {
   return {
     p_subject: "00000000-0000-0000-0000-000000000000",
-    p_similarity: 0.1,
-    p_second_subject: null,
-    p_second_similarity: null,
-    p_frame: frame,
+    p_similarities: [0.1],
+    p_frames: [frame],
   };
 }
 
@@ -633,41 +639,45 @@ async function main() {
   // ── Margin rule: top gap vs second < 0.05 → fail (matches as self) ──
   {
     // S3 re-enrolled clean (above); consent was already set. Verify a lookalike
-    // scenario: CompreFace returns the student's own uid at 0.9 BUT a different
-    // subject close behind (0.88) → gap 0.02 < 0.05 → not matched. Each case uses
-    // a FRESH session (a single fail pauses the session, blocking the next).
-    const { sessionId } = await makeLiveAssessment("Margin Fail", clientS3);
+    // ── I-vote: multi-frame majority (replaces the removed margin rule) ──
+    // scenario: a LOOKALIKE classmate ranks top-1 at 0.8 while the caller's
+    // OWN similarity is 0.7 — under the old margin rule this FAILED; with
+    // 1:1-by-lookup voting it must PASS. Each case uses a FRESH session.
+    const { sessionId } = await makeLiveAssessment("Vote Lookalike", clientS3);
     const nonce = await currentNonce(clientS3, sessionId);
     const r = await clientS3.rpc("record_face_check", {
       p_session_id: sessionId,
       p_subject: studentS3.id,
-      p_similarity: 0.9,
-      p_second_subject: studentS1.id,
-      p_second_similarity: 0.88,
+      p_similarities: [0.7, 0.72],
       p_trigger: "periodic",
       p_nonce: nonce,
-      p_frame: "margin-lookalike-frame",
+      p_frames: ["vote-lookalike-1", "vote-lookalike-2"],
     });
-    record("margin rule: top−second gap 0.02 < 0.05 → fail (paused)",
-      r.data?.matched === false && r.data?.sessionStatus === "paused",
+    record("1:1 vote: self sims [0.7,0.72] pass even though a lookalike would rank top-1",
+      r.data?.matched === true && r.data?.sessionStatus === "active",
       `${JSON.stringify(r.data)} err=${r.error?.message ?? ""}`);
 
-    // Margin satisfied: gap 0.35 ≥ 0.05 → match (fresh session).
-    const { sessionId: s2 } = await makeLiveAssessment("Margin Pass", clientS3);
+    // Majority required: 1-of-3 (one good frame between two failures) → fail
+    // (fresh session — the previous one is active, so reuse is fine but a
+    // fresh session keeps cases independent).
+    const { sessionId: s2 } = await makeLiveAssessment("Vote Minority", clientS3);
     const nonce2 = await currentNonce(clientS3, s2);
     const r2 = await clientS3.rpc("record_face_check", {
       p_session_id: s2,
       p_subject: studentS3.id,
-      p_similarity: 0.95,
-      p_second_subject: studentS1.id,
-      p_second_similarity: 0.6,
+      p_similarities: [0.1, 0.9, 0.1],
       p_trigger: "periodic",
       p_nonce: nonce2,
-      p_frame: "margin-clear-frame",
+      p_frames: ["vote-min-1", "vote-min-2", "vote-min-3"],
     });
-    record("margin rule: top−second gap 0.35 ≥ 0.05 → match (active)",
-      r2.data?.matched === true && r2.data?.sessionStatus === "active",
+    record("1:1 vote: 1-of-3 split → no majority → fail (paused)",
+      r2.data?.matched === false && r2.data?.sessionStatus === "paused",
       JSON.stringify(r2.data));
+
+    // Distance reflects the BEST frame of the vote.
+    record("1:1 vote: distance = 1 − max(similarity)",
+      Math.abs((r.data?.distance ?? -1) - 0.28) < 1e-6,
+      `distance=${r.data?.distance}`);
   }
 
   // ── Advisory flags: suspected_replay / too_frequent ─────────────
@@ -750,9 +760,9 @@ async function main() {
     const { sessionId } = await makeLiveAssessment("NullSubject", clientS3);
     const nonce = await currentNonce(clientS3, sessionId);
     const r = await clientS3.rpc("record_face_check", {
-      p_session_id: sessionId, p_subject: null, p_similarity: 0.9,
-      p_second_subject: null, p_second_similarity: null, p_trigger: "start",
-      p_nonce: nonce, p_frame: "null-subject",
+      p_session_id: sessionId, p_subject: null, p_similarities: [0.9],
+      p_trigger: "start",
+      p_nonce: nonce, p_frames: ["null-subject"],
     });
     const row = (await clientS3.from("quiz_sessions").select("status").eq("id", sessionId).single()).data;
     record("numeric gate: NULL p_subject + high similarity → clean fail row (paused), not a 500",
@@ -849,9 +859,9 @@ async function main() {
     const { sessionId } = await makeLiveAssessment("Thresh 0.5", clientS3);
     const nonce = await currentNonce(clientS3, sessionId);
     const at = await clientS3.rpc("record_face_check", {
-      p_session_id: sessionId, p_subject: studentS3.id, p_similarity: 0.5,
-      p_second_subject: null, p_second_similarity: null, p_trigger: "start",
-      p_nonce: nonce, p_frame: "threshold-0.5",
+      p_session_id: sessionId, p_subject: studentS3.id, p_similarities: [0.5],
+      p_trigger: "start",
+      p_nonce: nonce, p_frames: ["threshold-0.5"],
     });
     record("threshold: similarity exactly 0.5 → matched",
       at.data?.matched === true, JSON.stringify(at.data));
@@ -859,48 +869,47 @@ async function main() {
     const { sessionId: s2 } = await makeLiveAssessment("Thresh 0.49", clientS3);
     const nonce2 = await currentNonce(clientS3, s2);
     const below = await clientS3.rpc("record_face_check", {
-      p_session_id: s2, p_subject: studentS3.id, p_similarity: 0.49,
-      p_second_subject: null, p_second_similarity: null, p_trigger: "start",
-      p_nonce: nonce2, p_frame: "threshold-0.49",
+      p_session_id: s2, p_subject: studentS3.id, p_similarities: [0.49],
+      p_trigger: "start",
+      p_nonce: nonce2, p_frames: ["threshold-0.49"],
     });
     record("threshold: similarity 0.49 → not matched",
       below.data?.matched === false, JSON.stringify(below.data));
   }
 
-  // ── I-numeric: NULL / out-of-range metadata → typed error (no 500) ──
+  // ── I-numeric: NULL / out-of-range array elements → typed error (no 500) ──
   {
-    // A NULL similarity previously crashed the `matched NOT NULL` insert (raw
-    // 500). All probes pass BOTH second-* params explicitly — PostgREST RPC
-    // overload resolution requires every nullable param to be named (omitting
-    // `p_second_subject` yields "function not found" → data null).
+    // A per-element NULL/NaN similarity previously crashed the verdict (raw
+    // 500); the 0020 gates reject them with typed invalid_frame. PostgREST
+    // resolves the single 6-arg signature, so partial args are fine.
     const { sessionId } = await makeLiveAssessment("Numeric Gates", clientS3);
     const nonce = await currentNonce(clientS3, sessionId);
     const nullSim = await clientS3.rpc("record_face_check", {
-      p_session_id: sessionId, p_subject: studentS3.id, p_similarity: null,
-      p_second_subject: null, p_second_similarity: null, p_trigger: "start",
-      p_nonce: nonce, p_frame: "null-sim",
+      p_session_id: sessionId, p_subject: studentS3.id, p_similarities: [null],
+      p_trigger: "start",
+      p_nonce: nonce, p_frames: ["null-sim"],
     });
-    record("numeric gate: NULL p_similarity → typed invalid_frame",
+    record("numeric gate: NULL element in p_similarities → typed invalid_frame",
       nullSim.data?.error === "invalid_frame",
       `${JSON.stringify(nullSim.data)} err=${nullSim.error?.message ?? ""}`);
 
     const overRange = await clientS3.rpc("record_face_check", {
-      p_session_id: sessionId, p_subject: studentS3.id, p_similarity: 1.5,
-      p_second_subject: null, p_second_similarity: null, p_trigger: "start",
-      p_nonce: nonce, p_frame: "over-sim",
+      p_session_id: sessionId, p_subject: studentS3.id, p_similarities: [1.5],
+      p_trigger: "start",
+      p_nonce: nonce, p_frames: ["over-sim"],
     });
-    record("numeric gate: p_similarity > 1 → typed invalid_frame",
+    record("numeric gate: element > 1 → typed invalid_frame",
       overRange.data?.error === "invalid_frame",
       `${JSON.stringify(overRange.data)} err=${overRange.error?.message ?? ""}`);
 
-    const badSecond = await clientS3.rpc("record_face_check", {
-      p_session_id: sessionId, p_subject: studentS3.id, p_similarity: 0.9,
-      p_second_subject: null, p_second_similarity: -0.5, p_trigger: "start",
-      p_nonce: nonce, p_frame: "neg-second",
+    const lenMismatch = await clientS3.rpc("record_face_check", {
+      p_session_id: sessionId, p_subject: studentS3.id, p_similarities: [0.9, 0.8],
+      p_trigger: "start",
+      p_nonce: nonce, p_frames: ["len-mismatch-1"],
     });
-    record("numeric gate: negative p_second_similarity → typed invalid_frame",
-      badSecond.data?.error === "invalid_frame",
-      `${JSON.stringify(badSecond.data)} err=${badSecond.error?.message ?? ""}`);
+    record("numeric gate: |p_similarities| ≠ |p_frames| → typed invalid_frame",
+      lenMismatch.data?.error === "invalid_frame",
+      `${JSON.stringify(lenMismatch.data)} err=${lenMismatch.error?.message ?? ""}`);
   }
 
   // ── I-exempt: short-circuit against the REAL SQL ────────────────
@@ -974,6 +983,78 @@ async function main() {
     // Restore S3's enrollment for any subsequent probes (rejoin the existing
     // class — join_class is idempotent for a fresh membership).
     await clientS3.rpc("join_class", { code: joinCode });
+  }
+
+  // ── Focus-loss pause escalation (0020/0021) ─────────────────────
+  {
+    const { sessionId } = await makeLiveAssessment("Focus Escalation", clientS3);
+    let last = null;
+    for (let i = 0; i < 3; i++) {
+      if (i > 0) {
+        await clientS3.rpc("self_recover_session", { p_session_id: sessionId });
+      }
+      last = await clientS3.rpc("pause_session", {
+        p_session_id: sessionId,
+        p_reason: "focus_lost",
+      });
+    }
+    record("focus-loss: 3rd confirmed loss → flagged + audited",
+      last.data?.sessionStatus === "flagged",
+      JSON.stringify(last.data));
+    const audits = await clientA
+      .from("lecturer_audit_view")
+      .select("action, event_session_id")
+      .eq("event_session_id", sessionId);
+    record("focus-loss: auto_flag_focus_loss attributed to the session timeline",
+      (audits.data ?? []).some((a) => a.action === "auto_flag_focus_loss"),
+      JSON.stringify(audits.data));
+
+    // R1: flagging from `paused` must clear paused_at (unlock must not
+    // credit flagged idle time as exam time). Three focus losses accumulate
+    // ACROSS the paused state (blur while already paused still counts).
+    const { sessionId: s2 } = await makeLiveAssessment("Focus Paused Flag", clientS3);
+    await clientS3.rpc("pause_session", { p_session_id: s2, p_reason: "hand_loss" });
+    let lastF = null;
+    for (let i = 0; i < 3; i++) {
+      lastF = await clientS3.rpc("pause_session", { p_session_id: s2, p_reason: "focus_lost" });
+    }
+    const rowAfterFlag = (await admin.from("quiz_sessions").select("status, paused_at, focus_pause_count").eq("id", s2).single()).data;
+    record("focus-loss: flag from paused clears paused_at",
+      lastF.data?.sessionStatus === "flagged" &&
+        rowAfterFlag?.paused_at === null && rowAfterFlag?.status === "flagged",
+      `${JSON.stringify(lastF.data)} row=${JSON.stringify(rowAfterFlag)}`);
+    // Unlock resets the counter so the next genuine blur does not re-flag.
+    const unlock = await clientA.rpc("unlock_session", { p_session_id: s2 });
+    const rowAfterUnlock = (await admin.from("quiz_sessions").select("focus_pause_count").eq("id", s2).single()).data;
+    record("focus-loss: unlock resets focus_pause_count",
+      unlock.data?.sessionStatus === "active" && rowAfterUnlock?.focus_pause_count === 0,
+      JSON.stringify(rowAfterUnlock));
+
+    // Invalid reason → typed error.
+    const badReason = await clientS3.rpc("pause_session", {
+      p_session_id: s2, p_reason: "party",
+    });
+    record("pause_session: invalid reason → invalid_reason",
+      badReason.data?.error === "invalid_reason", JSON.stringify(badReason.data));
+  }
+
+  // ── Session advisories (0020/0021): upsert + throttle ───────────
+  {
+    const { sessionId } = await makeLiveAssessment("Advisory RPC", clientS3);
+    const a1 = await clientS3.rpc("report_session_advisory", { p_session_id: sessionId, p_type: "voice_activity" });
+    record("advisory: valid type on own active session → ok",
+      a1.data?.ok === true, JSON.stringify(a1.data));
+    const badType = await clientS3.rpc("report_session_advisory", { p_session_id: sessionId, p_type: "vibes" });
+    record("advisory: unknown type → invalid_type",
+      badType.data?.error === "invalid_type", JSON.stringify(badType.data));
+    // Throttle: rapid repeats must NOT inflate occurrences (55s RPC gate —
+    // the second call lands inside the window).
+    const before = (await admin.from("session_advisories").select("occurrences").eq("session_id", sessionId).eq("adv_type", "voice_activity").single()).data;
+    await clientS3.rpc("report_session_advisory", { p_session_id: sessionId, p_type: "voice_activity" });
+    const after = (await admin.from("session_advisories").select("occurrences").eq("session_id", sessionId).eq("adv_type", "voice_activity").single()).data;
+    record("advisory: direct-RPC spam throttled (occurrences stay at 1)",
+      before?.occurrences === 1 && after?.occurrences === 1,
+      `before=${JSON.stringify(before)} after=${JSON.stringify(after)}`);
   }
 
   // ── Summary ──────────────────────────────────────────────────

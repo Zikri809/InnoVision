@@ -1,8 +1,10 @@
 import type { SessionStatus, QuizStatus, LecturerAuditEvent } from "@/lib/types/aliases";
 import type {
+  AdvisorySummary,
   DisplayStatus,
   FaceCheckSummary,
   IntegrityEvent,
+  ResultsAdvisoryInput,
   ResultsFaceCheckInput,
   ResultsSessionInput,
   ResultsSessionRow,
@@ -78,6 +80,45 @@ export function summarizeFaceChecks(checks: ResultsFaceCheckInput[]): FaceCheckS
   }
 
   return { fails, replays, tooFrequent, firstAt, lastAt };
+}
+
+/**
+ * Advisory aggregate chips for a session row. Advisories are REVIEW HINTS
+ * (second_face / looked_away / voice_activity / headset_active) — they never
+ * changed the student's status; the counts are occurrences of each type.
+ */
+export function summarizeAdvisories(advisories: ResultsAdvisoryInput[]): AdvisorySummary {
+  const summary: AdvisorySummary = {
+    secondFace: 0,
+    lookedAway: 0,
+    voiceActivity: 0,
+    headsetActive: 0,
+    lastAt: null,
+  };
+  for (const a of advisories) {
+    const n = typeof a.occurrences === "number" && Number.isFinite(a.occurrences)
+      ? Math.max(0, Math.floor(a.occurrences))
+      : 0;
+    switch (a.adv_type) {
+      case "second_face":
+        summary.secondFace += n;
+        break;
+      case "looked_away":
+        summary.lookedAway += n;
+        break;
+      case "voice_activity":
+        summary.voiceActivity += n;
+        break;
+      case "headset_active":
+        summary.headsetActive += n;
+        break;
+      default:
+        break; // unknown type — never crash the dashboard
+    }
+    const t = toEpochMs(a.last_seen_at ?? a.first_seen_at);
+    if (t !== null && (summary.lastAt === null || t > summary.lastAt)) summary.lastAt = t;
+  }
+  return summary;
 }
 
 const TYPE_RANK: Record<IntegrityEvent["kind"], number> = {
@@ -191,6 +232,7 @@ type AssembleArgs = {
   roster: { student_id: string; full_name: string | null }[];
   faceChecks: ResultsFaceCheckInput[];
   auditRows: LecturerAuditEvent[];
+  advisories?: ResultsAdvisoryInput[];
   totalQuestions: number;
   nowMs: number;
 };
@@ -221,6 +263,7 @@ export function assembleResultsRows({
   roster,
   faceChecks,
   auditRows,
+  advisories = [],
   totalQuestions,
   nowMs,
 }: AssembleArgs): ResultsSessionRow[] {
@@ -279,6 +322,13 @@ export function assembleResultsRows({
     checksBySession.set(c.session_id, list);
   }
 
+  const advisoriesBySession = new Map<string, ResultsAdvisoryInput[]>();
+  for (const a of advisories) {
+    const list = advisoriesBySession.get(a.session_id) ?? [];
+    list.push(a);
+    advisoriesBySession.set(a.session_id, list);
+  }
+
   const rows: ResultsSessionRow[] = [];
   for (const s of sessions) {
     const sessionChecks = checksBySession.get(s.id) ?? [];
@@ -299,9 +349,11 @@ export function assembleResultsRows({
       face_unavailable_at: s.face_unavailable_at,
       face_exempt: s.face_exempt,
       face_fail_streak: s.face_fail_streak,
+      focus_pause_count: s.focus_pause_count ?? null,
       studentName: nameByStudent.get(s.student_id) ?? null,
       displayStatus: deriveSessionDisplayStatus(s, { quizStatus: quiz.status, nowMs }),
       faceSummary: summarizeFaceChecks(sessionChecks),
+      advisorySummary: summarizeAdvisories(advisoriesBySession.get(s.id) ?? []),
       integrityTimeline: buildIntegrityTimeline(s, sessionChecks, sessionAudit),
       // Copy the shared aggregate per row (never alias — a future consumer
       // could mutate one row's list and corrupt another's).

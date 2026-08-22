@@ -24,17 +24,21 @@ export const EnrollSchema = z.object({
 export type EnrollInput = z.infer<typeof EnrollSchema>;
 
 /**
- * Verify frame — allows the EMPTY string as the client's "no face captured"
- * sentinel. The verify route detects `""` and short-circuits CompreFace,
- * passing `p_subject=''` + `p_similarity=0` so the RPC records a FAIL row
- * (the null-capture edge is integrity-conservative — never a silent pass).
- * Enrollment frames stay non-empty via `frameSchema`.
+ * Verify frames — each entry allows the EMPTY string as the client's
+ * "no face captured" sentinel for that capture slot. The verify route skips
+ * CompreFace for empty frames (a fail vote) and passes the rest to
+ * CompreFace; the RPC records ONE row whose verdict is the strict majority
+ * of per-frame self-similarities ≥ 0.5. Enrollment frames stay non-empty
+ * via `frameSchema`.
  */
 export const verifyFrameSchema = z.string("Frame must be a base64 image string.");
 
 export const VerifySchema = z.object({
   sessionId: z.string().uuid("sessionId must be a valid UUID."),
-  frame: verifyFrameSchema,
+  frames: z
+    .array(verifyFrameSchema)
+    .min(1, "At least one frame is required.")
+    .max(3, "At most 3 frames per check."),
   trigger: z.enum(["start", "question", "periodic"], {
     message: "trigger must be start, question, or periodic.",
   }),

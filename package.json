@@ -34,7 +34,9 @@
     "face:reset": "node scripts/face-reset.mjs",
     "vendor:mediapipe": "node scripts/vendor-mediapipe.mjs",
     "verify:mediapipe": "node scripts/verify-mediapipe.mjs",
-    "seed:demo": "node scripts/seed-demo.mjs"
+    "seed:demo": "node scripts/seed-demo.mjs",
+    "face:report": "node scripts/face-threshold-report.mjs",
+    "incident:cleanup": "node scripts/incident-cleanup.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

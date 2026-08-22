@@ -1,5 +1,6 @@
 import { redirect, notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getClassRoster } from "@/lib/classes/roster";
 import { assembleResultsRows } from "@/lib/results/derive";
 import { RESULTS_SESSION_LIMIT, RESULTS_AUDIT_LIMIT } from "@/lib/results/constants";
@@ -99,7 +100,7 @@ export default async function LecturerQuizResultsPage({
         .from("lecturer_session_view")
         // GET-envelope columns MINUS verify_nonce (the student replay token).
         .select(
-          "id, quiz_id, student_id, mode, status, score, started_at, submitted_at, last_activity_at, face_unavailable_at, face_exempt, face_fail_streak",
+          "id, quiz_id, student_id, mode, status, score, started_at, submitted_at, last_activity_at, face_unavailable_at, face_exempt, face_fail_streak, focus_pause_count",
         )
         .eq("quiz_id", id)
         .order("started_at", { ascending: false })
@@ -144,9 +145,19 @@ export default async function LecturerQuizResultsPage({
   const studentIds = sessionRows.map((s) => s.student_id);
 
   // Guarded-empty reads: skip the fetch entirely when there are no sessions.
-  const [{ data: faceChecks, error: faceChecksError }, { data: auditRows, error: auditError }] =
+  const [
+    { data: faceChecks, error: faceChecksError },
+    { data: auditRows, error: auditError },
+    { data: advisoryRows, error: advisoriesError },
+    { data: clipRows, error: clipsError },
+  ] =
     sessionIds.length === 0
-      ? [{ data: [], error: null }, { data: [], error: null }]
+      ? [
+          { data: [], error: null },
+          { data: [], error: null },
+          { data: [], error: null },
+          { data: [], error: null },
+        ]
       : await Promise.all([
           supabase
             .from("face_checks")
@@ -166,6 +177,15 @@ export default async function LecturerQuizResultsPage({
             // (incl. reset markers) are never silently dropped by truncation.
             .order("created_at", { ascending: false })
             .limit(RESULTS_AUDIT_LIMIT),
+          supabase
+            .from("session_advisories")
+            .select("session_id, adv_type, first_seen_at, last_seen_at, occurrences")
+            .in("session_id", sessionIds),
+          supabase
+            .from("incident_clips")
+            .select("id, session_id, storage_path, reason, duration_ms, recorded_from, recorded_to")
+            .in("session_id", sessionIds)
+            .order("recorded_from", { ascending: false }),
         ]);
 
   if (faceChecksError) {
@@ -188,6 +208,49 @@ export default async function LecturerQuizResultsPage({
       </div>
     );
   }
+  if (advisoriesError) {
+    console.error("Advisories fetch error:", advisoriesError);
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-8">
+        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
+          Could not load the results right now. Please refresh.
+        </p>
+      </div>
+    );
+  }
+  if (clipsError) {
+    console.error("Incident clips fetch error:", clipsError);
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-8">
+        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
+          Could not load the results right now. Please refresh.
+        </p>
+      </div>
+    );
+  }
+
+  // Signed playback URLs: the incident-footage bucket is PRIVATE with no
+  // client policies, so signing runs through the service-role client
+  // (server-side only; the 1h URLs are short-lived and never stored).
+  const incidentClips: Record<string, { id: string; url: string; reason: string; durationMs: number; recordedFrom: string | null }[]> = {};
+  if ((clipRows ?? []).length > 0) {
+    const admin = createAdminClient();
+    for (const clip of clipRows ?? []) {
+      const { data: signed } = await admin.storage
+        .from("incident-footage")
+        .createSignedUrl(clip.storage_path, 3600);
+      if (!signed?.signedUrl) continue;
+      const list = incidentClips[clip.session_id] ?? [];
+      list.push({
+        id: clip.id,
+        url: signed.signedUrl,
+        reason: clip.reason,
+        durationMs: clip.duration_ms ?? 0,
+        recordedFrom: clip.recorded_from,
+      });
+      incidentClips[clip.session_id] = list;
+    }
+  }
 
   const rows = assembleResultsRows({
     quiz: { status: quiz.status },
@@ -195,6 +258,7 @@ export default async function LecturerQuizResultsPage({
     roster: rosterResult.roster,
     faceChecks: faceChecks ?? [],
     auditRows: auditRows ?? [],
+    advisories: advisoryRows ?? [],
     totalQuestions: totalQuestions ?? 0,
     // Server component: each request is a fresh render, so current time is
     // intentional (the abandonment derivation is server-computed). Suppressed
@@ -216,6 +280,7 @@ export default async function LecturerQuizResultsPage({
       truncated={sessionRows.length >= RESULTS_SESSION_LIMIT}
       rows={rows}
       roster={rosterResult.roster}
+      incidentClips={incidentClips}
     />
   );
 }

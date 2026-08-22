@@ -59,6 +59,7 @@ export function ResultsDashboardClient({
   truncated,
   rows,
   roster,
+  incidentClips = {},
 }: {
   quizId: string;
   quizTitle: string;
@@ -71,6 +72,11 @@ export function ResultsDashboardClient({
   truncated: boolean;
   rows: ResultsSessionRow[];
   roster: { student_id: string; full_name: string | null; enrolled_at: string }[];
+  /** Signed (1h) playback URLs per session — empty for clean sessions. */
+  incidentClips?: Record<
+    string,
+    { id: string; url: string; reason: string; durationMs: number; recordedFrom: string | null }[]
+  >;
 }) {
   const router = useRouter();
   const locale = useLocale();
@@ -387,6 +393,38 @@ export function ResultsDashboardClient({
                           {t("faceChecksSummary", { fails: row.faceSummary.fails, replays: row.faceSummary.replays })}
                         </p>
                       )}
+                      {(row.advisorySummary.secondFace > 0 ||
+                        row.advisorySummary.lookedAway > 0 ||
+                        row.advisorySummary.voiceActivity > 0 ||
+                        row.advisorySummary.headsetActive > 0) && (
+                        <div className="mt-1 flex flex-wrap gap-1.5">
+                          {row.advisorySummary.secondFace > 0 && (
+                            <span className="rounded-full border-[2px] border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-extrabold text-amber-800">
+                              {t("advisorySecondFace", { count: row.advisorySummary.secondFace })}
+                            </span>
+                          )}
+                          {row.advisorySummary.lookedAway > 0 && (
+                            <span className="rounded-full border-[2px] border-sky-300 bg-sky-50 px-2 py-0.5 text-[11px] font-extrabold text-sky-800">
+                              {t("advisoryLookedAway", { count: row.advisorySummary.lookedAway })}
+                            </span>
+                          )}
+                          {row.advisorySummary.voiceActivity > 0 && (
+                            <span className="rounded-full border-[2px] border-violet-300 bg-violet-50 px-2 py-0.5 text-[11px] font-extrabold text-violet-800">
+                              {t("advisoryVoice", { count: row.advisorySummary.voiceActivity })}
+                            </span>
+                          )}
+                          {row.advisorySummary.headsetActive > 0 && (
+                            <span className="rounded-full border-[2px] border-border bg-muted px-2 py-0.5 text-[11px] font-extrabold text-muted-foreground">
+                              {t("advisoryHeadset")}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {(row.focus_pause_count ?? 0) > 0 && (
+                        <p className="text-xs font-semibold text-muted-foreground">
+                          {t("focusPauses", { count: row.focus_pause_count ?? 0 })}
+                        </p>
+                      )}
                       {row.face_unavailable_at && (
                         <p className="text-xs font-semibold text-muted-foreground">
                           {t("cameraUnavailable")} ({formatTime(row.face_unavailable_at)})
@@ -430,6 +468,31 @@ export function ResultsDashboardClient({
                       <Button size="sm" variant="destructive" disabled={busyRows.has(row.id)} onClick={() => { setResetRow(row.id); setResetCooled(false); }}>
                         {t("resetBtn")}
                       </Button>
+                    </div>
+                  )}
+
+                  {(incidentClips[row.id]?.length ?? 0) > 0 && expanded[row.id] && (
+                    <div className="mb-3 space-y-2">
+                      <p className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">
+                        {t("incidentClipsTitle")}
+                      </p>
+                      {incidentClips[row.id]!.map((clip) => (
+                        <div key={clip.id} className="rounded-2xl border-[3px] border-border bg-muted/40 p-2.5">
+                          <p className="text-xs font-semibold text-muted-foreground">
+                            {t("incidentClipMeta", {
+                              reason: clip.reason,
+                              sec: Math.round(clip.durationMs / 1000),
+                              time: formatTime(clip.recordedFrom),
+                            })}
+                          </p>
+                          <video
+                            controls
+                            preload="none"
+                            src={clip.url}
+                            className="mt-1.5 max-h-72 w-full rounded-xl bg-black"
+                          />
+                        </div>
+                      ))}
                     </div>
                   )}
 

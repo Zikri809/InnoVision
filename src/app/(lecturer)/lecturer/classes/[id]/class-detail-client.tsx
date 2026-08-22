@@ -359,6 +359,9 @@ export function ClassDetailClient({
                   </Label>
                   <Input
                     id="quiz-title"
+                    // Stable accessible name for E2E (the sr-only Label's
+                    // text follows i18n copy, which drifted from the specs).
+                    aria-label="Quiz title"
                     placeholder={t("quizTitlePlaceholder")}
                     value={title}
                     disabled={creating}
@@ -376,7 +379,11 @@ export function ClassDetailClient({
                   onValueChange={(v) => setMode(v as "practice" | "assessment")}
                   disabled={creating}
                 >
-                  <SelectTrigger id="quiz-mode" className="w-full sm:w-auto sm:min-w-[12rem]">
+                  <SelectTrigger
+                    id="quiz-mode"
+                    aria-label="Mode"
+                    className="w-full sm:w-auto sm:min-w-[12rem]"
+                  >
 
                     <SelectValue placeholder={t("modeLabel")}>
                       {(v) => getModeLabel(v as QuizMode, locale)}

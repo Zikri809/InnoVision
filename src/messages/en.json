@@ -148,7 +148,7 @@
     "inviteCodePlaceholder": "e.g. INNO-2026-TEACH",
     "inviteCodeHelp": "Please enter the lecturer invite code provided by your administrator.",
     "consentTitle": "Biometric Consent",
-    "consentText": "I understand and consent to face verification for assessments.",
+    "consentText": "I understand and consent to face verification for assessments. If an integrity incident occurs, camera/mic footage from the preceding minutes may be recorded and reviewed.",
     "createAccountBtn": "Create account",
     "creatingAccount": "Creating account…",
     "creatingAccountBtn": "Creating account…",
@@ -361,7 +361,14 @@
         "start": "Start",
         "question": "Question",
         "periodic": "Periodic"
-      }
+      },
+      "advisorySecondFace": "{count, plural, one {Second face detected} other {Second face ×#}}",
+      "advisoryLookedAway": "{count, plural, one {Looked away repeatedly} other {Looked away ×#}}",
+      "advisoryVoice": "{count, plural, one {Voice activity} other {Voice activity ×#}}",
+      "advisoryHeadset": "Headset as mic input",
+      "incidentClipsTitle": "Incident footage (auto-recorded before the incident)",
+      "incidentClipMeta": "{reason} · {sec}s · from {time}",
+      "focusPauses": "{count, plural, one {Focus loss pause ×1} other {Focus loss pauses ×#}}"
     }
   },
   "student": {
@@ -517,7 +524,7 @@
     "gateSubtitle": "Before you start, we verify it's really you taking this assessment.",
     "timeRemaining": "Time remaining: {sec}s",
     "consentRequired": "Biometric consent required",
-    "consentCheckbox": "I understand and consent to face verification for this assessment.",
+    "consentCheckbox": "I understand and consent to face verification for this assessment. If an integrity incident occurs, the preceding minutes of camera and microphone footage may be recorded and reviewed by a lecturer.",
     "enrollRequired": "Enrollment required",
     "enrollRequiredBody": "You need to enroll your face before taking an assessment.",
     "goToEnrollment": "Go to enrollment",
@@ -536,7 +543,10 @@
     "flaggedTitle": "Assessment flagged",
     "flaggedBody": "Our system detected repeated face mismatches. A lecturer must review and unlock your assessment before you can continue.",
     "checkAgainBtn": "Check again",
-    "offlineChip": "Face check unavailable — camera or models offline"
+    "offlineChip": "Face check unavailable — camera or models offline",
+    "focusLostTitle": "You left the exam window",
+    "focusLostBody": "Your exam was paused because another app or window took focus. Click below to return — this window will come back to the front.",
+    "focusLostBtn": "Return to the exam"
   },
   "extract": {
     "dialogTitle": "Generate quiz from file",

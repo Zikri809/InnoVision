@@ -8,6 +8,7 @@ import * as consentRoute from "@/app/api/face/consent/route";
 import * as unlockRoute from "@/app/api/face/unlock/route";
 import * as exemptRoute from "@/app/api/sessions/[id]/exempt-face/route";
 import * as pauseRoute from "@/app/api/sessions/[id]/pause/route";
+import * as sessionAdvisoryRoute from "@/app/api/sessions/[id]/advisory/route";
 import * as sessionGetRoute from "@/app/api/sessions/[id]/route";
 import * as healthRoute from "@/app/api/face/health/route";
 
@@ -20,6 +21,7 @@ vi.mock("@/lib/supabase/server", () => ({
 // the responses via the mutable `comprefaceMock`.
 const comprefaceMock = {
   recognize: vi.fn(),
+  recognizeFaces: vi.fn(),
   detect: vi.fn(),
   addSubjectExample: vi.fn(),
   deleteSubject: vi.fn(),
@@ -30,6 +32,17 @@ const comprefaceMock = {
 };
 vi.mock("@/lib/face/server/compreface-client", () => ({
   recognize: (...a: unknown[]) => comprefaceMock.recognize(...a),
+  recognizeFaces: (...a: unknown[]) => comprefaceMock.recognizeFaces(...a),
+  // Mirror of the real selfSimilarity (max self-subject similarity across faces).
+  selfSimilarity: (faces: { subjects: { subject: string; similarity: number }[] }[], uid: string) => {
+    let best = 0;
+    for (const face of faces) {
+      for (const s of face.subjects) {
+        if (s.subject === uid && s.similarity > best) best = s.similarity;
+      }
+    }
+    return best;
+  },
   detect: (...a: unknown[]) => comprefaceMock.detect(...a),
   addSubjectExample: (...a: unknown[]) => comprefaceMock.addSubjectExample(...a),
   deleteSubject: (...a: unknown[]) => comprefaceMock.deleteSubject(...a),
@@ -72,7 +85,7 @@ function req(body?: unknown, init?: RequestInit): Request {
 
 function verifyReq(overrides?: Record<string, unknown>) {
   return req({
-    frame: MATCH_FRAME,
+    frames: [MATCH_FRAME],
     trigger: "periodic",
     nonce: NONCE,
     sessionId: SESSION_ID,
@@ -150,11 +163,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   // Default CompreFace behavior: match frame → self subject, no duplicates,
   // pose valid.
-  comprefaceMock.recognize.mockResolvedValue({
-    subject: STUDENT_ID,
-    similarity: 0.95,
-    subjects: [{ subject: STUDENT_ID, similarity: 0.95 }],
-  });
+  comprefaceMock.recognizeFaces.mockResolvedValue([
+    { subjects: [{ subject: STUDENT_ID, similarity: 0.95 }] },
+  ]);
   comprefaceMock.detect.mockResolvedValue({ faces: [{ yaw: 0 }] });
   comprefaceMock.addSubjectExample.mockResolvedValue({ imageId: "img-1" });
   comprefaceMock.deleteSubject.mockResolvedValue({ ok: true });
@@ -260,11 +271,7 @@ describe("I5 — 3 flat fails → flagged", () => {
   it("flags on the 3rd mismatch (with blink-recovery between fails)", async () => {
     const ctx = faceContext();
     // CompreFace returns a mismatch (no self match).
-    comprefaceMock.recognize.mockResolvedValue({
-      subject: null,
-      similarity: 0.1,
-      subjects: [],
-    });
+    comprefaceMock.recognizeFaces.mockResolvedValue([{ subjects: [] }]);
     let nonce = NONCE;
     let lastBody: { sessionStatus?: string; nextNonce?: string } = {};
     for (let i = 0; i < 3; i++) {
@@ -286,11 +293,7 @@ describe("I5 — 3 flat fails → flagged", () => {
 describe("I5b — single fail → paused", () => {
   it("pauses after one mismatch", async () => {
     const ctx = faceContext();
-    comprefaceMock.recognize.mockResolvedValue({
-      subject: null,
-      similarity: 0.1,
-      subjects: [],
-    });
+    comprefaceMock.recognizeFaces.mockResolvedValue([{ subjects: [] }]);
     const res = await verify.POST(verifyReq());
     const body = await res.json();
     expect(body.sessionStatus).toBe("paused");
@@ -298,38 +301,87 @@ describe("I5b — single fail → paused", () => {
   });
 });
 
-describe("I-margin — lookalike gap below margin → fail", () => {
-  it("no match when top−second gap < 0.15 even if top is self", async () => {
+describe("I-vote — multi-frame majority voting", () => {
+  it("passes when 2 of 3 frames match, even though one frame failed", async () => {
     faceContext();
-    // Top = self at 0.9, second = different subject at 0.8 → gap 0.10 < 0.15.
-    comprefaceMock.recognize.mockResolvedValue({
-      subject: STUDENT_ID,
-      similarity: 0.9,
-      subjects: [
-        { subject: STUDENT_ID, similarity: 0.9 },
-        { subject: "00000000-0000-4000-8000-0000000000aa", similarity: 0.8 },
-      ],
+    // Frame 1: strong self-match; frame 2: no self reading (blur/glance);
+    // frame 3: weak-but-passing self-match.
+    comprefaceMock.recognizeFaces.mockImplementation(async (frame: string) => {
+      if (frame === "F1") return [{ subjects: [{ subject: STUDENT_ID, similarity: 0.95 }] }];
+      if (frame === "F2") return [{ subjects: [] }];
+      return [{ subjects: [{ subject: STUDENT_ID, similarity: 0.6 }] }];
     });
-    const res = await verify.POST(verifyReq());
-    expect(res.status).toBe(200);
+    const res = await verify.POST(
+      verifyReq({ frames: ["F1", "F2", "F3"] }),
+    );
+    const body = await res.json();
+    expect(body.matched).toBe(true);
+    expect(body.sessionStatus).toBe("active");
+    // Distance reflects the BEST frame's reading.
+    expect(body.distance).toBeCloseTo(0.05, 5);
+  });
+
+  it("fails on a 1-of-3 split (no majority)", async () => {
+    faceContext();
+    comprefaceMock.recognizeFaces.mockImplementation(async (frame: string) => {
+      return frame === "GOOD"
+        ? [{ subjects: [{ subject: STUDENT_ID, similarity: 0.9 }] }]
+        : [{ subjects: [] }];
+    });
+    const res = await verify.POST(verifyReq({ frames: ["BAD1", "GOOD", "BAD2"] }));
     const body = await res.json();
     expect(body.matched).toBe(false);
     expect(body.sessionStatus).toBe("paused");
   });
 
-  it("match when gap ≥ 0.15", async () => {
+  it("requires BOTH frames to pass when only two were submitted", async () => {
     faceContext();
-    comprefaceMock.recognize.mockResolvedValue({
-      subject: STUDENT_ID,
-      similarity: 0.95,
-      subjects: [
-        { subject: STUDENT_ID, similarity: 0.95 },
-        { subject: "00000000-0000-4000-8000-0000000000aa", similarity: 0.6 },
-      ],
-    });
-    const res = await verify.POST(verifyReq());
+    comprefaceMock.recognizeFaces.mockResolvedValue([
+      { subjects: [{ subject: STUDENT_ID, similarity: 0.95 }] },
+    ]);
+    const bothPass = await verify.POST(verifyReq({ frames: ["A", "B"] }));
+    expect((await bothPass.json()).matched).toBe(true);
+
+    faceContext();
+    comprefaceMock.recognizeFaces.mockImplementation(async (frame: string) =>
+      frame === "PASS" ? [{ subjects: [{ subject: STUDENT_ID, similarity: 0.95 }] }] : [{ subjects: [] }],
+    );
+    const oneFails = await verify.POST(verifyReq({ frames: ["PASS", "FAIL"] }));
+    expect((await oneFails.json()).matched).toBe(false);
+  });
+
+  it("a lookalike ranking top-1 does NOT fail the check (1:1 by lookup)", async () => {
+    faceContext();
+    // A classmate outranks the student in the gallery — the old margin rule
+    // would have failed this; the caller's OWN similarity is what counts.
+    comprefaceMock.recognizeFaces.mockResolvedValue([
+      {
+        subjects: [
+          { subject: "00000000-0000-4000-8000-0000000000aa", similarity: 0.8 },
+          { subject: STUDENT_ID, similarity: 0.7 },
+        ],
+      },
+    ]);
+    const res = await verify.POST(verifyReq({ frames: ["TWIN1", "TWIN2"] }));
     const body = await res.json();
     expect(body.matched).toBe(true);
+    expect(body.distance).toBeCloseTo(0.3, 5);
+  });
+
+  it("an oversized frame → 413", async () => {
+    faceContext();
+    const res = await verify.POST(
+      verifyReq({ frames: ["x".repeat(200_001), MATCH_FRAME] }),
+    );
+    expect(res.status).toBe(413);
+  });
+
+  it("more than 3 frames → 400", async () => {
+    faceContext();
+    const res = await verify.POST(
+      verifyReq({ frames: [MATCH_FRAME, MATCH_FRAME, MATCH_FRAME, MATCH_FRAME] }),
+    );
+    expect(res.status).toBe(400);
   });
 });
 
@@ -406,7 +458,7 @@ describe("CSRF + rate limit + malformed + transport", () => {
     const crossVerify = new Request("http://localhost", {
       method: "POST",
       headers: { "content-type": "application/json", origin: "http://evil.example.com" },
-      body: JSON.stringify({ frame: MATCH_FRAME, trigger: "periodic", nonce: NONCE, sessionId: SESSION_ID }),
+      body: JSON.stringify({ frames: [MATCH_FRAME], trigger: "periodic", nonce: NONCE, sessionId: SESSION_ID }),
     });
     expect((await verify.POST(crossVerify)).status).toBe(403);
     expect((await consent.POST(cross)).status).toBe(403);
@@ -452,7 +504,7 @@ describe("CSRF + rate limit + malformed + transport", () => {
 describe("I-compreface-down — CompreFace unavailable → 503", () => {
   it("verify returns 503 when CompreFace recognize fails", async () => {
     faceContext();
-    comprefaceMock.recognize.mockResolvedValue({ error: "compreface_unavailable" });
+    comprefaceMock.recognizeFaces.mockResolvedValue({ error: "compreface_unavailable" });
     const res = await verify.POST(verifyReq());
     expect(res.status).toBe(503);
     expect((await res.json()).error).toBe("compreface_unavailable");
@@ -460,7 +512,7 @@ describe("I-compreface-down — CompreFace unavailable → 503", () => {
 
   it("verify returns 503 comprehend_error (HTTP error) mapped distinctly", async () => {
     faceContext();
-    comprefaceMock.recognize.mockResolvedValue({ error: "compreface_error" });
+    comprefaceMock.recognizeFaces.mockResolvedValue({ error: "compreface_error" });
     const res = await verify.POST(verifyReq());
     expect(res.status).toBe(503);
     expect((await res.json()).error).toBe("compreface_error");
@@ -474,23 +526,23 @@ describe("I-compreface-down — CompreFace unavailable → 503", () => {
   });
 });
 
-describe("I4b — no-face sentinel (empty frame) records a FAIL row, never a pass", () => {
+describe("I4b — no-face sentinel (empty frames) records a FAIL row, never a pass", () => {
   it("returns 200 with matched:false → sessionStatus paused, and does NOT call CompreFace", async () => {
     const ctx = faceContext();
-    const res = await verify.POST(verifyReq({ frame: "" }));
+    const res = await verify.POST(verifyReq({ frames: [""] }));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.matched).toBe(false);
     expect(body.sessionStatus).toBe("paused");
     expect(body.nextNonce).not.toBe(NONCE); // nonce still rotates (fail row written)
-    expect(comprefaceMock.recognize).not.toHaveBeenCalled();
+    expect(comprefaceMock.recognizeFaces).not.toHaveBeenCalled();
     const session = ctx.client.tables["quiz_sessions"]!.find((s) => s.id === SESSION_ID);
     expect(session?.status).toBe("paused");
   });
 
   it("an empty-frame start verify does NOT skip the RPC (no silent gate pass)", async () => {
     faceContext();
-    const res = await verify.POST(verifyReq({ frame: "", trigger: "start" }));
+    const res = await verify.POST(verifyReq({ frames: [""], trigger: "start" }));
     const body = await res.json();
     expect(body.matched).toBe(false);
   });
@@ -499,22 +551,18 @@ describe("I4b — no-face sentinel (empty frame) records a FAIL row, never a pas
 describe("I-threshold — FACE_SIMILARITY_MIN boundary (0.5)", () => {
   it("similarity exactly 0.5 → match", async () => {
     faceContext();
-    comprefaceMock.recognize.mockResolvedValue({
-      subject: STUDENT_ID,
-      similarity: 0.5,
-      subjects: [{ subject: STUDENT_ID, similarity: 0.5 }],
-    });
+    comprefaceMock.recognizeFaces.mockResolvedValue([
+      { subjects: [{ subject: STUDENT_ID, similarity: 0.5 }] },
+    ]);
     const res = await verify.POST(verifyReq());
     expect((await res.json()).matched).toBe(true);
   });
 
   it("similarity 0.49 → no match", async () => {
     faceContext();
-    comprefaceMock.recognize.mockResolvedValue({
-      subject: STUDENT_ID,
-      similarity: 0.49,
-      subjects: [{ subject: STUDENT_ID, similarity: 0.49 }],
-    });
+    comprefaceMock.recognizeFaces.mockResolvedValue([
+      { subjects: [{ subject: STUDENT_ID, similarity: 0.49 }] },
+    ]);
     const res = await verify.POST(verifyReq());
     const body = await res.json();
     expect(body.matched).toBe(false);
@@ -724,8 +772,7 @@ describe("GET /api/sessions/[id]", () => {
   });
 });
 
-describe("revoke-during-live → session flagged + re-consent does not clear", () => {
-  it("revokes consent, flags the session, and re-consent keeps it flagged", async () => {
+describe("revoke-during-live → session flagged + re-consent does not clear", () => {  it("revokes consent, flags the session, and re-consent keeps it flagged", async () => {
     const ctx = faceContext({ enrolled: true });
     ctx.client.seedQuestion({
       id: "00000000-0000-4000-8000-0000000000dd",
@@ -776,5 +823,105 @@ describe("revoke-during-live → session flagged + re-consent does not clear", (
     const profile = ctx.client.tables["profiles"]!.find((p) => p.id === STUDENT_ID);
     expect(profile?.consent_given_at).not.toBeNull();
     expect(profile?.face_enrollment_status).toBeNull();
+  });
+});
+
+describe("focus-loss pause � reason escalation (0020)", () => {
+  it("focus_lost ? paused, count accumulates", async () => {
+    const ctx = faceContext();
+    const res = await pause.POST(req({ reason: "focus_lost" }), {
+      params: Promise.resolve({ id: SESSION_ID }),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).sessionStatus).toBe("paused");
+    const s = ctx.client.tables["quiz_sessions"]!.find((x) => x.id === SESSION_ID)!;
+    expect(s.status).toBe("paused");
+    expect(s.focus_pause_count).toBe(1);
+  });
+
+  it("3rd confirmed focus loss ? flagged + audit event", async () => {
+    const ctx = faceContext();
+    let last: Response | null = null;
+    for (let i = 0; i < 3; i++) {
+      // Self-recover between strikes so each pause starts from active.
+      if (i > 0) await selfRecover.POST(req({ sessionId: SESSION_ID }));
+      last = await pause.POST(req({ reason: "focus_lost" }), {
+        params: Promise.resolve({ id: SESSION_ID }),
+      });
+    }
+    expect(last!.status).toBe(200);
+    expect((await last!.json()).sessionStatus).toBe("flagged");
+    const s = ctx.client.tables["quiz_sessions"]!.find((x) => x.id === SESSION_ID)!;
+    expect(s.status).toBe("flagged");
+    expect(s.focus_pause_count).toBe(3);
+    const audits = ctx.client.tables["audit_events"] ?? [];
+    expect(audits.some((a) => a.action === "auto_flag_focus_loss")).toBe(true);
+  });
+
+  it("invalid reason ? 400", async () => {
+    faceContext();
+    const res = await pause.POST(req({ reason: "party" }), {
+      params: Promise.resolve({ id: SESSION_ID }),
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("session advisories � report + accumulate", () => {
+  const advisory = sessionAdvisoryRoute;
+
+  function advisoryReq(body: unknown) {
+    return req(body);
+  }
+
+  it("records a valid type ? ok:true", async () => {
+    faceContext();
+    const res = await advisory.POST(advisoryReq({ type: "voice_activity" }), {
+      params: Promise.resolve({ id: SESSION_ID }),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).ok).toBe(true);
+    const rows = fakeHolder.current!.tables["session_advisories"]!;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].adv_type).toBe("voice_activity");
+    expect(rows[0].occurrences).toBe(1);
+  });
+
+  it("repeats of one type ACCUMULATE occurrences (no row growth)", async () => {
+    faceContext();
+    for (let i = 0; i < 3; i++) {
+      await advisory.POST(advisoryReq({ type: "second_face" }), {
+        params: Promise.resolve({ id: SESSION_ID }),
+      });
+    }
+    const rows = fakeHolder.current!.tables["session_advisories"]!;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].occurrences).toBe(3);
+  });
+
+  it("invalid type ? 400", async () => {
+    faceContext();
+    const res = await advisory.POST(advisoryReq({ type: "vibes" }), {
+      params: Promise.resolve({ id: SESSION_ID }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("non-owner ? 404", async () => {
+    faceContext();
+    fakeHolder.current!.setUser("00000000-0000-4000-8000-0000000000ee", "student");
+    const res = await advisory.POST(advisoryReq({ type: "looked_away" }), {
+      params: Promise.resolve({ id: SESSION_ID }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("rate limit ? 429", async () => {
+    faceContext();
+    _seedRateLimit(`session-advisory:${STUDENT_ID}`, 10);
+    const res = await advisory.POST(advisoryReq({ type: "headset_active" }), {
+      params: Promise.resolve({ id: SESSION_ID }),
+    });
+    expect(res.status).toBe(429);
   });
 });

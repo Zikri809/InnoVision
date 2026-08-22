@@ -6,10 +6,31 @@ import * as exemptRoute from "@/app/api/sessions/[id]/exempt-face/route";
 import * as unavailableRoute from "@/app/api/sessions/[id]/face-unavailable/route";
 import * as consentRoute from "@/app/api/face/consent/route";
 import * as sessionGetRoute from "@/app/api/sessions/[id]/route";
+import * as incidentRoute from "@/app/api/sessions/[id]/incident/route";
 
 const fakeHolder: { current: FakeSupabase | undefined } = { current: undefined };
 vi.mock("@/lib/supabase/server", () => ({
   createClient: () => fakeHolder.current,
+}));
+
+// Storage + metadata writes go through the ADMIN client — mock the boundary
+// and assert the upload/insert contract (the real client needs service keys).
+const adminMock = {
+  storage: {
+    from: vi.fn(() => ({
+      upload: vi.fn().mockResolvedValue({ error: null }),
+      remove: vi.fn().mockResolvedValue({ error: null }),
+    })),
+  },
+  from: vi.fn(() => incidentInsertBuilder()),
+};
+function incidentInsertBuilder() {
+  return {
+    insert: vi.fn().mockResolvedValue({ error: null }),
+  };
+}
+vi.mock("@/lib/supabase/admin", () => ({
+  createAdminClient: () => adminMock,
 }));
 
 const pause = pauseRoute;
@@ -17,6 +38,7 @@ const exempt = exemptRoute;
 const unavailable = unavailableRoute;
 const consent = consentRoute;
 const sessionGet = sessionGetRoute;
+const incident = incidentRoute;
 
 const QUIZ_C = "00000000-0000-4000-8000-00000000000c";
 const SESSION_ID = "00000000-0000-4000-8000-0000000000aa";
@@ -286,5 +308,97 @@ describe("GET /api/sessions/[id]", () => {
     assessmentContext();
     const res = await sessionGet.GET(req(), { params: Promise.resolve({ id: "not-a-uuid" }) });
     expect(res.status).toBe(404);
+  });
+});
+
+describe("incident upload � ring-buffer clip route", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    adminMock.storage.from = vi.fn(() => ({
+      upload: vi.fn().mockResolvedValue({ error: null }),
+      remove: vi.fn().mockResolvedValue({ error: null }),
+    }));
+    adminMock.from = vi.fn(() => incidentInsertBuilder());
+  });
+
+  function incidentReq(opts?: { size?: number; declared?: number; type?: string }) {
+    const size = opts?.size ?? 1024;
+    const blob = new Blob([new Uint8Array(size)], { type: opts?.type ?? "video/webm" });
+    const form = new FormData();
+    form.append("clip", blob, "clip.webm");
+    form.append("reason", "paused");
+    form.append("durationMs", "4200");
+    form.append("recordedFrom", new Date(0).toISOString());
+    const headers: Record<string, string> = {};
+    if (opts?.declared != null) headers["content-length"] = String(opts.declared);
+    return new Request("http://localhost", { method: "POST", headers, body: form });
+  }
+
+  it("active assessment + valid clip ? 200 ok; storage + row written with webm content type", async () => {
+    assessmentContext();
+    const res = await incident.POST(incidentReq(), { params: Promise.resolve({ id: SESSION_ID }) });
+    expect(res.status).toBe(200);
+    expect((await res.json()).ok).toBe(true);
+    expect(adminMock.storage.from).toHaveBeenCalledWith("incident-footage");
+    expect(adminMock.from).toHaveBeenCalledWith("incident_clips");
+  });
+
+  it("completed session ? 400 (no post-submit storage-bloat channel)", async () => {
+    assessmentContext({ status: "completed" });
+    const res = await incident.POST(incidentReq(), { params: Promise.resolve({ id: SESSION_ID }) });
+    expect(res.status).toBe(400);
+  });
+
+  it("practice session ? 400", async () => {
+    const ctx = makeOwnerContext({ quizStatus: "live" });
+    ctx.client.tables["quizzes"]![0].mode = "practice";
+    ctx.client.setUser(STUDENT_ID, "student");
+    fakeHolder.current = ctx.client;
+    const res = await incident.POST(incidentReq(), { params: Promise.resolve({ id: SESSION_ID }) });
+    expect([400, 404]).toContain(res.status);
+  });
+
+  it("non-owner ? 404", async () => {
+    assessmentContext();
+    fakeHolder.current!.setUser("00000000-0000-4000-8000-0000000000ee", "student");
+    const res = await incident.POST(incidentReq(), { params: Promise.resolve({ id: SESSION_ID }) });
+    expect(res.status).toBe(404);
+  });
+
+  it("declared content-length over the cap ? 413 BEFORE buffering the body", async () => {
+    assessmentContext();
+    const res = await incident.POST(
+      incidentReq({ declared: 40_000_000 }),
+      { params: Promise.resolve({ id: SESSION_ID }) },
+    );
+    expect(res.status).toBe(413);
+    expect(adminMock.storage.from).not.toHaveBeenCalled();
+  });
+
+  it("oversized actual clip ? 413 and NO storage write", async () => {
+    assessmentContext();
+    const res = await incident.POST(
+      incidentReq({ size: 31_000_000 }),
+      { params: Promise.resolve({ id: SESSION_ID }) },
+    );
+    expect(res.status).toBe(413);
+    expect(adminMock.storage.from).not.toHaveBeenCalled();
+  });
+
+  it("rate limit ? 429", async () => {
+    assessmentContext();
+    _seedRateLimit(`session-incident:${STUDENT_ID}`, 6);
+    const res = await incident.POST(incidentReq(), { params: Promise.resolve({ id: SESSION_ID }) });
+    expect(res.status).toBe(429);
+  });
+
+  it("storage failure ? 503, no row inserted", async () => {
+    assessmentContext();
+    adminMock.storage.from = vi.fn(() => ({
+      upload: vi.fn().mockResolvedValue({ error: { message: "bucket down" } }),
+      remove: vi.fn().mockResolvedValue({ error: null }),
+    }));
+    const res = await incident.POST(incidentReq(), { params: Promise.resolve({ id: SESSION_ID }) });
+    expect(res.status).toBe(503);
   });
 });

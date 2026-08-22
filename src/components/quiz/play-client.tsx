@@ -13,6 +13,9 @@ import type { HoldProgress } from "@/lib/gestures/types";
 import { FaceVerifier } from "@/components/face/face-verifier";
 import { useFacePipeline, type FacePipelinePhase } from "@/components/face/use-face-pipeline";
 import { useFaceTracker } from "@/components/face/use-face-tracker";
+import { useIntegrityAdvisories } from "@/components/face/use-integrity-advisories";
+import { useIncidentRecorder } from "@/components/face/use-incident-recorder";
+import { getFakeFaceTracker } from "@/lib/face/fake-seam";
 import type { FaceStatus } from "@/lib/face/types";
 
 
@@ -198,6 +201,27 @@ export function PlayClient({
     pipeline.setTracker(faceTracker.trackerRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [faceTracker.available]);
+
+  // ── Integrity advisories (lecturer-visible hints, never blocking) ──
+  const { micStreamRef } = useIntegrityAdvisories({
+    sessionId,
+    enabled: quiz.mode === "assessment" && Boolean(face) && faceTracker.available,
+    armed: faceStatus === "ready",
+    tracker: faceTracker.trackerRef.current,
+  });
+
+  // ── Incident ring-buffer recorder (uploads ONLY on incidents) ──────
+  // Skipped under the E2E fake seam — headless runs must not exercise a real
+  // getUserMedia/MediaRecorder path the fake tracker doesn't cover.
+  const isFakeFace =
+    process.env.NODE_ENV !== "production" && getFakeFaceTracker() != null;
+  useIncidentRecorder({
+    sessionId,
+    enabled: quiz.mode === "assessment" && Boolean(face) && !isFakeFace,
+    status: faceStatus,
+    phase,
+    micStreamRef,
+  });
 
   // If the tracker is unavailable, force the pipeline to passthrough.
   useEffect(() => {
@@ -644,6 +668,7 @@ export function PlayClient({
         enrolled={face?.enrolled ?? false}
         consentGiven={face?.consentGiven ?? false}
         remainingMs={remainingMs}
+        pausedReason={pipeline.pausedReason}
         onBegin={() => {
           void pipeline.beginGate();
         }}
