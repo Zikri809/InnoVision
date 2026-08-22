@@ -1,6 +1,8 @@
 # InnoVision — Phase 6 (Gesture Layer) Implementation Plan
 
-> **Status:** DRAFT — pending review; not approved for execution.
+> **Status: EXECUTED** (gesture layer, hand tracking, hand-loss pause) — the "DRAFT" note below predates shipment and is stale.
+>
+> ⚠️ Post-script: hand-loss pause became SERVER-SIDE in Phase 7 (`POST /api/sessions/[id]/pause`, reason `hand_loss`) — the client-only modal described below was migrated into the session state machine. It does NOT increment `focus_pause_count`. See docs/PLAN_INTEGRITY_SUITE.md §2b.
 > **Depends on:** Phase 5 (Play screen, click-first) — committed at `59ee525`; gates green (313 vitest · verify:security 3/3 · verify:classes 21/21 · verify:quizzes 42/42 · verify:ai 16/16 · verify:sessions 19/19 · 13 Playwright E2E · lint/typecheck/build clean).
 > **Phase 6 deliverable (PLAN §6):** port Hand Landmarker, hold-to-confirm, calibration screen — a full quiz playable hands-free; accidental-lock guard holds.
 > **Gate tests (TESTING §9):** **U-G1–U-G7** (finger count / hold-to-confirm / hand-loss) · **E8** (gesture answering, simulated) · **E9** (accidental-lock guard) · **E9b** (hand lost → auto-pause). All earlier gates stay green.

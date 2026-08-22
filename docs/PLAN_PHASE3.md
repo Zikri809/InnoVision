@@ -1,6 +1,6 @@
 # InnoVision — Phase 3 (Manual Builder) Implementation Plan
 
-> **Status:** Validated (graphify graph refreshed at HEAD `742185a`; baseline lint/typecheck/37 unit tests green) and approved for execution.
+> **Status: EXECUTED** (manual builder, question CRUD). Historical plan. (graphify graph refreshed at HEAD `742185a`; baseline lint/typecheck/37 unit tests green) and approved for execution.
 > **Depends on:** Phase 2 (Classes) — committed, gates green (D8/D12/D15–D18, E1, E1a).
 > **Phase 3 deliverable (PLAN §6):** `quizzes` + `questions` CRUD UI (mcq/true_false only), publish flow — a lecturer hand-builds a quiz, publishes it, and it appears **live** for enrolled students.
 > **Gate tests (TESTING §9):** **D5** (answer secrecy on read) · **D6** (owner reads `correct_index`) · **I20** (student blocked from every lecturer-only route). All earlier gates (E1a, D8/D12/D15–D18, E1) stay green.

@@ -1,4 +1,7 @@
-﻿# InnoVision — Phase 5 (Play Screen, Click-First) Implementation Plan
+> **Status: EXECUTED** (click-first play screen, server-authoritative timer).
+> Historical plan.
+
+# InnoVision — Phase 5 (Play Screen, Click-First) Implementation Plan
 
 > **Post-audit note:** `TIMER_GRACE_SEC` was removed from `.env.local.example` and CI — nothing ever read it. The grace is a SQL constant (`interval '5 seconds'`) in the RPC; ignore any statement below that says the env var "already exists" or that CI writes it.
 

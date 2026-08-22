@@ -1,6 +1,6 @@
 # Reveal Results — Final Implementation Plan (v4)
 
-Status: READY FOR IMPLEMENTATION — revised after TWO rounds of parallel
+Status: IMPLEMENTED (migration 0012_results_reveal.sql, /api/quizzes/[id]/reveal, results-reveal UI). This document is the binding design record for reveal semantics ONLY — it predates the integrity suite (0020/0021) and says nothing about advisories, focus pauses, or incident clips. — revised after TWO rounds of parallel
 stress-test audits (round 1 found the original leak + race blockers; round 2
 re-audited v3 and found the remaining gaps below, all now resolved).
 This is the implementation reference; the changes below are binding.

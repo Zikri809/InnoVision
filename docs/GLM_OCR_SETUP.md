@@ -1,5 +1,7 @@
 # GLM-OCR Setup Guide (Docker / vLLM)
 
+> Last verified: 2026-08-22.
+
 > GLM-OCR (Z.ai) is the opt-in high-accuracy OCR engine. It runs **in Docker via
 > vLLM** — the officially recommended production runtime — and exposes an
 > OpenAI-compatible API on loopback. This replaces the earlier native-Ollama

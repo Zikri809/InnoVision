@@ -1,6 +1,6 @@
 # Quiz Builder Metadata Editing (Title, Mode, Time Limit) — Architecture & Implementation Plan
 
-**Status**: Ready for Implementation (Critiqued & Hardened by 4 Review Subagents)  
+**Status**: IMPLEMENTED (PATCH /api/quizzes/[id], in-place edit + regenerate modals — commit d732dab; E15 covers it). Plan kept as the design record. (Critiqued & Hardened by 4 Review Subagents)  
 **Target Module**: Quiz Builder (`src/app/(lecturer)/lecturer/quizzes/[id]/builder/quiz-builder-client.tsx`), Quiz API (`src/app/api/quizzes/[id]/route.ts`), Class Quizzes API (`src/app/api/classes/[id]/quizzes/route.ts`), Quiz Validation (`src/lib/quizzes/validation.ts`)  
 **Dependencies**: `supabase/migrations/0004_quizzes.sql`, `supabase/migrations/0007_ai_generation.sql`, `src/lib/http.ts`, `src/lib/quizzes/guards.ts`  
 **UI Rewrite Alignment**: Spec written with strict separation of backend invariants, pure utility functions, and clean component interfaces so it remains completely resilient to upcoming UI refactors.

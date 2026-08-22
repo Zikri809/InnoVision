@@ -1,5 +1,11 @@
 # CompreFace Setup Guide
 
+> Operational guide — Docker/env/ports current as of 2026-08-22. Authored during
+> the Phase-7 migration: app-side call patterns changed in migrations 0020/0021
+> (multi-frame verify) — see docs/PLAN_INTEGRITY_SUITE.md before reasoning about
+> the verify flow. The `FAKE_FRAME_MATCH`/`FAKE_FRAME_MISMATCH` mock markers
+> remain current.
+
 > Part of the Phase 7 CompreFace migration (`docs/PLAN_PHASE7_COMPREFACE_MIGRATION.md`). CompreFace is the self-hosted face recognition backend — it runs in Docker alongside Supabase, and the Next.js API routes call it over loopback only.
 
 ## 1. Prereqs
@@ -66,7 +72,7 @@ curl -H "x-api-key: $COMPREFACE_API_KEY" http://localhost:8000/api/v1/health
 - CompreFace's ports are bound to `127.0.0.1` only (see `docker-compose.yml`). The Next.js routes talk to it over loopback — classroom WiFi cannot reach it.
 - `COMPREFACE_API_KEY` is a **shared application secret**: anyone with it has full CRUD on all subjects (enroll a face under any subject name, delete any subject). Never ship it to the client; never commit it.
 - The key is per-application, not per-user. All user isolation happens in the Next.js routes + Postgres RLS.
-- Biometric data lives only in the CompreFace Postgres named volume (`compreface-postgres-data`). It is never committed to the repo.
+- Biometric enrollment samples live in the CompreFace Postgres named volume (`compreface-postgres-data`) — as of Phase 7. Since 0020, INCIDENT footage (short clips, only when an integrity event fires) additionally lives in the private Supabase Storage bucket `incident-footage`; see docs/PLAN_INTEGRITY_SUITE.md §4
 
 ## 6. Test / mock mode
 

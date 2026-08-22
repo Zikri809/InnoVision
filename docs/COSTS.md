@@ -1,5 +1,13 @@
 # InnoVision — Cost Breakdown (excluding LLM API)
 
+> **⚠️ PARTIALLY STALE (authored pre-CompreFace / pre-integrity-suite).**
+> Known-drift sections: §2.3 describes browser-side face embeddings (DEAD since
+> migration 0010 — frames now go to a self-hosted CompreFace Docker container,
+> which adds its own hosting footprint NOT costed below); §2.1 wrongly says
+> MediaPipe models are VENDORED into `public/models` (Phase 6) and served from the app host — CDN assumption removed
+> `public/models` since Phase 6); storage/bandwidth estimates predate the
+> incident-footage bucket (0020). Numbers below are directional, not quotes. (excluding LLM API)
+
 > Scope: infrastructure and services needed to **build, run, and demo** the MVP for ~20 students.
 > LLM/vision token costs are excluded by request — and the [OCR design](PLAN.md#3-text-extraction--ocr-module-cost-saving-design) defaults to **in-browser Tesseract OCR ($0)**, with local GLM-OCR and cloud vision strictly opt-in, so even those stay near zero.
 
@@ -48,7 +56,7 @@
 
 - Open-source (Apache 2.0), runs **100% client-side** (WASM/WebGL). No API key, no per-call billing, no usage cap.
 - Models (~30 MB total: hand landmarker, face embedder, face landmarker) **self-hosted from the app's `/public/models`** so the demo doesn't depend on Google's CDN being reachable from venue Wi-Fi. $0 either way.
-- No inference server, no GPU bill. Face embeddings are computed in the browser; only a **192-float array (~768 B)** is sent to Supabase.
+⚠️ STALE (pre-CompreFace): face verification now sends webcam FRAMES to a self-hosted CompreFace service (migration 0010); incident recording (0020) additionally stores short clips in Supabase Storage on incidents only — see docs/PLAN_INTEGRITY_SUITE.md
 - Bonus: raw face images never leave the student's device — privacy-friendly by design.
 
 ### 2.4 OCR — $0

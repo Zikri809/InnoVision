@@ -1,5 +1,11 @@
 # InnoVision — Security Audit
 
+> **📍 POINT-IN-TIME SNAPSHOT (2026-08-08, Phase-1 scope).** Later hardening
+> (migrations 0005–0021, rate limits, RPC rewrites, the 0020/0021 audits and
+> their remediations) is NOT reflected here. Do not cite this as the current
+> security posture — the invariants live in docs/PLAN_INTEGRITY_SUITE.md §4
+> and the migration headers.
+
 > **Date:** 2026-08-08
 > **Scope:** Phase 1 codebase (Scaffold): Next.js 16 App Router, Supabase auth, shadcn/ui, e2e tests, initial migration.
 > **Audit type:** Manual code review — authentication, authorization, RLS, input handling, secrets handling.
@@ -241,4 +247,8 @@ Additions audited (PLAN_PHASE8 §2 D2/D4/D9, §9): `reset_session` RPC + `lectur
 
 **Docs resolution:** TESTING.md / PLAN.md P8 gate row `E13 → E13b` (P7's timer-gate E13 keeps its id).
 
-**Residual (documented, accepted — P7-scope, not P8):** the P7 `unlock_session`/`exempt_face_session` RPC routes return `nextNonce` (the student's rotated `verify_nonce`) in their 200 body. The P8 dashboard is the first caller to exercise them, so the nonce now reaches a lecturer browser. This is inert as a privilege path — a lecturer is never the session owner, so `record_face_check`/`answer_question` reject them with `not_owner` (`student_id = auth.uid()` is required) — but it is inconsistent with the "verify_nonce never travels to the lecturer" discipline (P7 `GET /api/sessions/[id]` omits it). Fixing it means editing those audited P7 routes (strip `nextNonce` from the lecturer-facing 200 body) — deliberately out of P8 scope; tracked as a follow-up (PLAN_PHASE8 §5).
+**Residual (documented, accepted — P7-scope, not P8):** the P7 `unlock_session`/`exempt_face_session` RPC routes return `nextNonce` (the student's rotated `verify_nonce`) in their 200 body. The P8 dashboard is the first caller to exercise them, so the nonce now reaches a lecturer browser. This is inert as a privilege path — a lecturer is never the session owner, so `record_face_check`/`answer_question` reject them with `not_owner` (`student_id = auth.uid()` is required) — but it is inconsistent with the "verify_nonce never travels to the lecturer" discipline (P7 `GET /api/sessions/[id]` omits it). Fixing it means editing those audited P7 routes (strip `nextNonce` from the lecturer-facing 200 body) — deliberately out of P8 scope; tracked as a follow-up (PLAN_PHASE8 §5). — RESOLVED: lecturer surfaces were rebuilt to exclude `verify_nonce` (lecturer_session_view / results projections, migrations 0011/0012).
+
+---
+
+**Current security posture:** `docs/PLAN_INTEGRITY_SUITE.md` · **Index:** `docs/README.md` · Post-0020/0021 remediation record lives in migration headers + `scripts/verify-face.mjs` (59 live-SQL checks).

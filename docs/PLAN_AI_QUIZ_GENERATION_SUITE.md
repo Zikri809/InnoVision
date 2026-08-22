@@ -1,6 +1,6 @@
 # AI Quiz Generation Suite (Multi-File Ingestion, Steering, Difficulty & Append Mode)
 
-**Status**: Implemented, Multi-Subagent Audited & Hardened  
+**Status**: Implemented, Multi-Subagent Audited & Hardened (2026-08-21). Design record; the "PASSED (631/631)" counts below are point-in-time snapshots, not current CI state.  
 **Target Modules**:  
 - AI Pipeline: `src/lib/ai/quiz-prompt.ts`, `src/lib/ai/quiz-schema.ts`, `src/lib/ai/validation.ts`  
 - Generation Route: `src/app/api/ai/generate-quiz/route.ts`  

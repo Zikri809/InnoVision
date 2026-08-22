@@ -3,6 +3,14 @@
 > **Status:** EXECUTED — the CompreFace migration is implemented. `docker-compose.yml` (loopback-bound), migration `0010_compreface.sql` (face_embedding dropped, face_enrollment_status + frame_hash + GUC guard added, RPCs redefined), `lib/face/*` (frame-based schemas, server CompreFace client), API routes (enroll/verify/consent/health), UI (3-angle enroll wizard, gate explicit-Begin, pipeline frame-based), FakeSupabase + route tests, E2E fake-tracker + CompreFace mock. Verification: vitest 507/507, coverage thresholds pass, verify-face 50/50 (D10/D11/D13/D14 + D-col-priv + margin + suspicion + reject + tie-break + audit-loop window/threshold/numeric/exempt/quiz-live/null-subject probes), all earlier verify scripts green, mediapipe manifest clean, build clean. E2E face specs updated (E3/E3b/E13/E6/E7/E12/E9b) — see §3 Step 8 for the remaining E2E timing notes.
 > **Predecessor:** Phase 7 (Face Pipeline) as executed — see `docs/PLAN_PHASE7.md` (the "before" state; now SUPERSEDED-bannered).
 > **Design source:** `docs/PLAN_PHASE7.md` §architecture-design (the CompreFace design document at the top of the file).
+> **⚠️ SUPERSEDED IN PART (migrations 0020/0021):** the margin rule
+> (`FACE_MARGIN_MIN`, top1−top2), the single-similarity RPC signature
+> (`p_similarity`/`p_second_*`), and the top-2 route extraction described
+> below are REMOVED. Verification is now 1:1-by-lookup with strict
+> multi-frame majority voting over `p_similarities real[]`; focus-loss
+> pause, session advisories, and incident recording were added. Current
+> contract: **docs/PLAN_INTEGRITY_SUITE.md**.
+
 > **Phase 7 migration deliverable:** Docker CompreFace alongside the Next.js app → browser sends webcam frames to Next.js API routes → CompreFace handles detection/alignment/embedding/matching → auth.uid-keyed subject registry → multi-angle enrollment → duplicate-identity detection → verification-lite with margin rule → all existing security invariants preserved (server-only verdict, atomic window, nonce rotation, GUC-guarded enrollment status).
 > **Gate tests (TESTING §9):** **U-F1–U-F7c** (U-F1–U-F3 adapted) · **D10, D11, D13, D14** · **I1–I6c, I20, I22** · **E3, E3b, E6, E7, E12** · **E9b**. All earlier gates stay green. Test IDs are preserved; assertions are adapted to the new architecture.
 

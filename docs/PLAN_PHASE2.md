@@ -1,6 +1,6 @@
 # InnoVision — Phase 2 (Classes) Implementation Plan
 
-> **Status:** Validated (4 subagents + graphify) and approved for execution.
+> **Status: EXECUTED** (classes, join codes, roster). Historical plan — kept as the record of what was built and why.
 > **Depends on:** Phase 1 (Scaffold) — committed, gates green.
 > **Phase 2 deliverable (PLAN §6):** `classes` + `class_enrollments`, 6-char join codes with retry-on-collision, student enrollment via code, cross-lecturer RLS isolation, private `quiz-sources` bucket, class CRUD + role-guarded pages.
 > **Gate tests:** **D8** (lecturer B cannot read lecturer A's classes) · **D12** (`quiz-sources` owner-only) · **E1** (class → join via code → roster updates). Plus all earlier gates stay green (E1a).

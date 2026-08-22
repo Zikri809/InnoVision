@@ -1,3 +1,11 @@
+> **📍 POINT-IN-TIME PLAN (Phase 0 era) — superseded per-section.** Phases 1–8
+> shipped (each `PLAN_PHASE*.md` records its own execution); the face
+> pipeline was since re-architected twice (CompreFace 0010, integrity suite
+> 0020/0021). For CURRENT behavior read **docs/README.md** (index) and
+> **docs/PLAN_INTEGRITY_SUITE.md** (face/integrity). The API/data-model
+> sections below drifted — trust the migrations in `supabase/migrations/`
+> and the route handlers over this document.
+
 # InnoVision — Implementation Plan
 
 > **MVP Goal:** Lecturer-created, AI-generated, gesture-answered quizzes with continuous face verification for assessments.
@@ -357,4 +365,4 @@ Vercel notes: AI quiz-generation routes intentionally run long (per-call timeout
 5. **Sparse slide decks → weak AI questions** — slides are diagrams+bullets, so extracted text can be thin; builder shows a **source-text preview** so the lecturer sees why before blaming the AI.
 6. **Free-tier Supabase pauses after 7 days inactivity** — reopen the project before demo day.
 7. **Demo-room reality** — 20 laptops + fluorescent lighting degrades both hand and face tracking; the click fallback + supervisor override are the safety net.
-8. **Direct-RPC face forgery (CompreFace migration residual).** A student can call `record_face_check` / `enroll_face` directly via PostgREST with forged CompreFace metadata for their OWN uid (`p_subject = auth.uid()`, high similarity) — the RPC trusts the metadata (it cannot call CompreFace). This is the same threat model as the pre-migration embedding-replay risk (a student could forge a matching embedding). **Mitigation:** the `p_subject = auth.uid()` check prevents impersonation; the FLAT window + blink liveness + lecturer review catch sustained forgery; the nonce rotates per check. **Post-MVP:** challenge-response liveness on periodic checks.
+8. **Direct-RPC face forgery (CompreFace migration residual).** A student can call `record_face_check` / `enroll_face` directly via PostgREST with forged CompreFace metadata for their OWN uid (`p_subject = auth.uid()`, high similarity) — the RPC trusts the metadata (it cannot call CompreFace). This is the same threat model as the pre-migration embedding-replay risk (a student could forge a matching embedding). **Mitigation:** the `p_subject = auth.uid()` check prevents impersonation; the FLAT window + blink liveness + lecturer review catch sustained forgery; the nonce rotates per check. **Post-MVP:** challenge-response liveness on periodic checks. — (status 2026-08-22: metadata forgery remains possible ONLY for passing AS ONESELF; verdict hardened by majority voting — see PLAN_INTEGRITY_SUITE.md §6)

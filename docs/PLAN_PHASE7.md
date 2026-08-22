@@ -1,3 +1,9 @@
+> **📜 HISTORICAL PLAN (pre-implementation).** Written before Phase 7 was
+> built. The shipped pipeline differs materially: client-side embeddings were
+> replaced by CompreFace server-side matching (0010), then by 1:1-by-lookup
+> multi-frame voting with focus-loss pause, advisories, and incident recording
+> (0020/0021). Current behavior: **docs/PLAN_INTEGRITY_SUITE.md**.
+
 # InnoVision — Phase 7 (Face Pipeline) Implementation Plan
 
 > **⚠️ SUPERSEDED by the CompreFace migration.** The face-recognition pipeline below (client-side MediaPipe embeddings + pgvector) has been **replaced** by the server-side CompreFace architecture described in **`docs/PLAN_PHASE7_COMPREFACE_MIGRATION.md`**. Everything in THIS file is the **PRE-migration state** — kept for the execution/audit history. Do not implement from this file.

@@ -1,9 +1,9 @@
 # InnoVision — Session Handoff (Phase 7 DONE → CompreFace migration)
 
-> **⚠️ Since this handoff was written, Phase 7's face pipeline was MIGRATED to CompreFace** — see `docs/PLAN_PHASE7_COMPREFACE_MIGRATION.md`. The migration is implemented: the client-side `FaceEmbeddingProvider`/`ImageEmbedder`/pgvector-embedding approach is GONE, replaced by a server-side CompreFace Docker service. The description below is the **pre-migration** baseline; read the migration doc for the current architecture.
+> **⚠️ Since this handoff was written, Phase 7's face pipeline was MIGRATED to CompreFace** — see `docs/PLAN_PHASE7_COMPREFACE_MIGRATION.md`. The migration is implemented: the client-side `FaceEmbeddingProvider`/`ImageEmbedder`/pgvector-embedding approach is GONE, replaced by a server-side CompreFace Docker service. The description below is the **pre-migration** baseline. NOTE: the CompreFace migration itself was later superseded by integrity-suite migrations 0020/0021 — read `docs/PLAN_INTEGRITY_SUITE.md` for the CURRENT architecture.
 >
 > Purpose: give a fresh session full context without re-reading the large PLAN docs.
-> Read this file first. `docs/PLAN_PHASE7.md` has the full implementation + audit-fix log (§8); `docs/TESTING.md` has the test plan.
+> Historical handoff — for onboarding start at `docs/README.md` (index), not here. `docs/PLAN_PHASE7.md` has the full implementation + audit-fix log (§8); `docs/TESTING.md` has the test plan.
 
 ---
 
@@ -37,6 +37,14 @@ Prereqs for the harnesses/E2E: **Docker Desktop running** + local Supabase up (`
 
 ## 3. What Phase 7 delivered
 
+> **⚠️ HISTORICAL SNAPSHOT (Phase-7 era).** The face pipeline was migrated to
+> CompreFace (0010) and then to multi-frame 1:1 voting + focus-loss pause +
+> advisories + incident recording (migrations 0020/0021). Embeddings,
+> `cosine.ts`, `FACE_DISTANCE_MAX`, the margin rule, and
+> `fake-face-embedder.ts` no longer exist; the current contract is
+> **docs/PLAN_INTEGRITY_SUITE.md** and `scripts/verify-face.mjs`. The text
+> below is preserved as the Phase-7 record only.
+
 - **Migration `0009_face.sql`** — `face_check_trigger` enum (`start`/`question`/`periodic`); `face_checks` (RLS owner/lecturer select-only, RPC-only writes; advisory `suspected_replay`/`too_frequent` flags); `audit_events` (service-role only; P8 adds a lecturer view); `quiz_sessions.face_unavailable_at`; **actor-bound guard trigger** on `profiles.face_embedding` (service-role writes INTENTIONALLY blocked — `auth.uid()` NULL); RPCs `enroll_face` / `revoke_face_consent` / `record_face_check` (14-step pinned order, FLAT last-5 window, nonce rotation inside one locked txn) / `self_recover_session` / `pause_session` / `unlock_session` / `exempt_face_session` / `report_face_unavailable`; **redefined `submit_session`** (`active`/`paused` submit; `flagged` → `session_not_active`).
 - **`src/lib/face/`** — pure, env-free logic: `constants.ts` (incl. `FACE_DISTANCE_MAX=0.4` mirror-not-enforcement header), `types.ts` (re-exports `FaceCheckTrigger`; `IFaceTracker` seam; **`FaceEmbeddingProvider`** — the swappable embedding-model interface), `cosine.ts`, `schemas.ts` (single `embeddingSchema` owner + `serializeEmbedding` bit-stable), `liveness.ts` (`BlinkDetector`), `streak.ts` (FLAT last-5), `recovery.ts`, `cadence.ts` (`PeriodicCadence` + `shouldScheduleFaceCheck`), `outcome.ts` (`resolveVerifyOutcome`/`faceStatusFromCheckResult`), `rpc-mapping.ts` (common-key table), `fake-seam.ts` (typed E2E accessors). Unit tests U-F1–U-F7c + I22 (68 tests).
 - **Shared camera** — `src/lib/vision/camera.ts` (token refcount + coalesced in-flight `getUserMedia` + supersede guard; SOLE `track.stop()` owner). `camera.test.ts` (winner-live + loser-stopped-once). **`hand-tracker.ts` refactored** — `stop()` releases the ref, NEVER stops shared tracks.
@@ -47,6 +55,8 @@ Prereqs for the harnesses/E2E: **Docker Desktop running** + local Supabase up (`
 - **Config** — `verify:face` npm script; CI step; `vitest.config.ts` coverage include + per-file thresholds for `lib/face/**` + `app/api/face/**` + `lib/vision/camera.ts` (`face-tracker.ts` 0-key browser-only).
 
 ## 4. Key security/robustness invariants (do not regress)
+
+> ⚠️ **Phase-7-era mechanics below (embeddings, cosine ≤ 0.4, 5s grace) are DEAD** — preserved for record. The standing invariants (server-computed verdicts, atomic window, nonce discipline) survive in evolved form; their current form is `docs/PLAN_INTEGRITY_SUITE.md` §1/§6.
 
 - **Server never trusts a client verdict.** `record_face_check` computes `matched` from the stored embedding vs the submitted RAW embedding; `0.4` + 5s grace are SQL constants. No `matched` parameter exists.
 - **`record_face_check` is ONE atomic RPC** — `for update` serializes concurrent verifies; the FLAT last-5 window (3 fails → flagged; a pass never flags the current check) lives inside the same locked transaction. Ordering pinned `checked_at DESC, id DESC`.
@@ -60,6 +70,8 @@ Prereqs for the harnesses/E2E: **Docker Desktop running** + local Supabase up (`
 - **CSRF** `checkSameOrigin()` on all state-changing face routes; per-user rate limits (enroll 5, verify 10, consent 5, self-recover 10, unlock 10, exempt 10, pause 20, face-unavailable 10, GET 60).
 
 ## 5. Known remaining / accepted (documented in PLAN_PHASE7 §5)
+
+> ⚠️ Face-mechanics bullets below are Phase-7 era; provider/drop-in instructions no longer apply. Point-in-time test counts throughout this file have drifted.
 
 - **PHASE 7 DEVIATION — face embedding model.** The plan pinned a `FaceEmbedder` task + `face_embedder.task` (192-dim) from `@mediapipe/tasks-vision`. That task DOES NOT EXIST (verified `1.0.1` and the latest RC — no `FaceEmbedder`/`FaceRecognizer` class; the model URL 404s). Implemented instead: a **swappable `FaceEmbeddingProvider` interface** (`src/lib/face/types.ts`) with a default `ImageEmbedderFaceEmbeddingProvider` consuming a self-hosted 192-dim TFLite model at `public/models/face_embedding.tflite`. **That file is a MANUAL DROP-IN** — until present, the manifest records it as `missing` (verify-mediapipe passes with a warning) and the pipeline reports face `'unavailable'` (click-first passthrough). To enable face verification: drop a 192-dim face-embedding TFLite at `public/models/face_embedding.tflite`, re-run `node scripts/vendor-mediapipe.mjs`, and commit the manifest update. The 192-dim `vector(192)` schema + cosine + all server logic are unchanged; swap the provider to use any future model.
 - **Anti-replay is honest, not magic** — the nonce stops naive captured-request replay; it cannot stop a student looping their own uploaded embedding. The FLAT window hard-flags continuous V/−V alternation at the 3rd fail in any sliding 5-window; bounded ≤5-check framing leaves a visible ≤2-fail record + advisory flags. True identity needs post-MVP challenge-response / device attestation.

@@ -1,6 +1,8 @@
 # InnoVision — Phase 8 (Results & Attendance) Implementation Plan
 
-> **Status:** EXECUTED (except E2E — deferred, see §5/§8.2). This document is the validated, execution-ready plan for Phase 8.
+> **Status: EXECUTED** — design record for the Phase-8 dashboard (results, reset, audit views). E2E coverage was partially deferred.
+>
+> ⚠️ **Since this plan shipped**, the integrity suite (migrations 0020/0021) EXTENDED this surface: per-type advisory chips (`second_face` / `looked_away` / `voice_activity` / `headset_active`), the `focus_pause_count` line, and incident-clip playback with signed URLs. The body below describes Phase-8 scope only — for the full current surface read **docs/PLAN_INTEGRITY_SUITE.md**.
 > **Depends on:** Phase 5 (play screen) + Phase 7 (face pipeline, CompreFace) — both committed; all P7 gates green.
 > **Phase 8 deliverable (PLAN §6):** Lecturer dashboard: sessions = attendance (incl. **"abandoned"** derived state), scores, face-check timeline, flags, **unlock + face-exempt + session-reset buttons** (all audited). The **source-text preview in builder** is a P8-row item that is **ALREADY DELIVERED** (`SourceTextPreview` in `quiz-builder-client.tsx` — no new work).
 > **Gate tests (TESTING §9):** **U-T4** (abandoned derived state) · **I21** (session-reset releases the one-attempt slot) · **E5b** (lecturer resets attempt) · **E13b** (attendance = session; renamed from the doc-colliding `E13`, see §7/D12). Audit rows verified via **D13**.
