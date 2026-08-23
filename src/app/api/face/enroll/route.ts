@@ -26,18 +26,21 @@ const ENROLL_RATE = { limit: 5, windowMs: 60 * 1000 };
 /**
  * POST /api/face/enroll — multi-angle CompreFace enrollment (3 frames).
  *
- * Preamble: guard → CSRF → rate-limit → parse → Zod → CompreFace →
- * RPC → `mapFaceError`.
+ * Preamble: guard → CSRF → rate-limit → parse → Zod → consent pre-check →
+ * CompreFace → RPC → `mapFaceError`.
  *
  * Flow (L9/L10):
  *  1. Validate 3 frames (front / left / right), each ≤ MAX_FRAME_BASE64_CHARS.
- *  2. Per frame: CompreFace `/detect` → validate pose (front |yaw| ≤ 30°,
+ *  2. Consent pre-check on `profiles.consent_given_at` — a non-consented
+ *     student's biometric frames must NEVER be shipped to CompreFace (the RPC
+ *     re-checks consent authoritatively inside the transaction).
+ *  3. Per frame: CompreFace `/detect` → validate pose (front |yaw| ≤ 30°,
  *     sides 10° ≤ |yaw| ≤ 75°). Reject → 400 pose_invalid.
- *  3. Duplicate check: CompreFace `/recognize` per frame → best NON-self match
+ *  4. Duplicate check: CompreFace `/recognize` per frame → best NON-self match
  *     (subject ≠ auth.uid()) with similarity ≥ FACE_SUSPICION_MIN (0.45,
  *     applied in the RPC). Passed to `enroll_face` as p_duplicate_*.
- *  4. Per frame: CompreFace `addSubjectExample(auth.uid(), frame)`.
- *  5. RPC `enroll_face(p_duplicate_subject, p_duplicate_similarity)` — the
+ *  5. Per frame: CompreFace `addSubjectExample(auth.uid(), frame)`.
+ *  6. RPC `enroll_face(p_duplicate_subject, p_duplicate_similarity)` — the
  *     RPC derives status ('enrolled' | 'pending_review').
  *
  * Mappings (bullets list ONLY overrides; common keys automatic):
@@ -96,10 +99,21 @@ export async function POST(request: Request) {
   // the revoked biometric data would never be removed.
   const { data: profileRow } = await supabase
     .from("profiles")
-    .select("face_deletion_pending, face_enrollment_status")
+    .select("face_deletion_pending, face_enrollment_status, consent_given_at")
     .eq("id", auth.userId)
     .maybeSingle();
-  if (profileRow && profileRow.face_deletion_pending === true) {
+
+  // Privacy gate: a NON-CONSENTED student's frames must never leave the
+  // server — reject BEFORE any CompreFace call (the RPC re-checks consent
+  // authoritatively inside the locked transaction).
+  if (!profileRow || !profileRow.consent_given_at) {
+    return (
+      mapFaceError({ error: "consent_required" }, { consent_required: { status: 403 } }) ??
+      internalError("Something went wrong.")
+    );
+  }
+
+  if (profileRow.face_deletion_pending === true) {
     const del = await compreface.deleteSubject(auth.userId);
     if ("error" in del) {
       return mapFaceError(del) ?? internalError("Could not enroll right now.");

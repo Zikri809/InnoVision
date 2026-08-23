@@ -4,8 +4,17 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
+import { BotAvatar } from "@/components/bot/bot-avatar";
+import type { BotState } from "@/lib/bot/engine";
 import type { FaceStatus } from "@/lib/face/types";
-import { ScanFace, ShieldCheck, UserRound, Timer } from "lucide-react";
+import { ShieldCheck, UserRound, Timer } from "lucide-react";
+
+const LIVENESS_AVATAR: Record<"idle" | "waiting" | "passed" | "failed", BotState> = {
+  idle: "idle",
+  waiting: "scanning",
+  passed: "success",
+  failed: "fail",
+};
 
 export function FaceGate({
   consentGiven,
@@ -38,8 +47,8 @@ export function FaceGate({
       <div aria-hidden className="pointer-events-none absolute -right-4 bottom-12 h-20 w-20 rounded-[60%_40%_45%_55%/50%_60%_40%_55%] bg-blue-200/50" />
 
       <div className="relative rounded-[28px] border-[3px] border-border bg-card p-7 shadow-[var(--shadow-clay)] md:p-9">
-        <div className="mb-4 grid h-14 w-14 place-items-center rounded-[18px] bg-blue-100 text-accent shadow-[0_4px_0_rgba(29,78,216,0.15)]">
-          <ScanFace className="h-7 w-7" aria-hidden />
+        <div className="mb-4 grid h-14 w-14 place-items-center rounded-[18px] bg-blue-100 shadow-[0_4px_0_rgba(29,78,216,0.15)]">
+          <BotAvatar state={LIVENESS_AVATAR[livenessState]} size={38} />
         </div>
         <h1 className="font-heading text-2xl font-semibold">{t("gateTitle")}</h1>
         <p className="mt-2 text-sm font-semibold text-muted-foreground">

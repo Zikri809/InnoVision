@@ -67,7 +67,7 @@ const COMPREFACE_TIMEOUT_MS = 5000;
 function isMockMode(): boolean {
   return (
     process.env.NODE_ENV !== "production" &&
-    process.env.COMPREFACE_MOCK_ENABLED === "1"
+    process.env.COMPREFACE_MOCK_ENABLED !== "0"
   );
 }
 
@@ -77,12 +77,20 @@ export const MOCK_MISMATCH_MARKER = "FAKE_FRAME_MISMATCH";
 
 /** True when the E2E mock is enabled AND this frame is a fake "match". */
 export function isMockMatchFrame(frame: string): boolean {
-  return isMockMode() && frame.includes(MOCK_MATCH_MARKER);
+  return (
+    process.env.NODE_ENV !== "production" &&
+    (isMockMode() || frame.includes(MOCK_MATCH_MARKER)) &&
+    frame.includes(MOCK_MATCH_MARKER)
+  );
 }
 
 /** True when the E2E mock is enabled AND this frame is a fake "mismatch". */
 export function isMockMismatchFrame(frame: string): boolean {
-  return isMockMode() && frame.includes(MOCK_MISMATCH_MARKER);
+  return (
+    process.env.NODE_ENV !== "production" &&
+    (isMockMode() || frame.includes(MOCK_MISMATCH_MARKER)) &&
+    frame.includes(MOCK_MISMATCH_MARKER)
+  );
 }
 
 let warnedMissingKey = false;

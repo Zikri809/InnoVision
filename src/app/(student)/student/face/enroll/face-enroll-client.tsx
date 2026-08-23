@@ -26,9 +26,15 @@ export function FaceEnrollClient({
   const router = useRouter();
   const t = useTranslations("student.face");
   const tCommon = useTranslations("common");
-  const { videoRef, trackerRef, available, booting } = useFaceTracker();
-
   const [consent, setConsent] = useState(consentGiven);
+
+  // Camera boots ONLY after biometric consent — the webcam light must never
+  // turn on while the consent card is still pending. Revoking consent flips
+  // `enabled` back to false and the hook's cleanup releases the stream.
+  const { videoRef, trackerRef, available, booting, start } = useFaceTracker({
+    enabled: consent,
+  });
+
   const [captureState, setCaptureState] = useState<CaptureState>(consentGiven && enrolled ? "done" : "idle");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -299,7 +305,13 @@ export function FaceEnrollClient({
           </div>
         )}
 
-        {booting && (
+        {!consent && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/90 px-6 text-center">
+            <p className="text-sm font-semibold text-white/80">{t("cameraOffHint")}</p>
+          </div>
+        )}
+
+        {consent && booting && (
           <div className="absolute inset-0 flex items-center justify-center bg-muted/80 text-sm font-semibold text-muted-foreground">
             {t("statusBooting")}
           </div>
@@ -312,14 +324,7 @@ export function FaceEnrollClient({
         </p>
       )}
 
-      {!available && !booting ? (
-        <div className="rounded-[28px] border-[3px] border-border bg-card p-8 shadow-[var(--shadow-clay)]">
-          <h2 className="font-heading text-xl font-semibold">{t("enrollTitle")}</h2>
-          <p className="mt-2 text-sm font-semibold text-muted-foreground">
-            {t("statusFailed")}
-          </p>
-        </div>
-      ) : !consent ? (
+      {!consent ? (
         <div className="rounded-[28px] border-[3px] border-border bg-card p-7 shadow-[var(--shadow-clay)] md:p-8">
           <h2 className="font-heading text-xl font-semibold">{t("consentTitle")}</h2>
           <p className="mt-2 text-sm font-semibold text-muted-foreground">
@@ -337,6 +342,18 @@ export function FaceEnrollClient({
               {t("consentCheckbox")}
             </span>
           </label>
+        </div>
+      ) : !available && !booting ? (
+        <div className="rounded-[28px] border-[3px] border-border bg-card p-8 shadow-[var(--shadow-clay)]">
+          <h2 className="font-heading text-xl font-semibold">{t("enrollTitle")}</h2>
+          <p className="mt-2 text-sm font-semibold text-muted-foreground">
+            {t("statusUnavailable")}
+          </p>
+          <div className="mt-5">
+            <Button variant="outline" size="lg" onClick={start}>
+              {tCommon("retry")}
+            </Button>
+          </div>
         </div>
       ) : (
         <div className="rounded-[28px] border-[3px] border-border bg-card p-7 shadow-[var(--shadow-clay)] md:p-8">

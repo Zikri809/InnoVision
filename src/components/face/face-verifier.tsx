@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import type { FaceStatus } from "@/lib/face/types";
 import type { PausedReason } from "@/components/face/use-face-pipeline";
 import { FaceGate } from "@/components/face/face-gate";
+import { BotAvatar } from "@/components/bot/bot-avatar";
 
 export function FaceVerifier({
   status,
@@ -81,6 +82,9 @@ export function FaceVerifier({
       {(status === "paused" || status === "recovering") && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm" role="alert">
           <div className="rounded-[28px] border-[3px] border-border bg-card p-8 text-center shadow-[var(--shadow-clay)]">
+            <div className="mb-4 grid place-items-center">
+              <BotAvatar state="paused" size={112} />
+            </div>
             <p className="font-heading text-xl font-semibold">
               {status === "recovering"
                 ? t("recoveringTitle")
@@ -107,6 +111,9 @@ export function FaceVerifier({
       {status === "flagged" && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm" role="alert">
           <div className="rounded-[28px] border-[3px] border-destructive/40 bg-card p-8 text-center shadow-[var(--shadow-clay)]">
+            <div className="mb-4 grid place-items-center">
+              <BotAvatar state="warn" size={112} bodyClassName="fill-destructive" />
+            </div>
             <p className="font-heading text-xl font-semibold text-destructive">{t("flaggedTitle")}</p>
             <p className="mx-auto mt-2 max-w-sm text-sm font-semibold text-muted-foreground">
               {t("flaggedBody")}

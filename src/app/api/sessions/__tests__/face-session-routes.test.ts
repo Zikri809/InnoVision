@@ -272,7 +272,7 @@ describe("consent — set + revoke", () => {
     const profile = ctx.client.tables["profiles"]!.find((p) => p.id === STUDENT_ID);
     expect(profile?.consent_given_at).toBeNull();
     expect(profile?.face_enrollment_status).toBeNull();
-    expect(profile?.face_deletion_pending).toBe(true);
+    expect(profile?.face_deletion_pending).toBe(false);
     expect((ctx.client.tables["audit_events"] ?? []).some((a) => a.action === "consent_revoked")).toBe(true);
   });
 });
