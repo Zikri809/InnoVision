@@ -6,7 +6,7 @@ import {
   installFakeFaceTracker,
   enrollViaFacePage,
   setFaceVerifyMode,
-  triggerFaceBlink,
+  clickBeginAndBlink,
   recoverFromPause,
   setFacePeriodic,
   waitForFlaggedOverlay,
@@ -54,11 +54,11 @@ test.describe("E7 — lecturer unlock", () => {
     await lecturerPage.getByText(QUIZ_TITLE, { exact: true }).click();
     await expect(lecturerPage).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
 
-    await lecturerPage.getByRole("textbox", { name: "Question" }).fill("What is 2+2?");
+    await lecturerPage.getByRole("textbox", { name: "Question prompt" }).fill("What is 2+2?");
     await lecturerPage.getByLabel("Option 1").fill("3");
     await lecturerPage.getByLabel("Option 2").fill("4");
     await lecturerPage.getByRole("button", { name: /add question/i }).click();
-    await expect(lecturerPage.getByRole("textbox", { name: "Question" })).toHaveValue("");
+    await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
 
     const publishButton = lecturerPage.getByRole("button", { name: /publish/i });
     await expect(publishButton).toBeEnabled();
@@ -80,30 +80,23 @@ test.describe("E7 — lecturer unlock", () => {
     // Fast cadence so mid-quiz periodic re-verifies fire deterministically.
     await setFacePeriodic(studentPage, { minMs: 2000, maxMs: 3000 });
 
-    // Drive to flagged: 3 fail cycles with blink recovery between.
+    // Drive to flagged: 3 fail cycles. The gate is EXPLICIT-Begin and a
+    // failed-'start' recovery lands back IN the gate, so every cycle is:
+    // Begin(+blink) → verify fails → paused overlay → blink-recover.
     for (let cycle = 0; cycle < 3; cycle++) {
       await setFaceVerifyMode(studentPage, "mismatch");
-      if (cycle === 0) {
-        // The gate is explicit-Begin: click Begin (blink + `'start'` verify)
-        // with mismatch mode → the start verify fails → paused.
-        const begin = studentPage.getByRole("button", { name: "Begin assessment", exact: true });
-        await expect(begin).toBeEnabled({ timeout: 15_000 });
-        await begin.click();
-        await triggerFaceBlink(studentPage);
-      }
-      await expect(
-        studentPage.getByText("Face check paused", { exact: true }),
-      ).toBeVisible({ timeout: 15_000 });
+      await clickBeginAndBlink(studentPage);
       if (cycle < 2) {
-        // Blink-recover (mismatch again so the next verify fails too).
-        await setFaceVerifyMode(studentPage, "mismatch");
-        await recoverFromPause(studentPage);
+        // Fails 1-2 → paused; blink-recover → back to the explicit-Begin gate.
         await expect(
           studentPage.getByText("Face check paused", { exact: true }),
         ).toBeVisible({ timeout: 15_000 });
+        await recoverFromPause(studentPage);
+      } else {
+        // Fail 3 (FLAT last-5 window) → flagged.
+        await waitForFlaggedOverlay(studentPage);
       }
     }
-    await waitForFlaggedOverlay(studentPage);
 
     // Student self-recover on flagged → 403 (explicit API assertion).
     const sessionId = studentPage.url().split("/play/")[1];
@@ -155,9 +148,9 @@ test.describe("E7 — lecturer unlock", () => {
     // Overlay cleared → answer Q1 → EndScreen.
     await expect(studentPage.getByText("What is 2+2?", { exact: true })).toBeVisible({ timeout: 10_000 });
     await studentPage.getByRole("button", { name: /4/i }).click();
-    await expect(studentPage.getByText("Answered", { exact: true })).toBeVisible();
+    await expect(studentPage.getByRole("button", { name: /^(Next|Finish)$/, exact: true })).toBeVisible();
     await studentPage.getByRole("button", { name: "Finish", exact: true }).click();
-    await expect(studentPage.getByText("Assessment complete", { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(studentPage.getByText("Assessment complete", { exact: false })).toBeVisible({ timeout: 10_000 });
 
     await lecturerCtx.close();
     await studentCtx.close();

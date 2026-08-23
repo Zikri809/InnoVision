@@ -11,7 +11,7 @@ import {
   installFakeFaceTracker,
   enrollViaFacePage,
   setFaceVerifyMode,
-  triggerFaceBlink,
+  recoverFromPause,
   passAssessmentGate,
 } from "./helpers";
 import { HOLD_MS } from "../src/lib/gestures/constants";
@@ -63,17 +63,17 @@ test.describe("E9b — hand lost → server pause → blink recovery → answer"
     await lecturerPage.getByText(QUIZ_TITLE, { exact: true }).click();
     await expect(lecturerPage).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
 
-    await lecturerPage.getByRole("textbox", { name: "Question" }).fill("What is 2+2?");
+    await lecturerPage.getByRole("textbox", { name: "Question prompt" }).fill("What is 2+2?");
     await lecturerPage.getByLabel("Option 1").fill("3");
     await lecturerPage.getByLabel("Option 2").fill("4");
     await lecturerPage.getByRole("button", { name: /add question/i }).click();
-    await expect(lecturerPage.getByRole("textbox", { name: "Question" })).toHaveValue("");
+    await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
 
-    await lecturerPage.getByRole("textbox", { name: "Question" }).fill("Capital of France?");
+    await lecturerPage.getByRole("textbox", { name: "Question prompt" }).fill("Capital of France?");
     await lecturerPage.getByLabel("Option 1").fill("Paris");
     await lecturerPage.getByLabel("Option 2").fill("London");
     await lecturerPage.getByRole("button", { name: /add question/i }).click();
-    await expect(lecturerPage.getByRole("textbox", { name: "Question" })).toHaveValue("");
+    await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
 
     const publishButton = lecturerPage.getByRole("button", { name: /publish/i });
     await expect(publishButton).toBeEnabled();
@@ -154,8 +154,10 @@ test.describe("E9b — hand lost → server pause → blink recovery → answer"
     blockedCapture.detach();
 
     // ── 3. Blink → self-recover → active → fresh hold → answer 200 ──
+    // Recovery is USER-initiated: the paused overlay's "Blink to recover"
+    // button runs the liveness + self_recover_session flow.
     await setFaceVerifyMode(studentPage, "match");
-    await triggerFaceBlink(studentPage);
+    await recoverFromPause(studentPage);
 
     // The pipeline self-recovers (blink → self_recover_session → active).
     await expect
@@ -179,7 +181,7 @@ test.describe("E9b — hand lost → server pause → blink recovery → answer"
     const res = await recoveryRes;
     expect(res.status()).toBe(200);
 
-    await expect(studentPage.getByText("Answered", { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(studentPage.getByRole("button", { name: /^(Next|Finish)$/, exact: true })).toBeVisible({ timeout: 10_000 });
 
     await lecturerCtx.close();
     await studentCtx.close();

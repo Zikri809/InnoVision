@@ -26,7 +26,8 @@ const QUIZ_TITLE = "E4 Practice Motion";
 test.describe("E4 — practice quiz click-first with resume + replay", () => {
   test("student answers a practice quiz, resumes after refresh, replays the end screen", async ({
     browser,
-  }) => {
+  }, testInfo) => {
+    testInfo.setTimeout(120_000);
     test.skip(!LECTURER_INVITE_CODE, "LECTURER_INVITE_CODE not set");
 
     const lecturerCtx = await browser.newContext();
@@ -56,9 +57,11 @@ test.describe("E4 — practice quiz click-first with resume + replay", () => {
     await expect(studentPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
     await joinClass(studentPage, joinCode, CLASS_TITLE);
 
-    await studentPage.getByRole("link", { name: /available quizzes/i }).click();
+    await studentPage.getByRole("link", { name: /View quizzes/i }).click();
     await expect(studentPage).toHaveURL(/\/student\/quizzes/);
-    await expect(studentPage.getByRole("heading", { name: "Available quizzes" })).toBeVisible();
+    // The hero band renders "Available quizzes" as a chip (plain text) with
+    // "Pick a quiz and wave your answer" as the h1 — match the actual layout.
+    await expect(studentPage.getByText("Available quizzes", { exact: true })).toBeVisible();
     await expect(studentPage.getByText(QUIZ_TITLE, { exact: true })).toBeVisible();
 
     // Start the quiz â†’ play page.
@@ -71,7 +74,7 @@ test.describe("E4 — practice quiz click-first with resume + replay", () => {
     // â”€â”€ 3. Answer Q1 correctly â†’ practice feedback + correctIndex â”€â”€
     await studentPage.getByRole("button", { name: /Speed in a direction/i }).click();
     // Feedback chip shows "Correct".
-    await expect(studentPage.getByText("Correct", { exact: true })).toBeVisible();
+    await expect(studentPage.getByText(/^Correct/)).toBeVisible();
     // Explanation text is shown (practice disclosure).
     await expect(studentPage.getByText(/Explanation:/)).toBeVisible();
     // The correct option is highlighted (correctIndex = 0 = "A").
@@ -80,18 +83,18 @@ test.describe("E4 — practice quiz click-first with resume + replay", () => {
     // â”€â”€ 4. RESUME sub-case â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Assert the feedback chip is visible BEFORE reload (proving the answer
     // POST completed and the client advanced).
-    await expect(studentPage.getByText("Correct", { exact: true })).toBeVisible();
+    await expect(studentPage.getByText(/^Correct/)).toBeVisible();
 
     // Reload â†’ engine must resume at Q2 (NOT stuck on Q1 already_answered).
     await studentPage.reload();
     await expect(studentPage).toHaveURL(/\/play\/[0-9a-f-]+/);
     await expect(studentPage.getByText("Which unit is force measured in?", { exact: true })).toBeVisible();
     // Q1 now shows a neutral "answered" chip (resume seed has no key).
-    await expect(studentPage.getByText("Question 2/3", { exact: true })).toBeVisible();
+    await expect(studentPage.getByText("Q 2/3", { exact: true })).toBeVisible();
 
     // Answer Q2 correctly (Newton = option B = index 1).
     await studentPage.getByRole("button", { name: /Newton/i }).click();
-    await expect(studentPage.getByText("Correct", { exact: true })).toBeVisible();
+    await expect(studentPage.getByText(/^Correct/)).toBeVisible();
 
     // Next â†’ Q3.
     await studentPage.getByRole("button", { name: "Next", exact: true }).click();
@@ -99,21 +102,21 @@ test.describe("E4 — practice quiz click-first with resume + replay", () => {
 
     // Answer Q3 correctly (True).
     await studentPage.getByRole("button", { name: /True/i }).click();
-    await expect(studentPage.getByText("Correct", { exact: true })).toBeVisible();
+    await expect(studentPage.getByText(/^Correct/)).toBeVisible();
 
     // Finish → submit → end screen with score 3/3.
     await studentPage.getByRole("button", { name: "Finish", exact: true }).click();
-    await expect(studentPage.getByText("Your score", { exact: true })).toBeVisible({ timeout: 10_000 });
     // The score is rendered as "3 / 3" in one element — match it robustly.
-    await expect(studentPage.getByText(/^3\s*\/\s*3$/)).toBeVisible();
+    await expect(studentPage.getByText(/^3\s*\/\s*3$/)).toBeVisible({ timeout: 10_000 });
+    await expect(studentPage.getByText("100% correct", { exact: true })).toBeVisible();
 
     // ── 5. REPLAY sub-case: direct navigation to the completed session ──
     const sessionUrl = studentPage.url();
     await studentPage.goto(sessionUrl);
     await expect(studentPage).toHaveURL(sessionUrl);
     // EndScreen renders (not the quiz).
-    await expect(studentPage.getByText("Your score", { exact: true })).toBeVisible();
     await expect(studentPage.getByText(/^3\s*\/\s*3$/)).toBeVisible();
+    await expect(studentPage.getByText("100% correct", { exact: true })).toBeVisible();
 
     await lecturerCtx.close();
     await studentCtx.close();

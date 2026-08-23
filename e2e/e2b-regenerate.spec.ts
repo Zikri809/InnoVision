@@ -32,24 +32,25 @@ async function createDraftQuizWithQuestions(page: Page, classTitle: string, quiz
   await expect(page).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
 
   // Q1
-  await page.getByRole("textbox", { name: "Question" }).fill("What is velocity?");
+  await page.getByRole("textbox", { name: "Question prompt" }).fill("What is velocity?");
   await page.getByLabel("Option 1").fill("Speed in a direction");
   await page.getByLabel("Option 2").fill("Total distance");
   await page.getByRole("button", { name: /add question/i }).click();
-  await expect(page.getByRole("textbox", { name: "Question" })).toHaveValue("");
+  await expect(page.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
   await expect(page.getByText("What is velocity?", { exact: true })).toBeVisible();
 
   // Q2
-  await page.getByRole("textbox", { name: "Question" }).fill("Which unit is force measured in?");
+  await page.getByRole("textbox", { name: "Question prompt" }).fill("Which unit is force measured in?");
   await page.getByLabel("Option 1").fill("Joule");
   await page.getByLabel("Option 2").fill("Newton");
   await page.getByRole("button", { name: /add question/i }).click();
-  await expect(page.getByRole("textbox", { name: "Question" })).toHaveValue("");
+  await expect(page.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
   await expect(page.getByText("Which unit is force measured in?", { exact: true })).toBeVisible();
 }
 
 test.describe("E2b — Regenerate a single question (draft only)", () => {
-  test("lecturer regenerates Q1; sibling untouched", async ({ browser }) => {
+  test("lecturer regenerates Q1; sibling untouched", async ({ browser }, testInfo) => {
+    testInfo.setTimeout(120_000);
     test.skip(!LECTURER_INVITE_CODE, "LECTURER_INVITE_CODE not set");
 
     const lecturerCtx = await browser.newContext();
@@ -59,9 +60,9 @@ test.describe("E2b — Regenerate a single question (draft only)", () => {
     await createDraftQuizWithQuestions(page, "E2b Physics", "Chapter 2: Motion");
 
     // Open the regenerate modal and submit.
-    const regenButtons = page.getByRole("button", { name: "Regenerate question" });
+    const regenButtons = page.getByRole("button", { name: /regenerate with ai/i });
     await regenButtons.first().click();
-    await page.getByRole("button", { name: /regenerate with ai/i }).click();
+    await page.getByRole("dialog").getByRole("button", { name: /regenerate with ai/i }).click();
 
     // The mock AI server returns "REPLACED: What is acceleration?".
     await expect(

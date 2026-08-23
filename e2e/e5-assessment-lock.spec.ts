@@ -16,7 +16,8 @@ const QUIZ_TITLE = "E5 One Attempt";
  *  1. Lecturer creates an UNTIMED assessment quiz (so it can't race the client
  *     auto-submit), publishes.
  *  2. Student A starts, answers, submits.
- *  3. Student A clicks Start again â†’ clean "already taken" message, no 500.
+ *  3. Student A clicks Start again → lands back on the completed session's
+ *     play page (reveal-gated "results pending" EndScreen, no 500).
  *  4. Student B (same class) can still start — one-attempt is per student.
  */
 
@@ -53,17 +54,17 @@ test.describe("E5 — assessment one-attempt lock", () => {
     await expect(lecturerPage).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
 
     // Add 2 questions.
-    await lecturerPage.getByRole("textbox", { name: "Question" }).fill("What is 2+2?");
+    await lecturerPage.getByRole("textbox", { name: "Question prompt" }).fill("What is 2+2?");
     await lecturerPage.getByLabel("Option 1").fill("3");
     await lecturerPage.getByLabel("Option 2").fill("4");
     await lecturerPage.getByRole("button", { name: /add question/i }).click();
-    await expect(lecturerPage.getByRole("textbox", { name: "Question" })).toHaveValue("");
+    await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
 
-    await lecturerPage.getByRole("textbox", { name: "Question" }).fill("Capital of France?");
+    await lecturerPage.getByRole("textbox", { name: "Question prompt" }).fill("Capital of France?");
     await lecturerPage.getByLabel("Option 1").fill("Paris");
     await lecturerPage.getByLabel("Option 2").fill("London");
     await lecturerPage.getByRole("button", { name: /add question/i }).click();
-    await expect(lecturerPage.getByRole("textbox", { name: "Question" })).toHaveValue("");
+    await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
 
     const publishButton = lecturerPage.getByRole("button", { name: /publish/i });
     await expect(publishButton).toBeEnabled();
@@ -74,38 +75,44 @@ test.describe("E5 — assessment one-attempt lock", () => {
     await registerUser(studentAPage, STUDENT_A_EMAIL, "student", LECTURER_INVITE_CODE);
     await expect(studentAPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
     await joinClass(studentAPage, joinCode, CLASS_TITLE);
-    await studentAPage.getByRole("link", { name: /available quizzes/i }).click();
+    await studentAPage.getByRole("link", { name: /View quizzes/i }).click();
     await expect(studentAPage).toHaveURL(/\/student\/quizzes/);
     await studentAPage.getByRole("button", { name: "Start", exact: true }).click();
     await expect(studentAPage).toHaveURL(/\/play\/[0-9a-f-]+/);
 
     await expect(studentAPage.getByText("What is 2+2?", { exact: true })).toBeVisible();
     await studentAPage.getByRole("button", { name: /4/i }).click();
-    await expect(studentAPage.getByText("Answered", { exact: true })).toBeVisible();
+    await expect(studentAPage.getByRole("button", { name: /^(Next|Finish)$/, exact: true })).toBeVisible();
     await studentAPage.getByRole("button", { name: "Next", exact: true }).click();
     await expect(studentAPage.getByText("Capital of France?", { exact: true })).toBeVisible();
     await studentAPage.getByRole("button", { name: /Paris/i }).click();
-    await expect(studentAPage.getByText("Answered", { exact: true })).toBeVisible();
+    await expect(studentAPage.getByRole("button", { name: /^(Next|Finish)$/, exact: true })).toBeVisible();
     await studentAPage.getByRole("button", { name: "Finish", exact: true }).click();
-    await expect(studentAPage.getByText("Your score", { exact: true })).toBeVisible({ timeout: 10_000 });
+    // Results are reveal-gated: until the lecturer reveals, the assessment end
+    // screen shows the "submitted" pending state — NOT a score (E5's scope is
+    // the one-attempt lock, not the reveal flow, which E14/E15 own).
+    await expect(
+      studentAPage.getByText("results will be released by your lecturer", { exact: false }),
+    ).toBeVisible();
 
     // â”€â”€ 3. Student A clicks Start again â†’ clean already-taken â”€â”€â”€â”€â”€
     await studentAPage.getByRole("button", { name: "Back to quizzes" }).click();
     await expect(studentAPage).toHaveURL(/\/student\/quizzes/);
     await studentAPage.getByRole("button", { name: "Start", exact: true }).click();
-    // The play page for the completed session renders the EndScreen's clean
-    // "already taken" message (no 500).
+    // 409 `already_attempted` redirects to the completed session's play page,
+    // which renders the EndScreen's reveal-gated pending state (no 500, and
+    // no score leaked before reveal).
     await expect(studentAPage).toHaveURL(/\/play\/[0-9a-f-]+/);
-    await expect(studentAPage.getByText("Your score", { exact: true })).toBeVisible();
     await expect(
-      studentAPage.getByText("It can only be taken once", { exact: false }),
+      studentAPage.getByText("results will be released by your lecturer", { exact: false }),
     ).toBeVisible();
+    await expect(studentAPage.getByText("Your score", { exact: true })).toHaveCount(0);
 
     // â”€â”€ 4. Student B can still start (one-attempt is per student) â”€
     await registerUser(studentBPage, STUDENT_B_EMAIL, "student", LECTURER_INVITE_CODE);
     await expect(studentBPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
     await joinClass(studentBPage, joinCode, CLASS_TITLE);
-    await studentBPage.getByRole("link", { name: /available quizzes/i }).click();
+    await studentBPage.getByRole("link", { name: /View quizzes/i }).click();
     await expect(studentBPage).toHaveURL(/\/student\/quizzes/);
     await studentBPage.getByRole("button", { name: "Start", exact: true }).click();
     await expect(studentBPage).toHaveURL(/\/play\/[0-9a-f-]+/);

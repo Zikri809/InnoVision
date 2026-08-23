@@ -11,9 +11,12 @@ import {
 } from "./helpers";
 
 const TEST_TIMESTAMP = Date.now();
-const LECTURER_EMAIL = `lecturer-e3-${TEST_TIMESTAMP}@innovision.test`;
-const STUDENT_A_EMAIL = `student-e3a-${TEST_TIMESTAMP}@innovision.test`;
-const STUDENT_B_EMAIL = `student-e3b-${TEST_TIMESTAMP}@innovision.test`;
+const LECTURER_E3A_EMAIL = `lecturer-e3a-${TEST_TIMESTAMP}@innovision.test`;
+const STUDENT_E3A_EMAIL = `student-e3a-${TEST_TIMESTAMP}@innovision.test`;
+const LECTURER_E3B_EMAIL = `lecturer-e3b-${TEST_TIMESTAMP}@innovision.test`;
+const STUDENT_E3B_EMAIL = `student-e3b-${TEST_TIMESTAMP}@innovision.test`;
+const LECTURER_E13_EMAIL = `lecturer-e13-${TEST_TIMESTAMP}@innovision.test`;
+const STUDENT_E13_EMAIL = `student-e13-${TEST_TIMESTAMP}@innovision.test`;
 const LECTURER_INVITE_CODE = process.env.LECTURER_INVITE_CODE ?? "";
 const CLASS_TITLE = "E3 Face Enroll";
 const QUIZ_TITLE = "E3 Assessment";
@@ -43,7 +46,7 @@ test.describe("E3/E3b — face enrollment + assessment gate", () => {
     const studentPage = await studentCtx.newPage();
 
     // Lecturer: class + UNTIMED assessment + publish.
-    await registerUser(lecturerPage, LECTURER_EMAIL, "lecturer", LECTURER_INVITE_CODE);
+    await registerUser(lecturerPage, LECTURER_E3A_EMAIL, "lecturer", LECTURER_INVITE_CODE);
     await expect(lecturerPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
     const joinCode = await createClass(lecturerPage, CLASS_TITLE);
 
@@ -57,17 +60,17 @@ test.describe("E3/E3b — face enrollment + assessment gate", () => {
     await lecturerPage.getByText(QUIZ_TITLE, { exact: true }).click();
     await expect(lecturerPage).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
 
-    await lecturerPage.getByRole("textbox", { name: "Question" }).fill("What is 2+2?");
+    await lecturerPage.getByRole("textbox", { name: "Question prompt" }).fill("What is 2+2?");
     await lecturerPage.getByLabel("Option 1").fill("3");
     await lecturerPage.getByLabel("Option 2").fill("4");
     await lecturerPage.getByRole("button", { name: /add question/i }).click();
-    await expect(lecturerPage.getByRole("textbox", { name: "Question" })).toHaveValue("");
+    await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
 
-    await lecturerPage.getByRole("textbox", { name: "Question" }).fill("Capital of France?");
+    await lecturerPage.getByRole("textbox", { name: "Question prompt" }).fill("Capital of France?");
     await lecturerPage.getByLabel("Option 1").fill("Paris");
     await lecturerPage.getByLabel("Option 2").fill("London");
     await lecturerPage.getByRole("button", { name: /add question/i }).click();
-    await expect(lecturerPage.getByRole("textbox", { name: "Question" })).toHaveValue("");
+    await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
 
     const publishButton = lecturerPage.getByRole("button", { name: /publish/i });
     await expect(publishButton).toBeEnabled();
@@ -79,7 +82,7 @@ test.describe("E3/E3b — face enrollment + assessment gate", () => {
     await revealQuiz(lecturerPage, CLASS_TITLE, QUIZ_TITLE);
 
     // Student A: register + join + fake face + enroll + start.
-    await registerUser(studentPage, STUDENT_A_EMAIL, "student", LECTURER_INVITE_CODE);
+    await registerUser(studentPage, STUDENT_E3A_EMAIL, "student", LECTURER_INVITE_CODE);
     await expect(studentPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
     await joinClass(studentPage, joinCode, CLASS_TITLE);
 
@@ -95,16 +98,18 @@ test.describe("E3/E3b — face enrollment + assessment gate", () => {
     await setFaceVerifyMode(studentPage, "match");
     await passAssessmentGate(studentPage);
 
-    // Answer Q1 + Q2, submit.
+    // Answer Q1 + Q2, submit. (The answered state = option disabled+pressed;
+    // the old "Answered" chip copy no longer exists post-i18n.)
     await expect(studentPage.getByText("What is 2+2?", { exact: true })).toBeVisible();
     await studentPage.getByRole("button", { name: /4/i }).click();
-    await expect(studentPage.getByText("Answered", { exact: true })).toBeVisible();
+    await expect(studentPage.getByRole("button", { name: "B 4" })).toBeDisabled();
     await studentPage.getByRole("button", { name: "Next", exact: true }).click();
     await expect(studentPage.getByText("Capital of France?", { exact: true })).toBeVisible();
     await studentPage.getByRole("button", { name: /Paris/i }).click();
-    await expect(studentPage.getByText("Answered", { exact: true })).toBeVisible();
+    await expect(studentPage.getByRole("button", { name: /A Paris/ })).toBeDisabled();
     await studentPage.getByRole("button", { name: "Finish", exact: true }).click();
-    await expect(studentPage.getByText("Assessment complete", { exact: true })).toBeVisible({ timeout: 10_000 });
+    // EndScreen heading carries a trailing emoji — match non-exact.
+    await expect(studentPage.getByText("Assessment complete", { exact: false })).toBeVisible({ timeout: 10_000 });
 
     await lecturerCtx.close();
     await studentCtx.close();
@@ -119,7 +124,7 @@ test.describe("E3/E3b — face enrollment + assessment gate", () => {
     const lecturerPage = await lecturerCtx.newPage();
     const studentPage = await studentCtx.newPage();
 
-    await registerUser(lecturerPage, LECTURER_EMAIL, "lecturer", LECTURER_INVITE_CODE);
+    await registerUser(lecturerPage, LECTURER_E3B_EMAIL, "lecturer", LECTURER_INVITE_CODE);
     await expect(lecturerPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
     await createClass(lecturerPage, CLASS_TITLE);
 
@@ -132,25 +137,29 @@ test.describe("E3/E3b — face enrollment + assessment gate", () => {
     await expect(lecturerPage.getByText(QUIZ_TITLE, { exact: true })).toBeVisible();
     await lecturerPage.getByText(QUIZ_TITLE, { exact: true }).click();
     await expect(lecturerPage).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
-    await lecturerPage.getByRole("textbox", { name: "Question" }).fill("Q1");
+    await lecturerPage.getByRole("textbox", { name: "Question prompt" }).fill("Q1");
     await lecturerPage.getByLabel("Option 1").fill("a");
     await lecturerPage.getByLabel("Option 2").fill("b");
     await lecturerPage.getByRole("button", { name: /add question/i }).click();
-    await expect(lecturerPage.getByRole("textbox", { name: "Question" })).toHaveValue("");
+    await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
     const publishButton = lecturerPage.getByRole("button", { name: /publish/i });
     await expect(publishButton).toBeEnabled();
     await publishButton.click();
     await expect(lecturerPage.getByText(/^Live/)).toBeVisible();
 
-    // Student B: register WITHOUT biometric consent (uncheck the box).
-    await studentPage.goto("/register");
-    await studentPage.getByLabel("Full name (optional)").fill(`student-${TEST_TIMESTAMP}`);
-    await studentPage.getByLabel("Email").fill(STUDENT_B_EMAIL);
-    await studentPage.getByLabel("Password", { exact: true }).fill("testpass123");
-    await studentPage.getByRole("radio", { name: "Student" }).check();
-    // Do NOT check the consent box — register should still work but without consent.
-    await studentPage.getByRole("button", { name: /register/i }).click();
-    await studentPage.waitForURL(/\/student\/classes/, { timeout: 15_000 });
+    // Student B: register (the platform-consent checkbox is mandatory at
+    // registration) then REVOKE biometric consent to reach the unconsented
+    // state — mirrors a real student revoking from the face-setup page.
+    await registerUser(studentPage, STUDENT_E3B_EMAIL, "student", LECTURER_INVITE_CODE);
+    const revokeRes = await studentPage.evaluate(async () => {
+      const res = await fetch("/api/face/consent", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ consent: false }),
+      });
+      return { status: res.status, body: await res.json().catch(() => ({})) };
+    });
+    expect(revokeRes.status).toBe(200);
 
     // Direct enroll API → 403 consent_required.
     await installFakeFaceTracker(studentPage);
@@ -168,8 +177,35 @@ test.describe("E3/E3b — face enrollment + assessment gate", () => {
       });
       return { status: res.status, body: await res.json().catch(() => ({})) };
     });
-    expect(enrollRes.status).toBe(403);
+    expect(enrollRes.status, `enroll body: ${JSON.stringify(enrollRes.body)}`).toBe(403);
     expect(enrollRes.body.error).toBe("consent_required");
+
+    // Pin (privacy regression): WITHOUT consent the enroll page must NOT boot
+    // the camera/tracker — no booting overlay, no capture panel, and the
+    // camera-off hint shows instead. Checking the box records consent → the
+    // boot proceeds → the capture panel settles.
+    await studentPage.goto("/student/face/enroll");
+    await expect(
+      studentPage.getByText("Your camera stays off", { exact: false }),
+    ).toBeVisible();
+    const enrollConsentBox = studentPage.getByRole("checkbox");
+    await expect(enrollConsentBox).toBeVisible();
+    await expect(
+      studentPage.getByRole("button", { name: "Start capture", exact: true }),
+    ).toBeHidden();
+    await expect(
+      studentPage.getByText("Starting camera", { exact: false }),
+    ).toBeHidden();
+
+    // The consent state flips only after the async consent POST resolves,
+    // so click (not check) and assert the post-condition instead.
+    await enrollConsentBox.click();
+    await expect(
+      studentPage.getByRole("button", { name: "Start capture", exact: true }),
+    ).toBeVisible({ timeout: 15_000 });
+    await expect(
+      studentPage.getByText("Your camera stays off", { exact: false }),
+    ).toBeHidden();
 
     await lecturerCtx.close();
     await studentCtx.close();
@@ -185,7 +221,7 @@ test.describe("E3/E3b — face enrollment + assessment gate", () => {
     const studentPage = await studentCtx.newPage();
 
     // Lecturer: TIMED assessment (timeLimitSec ≈ 3) + publish.
-    await registerUser(lecturerPage, LECTURER_EMAIL, "lecturer", LECTURER_INVITE_CODE);
+    await registerUser(lecturerPage, LECTURER_E13_EMAIL, "lecturer", LECTURER_INVITE_CODE);
     await expect(lecturerPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
     const joinCode = await createClass(lecturerPage, CLASS_TITLE);
 
@@ -199,11 +235,11 @@ test.describe("E3/E3b — face enrollment + assessment gate", () => {
     await lecturerPage.getByText("E13 Timed", { exact: true }).click();
     await expect(lecturerPage).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
 
-    await lecturerPage.getByRole("textbox", { name: "Question" }).fill("Q1");
+    await lecturerPage.getByRole("textbox", { name: "Question prompt" }).fill("Q1");
     await lecturerPage.getByLabel("Option 1").fill("a");
     await lecturerPage.getByLabel("Option 2").fill("b");
     await lecturerPage.getByRole("button", { name: /add question/i }).click();
-    await expect(lecturerPage.getByRole("textbox", { name: "Question" })).toHaveValue("");
+    await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
 
     // Set the time limit (3s) via the PATCH route (the builder has no
     // time-limit field — E13 needs a TIMED assessment so the gate can only be
@@ -228,7 +264,7 @@ test.describe("E3/E3b — face enrollment + assessment gate", () => {
     await revealQuiz(lecturerPage, CLASS_TITLE, "E13 Timed");
 
     // Student: register + join + enroll + start (fake face).
-    await registerUser(studentPage, STUDENT_A_EMAIL, "student", LECTURER_INVITE_CODE);
+    await registerUser(studentPage, STUDENT_E13_EMAIL, "student", LECTURER_INVITE_CODE);
     await expect(studentPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
     await joinClass(studentPage, joinCode, CLASS_TITLE);
     await installFakeFaceTracker(studentPage);
@@ -245,8 +281,9 @@ test.describe("E3/E3b — face enrollment + assessment gate", () => {
     await expect(begin).toBeVisible({ timeout: 15_000 });
 
     // Timer (3s) + grace (5s) + margin → EndScreen within ~20s, no deadlock.
-    await expect(studentPage.getByText("Assessment complete", { exact: true })).toBeVisible({ timeout: 20_000 });
-    await expect(studentPage.getByText("0", { exact: true }).first()).toBeVisible();
+    // (Heading carries a trailing emoji; score renders as "0 / N" — non-exact.)
+    await expect(studentPage.getByText("Assessment complete", { exact: false })).toBeVisible({ timeout: 20_000 });
+    await expect(studentPage.getByText(/0 \/ 1/)).toBeVisible();
 
     await lecturerCtx.close();
     await studentCtx.close();

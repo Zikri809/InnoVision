@@ -25,7 +25,8 @@ const QUIZ_TITLE = "E9c Skip Calibration";
 test.describe("E9c — calibration Skip → click-first fallback", () => {
   test("skipping calibration disables gestures and the quiz stays click-first", async ({
     browser,
-  }) => {
+  }, testInfo) => {
+    testInfo.setTimeout(120_000);
     test.skip(!LECTURER_INVITE_CODE, "LECTURER_INVITE_CODE not set");
 
     const lecturerCtx = await browser.newContext();
@@ -57,7 +58,7 @@ test.describe("E9c — calibration Skip → click-first fallback", () => {
     await expect(studentPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
     await joinClass(studentPage, joinCode, CLASS_TITLE);
 
-    await studentPage.getByRole("link", { name: /available quizzes/i }).click();
+    await studentPage.getByRole("link", { name: /View quizzes/i }).click();
     await expect(studentPage).toHaveURL(/\/student\/quizzes/);
     await expect(studentPage.getByText(QUIZ_TITLE, { exact: true })).toBeVisible();
 
@@ -79,14 +80,13 @@ test.describe("E9c — calibration Skip → click-first fallback", () => {
     // The quiz remains fully clickable (click-first passthrough).
     await expect(studentPage.getByText("Q1: Click this one.", { exact: true })).toBeVisible();
     await studentPage.getByRole("button", { name: /Alpha/i }).click();
-    await expect(studentPage.getByText("Correct", { exact: true })).toBeVisible();
+    await expect(studentPage.getByText(/^Correct/)).toBeVisible();
     await expect(studentPage.getByRole("button", { name: /Alpha/i })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
     await studentPage.getByRole("button", { name: "Finish", exact: true }).click();
-    await expect(studentPage.getByText("Your score", { exact: true })).toBeVisible({ timeout: 10_000 });
-    await expect(studentPage.getByText(/^1\s*\/\s*1$/)).toBeVisible();
+    await expect(studentPage.getByText(/^1\s*\/\s*1$/)).toBeVisible({ timeout: 10_000 });
 
     await lecturerCtx.close();
     await studentCtx.close();

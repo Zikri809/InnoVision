@@ -41,6 +41,7 @@ async function createTimedAssessment(
   await expect(page).toHaveURL(/\/lecturer\/classes\/[^/]+$/);
   await page.getByLabel("Quiz title").fill(opts.quizTitle);
   await page.getByLabel("Mode").click();
+  await page.getByRole("option", { name: "Assessment" }).click();
   await page.getByRole("button", { name: /create quiz|new quiz/i }).click();
   await expect(page.getByText(opts.quizTitle, { exact: true })).toBeVisible();
   await page.getByText(opts.quizTitle, { exact: true }).click();
@@ -60,11 +61,11 @@ async function createTimedAssessment(
   );
 
   for (const q of opts.questions) {
-    await page.getByRole("textbox", { name: "Question" }).fill(q.prompt);
+    await page.getByRole("textbox", { name: "Question prompt" }).fill(q.prompt);
     await page.getByLabel("Option 1").fill(q.options[0]);
     await page.getByLabel("Option 2").fill(q.options[1]);
     await page.getByRole("button", { name: /add question/i }).click();
-    await expect(page.getByRole("textbox", { name: "Question" })).toHaveValue("");
+    await expect(page.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
     await expect(page.getByText(q.prompt, { exact: true })).toBeVisible();
   }
 
@@ -179,7 +180,7 @@ test.describe("E10 — timer expiry (API + UI halves)", () => {
     await registerUser(studentPage, STUDENT_UI_EMAIL, "student", LECTURER_INVITE_CODE);
     await expect(studentPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
     await joinClass(studentPage, joinCode, CLASS_TITLE);
-    await studentPage.getByRole("link", { name: /available quizzes/i }).click();
+    await studentPage.getByRole("link", { name: /View quizzes/i }).click();
     await expect(studentPage).toHaveURL(/\/student\/quizzes/);
     await studentPage.getByRole("button", { name: "Start" }).click();
     await expect(studentPage).toHaveURL(/\/play\/[0-9a-f-]+/);
@@ -188,11 +189,12 @@ test.describe("E10 — timer expiry (API + UI halves)", () => {
     // in createTimedAssessment) — well within 10s.
     await expect(studentPage.getByText("What is 2+2?", { exact: true })).toBeVisible();
     await studentPage.getByRole("button", { name: /3/i }).click();
-    await expect(studentPage.getByText("Answered", { exact: true })).toBeVisible();
+    await expect(studentPage.getByRole("button", { name: /^(Next|Finish)$/, exact: true })).toBeVisible();
 
     // The client countdown (10s) hits 0 → auto-submit → EndScreen. Wait up to
-    // ~25s for the countdown + submit round trip.
-    await expect(studentPage.getByText("Assessment complete", { exact: true })).toBeVisible({ timeout: 25_000 });
+    // ~25s for the countdown + submit round trip. (Heading carries a trailing
+    // emoji — match non-exact.)
+    await expect(studentPage.getByText("Assessment complete", { exact: false })).toBeVisible({ timeout: 25_000 });
     // The answered score (1) is shown — stronger than a zero-answer auto-submit.
     // The score <p> renders "1 / 2" (with a nested span) — filter by text.
     await expect(

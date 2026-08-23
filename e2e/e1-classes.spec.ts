@@ -23,7 +23,8 @@ const LECTURER_INVITE_CODE = process.env.LECTURER_INVITE_CODE ?? "";
 test.describe("E1 — Class create → join via code → roster", () => {
   test("lecturer creates class, student joins, roster updates", async ({
     browser,
-  }) => {
+  }, testInfo) => {
+    testInfo.setTimeout(120_000);
     test.skip(!LECTURER_INVITE_CODE, "LECTURER_INVITE_CODE not set");
 
     // Two isolated contexts: lecturer + student.

@@ -5,6 +5,7 @@ import {
   joinClass,
   createAssessmentAndPublish,
   openResults,
+  revealQuiz,
   resolveServiceClient,
 } from "./helpers";
 
@@ -19,11 +20,6 @@ const QUIZ_TITLE = "E5b Assessment";
  * E5b (Phase 8 gate) — lecturer resets an attempt → the one-attempt slot is
  * released → the student re-takes; mid-flight reset surfaces the D13 dead
  * screen; every reset is audited.
- *
- * NOTE (deferred): SKIPPED until the planned UI rework is completed. This file
- * is the CONTRACT the rewrite must keep (selectors assert roles/text, not
- * class names). Flow through reset + re-take + mid-flight dead screen + audit,
- * then remove the skip and run it. See PLAN_PHASE8 §3 Step 5.
  *
  * Flow:
  * 1. Student completes attempt 1 (E5 locked state).
@@ -43,8 +39,6 @@ const QUIZ_TITLE = "E5b Assessment";
 test.describe("E5b — lecturer resets attempt", () => {
   test("reset releases the slot; mid-flight reset surfaces the D13 dead screen", async ({ browser }, testInfo) => {
     testInfo.setTimeout(120_000);
-    // Deferred: run once the UI rework lands (see file header).
-    test.skip(true, "Deferred until UI rework completes (PLAN_PHASE8 §3 Step 5)");
     test.skip(!LECTURER_INVITE_CODE, "LECTURER_INVITE_CODE not set");
 
     const admin = resolveServiceClient();
@@ -66,56 +60,60 @@ test.describe("E5b — lecturer resets attempt", () => {
         { prompt: "Capital of France?", options: ["Paris", "London"], correctIndex: 0 },
       ],
     });
+    await revealQuiz(lecturerPage, CLASS_TITLE, QUIZ_TITLE);
 
     // ── 1. Student: complete attempt 1 (E5 locked state) ────────────
     await registerUser(studentPage, STUDENT_EMAIL, "student", LECTURER_INVITE_CODE);
     await expect(studentPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
     await joinClass(studentPage, joinCode, CLASS_TITLE);
-    await studentPage.getByRole("link", { name: /available quizzes/i }).click();
+    await studentPage.getByRole("link", { name: /View quizzes/i }).click();
     await expect(studentPage).toHaveURL(/\/student\/quizzes/);
     await studentPage.getByRole("button", { name: "Start", exact: true }).click();
     await expect(studentPage).toHaveURL(/\/play\/[0-9a-f-]+/);
     const session1Id = studentPage.url().split("/play/")[1];
     await expect(studentPage.getByText("What is 2+2?", { exact: true })).toBeVisible();
     await studentPage.getByRole("button", { name: /4/i }).click();
-    await expect(studentPage.getByText("Answered", { exact: true })).toBeVisible();
+    await expect(studentPage.getByRole("button", { name: /^(Next|Finish)$/, exact: true })).toBeVisible();
     await studentPage.getByRole("button", { name: "Next", exact: true }).click();
     await expect(studentPage.getByText("Capital of France?", { exact: true })).toBeVisible();
     await studentPage.getByRole("button", { name: /Paris/i }).click();
-    await expect(studentPage.getByText("Answered", { exact: true })).toBeVisible();
+    await expect(studentPage.getByRole("button", { name: /^(Next|Finish)$/, exact: true })).toBeVisible();
     await studentPage.getByRole("button", { name: "Finish", exact: true }).click();
-    await expect(studentPage.getByText("Your score", { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(studentPage.getByText("Assessment complete", { exact: false })).toBeVisible({ timeout: 10_000 });
 
     // ── 2. Lecturer: results → Reset (confirm dialog) → row gone ─────
     await openResults(lecturerPage, CLASS_TITLE, QUIZ_TITLE);
-    await expect(lecturerPage.getByText("Completed", { exact: true })).toHaveCount(1);
+    const studentList1 = lecturerPage.getByRole("list");
+    await expect(studentList1.getByText("Completed", { exact: true })).toHaveCount(1);
     // The Reset button is rendered on the completed row.
     await lecturerPage.getByRole("button", { name: "Reset", exact: true }).click();
     await expect(
-      lecturerPage.getByRole("heading", { name: "Reset this attempt?" }),
+      lecturerPage.getByRole("dialog").getByRole("heading", { name: "Reset", exact: true }),
     ).toBeVisible();
-    await lecturerPage.getByRole("button", { name: "Reset attempt", exact: true }).click();
+    await lecturerPage.getByRole("dialog").getByRole("button", { name: "Reset", exact: true }).click();
     // The row disappears after refresh.
-    await expect(lecturerPage.getByText("Completed", { exact: true })).toHaveCount(0);
+    await expect(studentList1.getByText("Completed", { exact: true })).toHaveCount(0);
 
     // ── 3. Student: Start again → SUCCEEDS (slot released) ──────────
-    await studentPage.getByRole("button", { name: "Back to quizzes" }).click();
-    await expect(studentPage).toHaveURL(/\/student\/quizzes/);
+    await studentPage.goto("/student/quizzes");
+    await expect(studentPage.getByText("Available quizzes", { exact: false })).toBeVisible();
+    await expect(studentPage.getByRole("list").getByText("Completed", { exact: true })).toHaveCount(0);
     await studentPage.getByRole("button", { name: "Start", exact: true }).click();
-    await expect(studentPage).toHaveURL(/\/play\/[0-9a-f-]+/);
+    await expect(studentPage).toHaveURL(new RegExp(`/play/(?!${session1Id})[0-9a-f-]+`));
     await expect(studentPage.getByText("What is 2+2?", { exact: true })).toBeVisible();
     await studentPage.getByRole("button", { name: /4/i }).click();
-    await expect(studentPage.getByText("Answered", { exact: true })).toBeVisible();
+    await expect(studentPage.getByRole("button", { name: /^(Next|Finish)$/, exact: true })).toBeVisible();
 
     // ── 4. Lecturer: reset the re-take row mid-flight ────────────────
     await openResults(lecturerPage, CLASS_TITLE, QUIZ_TITLE);
-    await expect(lecturerPage.getByText("In progress", { exact: true })).toHaveCount(1);
+    const studentList2 = lecturerPage.getByRole("list");
+    await expect(studentList2.getByText("In progress", { exact: true })).toHaveCount(1);
     await lecturerPage.getByRole("button", { name: "Reset", exact: true }).click();
     await expect(
-      lecturerPage.getByRole("heading", { name: "Reset this attempt?" }),
+      lecturerPage.getByRole("dialog").getByRole("heading", { name: "Reset", exact: true }),
     ).toBeVisible();
-    await lecturerPage.getByRole("button", { name: "Reset attempt", exact: true }).click();
-    await expect(lecturerPage.getByText("In progress", { exact: true })).toHaveCount(0);
+    await lecturerPage.getByRole("dialog").getByRole("button", { name: "Reset", exact: true }).click();
+    await expect(studentList2.getByText("In progress", { exact: true })).toHaveCount(0);
 
     // ── 5. Student: next answer POST → D13 dead screen (NOT a 404 loop) ──
     await studentPage.getByRole("button", { name: "Next", exact: true }).click();

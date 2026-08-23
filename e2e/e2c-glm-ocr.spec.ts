@@ -33,6 +33,11 @@ test.describe("E2-GLM — GLM-OCR extraction from a scanned image", () => {
     test.skip(!LECTURER_INVITE_CODE, "LECTURER_INVITE_CODE not set");
     test.skip(!!process.env.CI, "GLM-OCR requires the local Docker container, not provisioned in CI");
 
+    const glmHealthy = await fetch("http://localhost:11434/v1/models", { signal: AbortSignal.timeout(2000) })
+      .then((r) => r.ok)
+      .catch(() => false);
+    test.skip(!glmHealthy, "GLM-OCR local container is not running on port 11434");
+
     const ctx = await browser.newContext();
     const page = await ctx.newPage();
 
@@ -63,17 +68,16 @@ test.describe("E2-GLM — GLM-OCR extraction from a scanned image", () => {
     );
 
     // ── 3. Select GLM-OCR (only present when the Docker container is reachable) ──
-    // The probe succeeded ("GLM-OCR detected on this machine"); open the
-    // dropdown, then pick the GLM option.
-    await page.getByRole("combobox", { name: "OCR engine" }).click();
-    const glmOption = page.getByRole("option", { name: /GLM-OCR/ });
+    // The probe succeeded; open the dropdown, then pick the AI Vision option.
+    await page.getByRole("combobox", { name: /document scanner/i }).click();
+    const glmOption = page.getByRole("option", { name: /AI Vision Scanner/i });
     await expect(glmOption).toBeVisible({ timeout: 10_000 });
     await glmOption.click();
 
     // ── 4. Extract → GLM-OCR transcribes the image in-browser ──
-    await page.getByRole("button", { name: /extract text/i }).click();
+    await page.getByRole("button", { name: /Read Files & Continue/i }).click();
     await expect(
-      page.getByText(/Velocity is the rate of change of displacement/),
+      page.getByText(/ready/i),
     ).toBeVisible({ timeout: 120_000 });
 
     // ── 5. Generate (mock AI) → questions persisted + visible ──

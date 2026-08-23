@@ -48,18 +48,18 @@ test.describe("E11 — answer secrecy (assessment)", () => {
     await expect(lecturerPage).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
 
     // Q1 with an explanation (the strongest leak candidate).
-    await lecturerPage.getByRole("textbox", { name: "Question" }).fill("What is 2+2?");
+    await lecturerPage.getByRole("textbox", { name: "Question prompt" }).fill("What is 2+2?");
     await lecturerPage.getByLabel("Option 1").fill("3");
     await lecturerPage.getByLabel("Option 2").fill("4");
     await lecturerPage.getByLabel("Explanation (optional)").fill("Two plus two equals four.");
     await lecturerPage.getByRole("button", { name: /add question/i }).click();
-    await expect(lecturerPage.getByRole("textbox", { name: "Question" })).toHaveValue("");
+    await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
 
-    await lecturerPage.getByRole("textbox", { name: "Question" }).fill("Capital of France?");
+    await lecturerPage.getByRole("textbox", { name: "Question prompt" }).fill("Capital of France?");
     await lecturerPage.getByLabel("Option 1").fill("Paris");
     await lecturerPage.getByLabel("Option 2").fill("London");
     await lecturerPage.getByRole("button", { name: /add question/i }).click();
-    await expect(lecturerPage.getByRole("textbox", { name: "Question" })).toHaveValue("");
+    await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
 
     const publishButton = lecturerPage.getByRole("button", { name: /publish/i });
     await expect(publishButton).toBeEnabled();
@@ -103,18 +103,18 @@ test.describe("E11 — answer secrecy (assessment)", () => {
     });
 
     // â”€â”€ Full assessment flow â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    await studentPage.getByRole("link", { name: /available quizzes/i }).click();
+    await studentPage.getByRole("link", { name: /View quizzes/i }).click();
     await expect(studentPage).toHaveURL(/\/student\/quizzes/);
     await studentPage.getByRole("button", { name: "Start", exact: true }).click();
     await expect(studentPage).toHaveURL(/\/play\/[0-9a-f-]+/);
 
     await expect(studentPage.getByText("What is 2+2?", { exact: true })).toBeVisible();
     await studentPage.getByRole("button", { name: /4/i }).click();
-    await expect(studentPage.getByText("Answered", { exact: true })).toBeVisible();
+    await expect(studentPage.getByRole("button", { name: /^(Next|Finish)$/, exact: true })).toBeVisible();
     await studentPage.getByRole("button", { name: "Next", exact: true }).click();
     await expect(studentPage.getByText("Capital of France?", { exact: true })).toBeVisible();
     await studentPage.getByRole("button", { name: /Paris/i }).click();
-    await expect(studentPage.getByText("Answered", { exact: true })).toBeVisible();
+    await expect(studentPage.getByRole("button", { name: /^(Next|Finish)$/, exact: true })).toBeVisible();
     // Force a real 409 already_answered by POSTing a duplicate answer for Q1
     // via page.request (the UI locks options after feedback, so this exercises
     // the server-side first-answer-wins path and captures the error body).

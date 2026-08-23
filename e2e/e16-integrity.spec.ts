@@ -64,10 +64,11 @@ test.describe("E16 — integrity suite", () => {
       await expect(lp.getByText(ids.quizTitle, { exact: true })).toBeVisible();
       await lp.getByText(ids.quizTitle, { exact: true }).click();
       await expect(lp).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
-      await lp.getByRole("textbox", { name: "Question" }).fill("What is 3+3?");
+      await lp.getByRole("textbox", { name: "Question prompt" }).fill("What is 3+3?");
       await lp.getByLabel("Option 1").fill("5");
       await lp.getByLabel("Option 2").fill("6");
       await lp.getByRole("button", { name: /add question/i }).click();
+      await expect(lp.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
       const publishButton = lp.getByRole("button", { name: /publish/i });
       await expect(publishButton).toBeEnabled();
       await publishButton.click();
@@ -120,14 +121,19 @@ test.describe("E16 — integrity suite", () => {
     // re-dispatch can't perpetually reset the debounce. On the 3rd strike
     // the RPC escalates to FLAGGED — accept that overlay too.
     async function blurUntilOverlay(acceptFlagged = false) {
+      const target = acceptFlagged ? returnBtn.or(flaggedText) : returnBtn;
       for (let i = 0; i < 8; i++) {
-        await studentPage.evaluate(() => window.dispatchEvent(new Event("blur")));
-        const paused = await returnBtn
-          .waitFor({ state: "visible", timeout: 1300 })
+        await studentPage.bringToFront();
+        await studentPage.evaluate(() => {
+          window.dispatchEvent(new Event("focus"));
+          window.dispatchEvent(new Event("blur"));
+        });
+        const appeared = await target
+          .waitFor({ state: "visible", timeout: 3500 })
           .then(() => true)
           .catch(() => false);
-        if (paused) return;
-        if (acceptFlagged && (await flaggedText.isVisible().catch(() => false))) return;
+        if (appeared) return;
+        await studentPage.waitForTimeout(500);
       }
       throw new Error("focus-loss pause overlay never appeared");
     }

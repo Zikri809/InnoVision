@@ -33,7 +33,8 @@ const QUIZ_TITLE = "E9 Accidental Lock";
 test.describe("E9 — accidental-lock guard", () => {
   test("a finger change mid-hold resets progress and never fires the earlier option", async ({
     browser,
-  }) => {
+  }, testInfo) => {
+    testInfo.setTimeout(120_000);
     test.skip(!LECTURER_INVITE_CODE, "LECTURER_INVITE_CODE not set");
 
     const lecturerCtx = await browser.newContext();
@@ -65,7 +66,7 @@ test.describe("E9 — accidental-lock guard", () => {
     await expect(studentPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
     await joinClass(studentPage, joinCode, CLASS_TITLE);
 
-    await studentPage.getByRole("link", { name: /available quizzes/i }).click();
+    await studentPage.getByRole("link", { name: /View quizzes/i }).click();
     await expect(studentPage).toHaveURL(/\/student\/quizzes/);
     await expect(studentPage.getByText(QUIZ_TITLE, { exact: true })).toBeVisible();
 

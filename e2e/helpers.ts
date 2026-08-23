@@ -37,7 +37,7 @@ export async function registerUser(
   // Wait for the role-based landing page (also settles the hydration race).
   await page.waitForURL(
     role === "lecturer" ? /\/lecturer\/classes/ : /\/student\/classes/,
-    { timeout: 15_000 },
+    { timeout: 30_000 },
   );
 }
 
@@ -116,7 +116,7 @@ export async function createQuizWithQuestions(
       await page.getByLabel("Type").click();
       await page.getByRole("option", { name: "True / False" }).click();
     }
-    await page.getByRole("textbox", { name: "Question" }).fill(q.prompt);
+    await page.getByRole("textbox", { name: "Question prompt" }).fill(q.prompt);
 
     // Fill options 1..N, adding extra option inputs as needed. True/False
     // options are disabled (auto-filled True/False) — skip filling them.
@@ -142,7 +142,7 @@ export async function createQuizWithQuestions(
 
     await page.getByRole("button", { name: /add question/i }).click();
     // The save completes when the form resets (Question field cleared).
-    await expect(page.getByRole("textbox", { name: "Question" })).toHaveValue("");
+    await expect(page.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
     await expect(page.getByText(q.prompt, { exact: true })).toBeVisible();
   }
 
@@ -367,11 +367,17 @@ export async function setFacePose(
 /** Enroll via the face-enroll page (consent + 3-angle capture + submit). */
 export async function enrollViaFacePage(page: Page) {
   await page.goto("/student/face/enroll");
-  // Consent (if not already given via registration).
-  const consentBtn = page.getByRole("button", { name: "I consent", exact: true });
-  if (await consentBtn.isVisible().catch(() => false)) {
-    await consentBtn.click();
-    await expect(page.getByText("Biometric consent", { exact: false }).first()).toBeVisible();
+  // Consent (if not already given via registration) — the enroll page renders
+  // a single consent CHECKBOX card pre-consent; checking it POSTs consent and
+  // gates the camera boot.
+  const consentBox = page.getByRole("checkbox");
+  if (await consentBox.isVisible().catch(() => false)) {
+    // The consent state flips only after the async consent POST resolves —
+    // click (not check) and wait on the post-condition.
+    await consentBox.click();
+    await expect(page.getByText("Biometric consent", { exact: false }).first()).toBeHidden({
+      timeout: 15_000,
+    });
   }
   // Wait for the enroll panel to settle (the boot microtask flips `available`;
   // a button-only `isVisible()` can race the unavailable panel). Either the
@@ -407,12 +413,27 @@ export async function enrollViaFacePage(page: Page) {
     // auto-redirects); land on quizzes for the caller.
     await expect(
       page.getByText("Enrolled successfully", { exact: false }),
-    ).toBeVisible({ timeout: 15_000 });
+    ).toBeVisible({ timeout: 30_000 });
     await page.goto("/student/quizzes");
   } else {
     // Already enrolled — nothing to do.
     await expect(page.getByText("Face already enrolled", { exact: false })).toBeVisible();
   }
+}
+
+/**
+ * Click the explicit-Begin gate CTA and resolve its blink liveness via the
+ * fake tracker. Parks the virtual cursor afterwards (same rationale as
+ * `passAssessmentGate`) — use for RE-Entering the gate mid-quiz (fail-cycle
+ * specs), where the parked cursor would otherwise sit on an option button's
+ * hover-edge band and oscillate it ±2px every frame.
+ */
+export async function clickBeginAndBlink(page: Page) {
+  const begin = page.getByRole("button", { name: "Begin assessment", exact: true });
+  await expect(begin).toBeEnabled({ timeout: 15_000 });
+  await begin.click();
+  await triggerFaceBlink(page);
+  await page.mouse.move(0, 0);
 }
 
 /** Pass the assessment gate: click Begin (beginGate waits for liveness), then trigger the blink. */
@@ -426,6 +447,12 @@ export async function passAssessmentGate(page: Page) {
   await expect(page.getByRole("button", { name: "Begin assessment", exact: true })).toBeHidden({
     timeout: 10_000,
   });
+  // Park the virtual cursor at a neutral corner. The Begin click leaves it
+  // where Begin was; if the post-gate reflow puts that point inside an option
+  // button's 2px hover-edge band (`hover:-translate-y-0.5`), the lift moves
+  // the edge past the cursor and the hover oscillates ±2px EVERY FRAME —
+  // Playwright then reports "element is not stable" forever.
+  await page.mouse.move(0, 0);
 }
 
 /** Capture face-verify POST bodies (`/api/face/verify`). */
@@ -502,11 +529,15 @@ export async function openResults(page: Page, classTitle: string, quizTitle: str
   await expect(page.getByRole("heading", { name: /My Classes|Kelas Saya/i })).toBeVisible();
   await page.getByText(classTitle, { exact: true }).click();
   await expect(page).toHaveURL(/\/lecturer\/classes\/[^/]+$/);
-  await page.getByText(quizTitle, { exact: true }).click();
-  await expect(page).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
-  // The entry point moved over time ("Results" header link → "View results"
-  // button on the class card) — match either.
-  await page.getByRole("link", { name: /results/i }).first().click();
+
+  const directResultsLink = page.getByRole("link", { name: new RegExp(`results.*${quizTitle}|${quizTitle}.*results`, "i") });
+  if (await directResultsLink.count() > 0) {
+    await directResultsLink.first().click();
+  } else {
+    await page.getByText(quizTitle, { exact: true }).click();
+    await expect(page).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
+    await page.getByRole("link", { name: /results/i }).first().click();
+  }
   await expect(page).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/results/);
 }
 

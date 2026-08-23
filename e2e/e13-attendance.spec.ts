@@ -57,8 +57,6 @@ const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
 test.describe("E13b — attendance = sessions", () => {
   test("4 students render as attendance rows with derived statuses", async ({ browser }, testInfo) => {
     testInfo.setTimeout(120_000);
-    // Deferred: run once the UI rework lands (see file header).
-    test.skip(true, "Deferred until UI rework completes (PLAN_PHASE8 §3 Step 5)");
     test.skip(!LECTURER_INVITE_CODE, "LECTURER_INVITE_CODE not set");
 
     const admin = resolveServiceClient();
@@ -103,56 +101,56 @@ test.describe("E13b — attendance = sessions", () => {
     await passAssessmentGate(studentAPage);
     await expect(studentAPage.getByText("What is 2+2?", { exact: true })).toBeVisible();
     await studentAPage.getByRole("button", { name: /4/i }).click();
-    await expect(studentAPage.getByText("Answered", { exact: true })).toBeVisible();
+    await expect(studentAPage.getByRole("button", { name: /^(Next|Finish)$/, exact: true })).toBeVisible();
     await studentAPage.getByRole("button", { name: "Next", exact: true }).click();
     await expect(studentAPage.getByText("Capital of France?", { exact: true })).toBeVisible();
     await studentAPage.getByRole("button", { name: /Paris/i }).click();
-    await expect(studentAPage.getByText("Answered", { exact: true })).toBeVisible();
+    await expect(studentAPage.getByRole("button", { name: /^(Next|Finish)$/, exact: true })).toBeVisible();
     await studentAPage.getByRole("button", { name: "Finish", exact: true }).click();
-    await expect(studentAPage.getByText("Assessment complete", { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(studentAPage.getByText("Assessment complete", { exact: false })).toBeVisible({ timeout: 10_000 });
 
     // ── 3. Student B: unseamed click-first → face_unavailable_at marker ──
     await registerUser(studentBPage, STUDENT_B_EMAIL, "student", LECTURER_INVITE_CODE);
     await expect(studentBPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
     await joinClass(studentBPage, joinCode, CLASS_TITLE);
-    await studentBPage.getByRole("link", { name: /available quizzes/i }).click();
+    await studentBPage.getByRole("link", { name: /View quizzes/i }).click();
     await expect(studentBPage).toHaveURL(/\/student\/quizzes/);
     await studentBPage.getByRole("button", { name: "Start", exact: true }).click();
     await expect(studentBPage).toHaveURL(/\/play\/[0-9a-f-]+/);
     await expect(studentBPage.getByText("What is 2+2?", { exact: true })).toBeVisible();
     await studentBPage.getByRole("button", { name: /4/i }).click();
-    await expect(studentBPage.getByText("Answered", { exact: true })).toBeVisible();
+    await expect(studentBPage.getByRole("button", { name: /^(Next|Finish)$/, exact: true })).toBeVisible();
     await studentBPage.getByRole("button", { name: "Next", exact: true }).click();
     await expect(studentBPage.getByText("Capital of France?", { exact: true })).toBeVisible();
     await studentBPage.getByRole("button", { name: /Paris/i }).click();
-    await expect(studentBPage.getByText("Answered", { exact: true })).toBeVisible();
+    await expect(studentBPage.getByRole("button", { name: /^(Next|Finish)$/, exact: true })).toBeVisible();
     await studentBPage.getByRole("button", { name: "Finish", exact: true }).click();
-    await expect(studentBPage.getByText("Assessment complete", { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(studentBPage.getByText("Assessment complete", { exact: false })).toBeVisible({ timeout: 10_000 });
 
     // ── 4. Student C: start + answer Q1, do NOT submit (in-progress) ──
     await registerUser(studentCPage, STUDENT_C_EMAIL, "student", LECTURER_INVITE_CODE);
     await expect(studentCPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
     await joinClass(studentCPage, joinCode, CLASS_TITLE);
-    await studentCPage.getByRole("link", { name: /available quizzes/i }).click();
+    await studentCPage.getByRole("link", { name: /View quizzes/i }).click();
     await expect(studentCPage).toHaveURL(/\/student\/quizzes/);
     await studentCPage.getByRole("button", { name: "Start", exact: true }).click();
     await expect(studentCPage).toHaveURL(/\/play\/[0-9a-f-]+/);
     await expect(studentCPage.getByText("What is 2+2?", { exact: true })).toBeVisible();
     await studentCPage.getByRole("button", { name: /4/i }).click();
-    await expect(studentCPage.getByText("Answered", { exact: true })).toBeVisible();
+    await expect(studentCPage.getByRole("button", { name: /^(Next|Finish)$/, exact: true })).toBeVisible();
 
     // ── 5. Student D: start + answer Q1, CLOSE the tab, then stale it ──
     await registerUser(studentDPage, STUDENT_D_EMAIL, "student", LECTURER_INVITE_CODE);
     await expect(studentDPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
     await joinClass(studentDPage, joinCode, CLASS_TITLE);
-    await studentDPage.getByRole("link", { name: /available quizzes/i }).click();
+    await studentDPage.getByRole("link", { name: /View quizzes/i }).click();
     await expect(studentDPage).toHaveURL(/\/student\/quizzes/);
     await studentDPage.getByRole("button", { name: "Start", exact: true }).click();
     await expect(studentDPage).toHaveURL(/\/play\/[0-9a-f-]+/);
     const dSessionId = studentDPage.url().split("/play/")[1];
     await expect(studentDPage.getByText("What is 2+2?", { exact: true })).toBeVisible();
     await studentDPage.getByRole("button", { name: /4/i }).click();
-    await expect(studentDPage.getByText("Answered", { exact: true })).toBeVisible();
+    await expect(studentDPage.getByRole("button", { name: /^(Next|Finish)$/, exact: true })).toBeVisible();
 
     // Close D's tab BEFORE the stale UPDATE — a parked-but-open tab could fire
     // a periodic face check and re-touch last_activity_at (robot-touch
@@ -179,9 +177,10 @@ test.describe("E13b — attendance = sessions", () => {
     await openResults(lecturerPage, CLASS_TITLE, QUIZ_TITLE);
 
     // Exactly 4 rows: the 4 status badges.
-    await expect(lecturerPage.getByText("Completed", { exact: true })).toHaveCount(2);
-    await expect(lecturerPage.getByText("In progress", { exact: true })).toHaveCount(1);
-    await expect(lecturerPage.getByText("Abandoned", { exact: true })).toHaveCount(
+    const studentList = lecturerPage.getByRole("list");
+    await expect(studentList.getByText("Completed", { exact: true })).toHaveCount(2);
+    await expect(studentList.getByText("In progress", { exact: true })).toHaveCount(1);
+    await expect(studentList.getByText("Abandoned", { exact: true })).toHaveCount(
       admin ? 1 : 0,
     );
 

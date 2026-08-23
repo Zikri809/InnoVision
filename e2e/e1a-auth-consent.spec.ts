@@ -33,8 +33,9 @@ test.describe("E1a — Auth both roles + consent persists", () => {
     await expect(
       page.getByRole("heading", { name: "My Classes" }),
     ).toBeVisible();
+    await page.getByRole("button", { name: /account/i }).click();
     await expect(page.getByText(LECTURER_EMAIL)).toBeVisible();
-    await expect(page.getByText("Given ✓")).toBeVisible();
+    await expect(page.getByText("Biometric consent given")).toBeVisible();
 
     // ── 2. Logout ────────────────────────────────────────────
     await page.getByRole("button", { name: /sign out/i }).click();
@@ -43,8 +44,9 @@ test.describe("E1a — Auth both roles + consent persists", () => {
     // ── 3. Register as student ───────────────────────────────
     await registerUser(page, STUDENT_EMAIL, "student", LECTURER_INVITE_CODE);
     await expect(page).toHaveURL(/\/student\/classes/);
+    await page.getByRole("button", { name: /account/i }).click();
     await expect(page.getByText(STUDENT_EMAIL)).toBeVisible();
-    await expect(page.getByText("Given ✓")).toBeVisible();
+    await expect(page.getByText("Biometric consent given")).toBeVisible();
 
     // ── 4. Logout, then login again — consent persists ───────
     await page.getByRole("button", { name: /sign out/i }).click();
@@ -54,9 +56,10 @@ test.describe("E1a — Auth both roles + consent persists", () => {
     await page.getByLabel("Password", { exact: true }).fill(E2E_PASSWORD);
     await page.getByRole("button", { name: /sign in/i }).click();
 
-    // Consent should still show as given
+    // Consent should still show as given inside user menu
     await expect(page).toHaveURL(/\/student\/classes/);
-    await expect(page.getByText("Given ✓")).toBeVisible();
+    await page.getByRole("button", { name: /account/i }).click();
+    await expect(page.getByText("Biometric consent given")).toBeVisible();
   });
 
   test("register blocked without consent", async ({ page }) => {
@@ -68,12 +71,12 @@ test.describe("E1a — Auth both roles + consent persists", () => {
     await page.getByRole("radio", { name: "Student" }).check();
 
     // Register button should be disabled without consent
-    await expect(page.getByRole("button", { name: /register/i })).toBeDisabled();
+    await expect(page.getByRole("button", { name: /create account|register/i })).toBeDisabled();
 
     // Check consent — button becomes enabled
     await page.getByRole("checkbox").check();
     await expect(
-      page.getByRole("button", { name: /register/i }),
+      page.getByRole("button", { name: /create account|register/i }),
     ).toBeEnabled();
   });
 

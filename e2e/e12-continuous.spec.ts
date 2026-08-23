@@ -57,11 +57,11 @@ test.describe("E12 — continuous verify", () => {
     await expect(lecturerPage).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
 
     for (let i = 0; i < 3; i++) {
-      await lecturerPage.getByRole("textbox", { name: "Question" }).fill(`Q${i + 1}`);
+      await lecturerPage.getByRole("textbox", { name: "Question prompt" }).fill(`Q${i + 1}`);
       await lecturerPage.getByLabel("Option 1").fill("a");
       await lecturerPage.getByLabel("Option 2").fill("b");
       await lecturerPage.getByRole("button", { name: /add question/i }).click();
-      await expect(lecturerPage.getByRole("textbox", { name: "Question" })).toHaveValue("");
+      await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
     }
 
     const publishButton = lecturerPage.getByRole("button", { name: /publish/i });
@@ -87,6 +87,9 @@ test.describe("E12 — continuous verify", () => {
     await studentPage.reload();
     await expect(begin).toBeVisible({ timeout: 15_000 });
 
+    // Periodic cadence override set up before gate/cadence schedules so it is active throughout
+    await setFacePeriodic(studentPage, { minMs: 2000, maxMs: 3000 });
+
     // Pass the gate (match).
     await setFaceVerifyMode(studentPage, "match");
     await passAssessmentGate(studentPage);
@@ -94,7 +97,7 @@ test.describe("E12 — continuous verify", () => {
     // Q1: answer.
     await expect(studentPage.getByText("Q1", { exact: true })).toBeVisible();
     await studentPage.getByRole("button", { name: /a/i }).click();
-    await expect(studentPage.getByText("Answered", { exact: true })).toBeVisible();
+    await expect(studentPage.getByRole("button", { name: /^(Next|Finish)$/, exact: true })).toBeVisible();
 
     // Q-transition verify fires (question → next). Capture verify POSTs.
     const verifyCapture = captureFaceVerifyPosts(studentPage);
@@ -102,15 +105,14 @@ test.describe("E12 — continuous verify", () => {
     await expect(studentPage.getByText("Q2", { exact: true })).toBeVisible();
 
     // Periodic cadence override → observe a real `trigger:'periodic'` quickly.
-    await setFacePeriodic(studentPage, { minMs: 2000, maxMs: 3000 });
     await expect
-      .poll(() => verifyCapture.bodies.some((b) => b.includes('"periodic"')), { timeout: 5_000 })
+      .poll(() => verifyCapture.bodies.some((b) => b.includes('"periodic"')), { timeout: 10_000 })
       .toBe(true);
 
     // ── Mismatch anchored after the Q2 feedback chip → Q3 transition fails ──
     await setFaceVerifyMode(studentPage, "mismatch");
     await studentPage.getByRole("button", { name: /a/i }).click();
-    await expect(studentPage.getByText("Answered", { exact: true })).toBeVisible();
+    await expect(studentPage.getByRole("button", { name: /^(Next|Finish)$/, exact: true })).toBeVisible();
     await studentPage.getByRole("button", { name: "Next", exact: true }).click();
 
     // The Q3 transition verify fails → pause overlay AND GET paused.

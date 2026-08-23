@@ -22,7 +22,9 @@ test.describe("E15 — Quiz Metadata Editing (Title, Mode, Time Limit)", () => {
     await page.getByLabel("Quiz title").fill(INITIAL_QUIZ_TITLE);
     await page.getByLabel("Mode").click();
     await page.getByRole("option", { name: "Assessment" }).click();
-    await page.getByLabel("Time limit (minutes)").fill("30");
+    // The create form uses h/min spinbuttons (sr-only labels "h"/"min").
+    await page.getByLabel("h", { exact: true }).fill("0");
+    await page.getByLabel("min", { exact: true }).fill("30");
     await page.getByRole("button", { name: /create quiz|new quiz/i }).click();
 
     await expect(page.getByText(INITIAL_QUIZ_TITLE, { exact: true })).toBeVisible();
@@ -30,9 +32,9 @@ test.describe("E15 — Quiz Metadata Editing (Title, Mode, Time Limit)", () => {
     await expect(page).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
 
     // 3. E15-1: Inline title edit fast path
-    // Click pencil icon next to title
-    await page.getByLabel(`Rename quiz: ${INITIAL_QUIZ_TITLE}`).click();
-    const titleInput = page.getByLabel("Quiz title");
+    // Double-click the title heading
+    await page.getByRole("heading", { level: 1, name: INITIAL_QUIZ_TITLE }).dblclick();
+    const titleInput = page.getByRole("textbox", { name: "Edit settings" });
     await expect(titleInput).toBeVisible();
     await expect(titleInput).toBeFocused();
 
@@ -41,25 +43,25 @@ test.describe("E15 — Quiz Metadata Editing (Title, Mode, Time Limit)", () => {
     await expect(page.getByRole("heading", { level: 1, name: INITIAL_QUIZ_TITLE })).toBeVisible();
 
     // Re-enter inline edit and save with Enter
-    await page.getByLabel(`Rename quiz: ${INITIAL_QUIZ_TITLE}`).click();
-    await page.getByLabel("Quiz title").fill("Renamed Inline Title");
+    await page.getByRole("heading", { level: 1, name: INITIAL_QUIZ_TITLE }).dblclick();
+    await page.getByRole("textbox", { name: "Edit settings" }).fill("Renamed Inline Title");
     await page.keyboard.press("Enter");
     await expect(page.getByRole("heading", { level: 1, name: "Renamed Inline Title" })).toBeVisible();
 
-    // 4. E15-2 & E15-3: Open EditQuizDialog via Settings button and change time limit
-    await page.getByLabel("Edit quiz settings").click();
-    await expect(page.getByRole("dialog", { name: "Quiz settings" })).toBeVisible();
-    await expect(page.getByLabel("Quiz Title")).toHaveValue("Renamed Inline Title");
+    // 4. E15-2 & E15-3: Open EditQuizDialog via Mode pill and change time limit
+    await page.getByRole("button", { name: /Quiz mode: Assessment/i }).click();
+    await expect(page.getByRole("dialog", { name: "Edit quiz settings" })).toBeVisible();
+    await expect(page.getByLabel("Title")).toHaveValue("Renamed Inline Title");
 
     // Change title and update time limit to 1h 15m
-    await page.getByLabel("Quiz Title").fill("Final Comprehensive Exam");
-    await page.getByLabel("Hours", { exact: true }).fill("1");
-    await page.getByLabel("Minutes", { exact: true }).fill("15");
+    await page.getByLabel("Title").fill("Final Comprehensive Exam");
+    await page.getByLabel("h", { exact: true }).fill("1");
+    await page.getByLabel("min", { exact: true }).fill("15");
 
     const patchPromise = page.waitForResponse(
       (res) => res.url().includes("/api/quizzes/") && res.request().method() === "PATCH",
     );
-    await page.getByRole("button", { name: "Save settings" }).click();
+    await page.getByRole("button", { name: "Save changes" }).click();
     const patchRes = await patchPromise;
     expect(patchRes.status()).toBe(200);
     const patchBody = await patchRes.json();
@@ -68,23 +70,23 @@ test.describe("E15 — Quiz Metadata Editing (Title, Mode, Time Limit)", () => {
 
     await expect(page.getByRole("dialog")).toBeHidden();
     await expect(page.getByRole("heading", { level: 1, name: "Final Comprehensive Exam" })).toBeVisible();
-    await expect(page.getByText("1h 15m limit")).toBeVisible();
+    await expect(page.getByText("1h 15m")).toBeVisible();
 
     // 5. E15-4 & E15-5: Open dialog via Mode pill, toggle to Practice, and save
-    await page.getByLabel(/Quiz mode: Assessment/i).click();
-    await expect(page.getByRole("dialog", { name: "Quiz settings" })).toBeVisible();
+    await page.getByRole("button", { name: /Quiz mode: Assessment/i }).click();
+    await expect(page.getByRole("dialog", { name: "Edit quiz settings" })).toBeVisible();
 
     // Select practice mode
-    await page.getByLabel("Quiz Mode").click();
+    await page.getByRole("dialog").getByRole("combobox", { name: "Quiz mode" }).click();
     await page.getByRole("option", { name: "Practice" }).click();
-    await expect(page.getByText("Practice quizzes are untimed.")).toBeVisible();
-    await expect(page.getByLabel("Hours", { exact: true })).toBeDisabled();
-    await expect(page.getByLabel("Minutes", { exact: true })).toBeDisabled();
+    await expect(page.getByText("No time limit").first()).toBeVisible();
+    await expect(page.getByLabel("h", { exact: true })).toBeDisabled();
+    await expect(page.getByLabel("min", { exact: true })).toBeDisabled();
 
     const patchPromisePractice = page.waitForResponse(
       (res) => res.url().includes("/api/quizzes/") && res.request().method() === "PATCH",
     );
-    await page.getByRole("button", { name: "Save settings" }).click();
+    await page.getByRole("button", { name: "Save changes" }).click();
     const practiceRes = await patchPromisePractice;
     expect(practiceRes.status()).toBe(200);
     const practiceBody = await practiceRes.json();
@@ -92,47 +94,45 @@ test.describe("E15 — Quiz Metadata Editing (Title, Mode, Time Limit)", () => {
     expect(practiceBody.quiz.time_limit_sec).toBeNull();
 
     await expect(page.getByRole("dialog")).toBeHidden();
-    await expect(page.getByText("1h 15m limit")).toBeHidden();
-    await expect(page.getByLabel(/Quiz mode: Practice/i)).toBeVisible();
+    await expect(page.getByText("1h 15m")).toBeHidden();
+    await expect(page.getByRole("button", { name: /Quiz mode: Practice/i })).toBeVisible();
 
     // 6. E15-6: Reopen dialog, switch back to Assessment, set Hours = 2 (max cap)
-    await page.getByLabel(/Quiz mode: Practice/i).click();
-    await page.getByLabel("Quiz Mode").click();
+    await page.getByRole("button", { name: /Quiz mode: Practice/i }).click();
+    await page.getByRole("dialog").getByRole("combobox", { name: "Quiz mode" }).click();
     await page.getByRole("option", { name: "Assessment" }).click();
 
-    await page.getByLabel("Hours", { exact: true }).fill("2");
-    await expect(page.getByLabel("Minutes", { exact: true })).toBeDisabled();
+    await page.getByLabel("h", { exact: true }).fill("2");
+    await expect(page.getByLabel("min", { exact: true })).toBeDisabled();
     await expect(
-      page.getByText("Maximum time limit reached (2 hours). Minutes are set to 0."),
+      page.getByText("Maximum 2h."),
     ).toBeVisible();
 
     await page.getByRole("button", { name: "Cancel" }).click();
     await expect(page.getByRole("dialog")).toBeHidden();
 
     // 7. E15-7: Mutual exclusion between inline edit and settings modal
-    await page.getByLabel(/Rename quiz/i).click();
-    await expect(page.getByLabel("Quiz title")).toBeVisible();
+    await page.getByRole("heading", { level: 1, name: "Final Comprehensive Exam" }).dblclick();
+    await expect(page.getByRole("textbox", { name: "Edit settings" })).toBeVisible();
     // Clicking settings cancels inline title edit and opens modal
-    await page.getByLabel("Edit quiz settings").click();
-    await expect(page.getByRole("dialog", { name: "Quiz settings" })).toBeVisible();
+    await page.getByRole("button", { name: /Quiz mode: Practice/i }).click();
+    await expect(page.getByRole("dialog", { name: "Edit quiz settings" })).toBeVisible();
     await page.getByRole("button", { name: "Cancel" }).click();
-    await expect(page.getByLabel("Quiz title")).toBeHidden();
+    await expect(page.getByRole("textbox", { name: "Edit settings" })).toBeHidden();
 
     // 8. E15-8 & E15-9: Add a question, publish quiz, and verify edit locks
-    await page.getByRole("textbox", { name: "Question" }).fill("What is 10 x 10?");
+    await page.getByLabel("Question prompt").fill("What is 10 x 10?");
     await page.getByLabel("Option 1").fill("100");
     await page.getByLabel("Option 2").fill("20");
     await page.getByRole("button", { name: /add question/i }).click();
     await expect(page.getByText("What is 10 x 10?")).toBeVisible();
 
-    await page.getByRole("button", { name: /publish quiz/i }).click();
-    await expect(page.getByRole("dialog", { name: /publish/i })).toBeVisible();
-    await page.getByRole("dialog").getByRole("button", { name: "Publish" }).click();
+    await page.getByRole("button", { name: /publish/i }).click();
 
-    // Once live, settings button and pencil icons are unmounted
+    // Once live, settings gear and chip buttons are unmounted
     await expect(page.getByText("Live", { exact: true })).toBeVisible();
-    await expect(page.getByLabel(/Rename quiz/i)).toBeHidden();
-    await expect(page.getByLabel("Edit quiz settings")).toBeHidden();
+    await expect(page.getByRole("button", { name: "Quiz settings" })).toBeHidden();
+    await expect(page.getByRole("button", { name: /Quiz mode:/i })).toBeHidden();
 
     // Out-of-band PATCH attempt on live quiz returns 409
     const quizId = page.url().split("/builder")[0].split("/").pop()!;

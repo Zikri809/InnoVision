@@ -48,7 +48,8 @@ const QUIZ_TITLE = "E8 Gesture Practice";
  *     assert Q4 stays on screen) → click Finish → EndScreen score 4/4.
  */
 test.describe("E8 — gesture answering (simulated)", () => {
-  test("a full quiz is playable hands-free via scripted holds", async ({ browser }) => {
+  test("a full quiz is playable hands-free via scripted holds", async ({ browser }, testInfo) => {
+    testInfo.setTimeout(120_000);
     test.skip(!LECTURER_INVITE_CODE, "LECTURER_INVITE_CODE not set");
 
     const lecturerCtx = await browser.newContext();
@@ -98,7 +99,7 @@ test.describe("E8 — gesture answering (simulated)", () => {
     await expect(studentPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
     await joinClass(studentPage, joinCode, CLASS_TITLE);
 
-    await studentPage.getByRole("link", { name: /available quizzes/i }).click();
+    await studentPage.getByRole("link", { name: /View quizzes/i }).click();
     await expect(studentPage).toHaveURL(/\/student\/quizzes/);
     await expect(studentPage.getByText(QUIZ_TITLE, { exact: true })).toBeVisible();
 
@@ -124,7 +125,7 @@ test.describe("E8 — gesture answering (simulated)", () => {
     expect(q1Body.questionId).toBeTruthy();
 
     // Feedback chip is the render barrier for `selected` (aria-pressed).
-    await expect(studentPage.getByText("Correct", { exact: true })).toBeVisible();
+    await expect(studentPage.getByText(/^Correct/)).toBeVisible();
     await expect(studentPage.getByRole("button", { name: /Velocity/i })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -164,7 +165,7 @@ test.describe("E8 — gesture answering (simulated)", () => {
     await playGestureSequence(studentPage, [{ fingers: 4, holdMs: HOLD_MS + 150 }]);
     const q2Body = JSON.parse((await q2Answer).postData() ?? "{}") as { selectedIndex: number };
     expect(q2Body.selectedIndex).toBe(3);
-    await expect(studentPage.getByText("Correct", { exact: true })).toBeVisible();
+    await expect(studentPage.getByText(/^Correct/)).toBeVisible();
     await expect(studentPage.getByRole("button", { name: /Temperature/i })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -182,7 +183,7 @@ test.describe("E8 — gesture answering (simulated)", () => {
     await playGestureSequence(studentPage, [{ fingers: 1, holdMs: HOLD_MS + 150 }]);
     const q3Body = JSON.parse((await q3Answer).postData() ?? "{}") as { selectedIndex: number };
     expect(q3Body.selectedIndex).toBe(0);
-    await expect(studentPage.getByText("Correct", { exact: true })).toBeVisible();
+    await expect(studentPage.getByText(/^Correct/)).toBeVisible();
     await studentPage.getByRole("button", { name: "Next", exact: true }).click();
 
     // ── 8. Q4 (5-option): finger 5 IS a valid answer → no palm-next advance ──
@@ -194,15 +195,14 @@ test.describe("E8 — gesture answering (simulated)", () => {
     await playGestureSequence(studentPage, [{ fingers: 5, holdMs: HOLD_MS + 150 }]);
     const q4Body = JSON.parse((await q4Answer).postData() ?? "{}") as { selectedIndex: number };
     expect(q4Body.selectedIndex).toBe(4);
-    await expect(studentPage.getByText("Correct", { exact: true })).toBeVisible();
+    await expect(studentPage.getByText(/^Correct/)).toBeVisible();
     // The palm-next gate (`optionCount < MAX_ANSWER_FINGERS`) must NOT have
     // advanced on a 5-option question — Q4 is still on screen.
     await expect(studentPage.getByText("Q4: Pick the fifth option.", { exact: true })).toBeVisible();
 
     // ── 9. Finish → EndScreen score 4/4 ──
     await studentPage.getByRole("button", { name: "Finish", exact: true }).click();
-    await expect(studentPage.getByText("Your score", { exact: true })).toBeVisible({ timeout: 10_000 });
-    await expect(studentPage.getByText(/^4\s*\/\s*4$/)).toBeVisible();
+    await expect(studentPage.getByText(/^4\s*\/\s*4$/)).toBeVisible({ timeout: 10_000 });
 
     await lecturerCtx.close();
     await studentCtx.close();

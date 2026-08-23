@@ -6,7 +6,7 @@ import {
   installFakeFaceTracker,
   enrollViaFacePage,
   setFaceVerifyMode,
-  triggerFaceBlink,
+  clickBeginAndBlink,
   recoverFromPause,
   setFacePeriodic,
   waitForPauseOverlay,
@@ -57,11 +57,11 @@ test.describe("E6 — pause/flag cycle", () => {
     await lecturerPage.getByText(QUIZ_TITLE, { exact: true }).click();
     await expect(lecturerPage).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
 
-    await lecturerPage.getByRole("textbox", { name: "Question" }).fill("What is 2+2?");
+    await lecturerPage.getByRole("textbox", { name: "Question prompt" }).fill("What is 2+2?");
     await lecturerPage.getByLabel("Option 1").fill("3");
     await lecturerPage.getByLabel("Option 2").fill("4");
     await lecturerPage.getByRole("button", { name: /add question/i }).click();
-    await expect(lecturerPage.getByRole("textbox", { name: "Question" })).toHaveValue("");
+    await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
 
     const publishButton = lecturerPage.getByRole("button", { name: /publish/i });
     await expect(publishButton).toBeEnabled();
@@ -84,37 +84,30 @@ test.describe("E6 — pause/flag cycle", () => {
     await setFacePeriodic(studentPage, { minMs: 2000, maxMs: 3000 });
 
     // ── 3 fail cycles: mismatch → paused → blink-recover → (repeat) ──
+    // The gate is EXPLICIT-Begin (a failed-'start' recovery lands back IN the
+    // gate; it never auto re-runs 'start'), so every fail cycle is:
+    // Begin(+blink) → verify fails → paused overlay → blink-recover.
     let recoveredOnce = false;
     for (let cycle = 1; cycle <= 3; cycle++) {
       await setFaceVerifyMode(studentPage, "mismatch");
 
-      if (cycle === 1) {
-        // The gate is explicit-Begin: click Begin (runs blink liveness + the
-        // `'start'` verify with mismatch mode) → the start verify fails → paused.
-        await setFaceVerifyMode(studentPage, "mismatch");
-        const begin = studentPage.getByRole("button", { name: "Begin assessment", exact: true });
-        await expect(begin).toBeEnabled({ timeout: 15_000 });
-        await begin.click();
-        await triggerFaceBlink(studentPage);
-        await waitForPauseOverlay(studentPage);
-      } else {
-        // Mid-quiz periodic verify fails → paused overlay.
-        await waitForPauseOverlay(studentPage);
-      }
+      await clickBeginAndBlink(studentPage);
 
-      // Blink-recover. On cycle 1, recovery lands back in the gate (no start
-      // verify yet) which auto re-runs 'start' → fails → paused again. On
-      // later cycles recovery lands in 'ready' and the fast cadence re-verifies.
-      await recoverFromPause(studentPage);
+      if (cycle < 3) {
+        // Fails 1-2 → paused; blink-recover → back to the gate.
+        await waitForPauseOverlay(studentPage);
 
-      if (cycle === 1) {
-        // Sub-case: children stay mounted after recovery (no re-calibration).
-        await expect(studentPage.getByText("What is 2+2?", { exact: true })).toBeVisible({
-          timeout: 10_000,
-        });
+        if (cycle === 1) {
+          // Sub-case: children stay mounted after recovery (no re-calibration).
+          await expect(studentPage.getByText("What is 2+2?", { exact: true })).toBeVisible({
+            timeout: 10_000,
+          });
+        }
+        await recoverFromPause(studentPage);
         recoveredOnce = true;
-        // The gate re-runs 'start' (mismatch) → paused again.
-        await waitForPauseOverlay(studentPage);
+      } else {
+        // Fail 3 (FLAT last-5 window) → flagged — lecturer decision only.
+        await waitForFlaggedOverlay(studentPage);
       }
     }
 

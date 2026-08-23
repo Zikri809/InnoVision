@@ -24,7 +24,8 @@ const LECTURER_INVITE_CODE = process.env.LECTURER_INVITE_CODE ?? "";
 test.describe("E1b — Manual quiz → publish → visible to student", () => {
   test("lecturer builds and publishes a quiz; student sees it", async ({
     browser,
-  }) => {
+  }, testInfo) => {
+    testInfo.setTimeout(120_000);
     test.skip(!LECTURER_INVITE_CODE, "LECTURER_INVITE_CODE not set");
 
     const lecturerCtx = await browser.newContext();
@@ -63,7 +64,7 @@ test.describe("E1b — Manual quiz → publish → visible to student", () => {
     await expect(lecturerPage.getByRole("heading", { name: "Chapter 1: Motion" })).toBeVisible();
 
     // Q1 — MCQ (default type, starts with 2 options → add 2 more for 4)
-    await lecturerPage.getByRole("textbox", { name: "Question" }).fill("What is velocity?");
+    await lecturerPage.getByRole("textbox", { name: "Question prompt" }).fill("What is velocity?");
     await lecturerPage.getByLabel("Option 1").fill("Speed in a direction");
     await lecturerPage.getByLabel("Option 2").fill("Total distance");
     await lecturerPage.getByRole("button", { name: /add option/i }).click();
@@ -72,25 +73,25 @@ test.describe("E1b — Manual quiz → publish → visible to student", () => {
     await lecturerPage.getByRole("textbox", { name: "Option 4" }).fill("Acceleration");
     await lecturerPage.getByRole("button", { name: /add question/i }).click();
     // The save completes when the form resets (Question field cleared).
-    await expect(lecturerPage.getByRole("textbox", { name: "Question" })).toHaveValue("");
+    await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
     await expect(lecturerPage.getByText("What is velocity?")).toBeVisible();
 
     // Q2 — MCQ with the "Add option" path (2 → 3 options)
-    await lecturerPage.getByRole("textbox", { name: "Question" }).fill("Which unit is force measured in?");
+    await lecturerPage.getByRole("textbox", { name: "Question prompt" }).fill("Which unit is force measured in?");
     await lecturerPage.getByRole("textbox", { name: "Option 1" }).fill("Joule");
     await lecturerPage.getByRole("textbox", { name: "Option 2" }).fill("Newton");
     await lecturerPage.getByRole("button", { name: /add option/i }).click();
     await lecturerPage.getByRole("textbox", { name: "Option 3" }).fill("Watt");
     await lecturerPage.getByRole("button", { name: /add question/i }).click();
-    await expect(lecturerPage.getByRole("textbox", { name: "Question" })).toHaveValue("");
+    await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
     await expect(lecturerPage.getByText("Which unit is force measured in?")).toBeVisible();
 
     // Q3 — True/False (type switch fixes options to True/False)
     await lecturerPage.getByLabel("Type").click();
     await lecturerPage.getByRole("option", { name: "True / False" }).click();
-    await lecturerPage.getByRole("textbox", { name: "Question" }).fill("Light travels faster than sound.");
+    await lecturerPage.getByRole("textbox", { name: "Question prompt" }).fill("Light travels faster than sound.");
     await lecturerPage.getByRole("button", { name: /add question/i }).click();
-    await expect(lecturerPage.getByRole("textbox", { name: "Question" })).toHaveValue("");
+    await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
     await expect(lecturerPage.getByText("Light travels faster than sound.")).toBeVisible();
 
     // Publish button enabled only after questions exist; click it.
@@ -100,7 +101,7 @@ test.describe("E1b — Manual quiz → publish → visible to student", () => {
     await expect(lecturerPage.getByText(/^Live/)).toBeVisible();
     // The quiz is now Live and questions are locked (read-only banner).
     await expect(lecturerPage.getByText("Live", { exact: true })).toBeVisible();
-    await expect(lecturerPage.getByText(/can no longer be edited/i)).toBeVisible();
+    await expect(lecturerPage.getByRole("alert").filter({ hasText: "Active" })).toBeVisible();
 
     // ── 4. Student registers, joins, sees the live quiz ────────
     await registerUser(studentPage, STUDENT_EMAIL, "student", LECTURER_INVITE_CODE);
@@ -111,13 +112,13 @@ test.describe("E1b — Manual quiz → publish → visible to student", () => {
     await expect(studentPage.getByText("E1b Physics", { exact: true })).toBeVisible();
 
     // Navigate to the quizzes list and confirm the published quiz + mode badge.
-    await studentPage.getByRole("link", { name: /available quizzes/i }).click();
+    await studentPage.getByRole("link", { name: /View quizzes/i }).click();
     await expect(studentPage).toHaveURL(/\/student\/quizzes/);
     await expect(
-      studentPage.getByRole("heading", { name: "Available quizzes" }),
+      studentPage.getByText("Available quizzes", { exact: true }),
     ).toBeVisible();
     await expect(studentPage.getByText("Chapter 1: Motion", { exact: true })).toBeVisible();
-    await expect(studentPage.getByText("Practice", { exact: true })).toBeVisible();
+    await expect(studentPage.getByRole("list").getByText("Practice")).toBeVisible();
     // Draft secrecy: no draft quiz exists for this student to see beyond the live one.
     await expect(studentPage.getByText("Chapter 1: Motion", { exact: true })).toHaveCount(1);
 
