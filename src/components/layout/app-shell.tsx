@@ -14,11 +14,14 @@ export async function AppShell({
   role,
   email,
   consentGiven,
+  notificationBell,
   children,
 }: {
   role: "lecturer" | "student";
   email: string;
   consentGiven: boolean;
+  /** Server-fetched <NotificationBell /> island (see role layouts). */
+  notificationBell?: ReactNode;
   children: ReactNode;
 }) {
   const t = await getTranslations("nav");
@@ -29,6 +32,7 @@ export async function AppShell({
       : [
           { href: "/student/classes", label: t("myClasses") },
           { href: "/student/quizzes", label: t("quizzes") },
+          { href: "/student/my-quizzes", label: t("myQuizzes") },
           { href: "/student/face/enroll", label: t("faceSetup") },
         ];
 
@@ -57,7 +61,10 @@ export async function AppShell({
             </nav>
           </div>
 
-          <AppUserMenu email={email} consentGiven={consentGiven} />
+          <div className="flex items-center gap-1.5">
+            {notificationBell}
+            <AppUserMenu email={email} consentGiven={consentGiven} />
+          </div>
         </div>
       </header>
 

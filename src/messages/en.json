@@ -62,7 +62,7 @@
   "nav": {
     "brand": "InnoVision",
     "myClasses": "My Classes",
-    "quizzes": "Quizzes",
+    "quizzes": "Class Quizzes",
     "faceSetup": "Face Setup",
     "skipToContent": "Skip to content",
     "signIn": "Sign in",
@@ -76,7 +76,8 @@
     "accountMenu": "Your InnoVision account",
     "consentGiven": "Biometric consent given",
     "consentMissing": "Consent not given yet",
-    "toggleLanguage": "Switch language"
+    "toggleLanguage": "Switch language",
+    "myQuizzes": "My Quizzes"
   },
   "landing": {
     "badge": "No clicks needed · Just raise your hand",
@@ -268,7 +269,12 @@
     "builder": {
       "backToClass": "Back to class",
       "renameQuiz": "Edit settings",
-      "editSettings": "Edit settings",
+      "editSettings": "Quiz settings",
+      "titleUpdated": "Title updated",
+      "questionAdded": "Question added",
+      "questionDeleted": "Question deleted",
+      "questionUpdated": "Question updated",
+      "questionRegenerated": "Question regenerated",
       "publishBtn": "Publish quiz",
       "publishQuiz": "Publish quiz",
       "publishingBtn": "Publishing…",
@@ -423,6 +429,8 @@
       "statusDone": "Enrolled successfully! ✓",
       "statusPendingReview": "Pending lecturer review.",
       "statusFailed": "Capture failed — please try again.",
+      "statusUnavailable": "Face verification is unavailable right now. Please try again later.",
+      "cameraOffHint": "Your camera stays off until you give consent below.",
       "startCaptureBtn": "Start capture",
       "tryAgainBtn": "Try again",
       "recaptureBtn": "Re-capture",
@@ -611,6 +619,7 @@
     "modeReplaceDesc": "Clear current draft questions and create fresh ones",
     "modeReplaceWarning": "Note: All current draft questions will be replaced.",
     "emptyTextError": "No readable text could be found in the uploaded files.",
+    "questionsGenerated": "Questions generated",
     "glmError": "The AI Vision scanner could not read this file. Please try the Standard Scanner.",
     "glmTimeout": "Reading the document took too long. Please try a smaller file or use Standard Scanner.",
     "glmUnavailable": "The AI Vision scanner is currently offline. Please switch to Standard Scanner.",
@@ -640,5 +649,176 @@
     "rateLimited": "Too many requests. Please try again later.",
     "timeout": "The request timed out. Please try again.",
     "internal": "An unexpected error occurred. Please try again."
+  },
+  "notifications": {
+    "bell": {
+      "label": "Notifications",
+      "labelUnread": "{count, plural, =1 {Notifications, 1 unread} other {Notifications, # unread}}"
+    },
+    "panel": {
+      "title": "Notifications",
+      "markAllRead": "Mark all as read",
+      "loadMore": "Load more",
+      "pinnedLabel": "Needs attention",
+      "emptyTitle": "You're all caught up",
+      "emptyBody": "New quiz alerts and updates will appear here.",
+      "sheetDescription": "Stay on top of your classes and quizzes.",
+      "clearConfirmTitle": "Mark all as read?",
+      "clearConfirmBody": "{count, plural, =1 {1 notification will be marked as read.} other {# notifications will be marked as read.}}"
+    },
+    "items": {
+      "quiz_live": {
+        "title": "New quiz",
+        "body": "\"{quizTitle}\" is now open in {className}.",
+        "practice": {
+          "title": "New practice quiz",
+          "body": "\"{quizTitle}\" is open for practice in {className}. Attempt it as many times as you like."
+        },
+        "assessment": {
+          "title": "New assessment live",
+          "body": "\"{quizTitle}\" is now open in {className}. This one counts — you get a single attempt."
+        }
+      },
+      "results_revealed": {
+        "title": "Results ready",
+        "body": "Your results for \"{quizTitle}\" are ready to view."
+      },
+      "session_reset": {
+        "title": "Attempt cleared",
+        "body": "Your attempt for \"{quizTitle}\" was cleared — you can retake it whenever you're ready."
+      },
+      "removed_from_class": {
+        "title": "Class access ended",
+        "body": "Your access to \"{className}\" has ended. If you think this is a mistake, check with your lecturer."
+      },
+      "class_archived": {
+        "title": "Class wrapped up",
+        "body": "Access to \"{className}\" has ended."
+      },
+      "student_joined": {
+        "title": "New student",
+        "body": "{studentName} joined \"{className}\"."
+      },
+      "session_submitted": {
+        "title": "New submission",
+        "body": "A new attempt for \"{quizTitle}\" was submitted."
+      },
+      "session_flagged": {
+        "title": "Review needed: face checks",
+        "body": "{studentName}'s face checks kept mismatching on \"{quizTitle}\". This is often lighting or a camera hiccup — review before unlocking."
+      },
+      "quiz_completed_all": {
+        "title": "Quiz fully attempted",
+        "body": "Every enrolled student has attempted \"{quizTitle}\". Ready to reveal the results?"
+      },
+      "incident_clip_recorded": {
+        "title": "Incident footage added",
+        "body": "A new recording is available for \"{quizTitle}\"."
+      },
+      "face_unavailable_reported": {
+        "title": "Camera unavailable report",
+        "body": "A student couldn't run face verification on \"{quizTitle}\". Consider unlocking or exempting them."
+      },
+      "face_enrollment_held": {
+        "title": "Face enrollment needs review",
+        "body": "An enrollment is pending lecturer review. Open your class roster to resolve it."
+      }
+    },
+    "digest": {
+      "student_joined": "{count, plural, =1 {1 student joined \"{className}\"} other {# students joined \"{className}\"}}",
+      "session_submitted": "{count, plural, =1 {1 new submission for \"{quizTitle}\"} other {# new submissions for \"{quizTitle}\"}}",
+      "quiz_completed_all": "\"{quizTitle}\" fully attempted",
+      "incident_clip_recorded": "{count, plural, =1 {1 new recording for \"{quizTitle}\"} other {# new recordings for \"{quizTitle}\"}}"
+    },
+    "fallback": {
+      "studentName": "Someone"
+    },
+    "a11y": {
+      "newCount": "{count, plural, =1 {1 new notification} other {# new notifications}}"
+    }
+  },
+  "myQuizzes": {
+    "heroTitle": "My Practice Quizzes",
+    "heroSubtitle": "Build your own quizzes, practice unlimited times, and share them with friends.",
+    "createCta": "Create quiz",
+    "emptyTitle": "No quizzes yet",
+    "emptySubtitle": "Create your first practice quiz and share it with your class.",
+    "statQuizzes": "Quizzes",
+    "shared": "Shared",
+    "priv": "Private",
+    "playBtn": "Play",
+    "editBtn": "Edit",
+    "shareBtn": "Share",
+    "deleteBtn": "Delete",
+    "deleteConfirmTitle": "Delete this quiz?",
+    "deleteConfirmBody": "\"{title}\" and all its questions will be removed for everyone. This cannot be undone.",
+    "shareTitle": "Share \"{title}\"",
+    "shareIntro": "Anyone with this link can practice it.",
+    "copyBtn": "Copy link",
+    "whatsappBtn": "WhatsApp",
+    "regenerateBtn": "New code",
+    "regenerateNote": "Generating a new code stops old links from working.",
+    "unshareBtn": "Stop sharing",
+    "unsharedNotice": "Sharing stopped.",
+    "updatedNotice": "Saved.",
+    "deletedNotice": "Quiz deleted.",
+    "questionCount": "{count, plural, =1 {# question} other {# questions}}",
+    "mintingLink": "Preparing your link…"
+  },
+  "quizEditor": {
+    "titleLabel": "Title",
+    "titlePlaceholder": "e.g. Chapter 5 — Circuits",
+    "descriptionLabel": "Description (optional)",
+    "descriptionPlaceholder": "What should players expect?",
+    "metaSave": "Save details",
+    "addQuestion": "Add question",
+    "editQuestion": "Edit question",
+    "questionN": "Q{number}",
+    "promptLabel": "Prompt",
+    "promptPlaceholder": "Ask something…",
+    "typeMcq": "Multiple choice",
+    "typeTrueFalse": "True / False",
+    "optionsLabel": "Options",
+    "addOption": "Add option",
+    "removeOptionA11y": "Remove option {index}",
+    "moveUpA11y": "Move option up",
+    "moveDownA11y": "Move option down",
+    "correctLabel": "Mark the correct answer",
+    "explanationLabel": "Explanation (optional)",
+    "explanationPlaceholder": "Shown after answering.",
+    "saveQuestion": "Save question",
+    "createBtn": "Create quiz",
+    "openBuilder": "Open builder",
+    "needTitle": "Give your quiz a title first.",
+    "minTwoOptions": "At least two non-empty options are needed.",
+    "pickCorrect": "Pick which option is correct.",
+    "duplicateOptions": "Options must be distinct.",
+    "questionCapReached": "A quiz can hold up to {count} questions.",
+    "promptRequired": "Write a prompt for your question.",
+    "deleteQuestionConfirm": "Delete this question?"
+  },
+  "sqPlayer": {
+    "banner": "Community-made practice content — not reviewed by lecturers.",
+    "byCreator": "by {name}",
+    "anonymous": "Anonymous",
+    "startBtn": "Start practice",
+    "progress": "Question {current} of {total}",
+    "correctFeedback": "Correct!",
+    "wrongFeedback": "Not quite — the right answer is highlighted.",
+    "explanationLabel": "Why",
+    "nextBtn": "Next",
+    "resultsBtn": "See results",
+    "endTitle": "Practice complete",
+    "scorePct": "{pct}% correct",
+    "reviewTitle": "Review",
+    "retryBtn": "Try again",
+    "backMine": "Back to My Quizzes",
+    "unavailable": "This practice quiz is no longer available.",
+    "qUnavailable": "No longer available.",
+    "noQuestions": "This quiz has no questions yet. Ask the creator to add some!",
+    "invalidLink": "This link is invalid or no longer available.",
+    "signInCta": "Sign in to play",
+    "homeCta": "Go to dashboard",
+    "back": "Back"
   }
 }

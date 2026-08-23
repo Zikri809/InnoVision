@@ -62,7 +62,7 @@
   "nav": {
     "brand": "InnoVision",
     "myClasses": "Kelas Saya",
-    "quizzes": "Kuiz",
+    "quizzes": "Kuis Kelas",
     "faceSetup": "Tetapan Wajah",
     "skipToContent": "Langkau ke kandungan",
     "signIn": "Log masuk",
@@ -76,7 +76,8 @@
     "accountMenu": "Akaun InnoVision anda",
     "consentGiven": "Kebenaran biometrik diberikan",
     "consentMissing": "Kebenaran belum diberikan",
-    "toggleLanguage": "Tukar bahasa"
+    "toggleLanguage": "Tukar bahasa",
+    "myQuizzes": "Kuis Saya"
   },
   "landing": {
     "badge": "Tanpa klik tetikus · Angkat tangan sahaja",
@@ -268,7 +269,12 @@
     "builder": {
       "backToClass": "Kembali ke kelas",
       "renameQuiz": "Sunting tetapan",
-      "editSettings": "Sunting tetapan",
+      "editSettings": "Tetapan kuiz",
+      "titleUpdated": "Tajuk dikemas kini",
+      "questionAdded": "Soalan ditambah",
+      "questionDeleted": "Soalan dipadam",
+      "questionUpdated": "Soalan dikemas kini",
+      "questionRegenerated": "Soalan dijana semula",
       "publishBtn": "Terbitkan kuiz",
       "publishQuiz": "Terbitkan kuiz",
       "publishingBtn": "Sedang menerbitkan…",
@@ -423,6 +429,8 @@
       "statusDone": "Berjaya didaftarkan! ✓",
       "statusPendingReview": "Menunggu semakan pensyarah.",
       "statusFailed": "Pemeriksaan gagal — sila cuba lagi.",
+      "statusUnavailable": "Pengesahan wajah tidak tersedia buat masa ini. Sila cuba lagi nanti.",
+      "cameraOffHint": "Kamera anda kekal dimatikan sehingga anda memberi kebenaran di bawah.",
       "startCaptureBtn": "Mula rakam",
       "tryAgainBtn": "Cuba lagi",
       "recaptureBtn": "Rakam semula",
@@ -611,6 +619,7 @@
     "modeReplaceDesc": "Kosongkan draf semasa dan cipta set soalan baru",
     "modeReplaceWarning": "Nota: Semua draf soalan semasa akan digantikan.",
     "emptyTextError": "Tiada teks yang boleh dibaca dijumpai dalam fail yang dimuat naik.",
+    "questionsGenerated": "Soalan dijana",
     "glmError": "Pengimbas Penglihatan AI tidak dapat membaca fail ini. Sila cuba gunakan Pengimbas Standard.",
     "glmTimeout": "Masa membaca dokumen tamat. Sila cuba fail yang lebih kecil atau gunakan Pengimbas Standard.",
     "glmUnavailable": "Perkhidmatan Pengimbas Penglihatan AI sedang di luar talian. Sila tukar kepada Pengimbas Standard.",
@@ -640,5 +649,176 @@
     "rateLimited": "Terlalu banyak permintaan. Sila cuba lagi kemudian.",
     "timeout": "Permintaan tamat masa. Sila cuba lagi.",
     "internal": "Ralat tidak dijangka telah berlaku. Sila cuba lagi."
+  },
+  "notifications": {
+    "bell": {
+      "label": "Notifikasi",
+      "labelUnread": "{count, plural, =1 {Notifikasi, 1 belum dibaca} other {Notifikasi, # belum dibaca}}"
+    },
+    "panel": {
+      "title": "Notifikasi",
+      "markAllRead": "Tanda semua dibaca",
+      "loadMore": "Muat lagi",
+      "pinnedLabel": "Perlu perhatian",
+      "emptyTitle": "Semua sudah selesai",
+      "emptyBody": "Amaran kuiz baharu dan kemas kini akan muncul di sini.",
+      "sheetDescription": "Kekal maklum dengan kelas dan kuiz anda.",
+      "clearConfirmTitle": "Tanda semua sebagai dibaca?",
+      "clearConfirmBody": "{count, plural, =1 {1 notifikasi akan ditanda dibaca.} other {# notifikasi akan ditanda dibaca.}}"
+    },
+    "items": {
+      "quiz_live": {
+        "title": "Kuiz baharu",
+        "body": "\"{quizTitle}\" kini dibuka dalam {className}.",
+        "practice": {
+          "title": "Kuiz latihan baharu",
+          "body": "\"{quizTitle}\" dibuka untuk latihan dalam {className}. Cuba sebanyak mana anda mahu."
+        },
+        "assessment": {
+          "title": "Penilaian baharu bermula",
+          "body": "\"{quizTitle}\" kini dibuka dalam {className}. Yang ini dikira — anda hanya ada satu percubaan."
+        }
+      },
+      "results_revealed": {
+        "title": "Keputusan sedia",
+        "body": "Keputusan anda untuk \"{quizTitle}\" sudah sedia untuk dilihat."
+      },
+      "session_reset": {
+        "title": "Percubaan dikosongkan",
+        "body": "Percubaan anda untuk \"{quizTitle}\" telah dikosongkan — anda boleh mencuba semula bila-bila masa yang bersedia."
+      },
+      "removed_from_class": {
+        "title": "Akses kelas ditamatkan",
+        "body": "Akses anda ke \"{className}\" telah ditamatkan. Jika anda rasa ini satu kesilapan, hubungi pensyarah anda."
+      },
+      "class_archived": {
+        "title": "Kelas telah ditamatkan",
+        "body": "Akses ke \"{className}\" telah ditamatkan."
+      },
+      "student_joined": {
+        "title": "Pelajar baharu",
+        "body": "{studentName} telah menyertai \"{className}\"."
+      },
+      "session_submitted": {
+        "title": "Serahan baharu",
+        "body": "Satu percubaan baharu untuk \"{quizTitle}\" telah dihantar."
+      },
+      "session_flagged": {
+        "title": "Perlu semakan: semakan wajah",
+        "body": "Semakan wajah {studentName} asyik tidak sepadan pada \"{quizTitle}\". Ini kerap berpunca daripada pencahayaan atau kamera — sila semak sebelum membuka kunci."
+      },
+      "quiz_completed_all": {
+        "title": "Kuiz telah dicuba sepenuhnya",
+        "body": "Semua pelajar berdaftar telah mencuba \"{quizTitle}\". Sedia untuk mendedahkan keputusan?"
+      },
+      "incident_clip_recorded": {
+        "title": "Rakaman insiden ditambah",
+        "body": "Rakaman baharu tersedia untuk \"{quizTitle}\"."
+      },
+      "face_unavailable_reported": {
+        "title": "Laporan kamera tidak tersedia",
+        "body": "Seorang pelajar tidak dapat menjalankan pengesahan wajah pada \"{quizTitle}\". Pertimbangkan untuk membuka kunci atau mengecualikan mereka."
+      },
+      "face_enrollment_held": {
+        "title": "Pendaftaran wajah perlu semakan",
+        "body": "Satu pendaftaran menunggu semakan pensyarah. Buka senarai kelas anda untuk menyelesaikannya."
+      }
+    },
+    "digest": {
+      "student_joined": "{count, plural, =1 {1 pelajar menyertai \"{className}\"} other {# pelajar menyertai \"{className}\"}}",
+      "session_submitted": "{count, plural, =1 {1 serahan baharu untuk \"{quizTitle}\"} other {# serahan baharu untuk \"{quizTitle}\"}}",
+      "quiz_completed_all": "\"{quizTitle}\" telah dicuba sepenuhnya",
+      "incident_clip_recorded": "{count, plural, =1 {1 rakaman baharu untuk \"{quizTitle}\"} other {# rakaman baharu untuk \"{quizTitle}\"}}"
+    },
+    "fallback": {
+      "studentName": "Seseorang"
+    },
+    "a11y": {
+      "newCount": "{count, plural, =1 {1 notifikasi baharu} other {# notifikasi baharu}}"
+    }
+  },
+  "myQuizzes": {
+    "heroTitle": "Kuis Latihan Saya",
+    "heroSubtitle": "Bina kuis anda sendiri, latih tanpa had, dan kongsi dengan rakan.",
+    "createCta": "Cipta kuis",
+    "emptyTitle": "Tiada kuis lagi",
+    "emptySubtitle": "Cipta kuis latihan pertama anda dan kongsi dengan kelas.",
+    "statQuizzes": "Kuis",
+    "shared": "Dikongsi",
+    "priv": "Peribadi",
+    "playBtn": "Main",
+    "editBtn": "Sunting",
+    "shareBtn": "Kongsi",
+    "deleteBtn": "Padam",
+    "deleteConfirmTitle": "Padam kuis ini?",
+    "deleteConfirmBody": "\"{title}\" dan semua soalannya akan dipadamkan untuk semua orang. Tindakan ini tidak boleh diundur.",
+    "shareTitle": "Kongsi \"{title}\"",
+    "shareIntro": "Sesiapa sahaja dengan pautan ini boleh berlatih.",
+    "copyBtn": "Salin pautan",
+    "whatsappBtn": "WhatsApp",
+    "regenerateBtn": "Kod baharu",
+    "regenerateNote": "Menjana kod baharu akan menyekat pautan lama.",
+    "unshareBtn": "Berhenti kongsi",
+    "unsharedNotice": "Perkongsian dihentikan.",
+    "updatedNotice": "Disimpan.",
+    "deletedNotice": "Kuis dipadam.",
+    "questionCount": "{count, plural, =1 {# soalan} other {# soalan}}",
+    "mintingLink": "Menyediakan pautan anda…"
+  },
+  "quizEditor": {
+    "titleLabel": "Tajuk",
+    "titlePlaceholder": "cth. Bab 5 — Litar",
+    "descriptionLabel": "Penerangan (pilihan)",
+    "descriptionPlaceholder": "Apakah yang perlu dijangka oleh pemain?",
+    "metaSave": "Simpan maklumat",
+    "addQuestion": "Tambah soalan",
+    "editQuestion": "Sunting soalan",
+    "questionN": "S{number}",
+    "promptLabel": "Soalan",
+    "promptPlaceholder": "Tanya sesuatu…",
+    "typeMcq": "Aneka pilihan",
+    "typeTrueFalse": "Betul / Salah",
+    "optionsLabel": "Pilihan",
+    "addOption": "Tambah pilihan",
+    "removeOptionA11y": "Buang pilihan {index}",
+    "moveUpA11y": "Naikkan pilihan",
+    "moveDownA11y": "Turunkan pilihan",
+    "correctLabel": "Tanda jawapan betul",
+    "explanationLabel": "Penjelasan (pilihan)",
+    "explanationPlaceholder": "Ditunjukkan selepas menjawab.",
+    "saveQuestion": "Simpan soalan",
+    "createBtn": "Cipta kuis",
+    "openBuilder": "Buka pembina",
+    "needTitle": "Beri tajuk untuk kuis anda dahulu.",
+    "minTwoOptions": "Sekurang-kurangnya dua pilihan diperlukan.",
+    "pickCorrect": "Pilih jawapan yang betul.",
+    "duplicateOptions": "Pilihan mesti berbeza.",
+    "questionCapReached": "Satu kuis boleh memuat sehingga {count} soalan.",
+    "promptRequired": "Tulis soalan untuk pertanyaan anda.",
+    "deleteQuestionConfirm": "Padam soalan ini?"
+  },
+  "sqPlayer": {
+    "banner": "Kandungan latihan dibina komuniti — tidak disemak oleh pensyarah.",
+    "byCreator": "oleh {name}",
+    "anonymous": "Tanpa nama",
+    "startBtn": "Mula berlatih",
+    "progress": "Soalan {current} daripada {total}",
+    "correctFeedback": "Betul!",
+    "wrongFeedback": "Hampir — jawapan betul ditonjolkan.",
+    "explanationLabel": "Kenapa",
+    "nextBtn": "Seterusnya",
+    "resultsBtn": "Lihat keputusan",
+    "endTitle": "Latihan selesai",
+    "scorePct": "{pct}% betul",
+    "reviewTitle": "Ulasan",
+    "retryBtn": "Cuba lagi",
+    "backMine": "Kembali ke Kuis Saya",
+    "unavailable": "Kuis latihan ini tidak lagi tersedia.",
+    "qUnavailable": "Tidak lagi tersedia.",
+    "noQuestions": "Kuis ini belum ada soalan. Minta pencipta menambah!",
+    "invalidLink": "Pautan ini tidak sah atau tidak lagi tersedia.",
+    "signInCta": "Log masuk untuk main",
+    "homeCta": "Pergi ke papan pemuka",
+    "back": "Kembali"
   }
 }
