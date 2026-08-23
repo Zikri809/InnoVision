@@ -95,7 +95,6 @@ export function QuizBuilderClient({
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(quiz.title);
   const [savingTitle, setSavingTitle] = useState(false);
-  const editTitleBtnRef = useRef<HTMLButtonElement>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const titleSubmitLock = useRef(false);
 
@@ -138,7 +137,7 @@ export function QuizBuilderClient({
     setEditingTitle(false);
     setTitleDraft(quiz.title);
     setError(null);
-    editTitleBtnRef.current?.focus();
+    headingRef.current?.focus();
   }
 
   async function handleTitleSave(e?: React.FormEvent) {
@@ -183,9 +182,9 @@ export function QuizBuilderClient({
         return;
       }
       setEditingTitle(false);
-      setNotice(t("renameQuiz"));
+      setNotice(t("titleUpdated"));
       router.refresh();
-      editTitleBtnRef.current?.focus();
+      headingRef.current?.focus();
     } catch {
       setError(tCommon("errorGeneric"));
     } finally {
@@ -278,7 +277,7 @@ export function QuizBuilderClient({
         return;
       }
       setDraft(emptyDraft);
-      setNotice(t("addQuestionBtn"));
+      setNotice(t("questionAdded"));
       router.refresh();
     } catch {
       setError(tCommon("errorGeneric"));
@@ -299,7 +298,7 @@ export function QuizBuilderClient({
         setError(body.message ?? body.error ?? tCommon("errorGeneric"));
         return;
       }
-      setNotice(t("deleteBtn"));
+      setNotice(t("questionDeleted"));
       router.refresh();
     } catch {
       setError(tCommon("errorGeneric"));
@@ -379,7 +378,7 @@ export function QuizBuilderClient({
               {editingTitle ? (
                 <form
                   onSubmit={handleTitleSave}
-                  className="flex flex-wrap items-center gap-2"
+                  className="flex items-center gap-2"
                 >
                   <Input
                     ref={titleInputRef}
@@ -391,25 +390,23 @@ export function QuizBuilderClient({
                     maxLength={TITLE_MAX}
                     disabled={savingTitle}
                     aria-label={t("renameQuiz")}
-                    className="font-heading text-2xl font-semibold sm:text-3xl max-w-md h-auto py-1 px-2.5 rounded-xl border-[3px] border-primary/40 bg-card/90 focus-visible:ring-primary/40"
+                    className="h-12 w-full max-w-xl min-w-0 rounded-2xl border-[3px] border-primary/40 bg-card px-4 font-heading text-xl font-semibold shadow-[var(--shadow-clay-in)] focus-visible:ring-primary/30 sm:text-2xl"
                   />
                   <Button
                     type="submit"
                     size="icon-sm"
                     disabled={savingTitle || !titleDraft.trim()}
                     aria-label={tCommon("save")}
-                    className="size-9 rounded-xl"
                   >
                     <Check className="size-4" />
                   </Button>
                   <Button
                     type="button"
-                    variant="ghost"
+                    variant="outline"
                     size="icon-sm"
                     onClick={cancelTitleEdit}
                     disabled={savingTitle}
                     aria-label={tCommon("cancel")}
-                    className="size-9 rounded-xl"
                   >
                     <X className="size-4" />
                   </Button>
@@ -419,21 +416,27 @@ export function QuizBuilderClient({
                   <h1
                     ref={headingRef}
                     tabIndex={-1}
-                    className="font-heading text-3xl font-semibold [text-wrap:balance] focus:outline-none"
+                    onDoubleClick={isDraft ? startTitleEdit : undefined}
+                    className={`font-heading text-3xl font-semibold [text-wrap:balance] focus:outline-none ${isDraft ? "cursor-text" : ""}`}
                   >
                     {quiz.title}
                   </h1>
                   {isDraft && (
                     <Button
-                      ref={editTitleBtnRef}
                       type="button"
                       variant="ghost"
                       size="icon-sm"
-                      onClick={startTitleEdit}
-                      aria-label={t("renameQuiz")}
+                      onClick={() => {
+                        cancelTitleEdit();
+                        setSettingsOpen(true);
+                      }}
+                      disabled={savingTitle || publishing}
+                      aria-haspopup="dialog"
+                      aria-expanded={settingsOpen}
+                      aria-label={t("editSettings")}
                       className="size-8 opacity-40 transition-opacity group-hover/title:opacity-100 hover:opacity-100 focus-visible:opacity-100 rounded-lg"
                     >
-                      <Pencil className="size-4" />
+                      <Settings2 className="size-4" />
                     </Button>
                   )}
                 </div>
@@ -459,7 +462,6 @@ export function QuizBuilderClient({
                     className={`relative inline-flex items-center justify-center gap-1.5 h-8 rounded-full border-[3px] px-3.5 text-xs font-extrabold cursor-pointer transition-[transform,box-shadow] duration-150 hover:-translate-y-0.5 hover:shadow-[var(--shadow-clay-sm)] active:translate-y-0 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/70 disabled:pointer-events-none disabled:opacity-60 before:absolute before:-inset-1.5 before:content-[''] ${MODE_CLASS[quiz.mode]}`}
                   >
                     <span>{getModeLabel(quiz.mode, locale)}</span>
-                    <Pencil className="size-3 opacity-60" aria-hidden="true" />
                   </button>
                 ) : (
                   <span className={`inline-flex items-center justify-center h-8 rounded-full border-[3px] px-3.5 text-xs font-extrabold select-none cursor-default ${MODE_CLASS[quiz.mode]}`}>
@@ -482,7 +484,6 @@ export function QuizBuilderClient({
                     >
                       <Timer className="size-3.5" aria-hidden="true" />
                       <span>{formatDuration(quiz.time_limit_sec, locale)}</span>
-                      <Pencil className="size-3 opacity-60" aria-hidden="true" />
                     </button>
                   ) : (
                     <span className="inline-flex items-center justify-center gap-1.5 h-8 rounded-full border-[3px] border-border bg-muted px-3.5 text-xs font-extrabold tabular-nums text-muted-foreground select-none cursor-default">
@@ -522,7 +523,7 @@ export function QuizBuilderClient({
         onOpenChange={handleDialogClose}
         quiz={quiz}
         onSuccess={() => {
-          setNotice(t("renameQuiz"));
+          setNotice(t("titleUpdated"));
           router.refresh();
         }}
         onError={(status, message) => {
@@ -556,7 +557,7 @@ export function QuizBuilderClient({
         question={editingQuestion}
         questionIndex={editingIndex ?? undefined}
         onSuccess={() => {
-          setNotice(t("editBtn"));
+          setNotice(t("questionUpdated"));
           router.refresh();
         }}
       />
@@ -572,7 +573,7 @@ export function QuizBuilderClient({
         question={regeneratingQuestion}
         questionIndex={regeneratingIndex ?? undefined}
         onSuccess={() => {
-          setNotice(t("regenerateBtn"));
+          setNotice(t("questionRegenerated"));
           router.refresh();
         }}
       />
@@ -588,14 +589,36 @@ export function QuizBuilderClient({
 
       <div aria-live="polite">
         {notice && (
-          <p className="mb-4 rounded-2xl border-[3px] border-emerald-300 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-800" role="status">
-            {notice}
-          </p>
+          <div
+            className="mb-4 flex items-center justify-between gap-3 rounded-2xl border-[3px] border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-800"
+            role="status"
+          >
+            <span>{notice}</span>
+            <button
+              type="button"
+              onClick={() => setNotice(null)}
+              aria-label={tCommon("close")}
+              className="shrink-0 cursor-pointer rounded-lg p-1.5 transition-colors hover:bg-emerald-100 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/40"
+            >
+              <X className="size-4" aria-hidden="true" />
+            </button>
+          </div>
         )}
         {error && (
-          <p className="mb-4 rounded-2xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-3 text-sm font-bold text-destructive" role="alert">
-            {error}
-          </p>
+          <div
+            className="mb-4 flex items-center justify-between gap-3 rounded-2xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2 text-sm font-bold text-destructive"
+            role="alert"
+          >
+            <span>{error}</span>
+            <button
+              type="button"
+              onClick={() => setError(null)}
+              aria-label={tCommon("close")}
+              className="shrink-0 cursor-pointer rounded-lg p-1.5 transition-colors hover:bg-destructive/15 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/40"
+            >
+              <X className="size-4" aria-hidden="true" />
+            </button>
+          </div>
         )}
       </div>
 

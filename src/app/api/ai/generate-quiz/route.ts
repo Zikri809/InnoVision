@@ -114,6 +114,7 @@ export async function POST(request: Request, context?: { params?: Promise<{ id?:
       supabase,
       quizId,
       userId: owner.userId,
+      quizTitle: owner.quiz.title,
       body: parsed.data,
     });
   } finally {
@@ -126,10 +127,11 @@ async function handleGenerate(
     supabase: Awaited<ReturnType<typeof createClient>>;
     quizId: string;
     userId: string;
+    quizTitle: string;
     body: z.infer<typeof GenerateQuizSchema>;
   },
 ): Promise<NextResponse> {
-  const { supabase, quizId, userId, body } = ctx;
+  const { supabase, quizId, userId, quizTitle, body } = ctx;
 
   // Single overall deadline for parse + AI attempt + retry (local tuning —
   // generous 15m budget; see GENERATION_BUDGET_MS).
@@ -308,7 +310,7 @@ async function handleGenerate(
   };
   const rpcArgs: SaveQuizQuestionsArgs = {
     p_quiz_id: quizId,
-    p_title: result.quiz.title,
+    p_title: quizTitle,
     p_source_file_url: sourcePathFinal ?? null,
     p_source_text: text,
     p_questions: rows,

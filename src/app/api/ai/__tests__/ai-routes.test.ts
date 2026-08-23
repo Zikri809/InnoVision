@@ -85,7 +85,8 @@ describe("I14 — generate happy path (MSW valid JSON)", () => {
     );
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.quiz.title).toBe("AI Motion Quiz");
+    expect(body.quiz.title).toBe("Test Quiz");
+    expect(body.quiz.title).not.toBe("AI Motion Quiz");
     expect(body.questions).toHaveLength(3);
     expect(body.questions[0].correct_index).toBe(0);
     // The quiz row was updated with source fields.
