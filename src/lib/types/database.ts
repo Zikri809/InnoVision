@@ -283,6 +283,47 @@ export type Database = {
           },
         ]
       }
+      notifications: {
+        Row: {
+          created_at: string
+          dedupe_key: string
+          id: string
+          payload: Json
+          read_at: string | null
+          recipient_id: string
+          seq: number
+          type: Database["public"]["Enums"]["notification_type"]
+        }
+        Insert: {
+          created_at?: string
+          dedupe_key: string
+          id?: string
+          payload?: Json
+          read_at?: string | null
+          recipient_id: string
+          seq?: never
+          type: Database["public"]["Enums"]["notification_type"]
+        }
+        Update: {
+          created_at?: string
+          dedupe_key?: string
+          id?: string
+          payload?: Json
+          read_at?: string | null
+          recipient_id?: string
+          seq?: never
+          type?: Database["public"]["Enums"]["notification_type"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notifications_recipient_id_fkey"
+            columns: ["recipient_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           consent_given_at: string | null
@@ -625,6 +666,88 @@ export type Database = {
           },
         ]
       }
+      student_quiz_questions: {
+        Row: {
+          correct_index: number
+          created_at: string
+          explanation: string | null
+          id: string
+          options: string[]
+          order_index: number
+          prompt: string
+          quiz_id: string
+          type: Database["public"]["Enums"]["question_type"]
+        }
+        Insert: {
+          correct_index: number
+          created_at?: string
+          explanation?: string | null
+          id?: string
+          options: string[]
+          order_index: number
+          prompt: string
+          quiz_id: string
+          type: Database["public"]["Enums"]["question_type"]
+        }
+        Update: {
+          correct_index?: number
+          created_at?: string
+          explanation?: string | null
+          id?: string
+          options?: string[]
+          order_index?: number
+          prompt?: string
+          quiz_id?: string
+          type?: Database["public"]["Enums"]["question_type"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "student_quiz_questions_quiz_id_fkey"
+            columns: ["quiz_id"]
+            isOneToOne: false
+            referencedRelation: "student_quizzes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      student_quizzes: {
+        Row: {
+          created_at: string
+          created_by: string
+          description: string | null
+          id: string
+          share_code: string | null
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          description?: string | null
+          id?: string
+          share_code?: string | null
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          description?: string | null
+          id?: string
+          share_code?: string | null
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "student_quizzes_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       lecturer_answers_view: {
@@ -892,6 +1015,44 @@ export type Database = {
           },
         ]
       }
+      student_quiz_player_question_view: {
+        Row: {
+          created_at: string | null
+          id: string | null
+          options: string[] | null
+          order_index: number | null
+          prompt: string | null
+          quiz_id: string | null
+          type: Database["public"]["Enums"]["question_type"] | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string | null
+          options?: string[] | null
+          order_index?: number | null
+          prompt?: string | null
+          quiz_id?: string | null
+          type?: Database["public"]["Enums"]["question_type"] | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string | null
+          options?: string[] | null
+          order_index?: number | null
+          prompt?: string | null
+          quiz_id?: string | null
+          type?: Database["public"]["Enums"]["question_type"] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "student_quiz_questions_quiz_id_fkey"
+            columns: ["quiz_id"]
+            isOneToOne: false
+            referencedRelation: "student_quizzes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       student_quiz_view: {
         Row: {
           class_id: string | null
@@ -1031,6 +1192,10 @@ export type Database = {
         }
         Returns: Json
       }
+      answer_student_question: {
+        Args: { p_question_id: string; p_selected_index: number }
+        Returns: Json
+      }
       append_question: {
         Args: {
           p_correct_index: number
@@ -1058,6 +1223,34 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      append_student_question: {
+        Args: {
+          p_correct_index: number
+          p_explanation: string
+          p_options: string[]
+          p_prompt: string
+          p_quiz_id: string
+          p_type: Database["public"]["Enums"]["question_type"]
+        }
+        Returns: {
+          correct_index: number
+          created_at: string
+          explanation: string | null
+          id: string
+          options: string[]
+          order_index: number
+          prompt: string
+          quiz_id: string
+          type: Database["public"]["Enums"]["question_type"]
+        }
+        SetofOptions: {
+          from: "*"
+          to: "student_quiz_questions"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      backfill_notification_state: { Args: never; Returns: Json }
       can_student_view_quiz: { Args: { p_quiz_id: string }; Returns: boolean }
       enroll_face: {
         Args: { p_duplicate_similarity: number; p_duplicate_subject: string }
@@ -1076,17 +1269,23 @@ export type Database = {
         Args: { p_session_id: string }
         Returns: boolean
       }
+      is_shared_student_quiz: { Args: { p_quiz_id: string }; Returns: boolean }
+      is_student: { Args: never; Returns: boolean }
+      is_student_quiz_creator: { Args: { p_quiz_id: string }; Returns: boolean }
       is_student_reveal_allowed: {
         Args: { p_quiz_id: string }
         Returns: boolean
       }
       join_class: { Args: { code: string }; Returns: Json }
+      mark_notifications_read: { Args: { p_ids: string[] }; Returns: Json }
+      mark_notifications_read_before: { Args: { p_seq: number }; Returns: Json }
       pause_session: {
         Args: { p_reason?: string; p_session_id: string }
         Returns: Json
       }
       prune_expired_data: { Args: never; Returns: Json }
       prune_expired_incident_clips: { Args: never; Returns: Json }
+      prune_expired_notifications: { Args: never; Returns: Json }
       record_face_check: {
         Args: {
           p_frames: string[]
@@ -1100,6 +1299,10 @@ export type Database = {
       }
       reject_face_enrollment: { Args: { p_student_id: string }; Returns: Json }
       reorder_questions: {
+        Args: { p_ordered_ids: string[]; p_quiz_id: string }
+        Returns: undefined
+      }
+      reorder_student_questions: {
         Args: { p_ordered_ids: string[]; p_quiz_id: string }
         Returns: undefined
       }
@@ -1135,6 +1338,7 @@ export type Database = {
         Returns: Json
       }
       reset_session: { Args: { p_session_id: string }; Returns: Json }
+      resolve_shared_student_quiz: { Args: { p_code: string }; Returns: Json }
       revoke_face_consent: { Args: never; Returns: Json }
       safe_audit_uuid: { Args: { p_value: string }; Returns: string }
       save_quiz_questions: {
@@ -1150,12 +1354,29 @@ export type Database = {
       }
       self_recover_session: { Args: { p_session_id: string }; Returns: Json }
       start_quiz_session: { Args: { p_quiz_id: string }; Returns: Json }
+      student_quiz_share_action: {
+        Args: { p_action: string; p_code?: string; p_quiz_id: string }
+        Returns: Json
+      }
       student_results: { Args: { p_quiz_id: string }; Returns: Json }
       submit_session: { Args: { p_session_id: string }; Returns: Json }
       unlock_session: { Args: { p_session_id: string }; Returns: Json }
     }
     Enums: {
       face_check_trigger: "start" | "question" | "periodic"
+      notification_type:
+        | "quiz_live"
+        | "results_revealed"
+        | "session_reset"
+        | "removed_from_class"
+        | "class_archived"
+        | "student_joined"
+        | "session_submitted"
+        | "session_flagged"
+        | "quiz_completed_all"
+        | "incident_clip_recorded"
+        | "face_unavailable_reported"
+        | "face_enrollment_held"
       question_type: "mcq" | "true_false"
       quiz_mode: "practice" | "assessment"
       quiz_status: "draft" | "live" | "closed"
@@ -1292,6 +1513,20 @@ export const Constants = {
   public: {
     Enums: {
       face_check_trigger: ["start", "question", "periodic"],
+      notification_type: [
+        "quiz_live",
+        "results_revealed",
+        "session_reset",
+        "removed_from_class",
+        "class_archived",
+        "student_joined",
+        "session_submitted",
+        "session_flagged",
+        "quiz_completed_all",
+        "incident_clip_recorded",
+        "face_unavailable_reported",
+        "face_enrollment_held",
+      ],
       question_type: ["mcq", "true_false"],
       quiz_mode: ["practice", "assessment"],
       quiz_status: ["draft", "live", "closed"],
