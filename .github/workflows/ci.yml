@@ -90,6 +90,9 @@ jobs:
       - name: Phase 8 results probes (D13-reset / I21-D / D-view + status matrix)
         run: npm run verify:results
 
+      - name: Phase SQ student-quiz probes (SQ-D1-D8)
+        run: npm run verify:student-quizzes
+
       - name: Build
         run: npm run build
 

@@ -20,6 +20,7 @@
     "verify:security": "node scripts/verify-security.mjs",
     "verify:classes": "node scripts/verify-classes.mjs",
     "verify:quizzes": "node scripts/verify-quizzes.mjs",
+    "verify:student-quizzes": "node scripts/verify-student-quizzes.mjs",
     "verify:ai": "node scripts/verify-ai.mjs",
     "verify:sessions": "node scripts/verify-sessions.mjs",
     "verify:face": "node scripts/verify-face.mjs",
