@@ -1,17 +1,24 @@
-// Demo seed — provisions 1 lecturer + 2 students and a full set of demo
-// classes/quizzes/questions/sessions so every screen can be clicked through.
+// Demo seed — provisions a REALISTIC semester of InnoVision usage so every
+// screen can be clicked through with believable data:
+//   • 2 lecturers, 10 students (varied engagement: some do everything, some
+//     only play shared quizzes, some have never attempted anything)
+//   • 3 classes: two active (different courses), one archived
+//   • Lecturer quizzes across the full lifecycle: draft → live → CLOSED with
+//     historical sessions + revealed results (a past weekly quiz)
+//   • Session spread: completed assessments with varied scores, an ACTIVE
+//     practice session mid-progress, completed practice runs
+//   • Student-created PRACTICE quizzes (the SQ feature): some SHARED via
+//     /s/<code> links, some kept private — as real students would use them
 //
-// Idempotent: safe to re-run. Existing users are reused (by email); the demo
-// class is reused (by fixed join code); quizzes are matched by title and only
-// published/questioned when missing. Nothing is deleted.
+// Face setup is intentionally NOT seeded (biometric enrollment stays a
+// deliberate user action).
+//
+// Idempotent: safe to re-run. Users reused by email, classes by join code,
+// quizzes by (class, title), student quizzes by (creator, title). Nothing is
+// deleted; share codes are only set when currently NULL.
 //
 // Run:  node scripts/seed-demo.mjs
-// Requires .env.local keys (NEXT_PUBLIC_SUPABASE_URL / ANON / SERVICE_ROLE).
-//
-// Demo logins (password for all):  Password123!
-//   lecturer@innovision.test   (role: lecturer)
-//   student1@innovision.test   (role: student)
-//   student2@innovision.test   (role: student)
+// Requires .env.local keys (NEXT_PUBLIC_SUPABASE_URL / SERVICE_ROLE).
 import { createClient } from "@supabase/supabase-js";
 import fs from "node:fs";
 import path from "node:path";
@@ -49,13 +56,22 @@ if (!isLocalUrl && process.env.ALLOW_PROD_SEED !== "1" && env.ALLOW_PROD_SEED !=
 const admin = createClient(URL, SERVICE, { auth: { persistSession: false } });
 
 const PASSWORD = "Password123!";
-const CLASS_JOIN_CODE = "DEMK42"; // 6 chars, unambiguous alphabet (no 0/O/1/I)
-const CLASS_TITLE = "CS101 — Intro to Algorithms";
+// Join codes: 6 chars, unambiguous alphabet (no 0/O/1/I/L).
+// Share codes: 10 chars from the SAME alphabet (CHECK-enforced).
 
 const PEOPLE = [
   { email: "lecturer@innovision.test", name: "Dr. Ada Lovelace", role: "lecturer" },
+  { email: "lecturer2@innovision.test", name: "Dr. Alan Kay", role: "lecturer" },
   { email: "student1@innovision.test", name: "Alan Turing", role: "student" },
   { email: "student2@innovision.test", name: "Grace Hopper", role: "student" },
+  { email: "student3@innovision.test", name: "Margaret Hamilton", role: "student" },
+  { email: "student4@innovision.test", name: "Barbara Liskov", role: "student" },
+  { email: "student5@innovision.test", name: "Donald Knuth", role: "student" },
+  { email: "student6@innovision.test", name: "Radia Perlman", role: "student" },
+  { email: "student7@innovision.test", name: "Ken Thompson", role: "student" },
+  { email: "student8@innovision.test", name: "Adele Goldberg", role: "student" },
+  { email: "student9@innovision.test", name: "Tim Berners-Lee", role: "student" },
+  { email: "student10@innovision.test", name: "Anita Borg", role: "student" },
 ];
 
 function log(msg) {
@@ -99,7 +115,7 @@ async function ensureUser({ email, name, role }) {
 }
 
 // ── Class + enrollments ─────────────────────────────────────────────
-async function ensureClass({ lecturerId, title = CLASS_TITLE, joinCode = CLASS_JOIN_CODE, archivedAt = null }) {
+async function ensureClass({ lecturerId, title, joinCode, archivedAt = null }) {
   const { data: found } = await admin
     .from("classes")
     .select("id, join_code")
@@ -128,7 +144,8 @@ async function ensureEnrollment(classId, studentId) {
 
 // ── Quizzes + questions ─────────────────────────────────────────────
 // Note: quizzes must start 'draft' (trigger), get questions, THEN be
-// transitioned to 'live'. Questions only insert while status = 'draft'.
+// transitioned toward 'live'/'closed'. Questions only insert while 'draft'.
+// A 'closed' target walks draft→live→closed like a real past quiz.
 async function ensureQuiz({ classId, createdBy, title, mode, timeLimitSec, status, questions }) {
   let { data: quiz } = await admin
     .from("quizzes")
@@ -171,18 +188,36 @@ async function ensureQuiz({ classId, createdBy, title, mode, timeLimitSec, statu
     log(`  + added ${rows.length} questions to "${title}"`);
   }
 
-  // Publish if requested and not already live/closed.
-  if (status === "live" && quiz.status === "draft") {
+  // Transition toward the requested status along the legal path.
+  if (quiz.status === "draft" && (status === "live" || status === "closed")) {
     const { error } = await admin.from("quizzes").update({ status: "live" }).eq("id", quiz.id);
     if (error) throw error;
     log(`  + published "${title}" → live`);
   }
+  if (status === "closed" && quiz.status !== "closed") {
+    // Re-read: the publish above may have just flipped it.
+    const { data: cur } = await admin.from("quizzes").select("status").eq("id", quiz.id).single();
+    if (cur?.status === "live") {
+      const { error } = await admin.from("quizzes").update({ status: "closed" }).eq("id", quiz.id);
+      if (error) throw error;
+      log(`  + closed "${title}"`);
+    }
+  }
   return { id: quiz.id, title, mode };
+}
+
+/** Reveal results on an assessment (one-way gate the dashboard respects). */
+async function ensureRevealed(quizId) {
+  await admin
+    .from("quizzes")
+    .update({ results_revealed_at: new Date().toISOString() })
+    .eq("id", quizId)
+    .is("results_revealed_at", null);
 }
 
 // ── Sessions + answers (for the results dashboard) ──────────────────
 async function seedSession({ quizId, studentId, mode, correctCount, totalQuestions, status }) {
-  // One assessment attempt per (quiz, student): skip if one already exists.
+  // One attempt per (quiz, student, mode) for these statuses: skip if exists.
   const { data: existing } = await admin
     .from("quiz_sessions")
     .select("id")
@@ -196,6 +231,7 @@ async function seedSession({ quizId, studentId, mode, correctCount, totalQuestio
   }
 
   const submitted = status === "completed";
+  const startedAt = new Date(Date.now() - (submitted ? 2 * 86400000 : 15 * 60000)).toISOString();
   const { data: session, error } = await admin
     .from("quiz_sessions")
     .insert({
@@ -204,7 +240,8 @@ async function seedSession({ quizId, studentId, mode, correctCount, totalQuestio
       mode,
       status,
       score: submitted ? correctCount : null,
-      submitted_at: submitted ? new Date().toISOString() : null,
+      submitted_at: submitted ? new Date(Date.now() - 2 * 86400000 + 14 * 60000).toISOString() : null,
+      started_at: startedAt,
     })
     .select("id")
     .single();
@@ -232,8 +269,64 @@ async function seedSession({ quizId, studentId, mode, correctCount, totalQuestio
       if (aErr) throw aErr;
     }
   }
-  log(`  + seeded ${status} session (score ${correctCount}/${totalQuestions})`);
+  log(`  + seeded ${status} ${mode} session (score ${correctCount}/${totalQuestions})`);
   return session.id;
+}
+
+// ── Student-created practice quizzes (SQ feature) ───────────────────
+// Mirrors what the API/RPC produce: creator-owned rows; sharing = setting a
+// 10-char alphabet code. Plays leave NO rows (stateless grading) — so no
+// "attempts by others" are seeded, matching privacy-by-construction.
+async function ensureStudentQuiz({ createdBy, title, description, shareCode, questions }) {
+  let { data: quiz } = await admin
+    .from("student_quizzes")
+    .select("id, share_code")
+    .eq("created_by", createdBy)
+    .eq("title", title)
+    .maybeSingle();
+
+  if (!quiz) {
+    const { data, error } = await admin
+      .from("student_quizzes")
+      .insert({ created_by: createdBy, title, description: description ?? null })
+      .select("id, share_code")
+      .single();
+    if (error) throw error;
+    quiz = data;
+    log(`  + created student quiz "${title}"`);
+  } else {
+    log(`  = reusing student quiz "${title}"`);
+  }
+
+  const { count } = await admin
+    .from("student_quiz_questions")
+    .select("id", { count: "exact", head: true })
+    .eq("quiz_id", quiz.id);
+
+  if ((count ?? 0) === 0 && questions?.length) {
+    const rows = questions.map((q, i) => ({
+      quiz_id: quiz.id,
+      order_index: i,
+      type: q.type,
+      prompt: q.prompt,
+      options: q.options,
+      correct_index: q.correctIndex,
+      explanation: q.explanation ?? null,
+    }));
+    const { error } = await admin.from("student_quiz_questions").insert(rows);
+    if (error) throw error;
+    log(`    + ${rows.length} questions`);
+  }
+
+  if (shareCode && !quiz.share_code) {
+    const { error } = await admin
+      .from("student_quizzes")
+      .update({ share_code: shareCode })
+      .eq("id", quiz.id);
+    if (error) throw error;
+    log(`    + shared at /s/${shareCode}`);
+  }
+  return quiz.id;
 }
 
 // ── Main ────────────────────────────────────────────────────────────
@@ -241,28 +334,46 @@ async function main() {
   log("\n== InnoVision demo seed ==\n");
 
   log("Users:");
-  const [lecturer, s1, s2] = await Promise.all(PEOPLE.map(ensureUser));
+  const people = [];
+  for (const p of PEOPLE) people.push(await ensureUser(p));
+  const [ada, kay] = people.filter((p) => p.role === "lecturer");
+  const [alan, grace, margaret, barbara, donald, radia, ken, adele, tim, anita] =
+    people.filter((p) => p.role === "student");
 
-  log("\nClass:");
-  const classId = await ensureClass({ lecturerId: lecturer.id, title: CLASS_TITLE, joinCode: CLASS_JOIN_CODE });
-  await ensureEnrollment(classId, s1.id);
-  await ensureEnrollment(classId, s2.id);
-  log(`  + enrolled ${s1.email} + ${s2.email}`);
-
-  // Seed an archived class to showcase the dispute audit trail & archiving section
-  const archClassId = await ensureClass({
-    lecturerId: lecturer.id,
+  log("\nClasses:");
+  const cs101 = await ensureClass({
+    lecturerId: ada.id,
+    title: "CS101 — Intro to Algorithms",
+    joinCode: "DEMK42",
+  });
+  const cs205 = await ensureClass({
+    lecturerId: kay.id,
+    title: "CS205 — Database Systems",
+    joinCode: "DBSYS5",
+  });
+  const cs100 = await ensureClass({
+    lecturerId: ada.id,
     title: "CS100 — Programming Fundamentals (Archived)",
     joinCode: "ARCH99",
     archivedAt: new Date(Date.now() - 7 * 86400000).toISOString(),
   });
-  await ensureEnrollment(archClassId, s1.id);
-  log(`  + enrolled ${s1.email} in archived class`);
 
-  log("\nQuizzes:");
+  log("Enrollments:");
+  for (const s of [alan, grace, margaret, barbara, donald, radia]) {
+    await ensureEnrollment(cs101, s.id);
+  }
+  for (const s of [grace, radia, ken, adele, tim, anita]) {
+    await ensureEnrollment(cs205, s.id);
+  }
+  await ensureEnrollment(cs100, alan.id);
+  log("  + CS101: alan, grace, margaret, barbara, donald, radia");
+  log("  + CS205: grace, radia, ken, adele, tim, anita");
+  log("  + CS100 (archived): alan");
+
+  log("\nCS101 quizzes:");
   const practice = await ensureQuiz({
-    classId,
-    createdBy: lecturer.id,
+    classId: cs101,
+    createdBy: ada.id,
     title: "Practice: Data Structures Basics",
     mode: "practice",
     timeLimitSec: null,
@@ -275,9 +386,9 @@ async function main() {
     ],
   });
 
-  const assessment = await ensureQuiz({
-    classId,
-    createdBy: lecturer.id,
+  const midterm = await ensureQuiz({
+    classId: cs101,
+    createdBy: ada.id,
     title: "Assessment: Midterm — Algorithms",
     mode: "assessment",
     timeLimitSec: 600,
@@ -291,9 +402,25 @@ async function main() {
     ],
   });
 
+  // A PAST quiz everyone took — closed, results revealed, full session history.
+  const weekly3 = await ensureQuiz({
+    classId: cs101,
+    createdBy: ada.id,
+    title: "Weekly Quiz 3 — Sorting (closed)",
+    mode: "assessment",
+    timeLimitSec: 420,
+    status: "closed",
+    questions: [
+      { type: "mcq", prompt: "Which sort is stable and in-place?", options: ["Merge sort", "Insertion sort", "Heap sort", "Quick sort"], correctIndex: 1, explanation: "Insertion sort never reorders equal elements and uses O(1) extra space." },
+      { type: "true_false", prompt: "Quick sort's average case is better than bubble sort's.", options: ["True", "False"], correctIndex: 0, explanation: "O(n log n) vs O(n²)." },
+      { type: "mcq", prompt: "What is the worst case of quick sort?", options: ["O(n)", "O(n log n)", "O(n²)", "O(log n)"], correctIndex: 2, explanation: "Already-sorted input with a bad pivot degrades to quadratic." },
+    ],
+  });
+  await ensureRevealed(weekly3.id);
+
   await ensureQuiz({
-    classId,
-    createdBy: lecturer.id,
+    classId: cs101,
+    createdBy: ada.id,
     title: "Draft: Graph Theory (WIP)",
     mode: "practice",
     timeLimitSec: null,
@@ -304,17 +431,91 @@ async function main() {
     ],
   });
 
-  log("\nSessions (results dashboard):");
-  // Student1: completed the assessment 4/5. Student2: completed it 3/5.
-  await seedSession({ quizId: assessment.id, studentId: s1.id, mode: "assessment", correctCount: 4, totalQuestions: 5, status: "completed" });
-  await seedSession({ quizId: assessment.id, studentId: s2.id, mode: "assessment", correctCount: 3, totalQuestions: 5, status: "completed" });
-  // Student2 also did a practice run (completed 3/4).
-  await seedSession({ quizId: practice.id, studentId: s2.id, mode: "practice", correctCount: 3, totalQuestions: 4, status: "completed" });
+  log("\nCS205 quizzes:");
+  await ensureQuiz({
+    classId: cs205,
+    createdBy: kay.id,
+    title: "Practice: ER Modelling & Normalization",
+    mode: "practice",
+    timeLimitSec: null,
+    status: "live",
+    questions: [
+      { type: "mcq", prompt: "Which normal form removes partial dependencies on a composite key?", options: ["1NF", "2NF", "3NF", "BCNF"], correctIndex: 1, explanation: "2NF requires every non-key attribute to depend on the WHOLE key." },
+      { type: "true_false", prompt: "A foreign key can contain NULLs.", options: ["True", "False"], correctIndex: 0, explanation: "Nullable FKs model optional relationships." },
+      { type: "mcq", prompt: "In an ER diagram, what does a diamond represent?", options: ["Entity", "Attribute", "Relationship", "Key"], correctIndex: 2, explanation: "Diamonds are relationships; rectangles are entities." },
+    ],
+  });
+  await ensureQuiz({
+    classId: cs205,
+    createdBy: kay.id,
+    title: "Assessment: SQL Practical (draft)",
+    mode: "assessment",
+    timeLimitSec: 900,
+    status: "draft",
+    questions: [
+      { type: "mcq", prompt: "Which JOIN returns all rows from both sides, matching where possible?", options: ["INNER JOIN", "LEFT JOIN", "FULL OUTER JOIN", "CROSS JOIN"], correctIndex: 2, explanation: "FULL OUTER keeps unmatched rows from both tables." },
+    ],
+  });
+
+  log("\nSessions (past + present):");
+  // Closed weekly quiz — the whole class took it two days ago, mixed results.
+  await seedSession({ quizId: weekly3.id, studentId: alan.id, mode: "assessment", correctCount: 3, totalQuestions: 3, status: "completed" });
+  await seedSession({ quizId: weekly3.id, studentId: grace.id, mode: "assessment", correctCount: 3, totalQuestions: 3, status: "completed" });
+  await seedSession({ quizId: weekly3.id, studentId: margaret.id, mode: "assessment", correctCount: 2, totalQuestions: 3, status: "completed" });
+  await seedSession({ quizId: weekly3.id, studentId: barbara.id, mode: "assessment", correctCount: 1, totalQuestions: 3, status: "completed" });
+  await seedSession({ quizId: weekly3.id, studentId: donald.id, mode: "assessment", correctCount: 3, totalQuestions: 3, status: "completed" });
+  // Live midterm — early submissions so far.
+  await seedSession({ quizId: midterm.id, studentId: alan.id, mode: "assessment", correctCount: 4, totalQuestions: 5, status: "completed" });
+  await seedSession({ quizId: midterm.id, studentId: grace.id, mode: "assessment", correctCount: 3, totalQuestions: 5, status: "completed" });
+  // Practice engagement: grace finished a run; alan has one IN PROGRESS.
+  await seedSession({ quizId: practice.id, studentId: grace.id, mode: "practice", correctCount: 3, totalQuestions: 4, status: "completed" });
+  await seedSession({ quizId: practice.id, studentId: alan.id, mode: "practice", correctCount: 0, totalQuestions: 4, status: "active" });
+
+  log("\nStudent-created practice quizzes (SQ):");
+  await ensureStudentQuiz({
+    createdBy: alan.id,
+    title: "Big-O Cheat Sheet Drill",
+    description: "My revision set for the midterm — mostly complexity questions.",
+    shareCode: "STUDYHARD2",
+    questions: [
+      { type: "mcq", prompt: "Average case of a linear search?", options: ["O(1)", "O(log n)", "O(n)", "O(n²)"], correctIndex: 2, explanation: "On average you scan half the array." },
+      { type: "true_false", prompt: "Binary search works on unsorted arrays.", options: ["True", "False"], correctIndex: 1, explanation: "It relies on sorted order to halve the range." },
+      { type: "mcq", prompt: "Cost of inserting at the HEAD of a linked list?", options: ["O(1)", "O(n)", "O(n log n)", "Amortized O(1)"], correctIndex: 0, explanation: "Just rewire two pointers — no shifting." },
+      { type: "true_false", prompt: "Quicksort is stable.", options: ["True", "False"], correctIndex: 1, explanation: "Partitioning can reorder equal elements." },
+    ],
+  });
+  await ensureStudentQuiz({
+    createdBy: grace.id,
+    title: "SQL Joins Practice",
+    description: "Made this while revising for the CS205 practical. Good luck!",
+    shareCode: "EXAMPREP24",
+    questions: [
+      { type: "mcq", prompt: "Which JOIN keeps unmatched LEFT-side rows?", options: ["INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "CROSS JOIN"], correctIndex: 1, explanation: "LEFT JOIN preserves the left table, NULL-filling the rest." },
+      { type: "true_false", prompt: "CROSS JOIN produces n × m rows.", options: ["True", "False"], correctIndex: 0, explanation: "Every left row pairs with every right row." },
+      { type: "mcq", prompt: "SELF JOIN is…", options: ["A syntax error", "A table joined with itself", "Two databases joined", "A view"], correctIndex: 1, explanation: "Use aliases to distinguish the two copies." },
+    ],
+  });
+  await ensureStudentQuiz({
+    createdBy: radia.id,
+    title: "Packet Flow Drill",
+    description: null, // real students often skip the description
+    shareCode: null,    // kept private
+    questions: [
+      { type: "mcq", prompt: "Which layer does a router primarily operate at?", options: ["Layer 2", "Layer 3", "Layer 4", "Layer 7"], correctIndex: 1, explanation: "Routers forward based on IP (layer 3)." },
+      { type: "true_false", prompt: "TCP guarantees packet order.", options: ["True", "False"], correctIndex: 0, explanation: "Sequence numbers allow reordering on arrival." },
+    ],
+  });
+  log("  (barbara/donald/etc. haven't made any — realistic distribution)");
 
   log("\n== Done ==\n");
   log("Sign in at http://localhost:3000/login  (password for all: " + PASSWORD + ")");
-  for (const p of PEOPLE) log(`  ${p.role.padEnd(9)}  ${p.email}`);
-  log(`\nStudent join code for ${CLASS_TITLE}: ${CLASS_JOIN_CODE}\n`);
+  log("  lecturers : lecturer@innovision.test, lecturer2@innovision.test");
+  log("  students  : student1@…test … student10@…test (see PEOPLE above)");
+  log(`\nJoin codes : CS101=${"DEMK42"}  CS205=DBSYS5`);
+  log("Shared student quizzes:");
+  log("  /s/STUDYHARD2  — Big-O Cheat Sheet Drill (Alan)");
+  log("  /s/EXAMPREP24  — SQL Joins Practice (Grace)");
+  log("\nFace setup intentionally NOT seeded — enrollment stays a user action.\n");
 }
 
 main().catch((e) => {
