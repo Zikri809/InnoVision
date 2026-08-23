@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
-import { PartyPopper, ClipboardCheck, Lock } from "lucide-react";
+import { BotAvatar } from "@/components/bot/bot-avatar";
+import { Lock } from "lucide-react";
 import type { ResultsBreakdownRow } from "@/app/play/[sessionId]/page";
 
 type Session = {
@@ -66,13 +67,13 @@ export function EndScreen({
       <div aria-hidden className="pointer-events-none absolute -right-4 bottom-16 h-20 w-20 rounded-[60%_40%_45%_55%/50%_60%_40%_55%] bg-blue-200/50" />
 
       <div className="relative rounded-[28px] border-[3px] border-border bg-card p-8 text-center shadow-[var(--shadow-clay)] md:p-10">
-        <div className="mx-auto mb-5 grid h-16 w-16 place-items-center rounded-[20px] bg-orange-100 text-primary shadow-[0_4px_0_rgba(194,65,12,0.15)]">
+        <div className="mx-auto mb-5 grid h-16 w-16 place-items-center rounded-[20px] bg-orange-100 shadow-[0_4px_0_rgba(194,65,12,0.15)]">
           {isPractice ? (
-            <PartyPopper className="h-8 w-8" aria-hidden />
+            <BotAvatar state="celebrate" size={46} />
           ) : revealed ? (
-            <ClipboardCheck className="h-8 w-8" aria-hidden />
+            <BotAvatar state="success" size={46} />
           ) : (
-            <Lock className="h-8 w-8" aria-hidden />
+            <Lock className="h-8 w-8 text-primary" aria-hidden />
           )}
         </div>
 

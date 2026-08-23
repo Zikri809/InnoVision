@@ -24,6 +24,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { LanguageToggle } from "@/components/layout/language-toggle";
+import { AuthBot } from "@/components/auth/auth-bot";
+import type { BotState } from "@/lib/bot/engine";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -41,6 +43,16 @@ export default function RegisterPage() {
   const [consent, setConsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const botState: BotState = loading
+    ? "scanning"
+    : error
+      ? "fail"
+      : password.length >= 8
+        ? "success"
+        : fullName.length > 0 || email.length > 0 || password.length > 0
+          ? "thinking"
+          : "idle";
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -103,6 +115,8 @@ export default function RegisterPage() {
         <LanguageToggle />
       </div>
 
+      <AuthBot state={botState} danger={!!error && !loading} />
+
       <div className="w-full max-w-md">
         <Link href="/" className="mb-8 flex items-center justify-center gap-2.5">
           <span className="grid h-11 w-11 -rotate-4 place-items-center rounded-2xl bg-primary font-heading text-xl font-bold text-primary-foreground shadow-[0_4px_0_var(--primary-deep)]">
@@ -127,7 +141,10 @@ export default function RegisterPage() {
                   autoComplete="name"
                   placeholder={t("fullNamePlaceholder")}
                   value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
+                  onChange={(e) => {
+                    setFullName(e.target.value);
+                    setError(null);
+                  }}
                 />
               </div>
 
@@ -142,7 +159,10 @@ export default function RegisterPage() {
                   autoComplete="email"
                   placeholder={t("emailPlaceholder")}
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    setError(null);
+                  }}
                   required
                 />
               </div>
@@ -156,7 +176,10 @@ export default function RegisterPage() {
                   autoComplete="new-password"
                   placeholder={t("passwordPlaceholder")}
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setError(null);
+                  }}
                   required
                   minLength={6}
                 />

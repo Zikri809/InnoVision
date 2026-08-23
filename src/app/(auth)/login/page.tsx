@@ -18,6 +18,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { LanguageToggle } from "@/components/layout/language-toggle";
+import { AuthBot } from "@/components/auth/auth-bot";
+import type { BotState } from "@/lib/bot/engine";
 
 function LoginForm() {
   const router = useRouter();
@@ -36,6 +38,16 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const botState: BotState = loading
+    ? "scanning"
+    : error
+      ? "fail"
+      : password.length >= 8
+        ? "success"
+        : email.length > 0 || password.length > 0
+          ? "thinking"
+          : "idle";
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -69,6 +81,8 @@ function LoginForm() {
       <div className="absolute right-6 top-6 z-10">
         <LanguageToggle />
       </div>
+
+      <AuthBot state={botState} danger={!!error && !loading} />
 
       <div className="w-full max-w-md">
         <Link href="/" className="mb-8 flex items-center justify-center gap-2.5">
@@ -104,7 +118,10 @@ function LoginForm() {
                   autoComplete="email"
                   placeholder={t("emailPlaceholder")}
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    setError(null);
+                  }}
                   required
                 />
               </div>
@@ -117,7 +134,10 @@ function LoginForm() {
                   autoComplete="current-password"
                   placeholder={t("passwordPlaceholder")}
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setError(null);
+                  }}
                   required
                 />
               </div>

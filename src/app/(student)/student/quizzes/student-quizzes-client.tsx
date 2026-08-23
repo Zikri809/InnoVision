@@ -13,6 +13,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ClipboardList, Zap, ShieldCheck, Timer, Play, ScanFace, Layers } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
+import { EmptyBoxIllustration } from "@/components/illustrations/empty-box";
 import { formatDuration } from "@/lib/format/duration";
 import { getModeLabel } from "@/lib/quizzes/labels";
 
@@ -168,15 +170,12 @@ export function StudentQuizzesClient({
 
       {/* ── Quiz cards ── */}
       {quizzes.length === 0 ? (
-        <div className="grid place-items-center rounded-[28px] border-[3px] border-dashed border-border bg-card/60 px-8 py-16 text-center">
-          <span className="grid h-14 w-14 place-items-center rounded-2xl bg-orange-100 text-primary">
-            <ClipboardList className="h-7 w-7" aria-hidden />
-          </span>
-          <p className="mt-4 font-heading text-lg font-semibold">{t("emptyTitle")}</p>
-          <p className="mt-1 max-w-xs text-sm font-semibold text-muted-foreground">
-            {t("emptySubtitle")}
-          </p>
-        </div>
+        <EmptyState
+          illustration={EmptyBoxIllustration}
+          title={t("emptyTitle")}
+          subtitle={t("emptySubtitle")}
+          className="rounded-[28px] border-[3px] bg-card/60 px-8 py-16"
+        />
       ) : (
         <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
           {quizzes.map((q) => {

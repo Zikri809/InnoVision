@@ -1,9 +1,7 @@
 "use client";
 
-/**
- * Live per-page progress bar for the extraction cascade ("page 3/12" — a good
- * demo moment, PLAN §3.3).
- */
+import { BotAvatar } from "@/components/bot/bot-avatar";
+
 export function OcrProgress({
   page,
   total,
@@ -18,7 +16,10 @@ export function OcrProgress({
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between text-xs text-muted-foreground">
-        <span>{label ?? "Extracting text…"}</span>
+        <span className="inline-flex items-center gap-1.5">
+          <BotAvatar state="thinking" size={18} />
+          {label ?? "Extracting text…"}
+        </span>
         <span>
           page {Math.min(page, total)}/{total}
         </span>

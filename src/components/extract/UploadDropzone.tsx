@@ -200,7 +200,7 @@ export function UploadDropzone({
             <span>{t("uploadedFilesTitle", { count: files.length, max: MAX_FILES })}</span>
             <span>{formatBytes(totalBytes)} / {formatBytes(MAX_TOTAL_UPLOAD_BYTES)}</span>
           </div>
-          <div className="grid gap-2 max-h-48 overflow-y-auto pr-1">
+          <div className="grid gap-2 max-h-60 overflow-y-auto pr-1">
             {files.map((item) => {
               const isImage = item.file.type.startsWith("image/") || /\.(png|jpe?g|webp)$/i.test(item.file.name);
               const isOffice = /\.(pptx|docx|txt|md)$/i.test(item.file.name);

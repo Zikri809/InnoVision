@@ -24,6 +24,8 @@ import {
   Loader2,
 } from "lucide-react";
 import type { LecturerClassCard } from "@/lib/types/aliases";
+import { EmptyState } from "@/components/ui/empty-state";
+import { EmptyBoxIllustration } from "@/components/illustrations/empty-box";
 
 /**
  * Lecturer "My Classes" dashboard — hero band, quick stats, active classes grid,
@@ -214,25 +216,24 @@ export function ClassesPageClient({
           </div>
 
           {activeClasses.length === 0 ? (
-            <div className="grid place-items-center rounded-[28px] border-[3px] border-dashed border-border bg-card/60 px-8 py-16 text-center">
-              <span className="grid h-14 w-14 place-items-center rounded-2xl bg-orange-100 text-primary">
-                <Plus className="h-7 w-7" aria-hidden />
-              </span>
-              <p className="mt-4 font-heading text-lg font-semibold">{t("emptyTitle")}</p>
-              <p className="mt-1 max-w-xs text-sm font-semibold text-muted-foreground">
-                {t("emptySubtitle")}
-              </p>
-              {archivedCount > 0 && (
-                <p className="mt-4 text-xs font-semibold text-muted-foreground">
-                  <Link
-                    href="/lecturer/classes/archived"
-                    className="font-extrabold text-primary underline underline-offset-4 hover:text-primary/80 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/40"
-                  >
-                    {t("viewArchivedClasses", { count: archivedCount })} →
-                  </Link>
-                </p>
-              )}
-            </div>
+            <EmptyState
+              illustration={EmptyBoxIllustration}
+              title={t("emptyTitle")}
+              subtitle={t("emptySubtitle")}
+              className="rounded-[28px] border-[3px] bg-card/60 px-8 py-16"
+              action={
+                archivedCount > 0 ? (
+                  <p className="mt-4 text-xs font-semibold text-muted-foreground">
+                    <Link
+                      href="/lecturer/classes/archived"
+                      className="font-extrabold text-primary underline underline-offset-4 hover:text-primary/80 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/40"
+                    >
+                      {t("viewArchivedClasses", { count: archivedCount })} →
+                    </Link>
+                  </p>
+                ) : null
+              }
+            />
           ) : (
             <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(240px,1fr))]">
               {activeClasses.map((c) => (

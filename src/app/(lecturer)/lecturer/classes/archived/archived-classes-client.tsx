@@ -21,13 +21,15 @@ import {
   ClipboardList,
   RotateCcw,
   Search,
-  SearchX,
   X,
   Loader2,
   AlertTriangle,
 } from "lucide-react";
 import { filterArchivedClasses } from "@/lib/classes/search";
 import type { ArchivedClassCard } from "@/lib/types/aliases";
+import { EmptyState } from "@/components/ui/empty-state";
+import { EmptyBoxIllustration } from "@/components/illustrations/empty-box";
+import { MagnifyingGlassIllustration } from "@/components/illustrations/magnifying-glass";
 
 export function ArchivedClassesClient({ classes }: { classes: ArchivedClassCard[] }) {
   const t = useTranslations("lecturer.archivedClasses");
@@ -176,37 +178,33 @@ export function ArchivedClassesClient({ classes }: { classes: ArchivedClassCard[
 
       {/* ── Main Content Area ── */}
       {classes.length === 0 ? (
-        /* Zero total archived classes */
-        <div className="grid place-items-center rounded-[28px] border-[3px] border-dashed border-border bg-card/60 px-8 py-16 text-center">
-          <span className="grid h-14 w-14 place-items-center rounded-2xl bg-orange-100 text-primary">
-            <Archive className="h-7 w-7" aria-hidden />
-          </span>
-          <p className="mt-4 font-heading text-lg font-semibold">{t("emptyArchivedTitle")}</p>
-          <p className="mt-1 max-w-sm text-sm font-semibold text-muted-foreground">
-            {t("emptyArchivedSubtitle")}
-          </p>
-          <div className="mt-6">
-            <Link href="/lecturer/classes" className={buttonVariants({ variant: "default" })}>
-              {t("backToActiveBtn")}
-            </Link>
-          </div>
-        </div>
+        <EmptyState
+          illustration={EmptyBoxIllustration}
+          title={t("emptyArchivedTitle")}
+          subtitle={t("emptyArchivedSubtitle")}
+          className="rounded-[28px] border-[3px] bg-card/60 px-8 py-16"
+          action={
+            <div className="mt-6">
+              <Link href="/lecturer/classes" className={buttonVariants({ variant: "default" })}>
+                {t("backToActiveBtn")}
+              </Link>
+            </div>
+          }
+        />
       ) : filteredClasses.length === 0 ? (
-        /* Zero search results */
-        <div className="grid place-items-center rounded-[28px] border-[3px] border-dashed border-border bg-card/60 px-8 py-16 text-center">
-          <span className="grid h-14 w-14 place-items-center rounded-2xl bg-muted text-muted-foreground">
-            <SearchX className="h-7 w-7" aria-hidden />
-          </span>
-          <p className="mt-4 font-heading text-lg font-semibold">{t("emptySearchTitle")}</p>
-          <p className="mt-1 max-w-sm text-sm font-semibold text-muted-foreground">
-            {t("emptySearchSubtitle", { query: searchQuery })}
-          </p>
-          <div className="mt-6">
-            <Button type="button" variant="outline" onClick={() => setSearchQuery("")}>
-              {t("clearSearchBtn")}
-            </Button>
-          </div>
-        </div>
+        <EmptyState
+          illustration={MagnifyingGlassIllustration}
+          title={t("emptySearchTitle")}
+          subtitle={t("emptySearchSubtitle", { query: searchQuery })}
+          className="rounded-[28px] border-[3px] bg-card/60 px-8 py-16"
+          action={
+            <div className="mt-6">
+              <Button type="button" variant="outline" onClick={() => setSearchQuery("")}>
+                {t("clearSearchBtn")}
+              </Button>
+            </div>
+          }
+        />
       ) : (
         /* Grid of Archived Class Cards */
         <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))] sm:gap-6">

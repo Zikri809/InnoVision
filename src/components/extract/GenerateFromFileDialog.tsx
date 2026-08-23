@@ -38,6 +38,7 @@ import {
 import { UploadDropzone, type UploadedFileItem } from "./UploadDropzone";
 import { EnginePicker } from "./EnginePicker";
 import { OcrProgress } from "./OcrProgress";
+import { BotAvatar } from "@/components/bot/bot-avatar";
 import { runExtractionPipeline, type PipelineProgress } from "@/lib/extract/pipeline";
 import type { ExtractEngine, OcrConfig } from "@/lib/extract/types";
 import type {
@@ -91,7 +92,7 @@ export function GenerateFromFileDialog({
   const [questionCountInput, setQuestionCountInput] = useState("10");
   const [difficulty, setDifficulty] = useState<QuizDifficulty>("mixed");
   const [formatDistribution, setFormatDistribution] = useState<QuestionFormatDistribution>("mixed");
-  const [generationMode, setGenerationMode] = useState<QuizGenerationMode>(hasQuestions ? "append" : "replace");
+  const [generationMode, setGenerationMode] = useState<QuizGenerationMode>("replace");
   const [steeringPrompt, setSteeringPrompt] = useState("");
   const [language, setLanguage] = useState<"auto" | "en" | "ms">("auto");
   const [isLowDensity, setIsLowDensity] = useState(false);
@@ -116,7 +117,7 @@ export function GenerateFromFileDialog({
     setSteeringPrompt("");
     setDifficulty("mixed");
     setFormatDistribution("mixed");
-    setGenerationMode(hasQuestions ? "append" : "replace");
+    setGenerationMode("replace");
     setPreviewExpanded(false);
     setQuestionCount(10);
     setQuestionCountInput("10");
@@ -267,7 +268,7 @@ export function GenerateFromFileDialog({
         return;
       }
 
-      setNotice(t("generateBtn"));
+      setNotice(t("questionsGenerated"));
       router.refresh();
       onOpenChange(false);
       reset();
@@ -704,6 +705,15 @@ export function GenerateFromFileDialog({
             </div>
           )}
         </div>
+
+        {busy && step === 2 && (
+          <div className="flex shrink-0 items-center justify-center gap-2.5 rounded-2xl border-[3px] border-primary/30 bg-primary/5 px-4 py-3">
+            <BotAvatar state="thinking" size={32} />
+            <span className="text-sm font-extrabold text-primary">
+              {t("generatingBtn")}
+            </span>
+          </div>
+        )}
 
         <DialogFooter className="shrink-0 pt-3 border-t-[3px] border-border/40 flex items-center justify-between sm:justify-between gap-3">
           {step === 1 ? (
