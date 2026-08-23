@@ -27,7 +27,10 @@ type Op =
   | { kind: "delete" };
 
 class FakeQueryBuilder {
-  private filters: { col: string; val: unknown; negated?: boolean }[] = [];
+  private filters: (
+    | { col: string; val: unknown; negated?: boolean }
+    | { col: string; val: unknown[]; list: true }
+  )[] = [];
   private orderBy: { col: string; asc: boolean }[] = [];
   private limitN?: number;
   private countExact = false;
@@ -52,6 +55,12 @@ class FakeQueryBuilder {
 
   neq(col: string, val: unknown): this {
     this.filters.push({ col, val, negated: true });
+    return this;
+  }
+
+  /** PostgREST `in` — membership over a list of values. */
+  in(col: string, values: unknown[]): this {
+    this.filters.push({ col, val: values, list: true });
     return this;
   }
 
@@ -138,7 +147,7 @@ class FakeQueryBuilder {
       // requireQuizOwner's `classes!inner(lecturer_id)` join. Resolve the FK
       // from the current row into the referenced table, then compare.
       const dot = f.col.indexOf(".");
-      if (dot > 0) {
+      if (dot > 0 && !("list" in f)) {
         const [refTable, refCol] = [f.col.slice(0, dot), f.col.slice(dot + 1)];
         out = out.filter((r) => {
           // quizzes.class_id → classes.id (the only embedded join in use).
@@ -158,6 +167,8 @@ class FakeQueryBuilder {
           const match = refRow?.[refCol] === f.val;
           return f.negated ? !match : match;
         });
+      } else if ("list" in f) {
+        out = out.filter((r) => f.val.includes(r[f.col]));
       } else {
         out = out.filter((r) => {
           const match = r[f.col] === f.val;
