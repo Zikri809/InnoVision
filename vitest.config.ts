@@ -21,7 +21,6 @@ export default defineConfig({
         "src/lib/student-quizzes/**",
         "src/lib/vision/camera.ts",
         "src/app/api/ai/**",
-        "src/app/api/ocr/**",
         "src/app/api/quizzes/**",
         "src/app/api/student-quizzes/**",
         "src/app/api/sessions/**",
@@ -47,9 +46,7 @@ export default defineConfig({
         "src/lib/extract/pdf.ts": { lines: 50, statements: 50, functions: 50, branches: 50 },
         "src/lib/extract/tesseract.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
         "src/lib/extract/glm-ocr.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
-        "src/lib/extract/vision.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
         "src/app/api/ai/**/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
-        "src/app/api/ocr/**/route.ts": { lines: 40, statements: 40, functions: 40, branches: 40 },
         // P3 quiz routes are tested by P3's test suite (above); the P4 gate
         // is the AI/extraction/OCR surface, so exclude P3 routes from the gate
         // but keep them in the report.

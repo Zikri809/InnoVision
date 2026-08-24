@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { isUuid } from "@/lib/classes/roster";
 import { rateLimit } from "@/lib/classes/rate-limit";
-import { notFound, rateLimited } from "@/lib/http";
+import { internalError, notFound, rateLimited } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 
@@ -61,7 +61,12 @@ export async function GET(_request: Request, { params }: Params) {
     .eq("student_id", user.id)
     .maybeSingle();
 
-  if (!own.error && own.data) {
+  if (own.error) {
+    // Transient DB failure must NOT read as "no session" (404) — surface 503.
+    console.error("Session fetch error:", own.error);
+    return internalError("Could not load the session right now.");
+  }
+  if (own.data) {
     return Response.json(await studentEnvelope(supabase, own.data), {
       status: 200,
       headers: { "content-type": "application/json" },
@@ -81,10 +86,18 @@ export async function GET(_request: Request, { params }: Params) {
       .select(ENVELOPE_COLS)
       .eq("id", id)
       .maybeSingle();
-    if (!lect.error && lect.data && typeof lect.data.quiz_id === "string") {
+    if (lect.error) {
+      console.error("Session fetch error:", lect.error);
+      return internalError("Could not load the session right now.");
+    }
+    if (lect.data && typeof lect.data.quiz_id === "string") {
       const isLecturerOfQuiz = await supabase.rpc("is_lecturer_of_quiz", {
         p_quiz_id: lect.data.quiz_id,
       });
+      if (isLecturerOfQuiz.error) {
+        console.error("is_lecturer_of_quiz error:", isLecturerOfQuiz.error);
+        return internalError("Could not load the session right now.");
+      }
       if (isLecturerOfQuiz.data === true) {
         return Response.json(envelope(lect.data), {
           status: 200,

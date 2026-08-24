@@ -164,14 +164,19 @@ export async function register({
         };
       }
 
-      // Keep auth.users metadata in sync (belt-and-suspenders).
-      await admin.auth.admin.updateUserById(userId, {
+      // Keep auth.users metadata in sync (belt-and-suspenders). A failure
+      // here doesn't block promotion (the profile row is authoritative) but
+      // must be visible — silent divergence confuses later debugging.
+      const { error: metaSyncError } = await admin.auth.admin.updateUserById(userId, {
         user_metadata: {
           role: "lecturer",
           full_name: fullName || undefined,
           locale: userLocale,
         },
       });
+      if (metaSyncError) {
+        console.error("Failed to sync lecturer auth metadata:", metaSyncError);
+      }
 
       // Verify promotion actually took effect; if not, surface a clear error
       // rather than leaving the user stuck with a student profile.
@@ -199,14 +204,22 @@ export async function register({
     // Student: record consent via the sanctioned RPC. The profiles
     // restricted-columns trigger blocks every direct authenticated write to
     // consent_given_at (anti-forgery), so the direct update this used to do
-    // would now fail with cannot_change_consent_directly. The chosen locale
-    // is unrestricted — persisted via a separate plain update.
+    // would now fail with cannot_change_consent_directly.
     const { data: grantData, error: grantError } = await supabase.rpc("grant_face_consent");
     if (grantError || (grantData as Record<string, unknown> | null)?.ok !== true) {
       console.error("grant_face_consent failed during registration:", grantError ?? grantData);
     }
 
-    await supabase.from("profiles").update({ locale: userLocale }).eq("id", userId);
+    // The chosen locale is unrestricted — persisted via a plain update. A
+    // failure falls back to the default locale; log it so the divergence is
+    // at least visible.
+    const { error: localeUpdateError } = await supabase
+      .from("profiles")
+      .update({ locale: userLocale })
+      .eq("id", userId);
+    if (localeUpdateError) {
+      console.error("Failed to persist locale during registration:", localeUpdateError);
+    }
 
     const { data: profile } = await supabase
       .from("profiles")

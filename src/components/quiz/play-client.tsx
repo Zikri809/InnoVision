@@ -60,9 +60,6 @@ type Phase =
 
 const FETCH_TIMEOUT_MS = 15_000;
 
-/** D13 — a lecturer reset the session mid-flight (answer/verify/submit → 404). */
-const RESET_DEAD_MSG = "This attempt was reset by your lecturer — ask them to restart you.";
-
 /** Phases where the pause overlay is suppressed so the timeUp Retry-submit stays reachable. */
 const BLOCK_INPUT_PHASES: Phase[] = ["timeUp", "submitting", "submitted", "dead"];
 
@@ -190,7 +187,7 @@ export function PlayClient({
     onReset: () => {
       // D13 — the pipeline observed a 404 on a verify POST: the session was
       // reset by a lecturer mid-flight. Terminal dead screen (no retry).
-      setError(RESET_DEAD_MSG);
+      setError(t("toast.resetDead"));
       setPhaseAndRef("dead");
     },
     onFaceStatus: (s) => setFaceStatus(s),
@@ -432,7 +429,7 @@ export function PlayClient({
         }));
         setPhaseAndRef("feedback");
       } catch (err) {
-        // Abort/network error â†’ surface a retry (endpoints are idempotent).
+        // Abort/network error → surface a retry (endpoints are idempotent).
         if ((err as Error)?.name === "AbortError") {
           setError(t("toast.recordTimeout"));
         } else {

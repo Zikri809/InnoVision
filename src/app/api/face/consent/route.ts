@@ -106,11 +106,17 @@ export async function POST(request: Request) {
   // 2. Best-effort CompreFace subject deletion. If it fails, `face_deletion_pending`
   //    remains true (set by the RPC) and the retry path (`compreface:cleanup`,
   //    the enroll-route check) cleans up later. If it SUCCEEDS, clear the flag
-  //    so the cleanup script never deletes a recreated subject and the flag
-  //    reflects the true state.
+  //    via the security-definer RPC (the column is revoked from direct client
+  //    writes — see migration 0024) so the cleanup script never deletes a
+  //    recreated subject and the flag reflects the true state.
   const del = await compreface.deleteSubject(auth.userId);
   if (!("error" in del)) {
-    await supabase.from("profiles").update({ face_deletion_pending: false }).eq("id", auth.userId);
+    const { error: confirmError } = await supabase.rpc("confirm_face_subject_deleted");
+    if (confirmError) {
+      // Non-fatal: the flag staying true only means the (idempotent) cleanup
+      // script may re-delete an already-deleted subject. Log and continue.
+      console.error("confirm_face_subject_deleted error:", confirmError);
+    }
   }
 
   return Response.json(

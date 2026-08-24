@@ -110,7 +110,7 @@ export class FaceTracker implements IFaceTracker {
   private visibilityHandler: (() => void) | null = null;
   private loadedMetadataHandler: (() => void) | null = null;
   private loadedMetadataTimer: ReturnType<typeof setTimeout> | null = null;
-  private waitForBlinkResolvers: (() => void)[] = [];
+  private waitForBlinkResolvers: ((outcome: "passed" | "failed") => void)[] = [];
   private poseListeners: Set<(pose: LivePose) => void> = new Set();
   private errorListeners: Set<(err: unknown) => void> = new Set();
   private errored = false;
@@ -414,25 +414,26 @@ export class FaceTracker implements IFaceTracker {
     if (this.disposed) return "failed";
     if (typeof document !== "undefined" && document.hidden) return "failed";
 
-    // If the user already blinked naturally within the last 3.5 seconds:
-    if (Date.now() - this.lastBlinkAt < 3500) {
-      this.lastBlinkAt = 0;
-      this.blinkDetector.reset();
-      return "passed";
-    }
-
     return new Promise<"passed" | "failed">((resolve) => {
-      const onBlink = () => {
-        this.lastBlinkAt = 0;
-        this.blinkDetector.reset();
-        resolve("passed");
+      // A blink only counts when it happens DURING the challenge: the
+      // BlinkDetector enforces a strict open→closed→open transition, and
+      // crediting a natural blink from BEFORE the wait began would let a
+      // student blink on cue just before triggering verification.
+      const waiter = (outcome: "passed" | "failed") => {
+        clearTimeout(timer);
+        this.removeBlinkListener(waiter);
+        if (outcome === "passed") {
+          this.lastBlinkAt = 0;
+          this.blinkDetector.reset();
+        }
+        resolve(outcome);
       };
       const timer = setTimeout(() => {
-        this.removeBlinkListener(onBlink);
+        this.removeBlinkListener(waiter);
         this.blinkDetector.reset();
         resolve("failed");
       }, timeoutMs);
-      this.addBlinkListener(onBlink, timer);
+      this.waitForBlinkResolvers.push(waiter);
     });
   }
 
@@ -443,19 +444,9 @@ export class FaceTracker implements IFaceTracker {
     return this.canvas;
   }
 
-  private addBlinkListener(
-    onBlink: () => void,
-    timer: ReturnType<typeof setTimeout>,
+  private removeBlinkListener(
+    onBlink: (outcome: "passed" | "failed") => void,
   ): void {
-    const wrapped = () => {
-      clearTimeout(timer);
-      this.removeBlinkListener(wrapped);
-      onBlink();
-    };
-    this.waitForBlinkResolvers.push(wrapped);
-  }
-
-  private removeBlinkListener(onBlink: () => void): void {
     this.waitForBlinkResolvers = this.waitForBlinkResolvers.filter((r) => r !== onBlink);
   }
 
@@ -463,7 +454,7 @@ export class FaceTracker implements IFaceTracker {
     this.lastBlinkAt = Date.now();
     const resolvers = this.waitForBlinkResolvers;
     this.waitForBlinkResolvers = [];
-    for (const r of resolvers) r();
+    for (const r of resolvers) r("passed");
   }
 
   stop(): void {
@@ -487,9 +478,12 @@ export class FaceTracker implements IFaceTracker {
     this.closeModels();
     this.releaseCamera();
     this.canvas = null;
+    // Dispose must NOT settle pending liveness waits as "passed": an unmount
+    // mid-challenge resolving "passed" would let recoverFlow treat a blink
+    // that never happened as verified and un-pause the session. Fail them.
     const resolvers = this.waitForBlinkResolvers;
     this.waitForBlinkResolvers = [];
-    for (const r of resolvers) r();
+    for (const r of resolvers) r("failed");
   }
 
   private releaseCamera(): void {

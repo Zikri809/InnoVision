@@ -87,7 +87,6 @@ export function QuizBuilderClient({
   const router = useRouter();
   const locale = useLocale();
   const t = useTranslations("lecturer.builder");
-  const tClasses = useTranslations("lecturer.classes");
   const tCommon = useTranslations("common");
   const isDraft = quiz.status === "draft";
 
@@ -150,7 +149,7 @@ export function QuizBuilderClient({
       return;
     }
     if (trimmed.length > TITLE_MAX) {
-      setError(`Title max ${TITLE_MAX}`);
+      setError(t("titleMax", { max: TITLE_MAX }));
       return;
     }
     if (trimmed === quiz.title) {
@@ -286,7 +285,14 @@ export function QuizBuilderClient({
     }
   }
 
+  const deletingId = useRef<string | null>(null);
+
   async function handleDelete(q: QuestionRow) {
+    // Irreversible — confirm like the student editor does, and lock against
+    // double-clicks (the second DELETE would 404 and mask the success).
+    if (deletingId.current) return;
+    if (!window.confirm(t("deleteQuestionConfirm"))) return;
+    deletingId.current = q.id;
     setError(null);
     setNotice(null);
     try {
@@ -302,6 +308,8 @@ export function QuizBuilderClient({
       router.refresh();
     } catch {
       setError(tCommon("errorGeneric"));
+    } finally {
+      deletingId.current = null;
     }
   }
 
@@ -458,7 +466,7 @@ export function QuizBuilderClient({
                     disabled={savingTitle || publishing}
                     aria-haspopup="dialog"
                     aria-expanded={settingsOpen}
-                    aria-label={`Quiz mode: ${getModeLabel(quiz.mode, locale)}.`}
+                    aria-label={t("modeBadgeLabel", { mode: getModeLabel(quiz.mode, locale) })}
                     className={`relative inline-flex items-center justify-center gap-1.5 h-8 rounded-full border-[3px] px-3.5 text-xs font-extrabold cursor-pointer transition-[transform,box-shadow] duration-150 hover:-translate-y-0.5 hover:shadow-[var(--shadow-clay-sm)] active:translate-y-0 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/70 disabled:pointer-events-none disabled:opacity-60 before:absolute before:-inset-1.5 before:content-[''] ${MODE_CLASS[quiz.mode]}`}
                   >
                     <span>{getModeLabel(quiz.mode, locale)}</span>
@@ -627,7 +635,7 @@ export function QuizBuilderClient({
           <CardHeader>
             <CardTitle>{t("addQuestionTitle")}</CardTitle>
             <CardDescription>
-              {t("addQuestionTitle")}
+              {t("addQuestionSubtitle")}
             </CardDescription>
           </CardHeader>
           <CardContent>

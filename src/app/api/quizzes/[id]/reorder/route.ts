@@ -2,13 +2,16 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireQuizOwner } from "@/lib/quizzes/guards";
 import { isUuid } from "@/lib/classes/roster";
+import { rateLimit } from "@/lib/classes/rate-limit";
 import { ReorderSchema } from "@/lib/quizzes/validation";
 import {
+  checkBodyLimit,
   checkSameOrigin,
   firstIssueMessage,
   internalError,
   invalidBody,
   invalidJson,
+  jsonError,
   notDraft,
   notFound,
 } from "@/lib/http";
@@ -16,6 +19,9 @@ import {
 export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ id: string }> };
+
+// Per-lecturer authoring budget (student-surface parity; abuse bound).
+const REORDER_RATE = { limit: 60, windowMs: 60 * 60 * 1000 };
 
 /**
  * POST /api/quizzes/[id]/reorder — atomically renumber questions via the
@@ -44,6 +50,13 @@ export async function POST(request: Request, { params }: Params) {
   // CSRF: reject cross-origin reorders (AI/session-route precedent).
   const originError = checkSameOrigin(request);
   if (originError) return originError;
+
+  if (!rateLimit(`quiz-author:${owner.userId}`, REORDER_RATE)) {
+    return jsonError("rate_limited", "Too many edits. Try again later.", 429);
+  }
+
+  const sizeError = checkBodyLimit(request);
+  if (sizeError) return sizeError;
 
   let body: unknown;
   try {

@@ -370,7 +370,7 @@ export function QuizEditorClient({
               <CardContent className="flex items-start justify-between gap-3 px-5 py-4">
                 <div className="min-w-0">
                   <p className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">
-                    {t("questionN", { number: i + 1 })} Â·{" "}
+                    {t("questionN", { number: i + 1 })} ·{" "}
                     {q.type === "true_false" ? t("typeTrueFalse") : t("typeMcq")}
                   </p>
                   <p className="mt-1 font-heading text-sm font-semibold">{q.prompt}</p>

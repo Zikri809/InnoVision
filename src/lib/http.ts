@@ -50,6 +50,30 @@ export function payloadTooLarge(message: string): NextResponse {
   return jsonError("payload_too_large", message, 413);
 }
 
+/**
+ * Default pre-parse JSON body cap for authoring routes. Mirrors the guard the
+ * student-quiz surface ships inline (`BODY_LIMIT_BYTES`); Zod string caps only
+ * apply AFTER `request.json()` has materialized the whole body, so oversized
+ * payloads are rejected at the header instead.
+ */
+export const JSON_BODY_LIMIT_BYTES = 64 * 1024;
+
+/**
+ * Reject requests whose declared `content-length` exceeds `maxBytes` BEFORE
+ * the body is buffered. Chunked encodings without the header fall through —
+ * the Zod schema caps remain the real backstop for those.
+ */
+export function checkBodyLimit(
+  request: Request,
+  maxBytes: number = JSON_BODY_LIMIT_BYTES,
+): NextResponse | null {
+  const lenHeader = request.headers.get("content-length");
+  if (lenHeader && Number(lenHeader) > maxBytes) {
+    return payloadTooLarge("Request body too large.");
+  }
+  return null;
+}
+
 /** 422 — AI output invalid / extraction needs browser OCR. */
 export function unprocessable(message: string, error = "unprocessable"): NextResponse {
   return jsonError(error, message, 422);

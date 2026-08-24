@@ -319,7 +319,7 @@ export async function generateQuiz(opts: {
   difficulty?: "easy" | "medium" | "hard" | "mixed";
   formatDistribution?: "mixed" | "mcq_only" | "true_false_only";
   steeringPrompt?: string;
-  /** Wall-clock deadline for attempt+retry combined. Defaults to now + 50s. */
+  /** Wall-clock deadline for attempt+retry combined. Defaults to now + 15 min (GENERATION_BUDGET_MS). */
   deadlineMs?: number;
 }): Promise<GenerateQuizResult> {
   const {

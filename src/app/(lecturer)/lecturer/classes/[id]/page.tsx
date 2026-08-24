@@ -2,6 +2,7 @@ import { redirect, notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getClassRoster } from "@/lib/classes/roster";
 import { ClassDetailClient } from "./class-detail-client";
+import { ProfilePendingPanel, LoadErrorPanel } from "@/components/layout/load-state";
 
 export default async function LecturerClassDetailPage({
   params,
@@ -22,11 +23,7 @@ export default async function LecturerClassDetailPage({
     .maybeSingle();
   if (!profile) {
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8">
-        <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground" role="alert">
-          Your profile is still being set up. Please refresh in a moment.
-        </p>
-      </div>
+      <ProfilePendingPanel />
     );
   }
   if (profile.role !== "lecturer") redirect("/student/classes");
@@ -40,11 +37,7 @@ export default async function LecturerClassDetailPage({
   if (classError) {
     console.error("Class fetch error:", classError);
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8">
-        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
-          Could not load the class right now. Please refresh.
-        </p>
-      </div>
+      <LoadErrorPanel />
     );
   }
   if (!cls) notFound();
@@ -54,11 +47,7 @@ export default async function LecturerClassDetailPage({
     console.error("Roster fetch error:", rosterError);
     // Surface a clear transient error state rather than an empty roster.
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8">
-        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
-          Could not load the roster right now. Please refresh.
-        </p>
-      </div>
+      <LoadErrorPanel />
     );
   }
 
@@ -73,11 +62,7 @@ export default async function LecturerClassDetailPage({
   if (quizzesError) {
     console.error("Quizzes fetch error:", quizzesError);
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8">
-        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
-          Could not load the quizzes right now. Please refresh.
-        </p>
-      </div>
+      <LoadErrorPanel />
     );
   }
 

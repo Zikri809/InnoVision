@@ -5,6 +5,7 @@ import { getClassRoster } from "@/lib/classes/roster";
 import { assembleResultsRows } from "@/lib/results/derive";
 import { RESULTS_SESSION_LIMIT, RESULTS_AUDIT_LIMIT } from "@/lib/results/constants";
 import { ResultsDashboardClient } from "./results-dashboard-client";
+import { ProfilePendingPanel, LoadErrorPanel } from "@/components/layout/load-state";
 
 export const dynamic = "force-dynamic";
 
@@ -42,11 +43,7 @@ export default async function LecturerQuizResultsPage({
     .maybeSingle();
   if (!profile) {
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8">
-        <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground" role="alert">
-          Your profile is still being set up. Please refresh in a moment.
-        </p>
-      </div>
+      <ProfilePendingPanel />
     );
   }
   if (profile.role !== "lecturer") redirect("/student/classes");
@@ -61,11 +58,7 @@ export default async function LecturerQuizResultsPage({
   if (quizError) {
     console.error("Quiz fetch error:", quizError);
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8">
-        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
-          Could not load the results right now. Please refresh.
-        </p>
-      </div>
+      <LoadErrorPanel />
     );
   }
   if (!quiz) notFound();
@@ -81,11 +74,7 @@ export default async function LecturerQuizResultsPage({
   if (ownedClassError) {
     console.error("Class ownership check error:", ownedClassError);
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8">
-        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
-          Could not load the results right now. Please refresh.
-        </p>
-      </div>
+      <LoadErrorPanel />
     );
   }
   if (!ownedClass) notFound();
@@ -112,31 +101,19 @@ export default async function LecturerQuizResultsPage({
   if (sessionsError) {
     console.error("Sessions fetch error:", sessionsError);
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8">
-        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
-          Could not load the results right now. Please refresh.
-        </p>
-      </div>
+      <LoadErrorPanel />
     );
   }
   if (rosterResult.error) {
     console.error("Roster fetch error:", rosterResult.error);
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8">
-        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
-          Could not load the results right now. Please refresh.
-        </p>
-      </div>
+      <LoadErrorPanel />
     );
   }
   if (totalQuestionsError) {
     console.error("Questions count fetch error:", totalQuestionsError);
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8">
-        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
-          Could not load the results right now. Please refresh.
-        </p>
-      </div>
+      <LoadErrorPanel />
     );
   }
 
@@ -191,64 +168,61 @@ export default async function LecturerQuizResultsPage({
   if (faceChecksError) {
     console.error("Face checks fetch error:", faceChecksError);
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8">
-        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
-          Could not load the results right now. Please refresh.
-        </p>
-      </div>
+      <LoadErrorPanel />
     );
   }
   if (auditError) {
     console.error("Audit read error:", auditError);
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8">
-        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
-          Could not load the results right now. Please refresh.
-        </p>
-      </div>
+      <LoadErrorPanel />
     );
   }
   if (advisoriesError) {
     console.error("Advisories fetch error:", advisoriesError);
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8">
-        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
-          Could not load the results right now. Please refresh.
-        </p>
-      </div>
+      <LoadErrorPanel />
     );
   }
   if (clipsError) {
     console.error("Incident clips fetch error:", clipsError);
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8">
-        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
-          Could not load the results right now. Please refresh.
-        </p>
-      </div>
+      <LoadErrorPanel />
     );
   }
 
   // Signed playback URLs: the incident-footage bucket is PRIVATE with no
   // client policies, so signing runs through the service-role client
   // (server-side only; the 1h URLs are short-lived and never stored).
+  // Signed in parallel — a serial loop costs one round trip per clip.
   const incidentClips: Record<string, { id: string; url: string; reason: string; durationMs: number; recordedFrom: string | null }[]> = {};
   if ((clipRows ?? []).length > 0) {
     const admin = createAdminClient();
-    for (const clip of clipRows ?? []) {
-      const { data: signed } = await admin.storage
-        .from("incident-footage")
-        .createSignedUrl(clip.storage_path, 3600);
-      if (!signed?.signedUrl) continue;
-      const list = incidentClips[clip.session_id] ?? [];
+    const signedResults = await Promise.all(
+      (clipRows ?? []).map(async (clip) => {
+        const { data: signed, error } = await admin.storage
+          .from("incident-footage")
+          .createSignedUrl(clip.storage_path, 3600);
+        if (error || !signed?.signedUrl) {
+          console.error("Incident clip signing error:", clip.id, error);
+          return null;
+        }
+        return {
+          clip,
+          url: signed.signedUrl,
+        };
+      }),
+    );
+    for (const result of signedResults) {
+      if (!result) continue;
+      const list = incidentClips[result.clip.session_id] ?? [];
       list.push({
-        id: clip.id,
-        url: signed.signedUrl,
-        reason: clip.reason,
-        durationMs: clip.duration_ms ?? 0,
-        recordedFrom: clip.recorded_from,
+        id: result.clip.id,
+        url: result.url,
+        reason: result.clip.reason,
+        durationMs: result.clip.duration_ms ?? 0,
+        recordedFrom: result.clip.recorded_from,
       });
-      incidentClips[clip.session_id] = list;
+      incidentClips[result.clip.session_id] = list;
     }
   }
 
@@ -277,9 +251,7 @@ export default async function LecturerQuizResultsPage({
       resultsRevealedAt={quiz.results_revealed_at}
       autoRevealOnComplete={quiz.auto_reveal_on_complete}
       totalQuestions={totalQuestions ?? 0}
-      truncated={sessionRows.length >= RESULTS_SESSION_LIMIT}
       rows={rows}
-      roster={rosterResult.roster}
       incidentClips={incidentClips}
     />
   );

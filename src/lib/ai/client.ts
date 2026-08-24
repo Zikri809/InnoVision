@@ -17,7 +17,6 @@ import {
  */
 
 export const AI_MODEL = process.env.AI_MODEL ?? "gpt-4o-mini";
-export const VISION_MODEL = process.env.OCR_VISION_MODEL ?? AI_MODEL;
 
 let client: OpenAI | null = null;
 

@@ -12,9 +12,15 @@
  * to is the lecturer's own machine, by design.
  */
 
+/** A single multimodal content part (OpenAI vision-chat shape). */
+export type HttpChatContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
 export type HttpChatMessage = {
   role: "system" | "user" | "assistant";
-  content: string;
+  /** Plain text for system/assistant; multimodal parts for vision requests. */
+  content: string | HttpChatContentPart[];
 };
 
 export type HttpChatResult =

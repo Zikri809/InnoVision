@@ -202,7 +202,12 @@ export function useIncidentRecorder(opts: {
       m.flushing = true;
       try {
         const drained = await drain();
-        if (disposed) return;
+        // Gate on the MACHINE-level stop flag, not this effect run's
+        // `disposed`: a status transition (paused→recovering on unlock) tears
+        // the effect down mid-upload, but the drained clip belongs to the
+        // incident that just happened and must still be uploaded. Only a real
+        // stop (discard / terminal unmount) drops it.
+        if (m.stopping) return;
         if (drained) {
           if (drained.blob.size <= MAX_INCIDENT_BYTES) {
             // Trust the ACTUAL container (Safari defaults to mp4 when WebM

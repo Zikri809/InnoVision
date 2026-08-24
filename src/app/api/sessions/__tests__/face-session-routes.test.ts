@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from "vitest";
 import { FakeSupabase, makeOwnerContext } from "@/app/api/quizzes/__tests__/fake-supabase";
 import { _resetRateLimiter, _seedRateLimit } from "@/lib/classes/rate-limit";
 import * as pauseRoute from "@/app/api/sessions/[id]/pause/route";
@@ -44,6 +44,17 @@ const QUIZ_C = "00000000-0000-4000-8000-00000000000c";
 const SESSION_ID = "00000000-0000-4000-8000-0000000000aa";
 const STUDENT_ID = "00000000-0000-4000-8000-0000000000ff";
 const LECTURER_ID = "00000000-0000-4000-8000-00000000000a";
+
+beforeAll(() => {
+  // The consent-revoke path calls the (module-real) CompreFace client; opt in
+  // to its E2E mock so deleteSubject succeeds without Docker — mirroring
+  // face-routes.test.ts. Mock mode is strict opt-in since 0024 remediation.
+  process.env.COMPREFACE_MOCK_ENABLED = "1";
+});
+
+afterAll(() => {
+  delete process.env.COMPREFACE_MOCK_ENABLED;
+});
 
 function req(body?: unknown, init?: RequestInit): Request {
   return new Request("http://localhost", {
@@ -323,7 +334,13 @@ describe("incident upload � ring-buffer clip route", () => {
 
   function incidentReq(opts?: { size?: number; declared?: number; type?: string }) {
     const size = opts?.size ?? 1024;
-    const blob = new Blob([new Uint8Array(size)], { type: opts?.type ?? "video/webm" });
+    const bytes = new Uint8Array(size);
+    // WebM/EBML magic (0x1A45DFA3) — the route magic-byte-sniffs uploads.
+    bytes[0] = 0x1a;
+    bytes[1] = 0x45;
+    bytes[2] = 0xdf;
+    bytes[3] = 0xa3;
+    const blob = new Blob([bytes], { type: opts?.type ?? "video/webm" });
     const form = new FormData();
     form.append("clip", blob, "clip.webm");
     form.append("reason", "paused");

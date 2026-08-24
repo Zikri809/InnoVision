@@ -9,6 +9,7 @@ import { createAiClient, chatCompletions, AI_MODEL } from "@/lib/ai/client";
 import { regenerateQuestion } from "@/lib/ai/quiz-prompt";
 import { normalizeOptions, GENERATION_BUDGET_MS, type AiQuestion } from "@/lib/ai/quiz-schema";
 import {
+  checkBodyLimit,
   firstIssueMessage,
   internalError,
   invalidBody,
@@ -62,6 +63,9 @@ export async function POST(request: Request, context?: { params?: Promise<{ id?:
   //    not to wrong-role callers).
   const auth = await requireLecturer(supabase);
   if (!auth.ok) return auth.response;
+
+  const sizeError = checkBodyLimit(request);
+  if (sizeError) return sizeError;
 
   let body: unknown;
   try {

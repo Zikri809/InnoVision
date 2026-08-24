@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
 import { formatDuration } from "@/lib/format/duration";
 import { ArrowLeft, Check, Megaphone } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,7 +21,6 @@ import {
 } from "@/components/ui/dialog";
 import type {
   DisplayStatus,
-  IntegrityEvent,
   ResultsSessionRow,
 } from "@/lib/results/types";
 
@@ -31,20 +29,6 @@ const STATUS_CLASS: Record<DisplayStatus, string> = {
   in_progress: "border-sky-300 bg-sky-100 text-sky-800",
   flagged: "border-amber-300 bg-amber-100 text-amber-800",
   completed: "border-emerald-300 bg-emerald-100 text-emerald-800",
-};
-
-const ACTION_LABEL: Record<string, string> = {
-  session_reset: "Session reset",
-  unlock: "Unlocked",
-  exempt_face: "Face-exempted",
-  consent_revoked: "Consent revoked",
-  self_recover: "Self-recovered",
-};
-
-const TRIGGER_LABEL: Record<string, string> = {
-  start: "Start",
-  question: "Question",
-  periodic: "Periodic",
 };
 
 export function ResultsDashboardClient({
@@ -56,9 +40,7 @@ export function ResultsDashboardClient({
   resultsRevealedAt,
   autoRevealOnComplete,
   totalQuestions,
-  truncated,
   rows,
-  roster,
   incidentClips = {},
 }: {
   quizId: string;
@@ -69,9 +51,7 @@ export function ResultsDashboardClient({
   resultsRevealedAt: string | null;
   autoRevealOnComplete: boolean;
   totalQuestions: number;
-  truncated: boolean;
   rows: ResultsSessionRow[];
-  roster: { student_id: string; full_name: string | null; enrolled_at: string }[];
   /** Signed (1h) playback URLs per session — empty for clean sessions. */
   incidentClips?: Record<
     string,
@@ -98,19 +78,6 @@ export function ResultsDashboardClient({
       default:
         return st;
     }
-  }
-
-  function formatDate(iso: string | null | undefined): string {
-    if (!iso) return "—";
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return "—";
-    const df = new Intl.DateTimeFormat(locale === "ms" ? "ms-MY" : "en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-      timeZone: "Asia/Kuala_Lumpur",
-    });
-    return df.format(d);
   }
 
   function formatTime(iso: string | null | undefined): string {
@@ -196,10 +163,6 @@ export function ResultsDashboardClient({
   const flagged = rows.filter((r) => r.displayStatus === "flagged").length;
   const abandoned = rows.filter((r) => r.displayStatus === "abandoned").length;
   const inProgress = rows.filter((r) => r.displayStatus === "in_progress").length;
-  const attempted = rows.length;
-
-  const attemptedStudentIds = new Set(rows.map((r) => r.student_id));
-  const notAttempted = roster.filter((r) => !attemptedStudentIds.has(r.student_id));
 
   function setRowError(id: string, msg: string) {
     setRowErrors((prev) => ({ ...prev, [id]: msg }));

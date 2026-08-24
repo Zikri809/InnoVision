@@ -28,6 +28,7 @@ const CF_BASE = env.COMPREFACE_BASE_URL || process.env.COMPREFACE_BASE_URL || "h
 const CF_KEY = env.COMPREFACE_API_KEY || process.env.COMPREFACE_API_KEY || "";
 
 async function main() {
+  assertLocalTarget(URL, "face-reset.mjs");
   console.log("🧹 [face:reset] Starting complete face recognition cleanup...\n");
 
   // 1. Clear CompreFace subjects & image collections

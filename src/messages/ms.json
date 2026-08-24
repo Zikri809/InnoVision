@@ -46,7 +46,14 @@
     "actions": "Tindakan",
     "inProgress": "Sedang berjalan",
     "notFound": "Tidak dijumpai",
-    "reason": "Sebab"
+    "reason": "Sebab",
+    "profileSettingUp": "Profil anda masih sedang disediakan. Sila muat semula sebentar lagi.",
+    "loadFailed": "Halaman ini tidak dapat dimuatkan buat masa ini. Sila muat semula.",
+    "returnHome": "Kembali ke laman utama",
+    "errorTitle": "Sesuatu tidak kena",
+    "errorBody": "Ralat tidak dijangka berlaku. Sila cuba lagi atau kembali ke laman utama.",
+    "notFoundTitle": "Halaman tidak ditemui",
+    "notFoundBody": "Halaman atau kuiz yang anda cari tidak wujud atau telah dipindahkan."
   },
   "authErrors": {
     "invalidEmail": "Sila masukkan alamat e-mel yang sah.",
@@ -310,7 +317,10 @@
       "questionsHeader": "Soalan",
       "questionsTitle": "Soalan",
       "noQuestionsTitle": "Belum ada soalan",
-      "noQuestionsSubtitle": "Tambah soalan menggunakan borang di sebelah kiri atau jana daripada nota kursus dengan AI."
+      "noQuestionsSubtitle": "Tambah soalan menggunakan borang di sebelah kiri atau jana daripada nota kursus dengan AI.",
+      "modeBadgeLabel": "Mod kuiz: {mode}.",
+      "titleMax": "Tajuk mestilah paling banyak {max} aksara.",
+      "deleteQuestionConfirm": "Padam soalan ini?"
     },
     "dialogs": {
       "editQuizTitle": "Sunting tetapan kuiz",
@@ -630,7 +640,9 @@
     "engineOfficeOnlyHint": "Pembacaan Pantas Aktif — Slaid dan dokumen Word anda dibaca terus secara pantas. Pengimbasan tidak diperlukan.",
     "engineMixedHint": "Pilihan pengimbas di atas hanya terpakai untuk fail PDF atau imej. Slaid anda akan dibaca secara terus.",
     "lowDensityTitle": "Sedikit teks dikesan dalam pembentangan anda",
-    "lowDensityDesc": "Kami mengesan sedikit teks dalam slaid ini. Jika slaid anda berasaskan imej, menyimpan pembentangan anda sebagai fail PDF akan membolehkan Pengimbas Penglihatan AI kami membaca gambar slaid secara terus."
+    "lowDensityDesc": "Kami mengesan sedikit teks dalam slaid ini. Jika slaid anda berasaskan imej, menyimpan pembentangan anda sebagai fail PDF akan membolehkan Pengimbas Penglihatan AI kami membaca gambar slaid secara terus.",
+    "decreaseCount": "Kurangkan bilangan soalan",
+    "increaseCount": "Tambah bilangan soalan"
   },
   "errors": {
     "unauthorized": "Anda mesti log masuk untuk melakukan tindakan ini.",

@@ -2,11 +2,15 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireQuizOwner } from "@/lib/quizzes/guards";
 import { isUuid } from "@/lib/classes/roster";
+import { rateLimit } from "@/lib/classes/rate-limit";
 import { checkSameOrigin, internalError, jsonError, notFound } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ id: string }> };
+
+// Per-lecturer publish budget (student-surface parity; abuse bound).
+const PUBLISH_RATE = { limit: 30, windowMs: 60 * 60 * 1000 };
 
 /**
  * POST /api/quizzes/[id]/publish — set a draft quiz to live.
@@ -34,6 +38,10 @@ export async function POST(request: Request, { params }: Params) {
   // Idempotent re-publish.
   if (owner.quiz.status === "live") {
     return NextResponse.json({ quiz: owner.quiz });
+  }
+
+  if (!rateLimit(`quiz-publish:${owner.userId}`, PUBLISH_RATE)) {
+    return jsonError("rate_limited", "Too many publish attempts. Try again later.", 429);
   }
 
   if (owner.quiz.status === "closed") {

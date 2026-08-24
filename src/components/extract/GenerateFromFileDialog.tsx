@@ -11,11 +11,7 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
-  Compass,
   FileText,
-  Globe,
-  Hash,
-  Layers,
   Minus,
   Plus,
   PlusCircle,
@@ -72,6 +68,9 @@ export function GenerateFromFileDialog({
   const stepContainerRef = useRef<HTMLDivElement>(null);
 
   const [files, setFiles] = useState<UploadedFileItem[]>([]);
+  // Lazy localStorage read is hydration-safe here: the dialog body (and this
+  // state consumer) only mounts client-side when `open` flips true — it never
+  // renders during SSR or the hydration pass.
   const [engine, setEngine] = useState<ExtractEngine>(() => {
     try {
       const stored = localStorage.getItem("innovision.ocrEngine");
@@ -555,7 +554,7 @@ export function GenerateFromFileDialog({
                   <div className="flex items-center gap-1.5">
                     <button
                       type="button"
-                      aria-label="Decrease question count"
+                      aria-label={t("decreaseCount")}
                       onClick={() => {
                         const next = Math.max(3, questionCount - 1);
                         setQuestionCount(next);
@@ -581,7 +580,7 @@ export function GenerateFromFileDialog({
 
                     <button
                       type="button"
-                      aria-label="Increase question count"
+                      aria-label={t("increaseCount")}
                       onClick={() => {
                         const next = Math.min(30, questionCount + 1);
                         setQuestionCount(next);

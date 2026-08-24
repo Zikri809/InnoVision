@@ -334,6 +334,9 @@ export class FakeSupabase {
     if (name === "revoke_face_consent") {
       return this._revokeFaceConsent();
     }
+    if (name === "confirm_face_subject_deleted") {
+      return this._confirmFaceSubjectDeleted();
+    }
     if (name === "reject_face_enrollment") {
       return this._rejectFaceEnrollment(args);
     }
@@ -1160,6 +1163,16 @@ export class FakeSupabase {
       created_at: "2026-01-01T00:00:00Z",
     });
     return { data: { ok: true, flagged_sessions: flagged.map((s) => s.id) }, error: null };
+  }
+
+  /** confirm_face_subject_deleted — clears face_deletion_pending for the caller. */
+  private async _confirmFaceSubjectDeleted() {
+    if (this.rpcResult.data !== null || this.rpcResult.error !== null) return this.rpcResult;
+    const studentId = this.user?.id ?? "";
+    const profile = (this.tables["profiles"] ?? []).find((p) => p.id === studentId);
+    if (!profile) return { data: { error: "not_authenticated" }, error: null };
+    profile.face_deletion_pending = false;
+    return { data: { ok: true }, error: null };
   }
 
   /** reject_face_enrollment (lecturer-only) — clears a pending_review status. */

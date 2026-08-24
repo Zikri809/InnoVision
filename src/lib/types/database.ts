@@ -1298,6 +1298,7 @@ export type Database = {
         Returns: Json
       }
       reject_face_enrollment: { Args: { p_student_id: string }; Returns: Json }
+      confirm_face_subject_deleted: { Args: never; Returns: Json }
       reorder_questions: {
         Args: { p_ordered_ids: string[]; p_quiz_id: string }
         Returns: undefined
@@ -1305,32 +1306,6 @@ export type Database = {
       reorder_student_questions: {
         Args: { p_ordered_ids: string[]; p_quiz_id: string }
         Returns: undefined
-      }
-      replace_quiz_questions: {
-        Args: {
-          p_questions: Json
-          p_quiz_id: string
-          p_source_file_url: string
-          p_source_text: string
-          p_title: string
-        }
-        Returns: {
-          correct_index: number
-          created_at: string
-          explanation: string | null
-          id: string
-          options: string[]
-          order_index: number
-          prompt: string
-          quiz_id: string
-          type: Database["public"]["Enums"]["question_type"]
-        }[]
-        SetofOptions: {
-          from: "*"
-          to: "questions"
-          isOneToOne: false
-          isSetofReturn: true
-        }
       }
       report_face_unavailable: { Args: { p_session_id: string }; Returns: Json }
       report_session_advisory: {

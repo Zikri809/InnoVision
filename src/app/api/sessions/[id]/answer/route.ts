@@ -39,8 +39,9 @@ const ANSWER_RATE = { limit: 120, windowMs: 60 * 1000 };
  *    flagged / completed all map here — single code)
  *  - `quiz_not_live` → 409 (lecturer closed quiz mid-session / student removed)
  *  - `time_expired` → 403 `{ error: "time_expired" }`
- *  - `already_answered` → 409 `{ error: "already_answered", isCorrect }`
- *    (payload passed through, key-mapped only; assessment only)
+ *  - `already_answered` → 409 `{ error: "already_answered" }` (KEYLESS —
+ *    assessment answers stay secrecy-safe; the RPC replays the stored result
+ *    for practice)
  *  - `invalid_question` / `invalid_selected_index` → 400
  *  - transport error → 503
  *  - success → 200 with the RPC payload passed through after mechanical

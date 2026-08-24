@@ -2,19 +2,25 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireClassOwner } from "@/lib/quizzes/guards";
 import { isUuid } from "@/lib/classes/roster";
+import { rateLimit } from "@/lib/classes/rate-limit";
 import { CreateQuizSchema } from "@/lib/quizzes/validation";
 import {
+  checkBodyLimit,
   checkSameOrigin,
   firstIssueMessage,
   internalError,
   invalidBody,
   invalidJson,
   notFound,
+  rateLimited,
 } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ id: string }> };
+
+// Per-lecturer quiz-creation budget (student-surface parity; abuse bound).
+const CREATE_RATE = { limit: 60, windowMs: 60 * 60 * 1000 };
 
 /**
  * POST /api/classes/[id]/quizzes — lecturer creates a quiz in their own class.
@@ -37,6 +43,13 @@ export async function POST(request: Request, { params }: Params) {
   // CSRF: reject cross-origin quiz creation (AI/session-route precedent).
   const originError = checkSameOrigin(request);
   if (originError) return originError;
+
+  if (!rateLimit(`quiz-create:${owner.userId}`, CREATE_RATE)) {
+    return rateLimited("Too many quizzes created. Try again later.");
+  }
+
+  const sizeError = checkBodyLimit(request);
+  if (sizeError) return sizeError;
 
   let body: unknown;
   try {

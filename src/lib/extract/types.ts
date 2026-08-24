@@ -4,7 +4,6 @@
  *  - 'native'  — free, instant text-layer extraction (pdfjs/mammoth/jszip).
  *  - 'tesseract' — client-side WASM OCR (default, $0, zero setup).
  *  - 'glm'     — local GLM-OCR via Docker/vLLM (opt-in, probe-gated, high accuracy).
- *  - 'vision'  — cloud vision LLM via /api/ocr/vision (opt-in, costs tokens).
  */
 
 export type ExtractEngine = "native" | "tesseract" | "glm";
@@ -26,12 +25,8 @@ export type OcrConfig = {
 
 /** Text density: a page is "scanned" (needs OCR) below this many chars. */
 export const MIN_CHARS_PER_PAGE = 40;
-/** Max pages rendered per vision OCR request (Vercel 4.5 MB body cap). */
-export const MAX_VISION_PAGES = 3;
 /** Max pages rasterized + recognized per Tesseract/GLM OCR run (includes GLM-OCR up to 200 pages). */
 export const MAX_OCR_PAGES = 200;
-/** Max base64 characters per image sent to /api/ocr/vision (~0.93 MB binary). */
-export const MAX_IMAGE_BASE64_CHARS = 1_300_000;
 /** Client-side file size cap (single file). */
 export const MAX_FILE_BYTES = 25_000_000;
 /** Maximum number of source files allowed in a multi-file batch upload. */

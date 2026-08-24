@@ -1,6 +1,6 @@
-import type { QuizMode } from "@/lib/types/aliases";
+import type { QuizMode, QuizStatus } from "@/lib/types/aliases";
 
-export type QuizStatus = "draft" | "live" | "closed";
+export type { QuizStatus };
 
 export const STATUS_LABEL: Record<QuizStatus, string> = {
   draft: "Draft",

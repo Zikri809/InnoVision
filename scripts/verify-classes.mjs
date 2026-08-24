@@ -268,7 +268,7 @@ async function main() {
   record("Archived exact count query returns 1", archCount === 1);
 
   // 8. Quiz Secrecy & Session Start Prevention on Archived Class
-  const { data: archQuiz, error: quizInsErr } = await admin
+  const { data: archQuiz } = await admin
     .from("quizzes")
     .insert({
       class_id: clsA.id,
@@ -314,7 +314,7 @@ async function main() {
   );
 
   // 9. New student S2 cannot join an archived class (RPC returns class_archived)
-  const studentS2 = await createUser(`studS2-${stamp}@innovision.test`);
+  await createUser(`studS2-${stamp}@innovision.test`);
   const clientS2 = await asUser(`studS2-${stamp}@innovision.test`);
   const { data: joinArchived, error: joinArchivedErr } = await clientS2.rpc("join_class", { code: joinCode });
   record(

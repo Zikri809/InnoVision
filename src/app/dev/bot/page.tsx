@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { notFound } from "next/navigation";
 import { BotAvatar } from "@/components/bot/bot-avatar";
 import { BOT_STATES, type BotState } from "@/lib/bot/engine";
 import { FaceGate } from "@/components/face/face-gate";
@@ -71,6 +72,10 @@ function FakeQuizBehind() {
 }
 
 export default function DevBotPage() {
+  // Component playground — not part of the product surface. 404 outside dev
+  // so the demo gallery never ships as a reachable production route.
+  if (process.env.NODE_ENV !== "development") notFound();
+
   const [cycle, setCycle] = useState<BotState>(BOT_STATES[0]);
 
   useEffect(() => {

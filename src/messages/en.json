@@ -46,7 +46,14 @@
     "actions": "Actions",
     "inProgress": "In progress",
     "notFound": "Not found",
-    "reason": "Reason"
+    "reason": "Reason",
+    "profileSettingUp": "Your profile is still being set up. Please refresh in a moment.",
+    "loadFailed": "Could not load this page right now. Please refresh.",
+    "returnHome": "Return home",
+    "errorTitle": "Something went wrong",
+    "errorBody": "An unexpected error occurred. Please try again or return to the home screen.",
+    "notFoundTitle": "Page not found",
+    "notFoundBody": "The page or quiz you are looking for does not exist or has been moved."
   },
   "authErrors": {
     "invalidEmail": "Please enter a valid email address.",
@@ -310,7 +317,10 @@
       "questionsHeader": "Questions",
       "questionsTitle": "Questions",
       "noQuestionsTitle": "No questions yet",
-      "noQuestionsSubtitle": "Add questions using the form on the left or generate from your course slides using AI."
+      "noQuestionsSubtitle": "Add questions using the form on the left or generate from your course slides using AI.",
+      "modeBadgeLabel": "Quiz mode: {mode}.",
+      "titleMax": "Title must be at most {max} characters.",
+      "deleteQuestionConfirm": "Delete this question?"
     },
     "dialogs": {
       "editQuizTitle": "Edit quiz settings",
@@ -630,7 +640,9 @@
     "engineOfficeOnlyHint": "Instant Reading Active — Your slides and Word documents are read directly at lightning speed. Scanning is not needed.",
     "engineMixedHint": "The scanner choice above applies to your PDF and image files. Your slides will be read directly.",
     "lowDensityTitle": "Low text detected in your presentation",
-    "lowDensityDesc": "We found very little text in these slides. If your slides are image-based, saving your presentation as a PDF will allow our AI Vision Scanner to read the slide pictures directly."
+    "lowDensityDesc": "We found very little text in these slides. If your slides are image-based, saving your presentation as a PDF will allow our AI Vision Scanner to read the slide pictures directly.",
+    "decreaseCount": "Decrease question count",
+    "increaseCount": "Increase question count"
   },
   "errors": {
     "unauthorized": "You must be signed in to perform this action.",

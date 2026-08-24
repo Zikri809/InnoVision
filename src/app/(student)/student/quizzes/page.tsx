@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { StudentQuizzesClient } from "./student-quizzes-client";
+import { ProfilePendingPanel, LoadErrorPanel } from "@/components/layout/load-state";
 
 const QUIZ_LIST_LIMIT = 200;
 
@@ -19,11 +20,7 @@ export default async function StudentQuizzesPage() {
 
   if (!profile) {
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8">
-        <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground" role="alert">
-          Your profile is still being set up. Please refresh in a moment.
-        </p>
-      </div>
+      <ProfilePendingPanel />
     );
   }
 
@@ -52,11 +49,7 @@ export default async function StudentQuizzesPage() {
   if (error || classesError) {
     console.error("Quizzes fetch error:", error ?? classesError);
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8">
-        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
-          Could not load the quizzes right now. Please refresh.
-        </p>
-      </div>
+      <LoadErrorPanel />
     );
   }
 

@@ -51,6 +51,10 @@ export function FaceEnrollClient({
   const attemptsRef = useRef(0);
   const captureStartRef = useRef(0);
   const disposedRef = useRef(false);
+  // Re-entrancy lock: a fast double-click on Start/Recapture must not boot two
+  // concurrent capture loops (they would interleave frames across angles and
+  // double-POST the enroll endpoint). Same pattern as the builder/editor locks.
+  const captureLockRef = useRef(false);
 
   useEffect(() => {
     disposedRef.current = false;
@@ -92,18 +96,22 @@ export function FaceEnrollClient({
 
   async function handleConsent() {
     setError(null);
-    const res = await fetch("/api/face/consent", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ consent: true }),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      setError(body.message ?? body.error ?? tCommon("errorGeneric"));
-      return;
+    try {
+      const res = await fetch("/api/face/consent", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ consent: true }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setError(body.message ?? body.error ?? tCommon("errorGeneric"));
+        return;
+      }
+      setConsent(true);
+      setCaptureState("idle");
+    } catch {
+      setError(tCommon("errorGeneric"));
     }
-    setConsent(true);
-    setCaptureState("idle");
   }
 
   async function handleRevoke() {
@@ -123,6 +131,8 @@ export function FaceEnrollClient({
       setConsent(false);
       setCaptureState("idle");
       setNotice(tCommon("ok"));
+    } catch {
+      setError(tCommon("errorGeneric"));
     } finally {
       setRevoking(false);
     }
@@ -149,9 +159,10 @@ export function FaceEnrollClient({
   }
 
   async function runCapture() {
-    if (disposedRef.current) return;
+    if (disposedRef.current || captureLockRef.current) return;
     const tracker = trackerRef.current;
     if (!tracker) return;
+    captureLockRef.current = true;
     setError(null);
     setNotice(null);
     setCaptureState("capturing");
@@ -159,36 +170,37 @@ export function FaceEnrollClient({
     attemptsRef.current = 0;
     captureStartRef.current = Date.now();
 
-    for (let i = 0; i < ENROLL_ANGLES.length; i++) {
-      if (disposedRef.current) return;
-      setCurrentAngle(i);
-      let frame: string | null = null;
-      while (frame === null) {
-        attemptsRef.current++;
-        if (disposedRef.current) return;
-        if (Date.now() - captureStartRef.current > ENROLL_CAPTURE_MAX_MS) {
-          setCaptureState("failed");
-          setError(t("statusFailed"));
-          return;
-        }
-        if (attemptsRef.current > ENROLL_CAPTURE_MAX_ATTEMPTS) {
-          setCaptureState("failed");
-          setError(t("statusFailed"));
-          return;
-        }
-        setCaptureState("blink");
-        frame = await captureOneAngle();
-      }
-      framesRef.current.push(frame);
-    }
-
-    setCaptureState("capturing");
     try {
+      for (let i = 0; i < ENROLL_ANGLES.length; i++) {
+        if (disposedRef.current) return;
+        setCurrentAngle(i);
+        let frame: string | null = null;
+        while (frame === null) {
+          attemptsRef.current++;
+          if (disposedRef.current) return;
+          if (Date.now() - captureStartRef.current > ENROLL_CAPTURE_MAX_MS) {
+            setCaptureState("failed");
+            setError(t("statusFailed"));
+            return;
+          }
+          if (attemptsRef.current > ENROLL_CAPTURE_MAX_ATTEMPTS) {
+            setCaptureState("failed");
+            setError(t("statusFailed"));
+            return;
+          }
+          setCaptureState("blink");
+          frame = await captureOneAngle();
+        }
+        framesRef.current.push(frame);
+      }
+
+      setCaptureState("capturing");
       const res = await fetch("/api/face/enroll", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ frames: framesRef.current }),
       });
+      if (disposedRef.current) return;
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         setCaptureState("failed");
@@ -202,8 +214,11 @@ export function FaceEnrollClient({
       setCaptureState("done");
       router.refresh();
     } catch {
+      if (disposedRef.current) return;
       setCaptureState("failed");
       setError(tCommon("errorGeneric"));
+    } finally {
+      captureLockRef.current = false;
     }
   }
 

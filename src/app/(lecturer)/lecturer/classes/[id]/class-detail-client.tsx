@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
@@ -35,7 +35,6 @@ import {
   Copy,
   Archive,
   RotateCcw,
-  AlertTriangle,
   Loader2,
 } from "lucide-react";
 import { formatDuration } from "@/lib/format/duration";
@@ -100,6 +99,14 @@ export function ClassDetailClient({
 
   // Ref lock guards against a fast double-click before React re-renders.
   const submitLock = useRef(false);
+  // Copied ✓ timer — cleared on repeat copies and on unmount so the state
+  // flip can't land after navigation (and rapid copies don't stack timers).
+  const copiedTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current !== null) window.clearTimeout(copiedTimerRef.current);
+    };
+  }, []);
 
   function formatDate(iso: string | null | undefined): string {
     if (!iso) return "—";
@@ -125,7 +132,8 @@ export function ClassDetailClient({
     try {
       await navigator.clipboard.writeText(cls.join_code);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
+      if (copiedTimerRef.current !== null) window.clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = window.setTimeout(() => setCopied(false), 1500);
     } catch {
       setCopyError(t("copyJoinCodeError"));
     }

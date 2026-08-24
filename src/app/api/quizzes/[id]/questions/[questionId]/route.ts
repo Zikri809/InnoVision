@@ -2,13 +2,16 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireQuizOwner } from "@/lib/quizzes/guards";
 import { isUuid } from "@/lib/classes/roster";
+import { rateLimit } from "@/lib/classes/rate-limit";
 import { QuestionInputSchema } from "@/lib/quizzes/validation";
 import {
+  checkBodyLimit,
   checkSameOrigin,
   firstIssueMessage,
   internalError,
   invalidBody,
   invalidJson,
+  jsonError,
   notDraft,
   notFound,
 } from "@/lib/http";
@@ -16,6 +19,9 @@ import {
 export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ id: string; questionId: string }> };
+
+// Per-lecturer authoring budget (student-surface parity; abuse bound).
+const AUTHOR_RATE = { limit: 120, windowMs: 60 * 60 * 1000 };
 
 /**
  * PATCH /api/quizzes/[id]/questions/[questionId] — replace a question on a
@@ -38,6 +44,13 @@ export async function PATCH(request: Request, { params }: Params) {
   // CSRF: reject cross-origin question edits (AI/session-route precedent).
   const originError = checkSameOrigin(request);
   if (originError) return originError;
+
+  if (!rateLimit(`quiz-author:${owner.userId}`, AUTHOR_RATE)) {
+    return jsonError("rate_limited", "Too many edits. Try again later.", 429);
+  }
+
+  const sizeError = checkBodyLimit(request);
+  if (sizeError) return sizeError;
 
   // The question must belong to this quiz (no cross-quiz moves).
   const { data: existing, error: existingError } = await supabase
@@ -84,7 +97,9 @@ export async function PATCH(request: Request, { params }: Params) {
     .eq("id", questionId)
     .eq("quiz_id", id)
     .select("id, quiz_id, order_index, type, prompt, options, correct_index, explanation, created_at")
-    .single();
+    // maybeSingle (not single): a concurrent DELETE between the pre-check and
+    // this UPDATE must surface as a clean 404, not a PGRST116 → 503.
+    .maybeSingle();
 
   if (error) {
     console.error("Update question error:", error);
@@ -96,6 +111,9 @@ export async function PATCH(request: Request, { params }: Params) {
       return invalidBody("The question data is invalid. Check options are distinct and within limits.");
     }
     return internalError("Could not update the question right now.");
+  }
+  if (!question) {
+    return notFound();
   }
 
   return NextResponse.json({ question });
@@ -120,6 +138,10 @@ export async function DELETE(request: Request, { params }: Params) {
   // CSRF: reject cross-origin question deletes (AI/session-route precedent).
   const originError = checkSameOrigin(request);
   if (originError) return originError;
+
+  if (!rateLimit(`quiz-author:${owner.userId}`, AUTHOR_RATE)) {
+    return jsonError("rate_limited", "Too many edits. Try again later.", 429);
+  }
 
   const { data: deleted, error } = await supabase
     .from("questions")

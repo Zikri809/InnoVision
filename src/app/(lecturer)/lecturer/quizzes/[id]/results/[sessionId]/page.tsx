@@ -2,6 +2,7 @@ import { redirect, notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getClassRoster } from "@/lib/classes/roster";
 import { SessionDetailClient } from "./session-detail-client";
+import { ProfilePendingPanel, LoadErrorPanel } from "@/components/layout/load-state";
 
 type SessionInfo = {
   id: string;
@@ -50,11 +51,7 @@ export default async function SessionDetailPage({
     .maybeSingle();
   if (!profile) {
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8">
-        <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground" role="alert">
-          Your profile is still being set up. Please refresh in a moment.
-        </p>
-      </div>
+      <ProfilePendingPanel />
     );
   }
   if (profile.role !== "lecturer") redirect("/student/classes");
@@ -68,11 +65,7 @@ export default async function SessionDetailPage({
   if (quizError) {
     console.error("Quiz fetch error:", quizError);
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8">
-        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
-          Could not load the results right now. Please refresh.
-        </p>
-      </div>
+      <LoadErrorPanel />
     );
   }
   if (!quiz) notFound();
@@ -95,11 +88,7 @@ export default async function SessionDetailPage({
   if (sessionError) {
     console.error("Session fetch error:", sessionError);
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8">
-        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
-          Could not load the results right now. Please refresh.
-        </p>
-      </div>
+      <LoadErrorPanel />
     );
   }
   if (!session) notFound();
@@ -118,21 +107,13 @@ export default async function SessionDetailPage({
   if (questionsError) {
     console.error("Questions fetch error:", questionsError);
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8">
-        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
-          Could not load the results right now. Please refresh.
-        </p>
-      </div>
+      <LoadErrorPanel />
     );
   }
   if (rosterResult.error) {
     console.error("Roster fetch error:", rosterResult.error);
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8">
-        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
-          Could not load the results right now. Please refresh.
-        </p>
-      </div>
+      <LoadErrorPanel />
     );
   }
 
@@ -143,11 +124,7 @@ export default async function SessionDetailPage({
   if (answersError) {
     console.error("Session answers fetch error:", answersError);
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8">
-        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
-          Could not load the results right now. Please refresh.
-        </p>
-      </div>
+      <LoadErrorPanel />
     );
   }
 

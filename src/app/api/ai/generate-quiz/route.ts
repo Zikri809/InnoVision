@@ -12,6 +12,7 @@ import { normalizePath } from "@/lib/ai/validation";
 import { nativeExtract } from "@/lib/extract/native";
 import { MAX_AGGREGATE_CHARS, MAX_FILE_BYTES, MAX_TOTAL_UPLOAD_BYTES } from "@/lib/extract/types";
 import {
+  checkBodyLimit,
   firstIssueMessage,
   internalError,
   invalidBody,
@@ -65,8 +66,8 @@ const inFlight = new Set<string>();
  *  - Rate-limited per user; in-flight guard per quiz.
  *  - Invalid AI output (after one retry) → 422 with ZERO rows inserted — the
  *    atomic replace RPC is never reached.
- *  - Success → `replace_quiz_questions` replaces all draft questions
- *    atomically and sets title/source fields.
+ *  - Success → `save_quiz_questions` (replace mode) replaces all draft
+ *    questions atomically and sets title/source fields.
  */
 export async function POST(request: Request, context?: { params?: Promise<{ id?: string }> }) {
   const supabase = await createClient();
@@ -78,6 +79,18 @@ export async function POST(request: Request, context?: { params?: Promise<{ id?:
   // CSRF: reject cross-origin POSTs (mitigates the SameSite=Lax subdomain gap).
   const originError = checkSameOrigin(request);
   if (originError) return originError;
+
+  // Reject oversized bodies BEFORE buffering: extractedText can legitimately
+  // approach ~400 KB, so this generous cap only stops abusive payloads.
+  const sizeError = checkBodyLimit(request, 512 * 1024);
+  if (sizeError) return sizeError;
+
+  // Authenticate before parsing — an unauthenticated caller must not be able
+  // to force large-body materialization on the server.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return notFound();
 
   let body: unknown;
   try {

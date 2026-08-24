@@ -13,8 +13,10 @@ import "server-only";
  * Mock mode (L15): when `NODE_ENV !== 'production'` AND
  * `COMPREFACE_MOCK_ENABLED === '1'`, the client inspects the frame string for
  * the E2E marker substrings (`FAKE_FRAME_MATCH` / `FAKE_FRAME_MISMATCH`) and
- * returns canned responses WITHOUT calling Docker. The two-flag guard means a
- * misconfigured production deployment cannot activate the mock.
+ * returns canned responses WITHOUT calling Docker. Mock mode is STRICT OPT-IN:
+ * without the explicit flag the client always talks to Docker, so a staging /
+ * dev deployment reachable by students can never be silently bypassed via a
+ * marker frame.
  *
  * All methods return typed objects; network/HTTP errors map to
  * `{ error: 'compreface_unavailable' }` so routes can 503 without leaking
@@ -67,7 +69,7 @@ const COMPREFACE_TIMEOUT_MS = 5000;
 function isMockMode(): boolean {
   return (
     process.env.NODE_ENV !== "production" &&
-    process.env.COMPREFACE_MOCK_ENABLED !== "0"
+    process.env.COMPREFACE_MOCK_ENABLED === "1"
   );
 }
 
@@ -75,22 +77,19 @@ function isMockMode(): boolean {
 export const MOCK_MATCH_MARKER = "FAKE_FRAME_MATCH";
 export const MOCK_MISMATCH_MARKER = "FAKE_FRAME_MISMATCH";
 
-/** True when the E2E mock is enabled AND this frame is a fake "match". */
+/**
+ * True when the E2E mock is enabled AND this frame is a fake "match".
+ * Both conditions are required: outside an explicitly opted-in mock run the
+ * marker string must reach CompreFace like any other frame (a marker in the
+ * wild is just garbage pixels that fail recognition).
+ */
 export function isMockMatchFrame(frame: string): boolean {
-  return (
-    process.env.NODE_ENV !== "production" &&
-    (isMockMode() || frame.includes(MOCK_MATCH_MARKER)) &&
-    frame.includes(MOCK_MATCH_MARKER)
-  );
+  return isMockMode() && frame.includes(MOCK_MATCH_MARKER);
 }
 
 /** True when the E2E mock is enabled AND this frame is a fake "mismatch". */
 export function isMockMismatchFrame(frame: string): boolean {
-  return (
-    process.env.NODE_ENV !== "production" &&
-    (isMockMode() || frame.includes(MOCK_MISMATCH_MARKER)) &&
-    frame.includes(MOCK_MISMATCH_MARKER)
-  );
+  return isMockMode() && frame.includes(MOCK_MISMATCH_MARKER);
 }
 
 let warnedMissingKey = false;

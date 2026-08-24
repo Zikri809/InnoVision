@@ -16,7 +16,8 @@ const HEALTH_RATE = { limit: 10, windowMs: 60 * 1000 };
  * if CompreFace is unreachable, the face pipeline reports `unavailable`
  * (click-first passthrough) instead of attempting verifies that would 503.
  *
- * GET — no CSRF (read-only). Authenticated (either role).
+ * GET — no CSRF (read-only). Student-authenticated (the only caller is the
+ * student's `useFaceTracker` boot race; lecturers don't verify faces).
  */
 export async function GET() {
   const supabase = await createClient();
@@ -24,7 +25,7 @@ export async function GET() {
   if (!auth.ok) return auth.response;
 
   if (!rateLimit(`face-health:${auth.userId}`, HEALTH_RATE)) {
-    console.warn(`[api/face/health] user ${auth.userId} rate limited`);
+    console.warn("[api/face/health] rate limited");
     return Response.json(
       { available: false, rate_limited: true },
       { status: 429, headers: { "content-type": "application/json" } },
@@ -32,7 +33,7 @@ export async function GET() {
   }
 
   const available = await compreface.health();
-  console.info(`[api/face/health] user=${auth.userId} available=${available}`);
+  console.info(`[api/face/health] available=${available}`);
   return Response.json(
     { available },
     { status: 200, headers: { "content-type": "application/json" } },

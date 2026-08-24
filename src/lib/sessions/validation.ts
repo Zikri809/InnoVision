@@ -20,7 +20,14 @@ export type StartSessionInput = z.infer<typeof StartSessionSchema>;
 
 export const AnswerSchema = z.object({
   questionId: z.string().uuid("questionId must be a valid UUID."),
-  selectedIndex: z.number().int("selectedIndex must be a whole number.").min(0),
+  // Upper bound = PG int4 ceiling: the RPC arg is an `int`, so a larger value
+  // would fail at PostgREST as a transport error (503) instead of this clean
+  // 400. Per-option bounds stay with the RPC (see module doc above).
+  selectedIndex: z
+    .number()
+    .int("selectedIndex must be a whole number.")
+    .min(0)
+    .max(2_147_483_647),
 });
 
 export type AnswerInput = z.infer<typeof AnswerSchema>;

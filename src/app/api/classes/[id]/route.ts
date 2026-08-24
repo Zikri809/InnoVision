@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireLecturer } from "@/lib/classes/guards";
+import { rateLimit } from "@/lib/classes/rate-limit";
 import { getClassRoster, isUuid } from "@/lib/classes/roster";
 import {
+  checkBodyLimit,
   checkSameOrigin,
   internalError,
   invalidJson,
@@ -12,6 +14,9 @@ import {
 export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ id: string }> };
+
+// Per-lecturer mutation budget (student-surface parity; abuse bound).
+const MUTATE_RATE = { limit: 60, windowMs: 60 * 60 * 1000 };
 
 /**
  * GET /api/classes/[id]
@@ -113,6 +118,16 @@ export async function PATCH(request: Request, { params }: Params) {
   const originError = checkSameOrigin(request);
   if (originError) return originError;
 
+  if (!rateLimit(`class-mutate:${auth.userId}`, MUTATE_RATE)) {
+    return NextResponse.json(
+      { error: "rate_limited", message: "Too many updates. Try again later." },
+      { status: 429 },
+    );
+  }
+
+  const sizeError = checkBodyLimit(request);
+  if (sizeError) return sizeError;
+
   let body: unknown;
   try {
     body = await request.json();
@@ -187,6 +202,13 @@ export async function DELETE(request: Request, { params }: Params) {
   // CSRF: reject cross-origin class deletion (AI/session-route precedent).
   const originError = checkSameOrigin(request);
   if (originError) return originError;
+
+  if (!rateLimit(`class-mutate:${auth.userId}`, MUTATE_RATE)) {
+    return NextResponse.json(
+      { error: "rate_limited", message: "Too many updates. Try again later." },
+      { status: 429 },
+    );
+  }
 
   const { data, error } = await supabase
     .from("classes")

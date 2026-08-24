@@ -75,33 +75,43 @@ export function useNotifications({
 
   /** Badge count — index-only scan over the partial unread index. */
   const refreshBadge = useCallback(async () => {
-    const { count } = await supabase
-      .from("notifications")
-      .select("id", { count: "exact", head: true })
-      .is("read_at", null);
-    setUnreadCount(count ?? 0);
+    try {
+      const { count } = await supabase
+        .from("notifications")
+        .select("id", { count: "exact", head: true })
+        .is("read_at", null);
+      setUnreadCount(count ?? 0);
+    } catch {
+      // Transport failure (offline / sleeping-tab wake). PostgREST throws on
+      // network errors rather than returning {error} — swallow here so the
+      // fire-and-forget poll loop never produces an unhandled rejection.
+    }
   }, [supabase]);
 
   const refresh = useCallback(async () => {
-    const [listRes, badge] = await Promise.all([
-      supabase
-        .from("notifications")
-        .select("id, seq, type, payload, read_at, created_at")
-        .order("seq", { ascending: false })
-        .limit(PAGE_SIZE),
-      supabase
-        .from("notifications")
-        .select("id", { count: "exact", head: true })
-        .is("read_at", null),
-    ]);
-    if (listRes.data) {
-      const mapped = listRes.data
-        .map((r) => mapRawRow(r as RawNotificationRow))
-        .filter((x): x is NotificationItem => x !== null);
-      setItems(mergeNotifications([], mapped, LIST_CAP));
-      setHasMore(mapped.length >= PAGE_SIZE);
+    try {
+      const [listRes, badge] = await Promise.all([
+        supabase
+          .from("notifications")
+          .select("id, seq, type, payload, read_at, created_at")
+          .order("seq", { ascending: false })
+          .limit(PAGE_SIZE),
+        supabase
+          .from("notifications")
+          .select("id", { count: "exact", head: true })
+          .is("read_at", null),
+      ]);
+      if (listRes.data) {
+        const mapped = listRes.data
+          .map((r) => mapRawRow(r as RawNotificationRow))
+          .filter((x): x is NotificationItem => x !== null);
+        setItems(mergeNotifications([], mapped, LIST_CAP));
+        setHasMore(mapped.length >= PAGE_SIZE);
+      }
+      if (typeof badge.count === "number") setUnreadCount(badge.count);
+    } catch {
+      // Same transport-failure contract as refreshBadge — keep stale state.
     }
-    if (typeof badge.count === "number") setUnreadCount(badge.count);
   }, [supabase]);
 
   const loadMore = useCallback(async () => {
@@ -123,6 +133,8 @@ export function useNotifications({
         setItems((prev) => mergeNotifications(prev, mapped, Number.MAX_SAFE_INTEGER));
         setHasMore(mapped.length >= PAGE_SIZE);
       }
+    } catch {
+      // Keep the list as-is; the user can retry the load-more control.
     } finally {
       setLoadingMore(false);
     }

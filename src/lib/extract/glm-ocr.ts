@@ -113,7 +113,7 @@ export async function glmExtract(
             content: [
               { type: "text", text: "Transcribe this page:" },
               { type: "image_url", image_url: { url: images[i].dataUrl } },
-            ] as unknown as string,
+            ],
           },
         ],
         maxTokens: 2000,

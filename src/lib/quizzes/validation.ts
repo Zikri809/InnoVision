@@ -26,6 +26,21 @@ export const MCQ_OPTIONS_MIN = 2;
 export const MCQ_OPTIONS_MAX = 5;
 export const TRUE_FALSE_OPTIONS = 2;
 
+// Invisible/bidi control characters that could visually reorder or hide text
+// (bidi marks/embeds/isolates, zero-width chars, soft hyphen, word joiner).
+const BIDI_CONTROL_REGEX =
+  /[\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF\u00AD]/g;
+
+/**
+ * Strip bidi-override / zero-width characters from user-typed titles.
+ * Quiz titles are rendered to entire class rosters (and, once shared,
+ * beyond), so they get the same homoglyph-spoofing defense as student
+ * practice-quiz titles.
+ */
+export function stripBidiControls(value: string): string {
+  return value.replace(BIDI_CONTROL_REGEX, "");
+}
+
 /**
  * Time-limit bounds. null = untimed; 1..7200 = timed; 0 is invalid in
  * both Zod and the DB. Must stay in lockstep with the DB CHECK in
@@ -76,7 +91,7 @@ export const QuestionInputSchema = z
         message: "True/False questions must have exactly 2 options.",
       });
     }
-    const distinct = new Set(q.options.map((o) => o.toLocaleLowerCase()));
+    const distinct = new Set(q.options.map((o) => o.toLowerCase()));
     if (distinct.size !== q.options.length) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -92,9 +107,14 @@ export type QuestionInput = z.infer<typeof QuestionInputSchema>;
 const QuizFieldsSchema = z.object({
   title: z
     .string()
-    .trim()
-    .min(1, "Title is required.")
-    .max(TITLE_MAX, `Title must be at most ${TITLE_MAX} characters.`),
+    .transform(stripBidiControls)
+    .pipe(
+      z
+        .string()
+        .trim()
+        .min(1, "Title is required.")
+        .max(TITLE_MAX, `Title must be at most ${TITLE_MAX} characters.`),
+    ),
   mode: z.enum(["practice", "assessment"]),
   timeLimitSec: z
     .number({ message: "Time limit must be a number of seconds." })
@@ -139,7 +159,10 @@ export const ReorderSchema = z.object({
     .array(z.string().uuid("Each question id must be a valid UUID."), {
       message: "Each question id must be a valid UUID.",
     })
-    .min(1, "Reorder must include at least one question."),
+    // Mirrors the student surface's cap: the RPC rejects foreign ids, but an
+    // unbounded UUID array should fail HERE, not after a full parse + round trip.
+    .min(1, "Reorder must include at least one question.")
+    .max(200, "Reorder payload exceeds the question limit."),
 });
 
 export type ReorderInput = z.infer<typeof ReorderSchema>;

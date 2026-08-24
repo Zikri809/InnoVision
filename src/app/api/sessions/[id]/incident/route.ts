@@ -93,9 +93,24 @@ export async function POST(request: Request, { params }: Params) {
   const fromMs = Date.parse(recordedFromRaw);
 
   const buffer = Buffer.from(await clip.arrayBuffer());
+  // Magic-byte sniff (not the client-declared MIME): arbitrary bytes must not
+  // land in storage as "video". WebM/EBML starts 0x1A45DFA3; MP4 has a "ftyp"
+  // box at offset 4. Anything else is rejected — a mislabeled payload would
+  // otherwise be stored and served as a video that never plays.
+  const isWebm =
+    buffer.length >= 4 &&
+    buffer[0] === 0x1a &&
+    buffer[1] === 0x45 &&
+    buffer[2] === 0xdf &&
+    buffer[3] === 0xa3;
+  const isMp4 =
+    buffer.length >= 8 &&
+    buffer.toString("latin1", 4, 8) === "ftyp";
+  if (!isWebm && !isMp4) {
+    return invalidBody("The clip is not a recognized video container.");
+  }
   // Trust the ACTUAL container the browser produced (Safari → mp4 when WebM
   // is unsupported); storing mp4 bytes under a .webm path breaks playback.
-  const isMp4 = (clip.type || "").includes("mp4");
   const ext = isMp4 ? "mp4" : "webm";
   const contentType = isMp4 ? "video/mp4" : "video/webm";
   const path = `${id}/${Date.now()}.${ext}`;

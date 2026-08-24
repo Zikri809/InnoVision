@@ -2,8 +2,10 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireQuizOwner } from "@/lib/quizzes/guards";
 import { isUuid } from "@/lib/classes/roster";
+import { rateLimit } from "@/lib/classes/rate-limit";
 import { QuestionInputSchema } from "@/lib/quizzes/validation";
 import {
+  checkBodyLimit,
   checkSameOrigin,
   firstIssueMessage,
   internalError,
@@ -11,11 +13,15 @@ import {
   invalidJson,
   notDraft,
   notFound,
+  rateLimited,
 } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ id: string }> };
+
+// Per-lecturer authoring budget (student-surface parity; abuse bound).
+const AUTHOR_RATE = { limit: 120, windowMs: 60 * 60 * 1000 };
 
 /**
  * POST /api/quizzes/[id]/questions — add a question to a DRAFT quiz.
@@ -37,6 +43,13 @@ export async function POST(request: Request, { params }: Params) {
   // CSRF: reject cross-origin question adds (AI/session-route precedent).
   const originError = checkSameOrigin(request);
   if (originError) return originError;
+
+  if (!rateLimit(`quiz-author:${owner.userId}`, AUTHOR_RATE)) {
+    return rateLimited("Too many edits. Try again later.");
+  }
+
+  const sizeError = checkBodyLimit(request);
+  if (sizeError) return sizeError;
 
   let body: unknown;
   try {

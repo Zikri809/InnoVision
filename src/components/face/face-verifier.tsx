@@ -1,12 +1,34 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
+import { useOverlayFocusTrap } from "@/lib/a11y/focus-trap";
 import type { FaceStatus } from "@/lib/face/types";
 import type { PausedReason } from "@/components/face/use-face-pipeline";
 import { FaceGate } from "@/components/face/face-gate";
 import { BotAvatar } from "@/components/bot/bot-avatar";
+
+/**
+ * Full-screen proctoring block. Deliberately NOT a Dialog (no Esc-dismiss;
+ * sits above the live camera feed), but it must still capture focus — without
+ * the trap a keyboard user could keep operating the quiz behind the backdrop.
+ */
+function BlockingOverlay({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useOverlayFocusTrap(ref, true);
+  return (
+    <div
+      ref={ref}
+      role="alertdialog"
+      aria-modal="true"
+      tabIndex={-1}
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-background/80 p-4 outline-none backdrop-blur-sm"
+    >
+      {children}
+    </div>
+  );
+}
 
 export function FaceVerifier({
   status,
@@ -80,7 +102,7 @@ export function FaceVerifier({
       {children}
 
       {(status === "paused" || status === "recovering") && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm" role="alert">
+        <BlockingOverlay>
           <div className="rounded-[28px] border-[3px] border-border bg-card p-8 text-center shadow-[var(--shadow-clay)]">
             <div className="mb-4 grid place-items-center">
               <BotAvatar state="paused" size={112} />
@@ -105,11 +127,11 @@ export function FaceVerifier({
               </Button>
             )}
           </div>
-        </div>
+        </BlockingOverlay>
       )}
 
       {status === "flagged" && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm" role="alert">
+        <BlockingOverlay>
           <div className="rounded-[28px] border-[3px] border-destructive/40 bg-card p-8 text-center shadow-[var(--shadow-clay)]">
             <div className="mb-4 grid place-items-center">
               <BotAvatar state="warn" size={112} bodyClassName="fill-destructive" />
@@ -124,7 +146,7 @@ export function FaceVerifier({
               </Button>
             </div>
           </div>
-        </div>
+        </BlockingOverlay>
       )}
     </div>
   );

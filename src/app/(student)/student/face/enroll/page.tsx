@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { FaceEnrollClient } from "./face-enroll-client";
+import { ProfilePendingPanel } from "@/components/layout/load-state";
 
 /**
  * Face enrollment page — student-only. Shows consent recap + checkbox when
@@ -27,11 +28,7 @@ export default async function FaceEnrollPage() {
 
   if (!profile) {
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8">
-        <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground" role="alert">
-          Your profile is still being set up. Please refresh in a moment.
-        </p>
-      </div>
+      <ProfilePendingPanel />
     );
   }
   if (profile.role !== "student") redirect("/lecturer/classes");

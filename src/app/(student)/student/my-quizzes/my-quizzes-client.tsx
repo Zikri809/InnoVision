@@ -280,7 +280,18 @@ export function MyQuizzesClient({ quizzes }: { quizzes: MyQuiz[] }) {
                 <Button
                   variant="outline"
                   size="icon"
-                  onClick={() => void navigator.clipboard.writeText(shareHref)}
+                  aria-label={t("copyBtn")}
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(shareHref);
+                      setError(null);
+                      setNotice(tCommon("copied"));
+                    } catch {
+                      // Clipboard denied / insecure context — the link stays
+                      // selected in the readonly input for manual copying.
+                      setNotice(null);
+                    }
+                  }}
                 >
                   <Link2 className="h-4 w-4" aria-hidden />
                 </Button>

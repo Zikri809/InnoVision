@@ -2,11 +2,22 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireLecturer } from "@/lib/classes/guards";
 import { createClassWithRetry } from "@/lib/classes/join-code";
-import { checkSameOrigin, invalidJson, internalError, unauthorized, forbidden } from "@/lib/http";
+import { rateLimit } from "@/lib/classes/rate-limit";
+import {
+  checkBodyLimit,
+  checkSameOrigin,
+  invalidJson,
+  internalError,
+  unauthorized,
+  forbidden,
+  rateLimited,
+} from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 
 const CLASS_LIST_LIMIT = 200;
+// Per-lecturer creation budget (student-surface parity; abuse bound).
+const CREATE_RATE = { limit: 30, windowMs: 60 * 60 * 1000 };
 
 /**
  * POST /api/classes — lecturer creates a class (join code auto-generated,
@@ -20,6 +31,13 @@ export async function POST(request: Request) {
   // CSRF: reject cross-origin class creation (AI/session-route precedent).
   const originError = checkSameOrigin(request);
   if (originError) return originError;
+
+  if (!rateLimit(`classes-create:${auth.userId}`, CREATE_RATE)) {
+    return rateLimited("Too many classes created. Try again later.");
+  }
+
+  const sizeError = checkBodyLimit(request);
+  if (sizeError) return sizeError;
 
   let body: unknown;
   try {

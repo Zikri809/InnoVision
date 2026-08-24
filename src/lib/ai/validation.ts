@@ -91,15 +91,6 @@ export const RegenerateQuestionSchema = z.object({
 
 export type RegenerateQuestionInput = z.infer<typeof RegenerateQuestionSchema>;
 
-export const VisionOcrSchema = z.object({
-  images: z
-    .array(z.string().min(1, "Images must not be empty."))
-    .min(1, "Provide at least one image.")
-    .max(3, "Send at most 3 images per request."),
-});
-
-export type VisionOcrInput = z.infer<typeof VisionOcrSchema>;
-
 /**
  * POSIX-style path normalizer for the sourcePath validator. Resolves `.`
  * and `..` segments against forward-slash separators.

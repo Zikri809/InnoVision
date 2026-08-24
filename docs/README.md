@@ -10,6 +10,7 @@
 
 | Doc | Scope |
 |---|---|
+| **ARCHITECTURE.md** | How the app works end to end: stack topology, request lifecycle, data model, the 5-layer security model, and per-feature data-flow walkthroughs (face verify protocol, session state machine, reveal gating, notifications, practice quizzes). Start here. |
 | **PLAN_INTEGRITY_SUITE.md** | Face verification (1:1-by-lookup multi-frame voting), focus-loss pause, session advisories, incident recording. Migrations 0020+0021. THE source of truth for the face/integrity pipeline. |
 | **PLAN_NOTIFICATIONS.md** | Per-user notification feed (migration 0022): bell island, polling/merge/dedup, i18n copy, role-layout wiring. THE source of truth for notifications. |
 | **PLAN_STUDENT_PRACTICE_QUIZZES.md** | Student-created practice quizzes (migration 0023): creator-only authoring, unlisted share codes minted ONLY via definer RPC, stateless server-side grading, DB-side caps, `/s/[code]` play. THE source of truth for the SQ feature (post-critique final). |

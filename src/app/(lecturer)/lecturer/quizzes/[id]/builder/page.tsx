@@ -2,6 +2,7 @@ import { redirect, notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { createClient } from "@/lib/supabase/server";
 import { QuizBuilderClient } from "./quiz-builder-client";
+import { ProfilePendingPanel } from "@/components/layout/load-state";
 
 export const dynamic = "force-dynamic";
 
@@ -33,11 +34,7 @@ export default async function QuizBuilderPage({
     .maybeSingle();
   if (!profile) {
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8">
-        <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground" role="alert">
-          Your profile is still being set up. Please refresh in a moment.
-        </p>
-      </div>
+      <ProfilePendingPanel />
     );
   }
   if (profile.role !== "lecturer") redirect("/student/classes");

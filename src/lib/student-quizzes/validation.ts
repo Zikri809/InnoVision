@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { stripBidiControls } from "@/lib/quizzes/validation";
 
 /**
  * Zod schemas for the student practice-quiz API surface
@@ -11,17 +12,12 @@ import { z } from "zod";
  * time limit, no status here.
  *
  * Title sanitization strips bidi-override / zero-width characters
- * (homoglyph spoofing defense for shared UGC titles).
+ * (homoglyph spoofing defense for shared UGC titles) — the shared
+ * `stripBidiControls` lives in the lecturer validation module.
  */
 
-// Invisible/bidi control characters that could visually reorder or hide text
-// (bidi marks/embeds/isolates, zero-width chars, soft hyphen, word joiner).
-const BIDI_CONTROL_REGEX =
-  /[\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF\u00AD]/g;
-
-export function stripBidiControls(value: string): string {
-  return value.replace(BIDI_CONTROL_REGEX, "");
-}
+// Re-exported so existing imports (and tests) keep working.
+export { stripBidiControls };
 
 const SanitizedTitleSchema = z
   .string()
@@ -70,7 +66,5 @@ export const UpdateStudentQuizSchema = z
   });
 
 export type UpdateStudentQuizInput = z.infer<typeof UpdateStudentQuizSchema>;
-
-export const StudentQuestionActionSchema = z.enum(["append"]);
 
 export type { QuestionInput } from "@/lib/quizzes/validation";

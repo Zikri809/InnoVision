@@ -67,13 +67,13 @@ export async function POST(request: Request, { params }: Params) {
   if (error) {
     const msg = error.message ?? "";
     console.error("Reorder student questions error:", error);
-    if (
-      msg.includes("not_owner") ||
-      msg.includes("quiz_not_found") ||
-      msg.includes("foreign_question_id") ||
-      msg.includes("id_count_mismatch")
-    ) {
+    // Same mapping as the lecturer twin (quizzes/[id]/reorder): ownership →
+    // 404, stale-client id-set drift → 400 with an actionable message.
+    if (msg.includes("not_owner") || msg.includes("quiz_not_found")) {
       return notFound();
+    }
+    if (msg.includes("foreign_question_id") || msg.includes("id_count_mismatch")) {
+      return invalidBody("The question list does not match the quiz. Refresh and try again.");
     }
     return internalError("Could not reorder the questions right now.");
   }

@@ -167,9 +167,18 @@ function LoginForm() {
   );
 }
 
+function LoginFallback() {
+  const tCommon = useTranslations("common");
+  return (
+    <div className="flex min-h-screen items-center justify-center font-bold text-muted-foreground">
+      {tCommon("loading")}
+    </div>
+  );
+}
+
 export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="flex min-h-screen items-center justify-center font-bold text-muted-foreground">Loading…</div>}>
+    <Suspense fallback={<LoginFallback />}>
       <LoginForm />
     </Suspense>
   );

@@ -145,15 +145,17 @@ export async function runExtractionPipeline(
 }
 
 /**
- * Run the chosen OCR engine. Requires a browser `File` (server-side callers
- * never reach this — they throw `ocr_required_browser` in the pipeline).
+ * Run the chosen OCR engine. Requires a browser `File` — the pipeline only
+ * routes here when one exists (server-side callers throw earlier), but the
+ * guard keeps the contract explicit instead of trusting a `!` assertion.
  */
 async function runOcr(
   opts: PipelineOptions,
   engine: ExtractEngine,
   cfg: Partial<OcrConfig>,
 ): Promise<ExtractionResult> {
-  const file = opts.file!;
+  const file = opts.file;
+  if (!file) throw new Error("no_input");
 
   if (engine === "glm") {
     const glm = await glmExtract(

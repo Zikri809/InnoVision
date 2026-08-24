@@ -2,9 +2,11 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireQuizOwner } from "@/lib/quizzes/guards";
 import { isUuid } from "@/lib/classes/roster";
+import { rateLimit } from "@/lib/classes/rate-limit";
 import { UpdateQuizSchema } from "@/lib/quizzes/validation";
 import { buildQuizUpdates } from "@/lib/quizzes/updates";
 import {
+  checkBodyLimit,
   checkSameOrigin,
   firstIssueMessage,
   internalError,
@@ -18,6 +20,9 @@ import {
 export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ id: string }> };
+
+// Per-lecturer mutation budget (student-surface parity; abuse bound).
+const MUTATE_RATE = { limit: 60, windowMs: 60 * 60 * 1000 };
 
 /**
  * PATCH /api/quizzes/[id] — rename / change mode / change time limit.
@@ -38,6 +43,13 @@ export async function PATCH(request: Request, { params }: Params) {
   // CSRF: reject cross-origin state changes (AI/session-route precedent).
   const originError = checkSameOrigin(request);
   if (originError) return originError;
+
+  if (!rateLimit(`quiz-mutate:${owner.userId}`, MUTATE_RATE)) {
+    return jsonError("rate_limited", "Too many updates. Try again later.", 429);
+  }
+
+  const sizeError = checkBodyLimit(request);
+  if (sizeError) return sizeError;
 
   let body: unknown;
   try {
@@ -116,6 +128,10 @@ export async function DELETE(request: Request, { params }: Params) {
   // precedent; a cross-site DELETE could otherwise cascade student sessions).
   const originError = checkSameOrigin(request);
   if (originError) return originError;
+
+  if (!rateLimit(`quiz-mutate:${owner.userId}`, MUTATE_RATE)) {
+    return jsonError("rate_limited", "Too many updates. Try again later.", 429);
+  }
 
   const { count, error: countError } = await supabase
     .from("quiz_sessions")

@@ -82,11 +82,15 @@ export async function PATCH(request: Request, { params }: Params) {
       if ((error.message ?? "").includes("not_owner")) return notFound();
       return internalError("Could not update sharing right now.");
     }
-    const { data } = await supabase
+    const { data, error: refetchError } = await supabase
       .from("student_quizzes")
       .select("id, title, description, share_code, created_at, updated_at")
       .eq("id", id)
       .single();
+    if (refetchError || !data) {
+      console.error("Unshare quiz refetch error:", refetchError);
+      return internalError("Could not update sharing right now.");
+    }
     return NextResponse.json({ quiz: data });
   }
 
@@ -103,18 +107,22 @@ export async function PATCH(request: Request, { params }: Params) {
     // transaction. The definer RPC is the ONLY share_code write path.
     for (let attempt = 0; attempt < CODE_ATTEMPTS; attempt++) {
       const code = generateShareCode();
-      const { data, error } = await supabase.rpc("student_quiz_share_action", {
+      const { error } = await supabase.rpc("student_quiz_share_action", {
         p_quiz_id: id,
         p_action: action,
         p_code: code,
       });
 
       if (!error) {
-        const { data: row } = await supabase
+        const { data: row, error: refetchError } = await supabase
           .from("student_quizzes")
           .select("id, title, description, share_code, created_at, updated_at")
           .eq("id", id)
           .single();
+        if (refetchError || !row) {
+          console.error("Share quiz refetch error:", refetchError);
+          return internalError("Could not update sharing right now.");
+        }
         return NextResponse.json({ quiz: row });
       }
 

@@ -217,7 +217,7 @@ async function main() {
 
   // ── SQ-D6: unshare nulls; re-share mints fresh ───────────────────
   await A.rpc("student_quiz_share_action", { p_quiz_id: quiz.id, p_action: "unshare" });
-  const { data: reShared, error: reErr } = await A.rpc("student_quiz_share_action", {
+  const { data: reShared } = await A.rpc("student_quiz_share_action", {
     p_quiz_id: quiz.id,
     p_action: "share", // code was nulled by the unshare above — share mints fresh
     p_code: "BBBBBBBB2B",
