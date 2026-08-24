@@ -34,9 +34,11 @@
 //         (event_quiz_id set) remain visible;
 //     (f) the student reads the view → 0 rows; raw audit_events SELECT as
 //         lecturer → denied (privilege layer).
-//   Race pin — reset concurrent with an in-flight answer_question: the loser
-//     gets not_owner (or session_not_active), never a 500 / partial write
-//     (atomic `for update`).
+//   Race pin — reset concurrent with an in-flight answer_question: whichever
+//     way the race resolves, the outcome is clean — a winning assessment
+//     answer returns the keyless {recorded:true} ack, a losing one gets
+//     not_owner (or session_not_active), and there is never a 500 / partial
+//     write (atomic `for update`).
 //   RPC error surface — the RPC's typed errors return cleanly (not_owner /
 //     not_lecturer / not_assessment), never a thrown payload. The
 //     503-on-transport/RPC-raise mapping is ROUTE-TEST-ONLY (a Node harness
@@ -339,8 +341,10 @@ async function main() {
       clientL.rpc("reset_session", { p_session_id: raceSession.id }),
     ]);
     const answerPayload = answerRes.data ?? {};
+    // Assessment answers are keyless ({recorded:true} — 0012 reveal-gate);
+    // is_correct only appears on practice-mode sessions.
     const loserClean = answerPayload.error === undefined
-      ? answerPayload.is_correct !== undefined
+      ? answerPayload.recorded === true || answerPayload.is_correct !== undefined
       : ["not_owner", "session_not_active"].includes(answerPayload.error);
     const resetWon = resetRes.data?.ok === true;
     // After the dust settles, the session is gone (atomic for update — no

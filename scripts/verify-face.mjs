@@ -321,7 +321,7 @@ async function main() {
     });
     record("D11b duplicate-detected enroll → pending_review",
       dupEnroll.data?.ok === true && dupEnroll.data?.status === "pending_review",
-      JSON.stringify(dupEnroll.data));
+      JSON.stringify(dupEnroll.data) + " err=" + JSON.stringify(dupEnroll.error));
 
     // RE-ENROLL while a live assessment exists → live_assessment (the
     // ever-enrolled marker survives; a revoke→re-enroll face swap is blocked).
