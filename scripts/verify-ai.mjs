@@ -1,17 +1,19 @@
 // Phase 4 security/RLS verification harness — runs against live local Supabase.
 // Covers gate tests:
-//   D34 — owner replaces a draft quiz's questions via replace_quiz_questions →
-//         old gone, new set order_index 0..n-1, title/source fields set
+//   D34 — owner replaces a draft quiz's questions via save_quiz_questions
+//         (replace mode) → old gone, new set order_index 0..n-1, title/source
+//         fields set (RPC returns void since 0019)
 //   D35 — non-owner lecturer / student / non-draft → typed errors; non-existent
-//         and non-owned quizzes raise the SAME 'not_owner' (no oracle);
-//         execute revoked from anon
+//         and non-owned quizzes raise the SAME 'not_quiz_owner' (no oracle);
+//         execute revoked from anon (restored by 0025)
 //   D36 — invalid payload → error and PRIOR questions untouched (rollback)
 //   D37 — after publish, a status-less UPDATE of source_text/source_file_url →
 //         quiz_not_draft_edit (edit-lock fires on any UPDATE)
 //   D38 — student sees no source_text/source_file_url/created_by via views;
 //         a second lecturer reads 0 rows of the live quiz (owner-only)
-//   D39 — N concurrent replace_quiz_questions on one draft quiz → no errors,
-//         valid final state (advisory lock serialization)
+//   D39 — N concurrent replaces via save_quiz_questions on one draft quiz →
+//         no errors, valid final state (advisory lock serialization,
+//         restored by 0025)
 //   D40 — source_text > 15000 via direct SQL → stored (cap removed)
 // NOT a unit test; run manually: node scripts/verify-ai.mjs
 import { createClient } from "@supabase/supabase-js";
@@ -144,15 +146,16 @@ async function main() {
 
   // ── D34: owner replaces draft questions atomically ─────────────
   const quiz34 = await makeDraftQuiz("D34 Quiz");
-  const { data: replaced, error: repErr } = await clientA.rpc("replace_quiz_questions", {
+  const { error: repErr } = await clientA.rpc("save_quiz_questions", {
     p_quiz_id: quiz34.id,
     p_title: "D34 Renamed",
     p_source_file_url: `${lecturerA.id}/${quiz34.id}/chapter.pdf`,
     p_source_text: "Velocity is displacement over time. Force equals mass times acceleration.",
     p_questions: makePayload("D34"),
+    p_mode: "replace",
   });
-  record("D34 replace succeeds", !repErr && Array.isArray(replaced) && replaced.length === 3,
-    repErr?.message ?? JSON.stringify(replaced));
+  // The RPC returns void since 0019 — success is "no error".
+  record("D34 replace succeeds", !repErr, repErr?.message ?? "ok");
 
   const { data: rows34 } = await clientA
     .from("questions")
@@ -178,12 +181,13 @@ async function main() {
 
   // ── D36: invalid payload → error, prior questions untouched ────
   const quiz36 = await makeDraftQuiz("D36 Quiz");
-  await clientA.rpc("replace_quiz_questions", {
+  await clientA.rpc("save_quiz_questions", {
     p_quiz_id: quiz36.id,
     p_title: null,
     p_source_file_url: null,
     p_source_text: null,
     p_questions: makePayload("D36"),
+    p_mode: "replace",
   });
   const invalidPayloads = [
     [],                                                                           // empty
@@ -195,12 +199,13 @@ async function main() {
   ];
   let d36Pass = true;
   for (const payload of invalidPayloads) {
-    const { error } = await clientA.rpc("replace_quiz_questions", {
+    const { error } = await clientA.rpc("save_quiz_questions", {
       p_quiz_id: quiz36.id,
       p_title: null,
       p_source_file_url: null,
       p_source_text: null,
       p_questions: payload,
+      p_mode: "replace",
     });
     if (!error) d36Pass = false;
   }
@@ -216,89 +221,97 @@ async function main() {
     `errorsOk=${d36Pass} remaining=${rows36?.length ?? 0}`);
 
   // ── D35: authZ + no-oracle + non-draft ─────────────────────────
-  const { error: s1ReplaceErr } = await clientS1.rpc("replace_quiz_questions", {
+  const { error: s1ReplaceErr } = await clientS1.rpc("save_quiz_questions", {
     p_quiz_id: quiz34.id,
     p_title: null,
     p_source_file_url: null,
     p_source_text: null,
     p_questions: makePayload("HACK"),
+    p_mode: "replace",
   });
   record("D35 student replace denied", Boolean(s1ReplaceErr), s1ReplaceErr?.message ?? "unexpectedly succeeded");
 
-  const { error: bReplaceErr } = await clientB.rpc("replace_quiz_questions", {
+  const { error: bReplaceErr } = await clientB.rpc("save_quiz_questions", {
     p_quiz_id: quiz34.id,
     p_title: null,
     p_source_file_url: null,
     p_source_text: null,
     p_questions: makePayload("HACK"),
+    p_mode: "replace",
   });
   record("D35 lecturer B replace on A's quiz denied", Boolean(bReplaceErr), bReplaceErr?.message ?? "unexpectedly succeeded");
 
   const ghostId = "00000000-0000-4000-8000-0000000000aa";
-  const { error: ghostErr } = await clientA.rpc("replace_quiz_questions", {
+  const { error: ghostErr } = await clientA.rpc("save_quiz_questions", {
     p_quiz_id: ghostId,
     p_title: null,
     p_source_file_url: null,
     p_source_text: null,
 p_questions: makePayload("GHOST"),
+    p_mode: "replace",
   });
   const ghostMsg = ghostErr?.message ?? "";
-  record("D35 non-existent quiz raises not_owner (no oracle)",
-    Boolean(ghostErr) && ghostMsg.includes("not_owner"),
+  record("D35 non-existent quiz raises not_quiz_owner (no oracle)",
+    Boolean(ghostErr) && ghostMsg.includes("not_quiz_owner"),
     ghostMsg);
 
   // D35 fold-in: an unauthenticated caller (raw anon key, no sign-in) must
-  // not be able to call replace_quiz_questions. The RPC's
-  // `revoke execute from public, anon` (migration 0007) is what guarantees
-  // this — if it regresses the call would either succeed or leak a different
-  // error code than a logged-in non-owner.
+  // not be able to call save_quiz_questions. The RPC's
+  // `revoke execute from public, anon` (migration 0016, restored by 0025
+  // after the 0019 drop/recreate lost it) is what guarantees this — if it
+  // regresses the call would either succeed or leak the authenticated
+  // 'not_authenticated'/'not_quiz_owner' errors to an anonymous caller.
   const anonClient = createClient(URL, ANON, { auth: { persistSession: false } });
   const { data: anonData, error: anonErr } = await anonClient.rpc(
-    "replace_quiz_questions",
+    "save_quiz_questions",
     {
       p_quiz_id: quiz34.id,
       p_title: null,
       p_source_file_url: null,
       p_source_text: null,
       p_questions: makePayload("ANON"),
+      p_mode: "replace",
     },
   );
   const anonMsg = anonErr?.message ?? "";
   record("D35 anon caller denied by revoke execute",
     Boolean(anonErr) &&
       (anonMsg.includes("permission denied") ||
-        anonMsg.includes("not_owner") ||
+        anonMsg.includes("Could not find") ||
+        anonMsg.includes("schema cache") ||
         anonMsg.includes("JWT")),
     `${anonMsg} | data=${JSON.stringify(anonData ?? null)?.slice(0, 60)}`);
-  // The error code MUST differ from the authenticated not_owner so a
+  // The error code MUST differ from the authenticated not_quiz_owner so a
   // non-authenticated caller learns nothing about quiz existence.
-  record("D35 anon error differs from authenticated not_owner (no oracle)",
+  record("D35 anon error differs from authenticated not_quiz_owner (no oracle)",
     anonMsg !== ghostMsg,
     `anon="${anonMsg}" ghost="${ghostMsg}"`);
 
-  // Non-draft (live) quiz → questions_locked_quiz_not_draft.
+  // Non-draft (live) quiz → quiz_not_draft.
   const quizLive = await makeDraftQuiz("D35 Live");
-  await clientA.rpc("replace_quiz_questions", {
+  await clientA.rpc("save_quiz_questions", {
     p_quiz_id: quizLive.id,
     p_title: null,
     p_source_file_url: null,
     p_source_text: null,
     p_questions: makePayload("LIVE"),
+    p_mode: "replace",
   });
   const { error: pubErr } = await clientA
     .from("quizzes")
     .update({ status: "live" })
     .eq("id", quizLive.id);
   assertNoError("publish live quiz", { error: pubErr });
-  const { error: liveReplaceErr } = await clientA.rpc("replace_quiz_questions", {
+  const { error: liveReplaceErr } = await clientA.rpc("save_quiz_questions", {
     p_quiz_id: quizLive.id,
     p_title: null,
     p_source_file_url: null,
     p_source_text: null,
     p_questions: makePayload("LIVE2"),
+    p_mode: "replace",
   });
   record("D35 replace on live quiz blocked",
-    Boolean(liveReplaceErr) && (liveReplaceErr.message ?? "").includes("questions_locked_quiz_not_draft"),
+    Boolean(liveReplaceErr) && (liveReplaceErr.message ?? "").includes("quiz_not_draft"),
     liveReplaceErr?.message ?? "unexpectedly replaced live quiz");
 
   // ── D37: status-less source update on a LIVE quiz → edit-lock ──
@@ -345,12 +358,13 @@ p_questions: makePayload("GHOST"),
   const CONCURRENT = 8;
   const repResults = await Promise.all(
     Array.from({ length: CONCURRENT }, (_, i) =>
-      clientA.rpc("replace_quiz_questions", {
+      clientA.rpc("save_quiz_questions", {
         p_quiz_id: quiz39.id,
         p_title: `D39-${i}`,
         p_source_file_url: null,
         p_source_text: `text-${i}`,
         p_questions: makePayload(`D39-${i}`),
+        p_mode: "replace",
       }),
     ),
   );

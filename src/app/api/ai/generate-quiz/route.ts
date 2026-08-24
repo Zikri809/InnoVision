@@ -338,8 +338,18 @@ async function handleGenerate(
   if (rpcError) {
     const msg = rpcError.message ?? "";
     console.error("save_quiz_questions error:", rpcError);
-    if (msg.includes("not_owner") || msg.includes("quiz_not_found")) return notFound();
-    if (msg.includes("questions_locked_quiz_not_draft")) return notDraft();
+    // 0019's save_quiz_questions raises not_quiz_owner / quiz_not_draft; the
+    // older codes are kept so the mapping survives future rewrites.
+    if (
+      msg.includes("not_owner") ||
+      msg.includes("not_quiz_owner") ||
+      msg.includes("quiz_not_found")
+    ) {
+      return notFound();
+    }
+    if (msg.includes("quiz_not_draft") || msg.includes("questions_locked_quiz_not_draft")) {
+      return notDraft();
+    }
     if (msg.includes("quiz_question_limit_exceeded")) {
       return unprocessable(
         "Appending these questions exceeds the maximum limit of 30 questions per quiz.",
