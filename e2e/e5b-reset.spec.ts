@@ -16,6 +16,25 @@ const LECTURER_INVITE_CODE = process.env.LECTURER_INVITE_CODE ?? "";
 const CLASS_TITLE = "E5b Reset";
 const QUIZ_TITLE = "E5b Assessment";
 
+type ServiceClient = NonNullable<ReturnType<typeof resolveServiceClient>>;
+
+/** Service-role lookup: the quiz id for a (class title, quiz title) pair.
+ * Prior E2E runs leave identically-titled rows behind, so take the newest. */
+async function resolveQuizId(
+  admin: ServiceClient,
+  classTitle: string,
+  quizTitle: string,
+): Promise<string | null> {
+  const { data } = await admin
+    .from("quizzes")
+    .select("id, classes!inner(title)")
+    .eq("title", quizTitle)
+    .eq("classes.title", classTitle)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  return (data as { id: string }[] | null)?.[0]?.id ?? null;
+}
+
 /**
  * E5b (Phase 8 gate) — lecturer resets an attempt → the one-attempt slot is
  * released → the student re-takes; mid-flight reset surfaces the D13 dead
@@ -93,6 +112,27 @@ test.describe("E5b — lecturer resets attempt", () => {
     await lecturerPage.getByRole("dialog").getByRole("button", { name: "Reset", exact: true }).click();
     // The row disappears after refresh.
     await expect(studentList1.getByText("Completed", { exact: true })).toHaveCount(0);
+
+    // Deterministic barrier: the lecturer's dashboard refreshing does NOT
+    // prove a fresh student RSC render sees the released slot (separate
+    // reads, separate commits — and e14's earlier reset would otherwise
+    // satisfy an unscoped count). Wait until a session_reset audited against
+    // THIS quiz is durable — same commit as the slot release — so the
+    // student's reload below can never resurrect the deleted attempt.
+    if (admin) {
+      await expect
+        .poll(async () => {
+          const quizId = await resolveQuizId(admin, CLASS_TITLE, QUIZ_TITLE);
+          if (!quizId) return 0;
+          const { count } = await admin
+            .from("audit_events")
+            .select("*", { count: "exact", head: true })
+            .eq("action", "session_reset")
+            .eq("metadata->>quiz_id", quizId);
+          return count ?? 0;
+        }, { timeout: 15_000 })
+        .toBeGreaterThanOrEqual(1);
+    }
 
     // ── 3. Student: Start again → SUCCEEDS (slot released) ──────────
     await studentPage.goto("/student/quizzes");

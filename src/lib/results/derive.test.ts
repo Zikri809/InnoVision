@@ -9,6 +9,8 @@ import {
 import { ABANDON_STALE_MS } from "./constants";
 
 const HOUR = 60 * 60 * 1000;
+const MINUTE = 60 * 1000;
+const SECOND = 1000;
 const NOW = 1_000_000 * HOUR; // arbitrary fixed "now"
 
 const ISO = (ms: number) => new Date(ms).toISOString();
@@ -510,6 +512,99 @@ describe("U-T4d — assembleResultsRows", () => {
     });
     expect(rows.find((r) => r.id === "p1")?.displayStatus).toBe("abandoned");
     expect(rows.find((r) => r.id === "p2")?.displayStatus).toBe("completed");
+  });
+
+  it("face checks group per session and flow into faceSummary + timeline", () => {
+    const rows = assembleResultsRows({
+      quiz: QUIZ,
+      sessions: [{ ...session({}), id: "s1", student_id: "stu" }],
+      roster: [],
+      faceChecks: [
+        { id: "fc2", session_id: "s1", checked_at: ISO(NOW - MINUTE), matched: true, distance: 0.3, trigger: "periodic", suspected_replay: false, too_frequent: false },
+        { id: "fc1", session_id: "s1", checked_at: ISO(NOW - 5 * MINUTE), matched: false, distance: null, trigger: "manual", suspected_replay: true, too_frequent: true },
+        // Wrong session — must not leak into s1's aggregates.
+        { id: "fcX", session_id: "OTHER", checked_at: ISO(NOW - MINUTE), matched: false, distance: null, trigger: "manual", suspected_replay: false, too_frequent: false },
+      ],
+      auditRows: [],
+      totalQuestions: 2,
+      nowMs: NOW,
+    });
+    expect(rows[0].faceSummary).toEqual({
+      fails: 1,
+      replays: 1,
+      tooFrequent: 1,
+      firstAt: NOW - 5 * MINUTE,
+      lastAt: NOW - MINUTE,
+    });
+    expect(rows[0].integrityTimeline.map((e) => e.kind)).toEqual(["face_check", "face_check"]);
+    expect(rows[0].integrityTimeline.map((e) => (e.kind === "face_check" ? e.id : ""))).toEqual(["fc1", "fc2"]);
+  });
+
+  it("advisories group per session and flow into advisorySummary", () => {
+    const rows = assembleResultsRows({
+      quiz: QUIZ,
+      sessions: [{ ...session({}), id: "s1", student_id: "stu" }],
+      roster: [],
+      faceChecks: [],
+      auditRows: [],
+      advisories: [
+        { session_id: "s1", adv_type: "second_face", first_seen_at: ISO(NOW - 9 * MINUTE), last_seen_at: ISO(NOW - 8 * MINUTE), occurrences: 2 },
+        { session_id: "s1", adv_type: "looked_away", first_seen_at: null, last_seen_at: ISO(NOW - MINUTE), occurrences: 3 },
+        { session_id: "s1", adv_type: "voice_activity", first_seen_at: null, last_seen_at: ISO(NOW - 2 * MINUTE), occurrences: -7.9 },
+        { session_id: "s1", adv_type: "headset_active", first_seen_at: null, last_seen_at: null, occurrences: Number.NaN },
+        { session_id: "s1", adv_type: "mystery_type", first_seen_at: null, last_seen_at: ISO(NOW - 30 * SECOND), occurrences: 1 },
+        { session_id: "OTHER", adv_type: "second_face", first_seen_at: null, last_seen_at: ISO(NOW), occurrences: 99 },
+      ],
+      totalQuestions: 1,
+      nowMs: NOW,
+    });
+    expect(rows[0].advisorySummary).toEqual({
+      secondFace: 2,
+      lookedAway: 3,
+      voiceActivity: 0,
+      headsetActive: 0,
+      lastAt: NOW - 30 * SECOND,
+    });
+  });
+
+  it("attributable row whose session matches NO fetched session but subject IS shown → legacyHistory (truncation)", () => {
+    // A non-reset attributable row (e.g. unlock) referencing a session outside
+    // the fetched page: its SUBJECT has a fetched session, so it must surface
+    // in the student aggregate rather than silently vanish.
+    const rows = assembleResultsRows({
+      quiz: QUIZ,
+      sessions: [{ ...session({}), id: "s1", student_id: "stu" }],
+      roster: [],
+      faceChecks: [],
+      auditRows: [
+        { id: "a1", actor_id: "lec1", subject_id: "stu", action: "unlock", created_at: ISO(NOW - HOUR), event_quiz_id: "q1", event_session_id: "TRUNCATED-AWAY" },
+      ],
+      totalQuestions: 1,
+      nowMs: NOW,
+    });
+    expect(rows[0].integrityTimeline).toEqual([]);
+    expect(rows[0].legacyHistory.filter((e) => e.kind === "audit").map((e) => e.action)).toEqual([
+      "unlock",
+    ]);
+  });
+
+  it("attributable non-reset audit row merges into the matching session timeline", () => {
+    const rows = assembleResultsRows({
+      quiz: QUIZ,
+      sessions: [{ ...session({}), id: "s1", student_id: "stu", face_unavailable_at: ISO(NOW - 4 * MINUTE) }],
+      roster: [],
+      faceChecks: [],
+      auditRows: [
+        { id: "a1", actor_id: "lec1", subject_id: "stu", action: "unlock", created_at: ISO(NOW - 2 * MINUTE), event_quiz_id: "q1", event_session_id: "s1" },
+      ],
+      totalQuestions: 1,
+      nowMs: NOW,
+    });
+    // unavailable marker (earlier) then audit unlock — type-priority tie-break untested here, order is by time.
+    expect(
+      rows[0].integrityTimeline.map((e) => (e.kind === "audit" ? e.action : e.kind)),
+    ).toEqual(["unavailable", "unlock"]);
+    expect(rows[0].legacyHistory).toEqual([]);
   });
 });
 

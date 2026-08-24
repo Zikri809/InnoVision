@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from "vitest";
 import { FakeSupabase, makeOwnerContext } from "@/app/api/quizzes/__tests__/fake-supabase";
-import { defaultAiServer, invalidJson, validQuizJson } from "@/test/msw/server";
-import { _resetRateLimiter, _seedRateLimit } from "@/lib/classes/rate-limit";
+import { defaultAiServer, invalidJson } from "@/test/msw/server";
+import { _resetRateLimiter } from "@/lib/classes/rate-limit";
 import { http, HttpResponse } from "msw";
 import * as generateRoute from "@/app/api/ai/generate-quiz/route";
 import * as regenerateRoute from "@/app/api/ai/regenerate-question/route";
@@ -42,13 +42,6 @@ function ownerContext(opts?: Parameters<typeof makeOwnerContext>[0]) {
   const ctx = makeOwnerContext(opts);
   fakeHolder.current = ctx.client;
   return ctx;
-}
-
-function studentContext() {
-  const client = new FakeSupabase();
-  client.setUser("00000000-0000-4000-8000-0000000000ff", "student");
-  fakeHolder.current = client;
-  return client;
 }
 
 function currentClient(): FakeSupabase {
@@ -444,5 +437,92 @@ describe("Phase 9 — Append mode, steering, difficulty, and multi-source paths"
       { params: Promise.resolve({ id: QUIZ_C }) },
     );
     expect(res.status).toBe(400);
+  });
+});
+
+describe("Server-side parse failure paths (downloadAndParseNative hardening)", () => {
+  it("storage download error → 404", async () => {
+    ownerContext();
+    const { generate } = await importHandlers();
+    const res = await generate.POST(
+      req({ quizId: QUIZ_C, sourcePath: `${OWNER_ID}/${QUIZ_C}/missing.txt` }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("file over the 25 MB server cap → 413 payload_too_large", async () => {
+    const ctx = ownerContext();
+    ctx.client.seedStorageFile(
+      `${OWNER_ID}/${QUIZ_C}/huge.txt`,
+      new Uint8Array(25_000_001),
+    );
+    const { generate } = await importHandlers();
+    const res = await generate.POST(
+      req({ quizId: QUIZ_C, sourcePath: `${OWNER_ID}/${QUIZ_C}/huge.txt` }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(413);
+    expect((await res.json()).error).toBe("payload_too_large");
+  });
+
+  it("unsupported extension → 422 unsupported_file_type", async () => {
+    const ctx = ownerContext();
+    ctx.client.seedStorageFile(
+      `${OWNER_ID}/${QUIZ_C}/virus.exe`,
+      new TextEncoder().encode("MZ binary"),
+    );
+    const { generate } = await importHandlers();
+    const res = await generate.POST(
+      req({ quizId: QUIZ_C, sourcePath: `${OWNER_ID}/${QUIZ_C}/virus.exe` }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe("unsupported_file_type");
+  });
+
+  it("corrupt pdf magic bytes → 422 parse_error", async () => {
+    const ctx = ownerContext();
+    ctx.client.seedStorageFile(
+      `${OWNER_ID}/${QUIZ_C}/fake.pdf`,
+      new TextEncoder().encode("definitely not a pdf"),
+    );
+    const { generate } = await importHandlers();
+    const res = await generate.POST(
+      req({ quizId: QUIZ_C, sourcePath: `${OWNER_ID}/${QUIZ_C}/fake.pdf` }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe("parse_error");
+  });
+
+  it("single file with too little text → 422 use_browser_ocr (lowConfidence)", async () => {
+    const ctx = ownerContext();
+    ctx.client.seedStorageFile(
+      `${OWNER_ID}/${QUIZ_C}/scan.txt`,
+      new TextEncoder().encode("hi"),
+    );
+    const { generate } = await importHandlers();
+    const res = await generate.POST(
+      req({ quizId: QUIZ_C, sourcePath: `${OWNER_ID}/${QUIZ_C}/scan.txt` }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe("use_browser_ocr");
+  });
+
+  it("binary disguised as .txt → 422 parse_error (null-byte guard)", async () => {
+    const ctx = ownerContext();
+    ctx.client.seedStorageFile(
+      `${OWNER_ID}/${QUIZ_C}/binary.txt`,
+      new Uint8Array([0x68, 0x69, 0x00, 0x00, 0x01]),
+    );
+    const { generate } = await importHandlers();
+    const res = await generate.POST(
+      req({ quizId: QUIZ_C, sourcePath: `${OWNER_ID}/${QUIZ_C}/binary.txt` }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe("parse_error");
   });
 });

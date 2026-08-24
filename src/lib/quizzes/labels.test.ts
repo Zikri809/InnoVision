@@ -4,6 +4,8 @@ import {
   STATUS_CLASS,
   MODE_LABEL,
   MODE_CLASS,
+  getStatusLabel,
+  getModeLabel,
 } from "./labels";
 
 describe("labels constants and classes (U-M19..U-M20)", () => {
@@ -35,5 +37,31 @@ describe("labels constants and classes (U-M19..U-M20)", () => {
     expect(MODE_CLASS.assessment).toContain("border-blue-300");
     expect(MODE_CLASS.assessment).toContain("text-blue-900");
     expect(MODE_CLASS.assessment).toContain("dark:border-blue-700/50");
+  });
+
+  it("U-M21 getStatusLabel resolves English labels by default and for explicit en", () => {
+    expect(getStatusLabel("draft")).toBe("Draft");
+    expect(getStatusLabel("live")).toBe("Live");
+    expect(getStatusLabel("closed")).toBe("Closed");
+    expect(getStatusLabel("live", "en")).toBe("Live");
+  });
+
+  it("U-M21b getStatusLabel falls back to the raw status for unknown locales", () => {
+    expect(getStatusLabel("live", "fr")).toBe("Live");
+  });
+
+  it("U-M22 getModeLabel resolves Malay labels and falls back to raw mode", () => {
+    expect(getModeLabel("practice", "ms")).toBe("Latihan");
+    expect(getModeLabel("assessment", "ms")).toBe("Penilaian");
+    expect(getModeLabel("assessment", "xx")).toBe("Assessment");
+  });
+
+  it("U-M23 defensive fallback: unknown enum value echoes itself (never undefined)", () => {
+    const bogus = "archived" as Parameters<typeof getStatusLabel>[0];
+    expect(getStatusLabel(bogus)).toBe("archived");
+    expect(getStatusLabel(bogus, "ms")).toBe("archived");
+    const bogusMode = "quiz" as Parameters<typeof getModeLabel>[0];
+    expect(getModeLabel(bogusMode)).toBe("quiz");
+    expect(getModeLabel(bogusMode, "ms")).toBe("quiz");
   });
 });

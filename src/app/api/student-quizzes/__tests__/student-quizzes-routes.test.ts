@@ -237,7 +237,70 @@ describe("questions routes", () => {
     expect(gone.status).toBe(404);
   });
 
-  it("reorder validates exact id set; mismatched set → 404", async () => {
+  it("PATCH: malformed UUIDs → 404; invalid JSON → 400", async () => {
+    const ctx = makeStudentQuizContext();
+    fakeHolder.current = ctx.client;
+    const { questionRoute } = await importAll();
+    const p = { params: Promise.resolve({ id: ctx.quizId, questionId: ctx.q1 }) };
+
+    expect(
+      (await questionRoute.PATCH(req(validQuestion), {
+        params: Promise.resolve({ id: "not-a-uuid", questionId: ctx.q1 }),
+      })).status,
+    ).toBe(404);
+
+    const badJson = new Request("http://localhost/x", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: "{not json",
+    });
+    expect((await questionRoute.PATCH(badJson, p)).status).toBe(400);
+  });
+
+  it("PATCH maps DB constraint errors → 400 and unknown DB failures → 503", async () => {
+    const ctx = makeStudentQuizContext();
+    fakeHolder.current = ctx.client;
+    const { questionRoute } = await importAll();
+    const p = { params: Promise.resolve({ id: ctx.quizId, questionId: ctx.q1 }) };
+
+    ctx.client.updateError = "duplicate_options";
+    expect((await questionRoute.PATCH(req(validQuestion), p)).status).toBe(400);
+
+    ctx.client.updateError = "explanation_too_long";
+    expect((await questionRoute.PATCH(req(validQuestion), p)).status).toBe(400);
+
+    ctx.client.updateError = "connection reset by peer";
+    expect((await questionRoute.PATCH(req(validQuestion), p)).status).toBe(503);
+  });
+
+  it("DELETE removes one of my questions; absent id → 404; DB failure → 503", async () => {
+    const ctx = makeStudentQuizContext();
+    fakeHolder.current = ctx.client;
+    const { questionRoute } = await importAll();
+
+    // Absent uuid under MY quiz → the update/delete matched nothing → 404.
+    const absent = await questionRoute.DELETE(req(), {
+      params: Promise.resolve({ id: ctx.quizId, questionId: crypto.randomUUID() }),
+    });
+    expect(absent.status).toBe(404);
+
+    const ok = await questionRoute.DELETE(req(), {
+      params: Promise.resolve({ id: ctx.quizId, questionId: ctx.q1 }),
+    });
+    expect(ok.status).toBe(200);
+    expect((await ok.json()).ok).toBe(true);
+    expect(
+      (ctx.client.tables["student_quiz_questions"] ?? []).find((q) => q.id === ctx.q1),
+    ).toBeUndefined();
+
+    ctx.client.updateError = "connection reset by peer";
+    const failed = await questionRoute.DELETE(req(), {
+      params: Promise.resolve({ id: ctx.quizId, questionId: ctx.q2 }),
+    });
+    expect(failed.status).toBe(503);
+  });
+
+  it("reorder validates exact id set; mismatched set → 400 (lecturer-surface parity)", async () => {
     const ctx = makeStudentQuizContext();
     fakeHolder.current = ctx.client;
     const { reorder } = await importAll();
@@ -246,8 +309,10 @@ describe("questions routes", () => {
     const ok = await reorder.POST(req({ questionIds: [ctx.q2, ctx.q1] }), p);
     expect(ok.status).toBe(200);
 
+    // A stale/partial id set is a client payload bug, not a missing resource —
+    // same mapping as quizzes/[id]/reorder: id_count_mismatch → 400.
     const bad = await reorder.POST(req({ questionIds: [ctx.q1] }), p);
-    expect(bad.status).toBe(404);
+    expect(bad.status).toBe(400);
   });
 });
 
