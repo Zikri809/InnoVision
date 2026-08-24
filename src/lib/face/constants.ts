@@ -60,8 +60,16 @@ export const FLAGGED_POLL_MS = 8000;
 /** Blendshape upper bound for "eye open" (`eyeBlinkLeft/Right`). */
 export const EYE_OPEN_MAX = 0.4;
 
-/** Blendshape lower bound for "eye closed" (`eyeBlinkLeft/Right`). */
-export const EYE_CLOSED_MIN = 0.6;
+/**
+ * Blendshape lower bound for "eye closed" (`eyeBlinkLeft/Right`).
+ * Tuned DOWN from 0.6 after live testing: a natural-speed blink peaks around
+ * 0.45–0.6 on the blendshape ramp and lasts ~3 frames at the tracker's ~30fps
+ * sampling, so requiring ≥0.6 forced users into exaggerated long blinks. At
+ * 0.5 a soft/quick blink still crosses while the anti-spoof property is
+ * unchanged — a static photo can never produce the required OPEN→closed
+ * TRANSITION regardless of where the closed threshold sits.
+ */
+export const EYE_CLOSED_MIN = 0.5;
 
 /**
  * Minimum interval between face checks (advisory `too_frequent` flag in

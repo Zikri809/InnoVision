@@ -121,6 +121,36 @@ export class FaceTracker implements IFaceTracker {
   private currentLandmarks: { x: number; y: number; z?: number }[] | null = null;
   private currentLighting: "good" | "too_dark" | "too_bright" = "good";
   private lastLuminanceSampleAt = 0;
+  /**
+   * Per-user neutral baseline for the nose-ratio proxy. The raw ratio at
+   * "looking straight" varies with facial anatomy AND webcam placement (a
+   * side-placed webcam alone can read ~15-20 units), so absolute thresholds
+   * misfire per person. When set, yaw is reported RELATIVE to this baseline.
+   */
+  private ratioBaseline: number | null = null;
+  private lastRawRatio: number | null = null;
+
+  /**
+   * Sample the live nose ratio for `sampleMs` and store the mean as the
+   * user's neutral pose. Call while the user looks straight at the camera
+   * (top of the guided enrollment). Falls back silently when the loop is not
+   * producing landmarks — the baseline simply stays unset (absolute mode).
+   */
+  async calibrateNeutral(sampleMs: number = 900): Promise<void> {
+    if (this.disposed) return;
+    const samples: number[] = [];
+    const deadline = Date.now() + sampleMs;
+    while (Date.now() < deadline && !this.disposed) {
+      if (this.lastRawRatio !== null) samples.push(this.lastRawRatio);
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    if (samples.length >= 5) {
+      // Trim outliers (blinks/mid-motion spikes) then average.
+      samples.sort((a, b) => a - b);
+      const kept = samples.slice(Math.floor(samples.length * 0.2), Math.ceil(samples.length * 0.8));
+      this.ratioBaseline = kept.reduce((s, v) => s + v, 0) / kept.length;
+    }
+  }
 
   constructor(video: HTMLVideoElement) {
     this.video = video;
@@ -524,13 +554,22 @@ export class FaceTracker implements IFaceTracker {
               const span = rightCheek.x - leftCheek.x;
               if (span > 0.01) {
                 const ratio = (nose.x - leftCheek.x) / span;
-                // Ratio ~0.5 when looking straight; >0.55 when turning left; <0.45 when turning right
-                yaw = Math.round((ratio - 0.5) * 100);
+                this.lastRawRatio = ratio;
+                // SCREEN-space yaw RELATIVE to the user's calibrated neutral
+                // (or the geometric midpoint when uncalibrated): positive =
+                // the on-screen face turns toward SCREEN-left, negative =
+                // screen-right. The mirrored display (`scale-x-[-1]`) flips
+                // raw nose travel, so negate here to match what the user
+                // SEES. All other consumers use |yaw| (attention advisories,
+                // quality score, getFaceHealth).
+                const neutral = this.ratioBaseline ?? 0.5;
+                yaw = Math.round((neutral - ratio) * 100);
               }
               centered = nose.x >= 0.30 && nose.x <= 0.70 && nose.y >= 0.20 && nose.y <= 0.80;
             }
           } else {
             this.currentLandmarks = null;
+            this.lastRawRatio = null;
           }
           let lighting: "good" | "too_dark" | "too_bright" = this.currentLighting;
           if (faceDetected && now - this.lastLuminanceSampleAt >= 250) {

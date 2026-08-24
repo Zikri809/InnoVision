@@ -29,6 +29,7 @@ const comprefaceMock = {
   health: vi.fn(),
   isMockMatchFrame: (f: string) => f.includes("FAKE_FRAME_MATCH"),
   isMockMismatchFrame: (f: string) => f.includes("FAKE_FRAME_MISMATCH"),
+  isMockModeEnabled: () => process.env.COMPREFACE_MOCK_ENABLED === "1",
 };
 vi.mock("@/lib/face/server/compreface-client", () => ({
   recognize: (...a: unknown[]) => comprefaceMock.recognize(...a),
@@ -50,6 +51,7 @@ vi.mock("@/lib/face/server/compreface-client", () => ({
   health: (...a: unknown[]) => comprefaceMock.health(...a),
   isMockMatchFrame: (f: string) => f.includes("FAKE_FRAME_MATCH"),
   isMockMismatchFrame: (f: string) => f.includes("FAKE_FRAME_MISMATCH"),
+  isMockModeEnabled: () => process.env.COMPREFACE_MOCK_ENABLED === "1",
 }));
 
 const enroll = enrollRoute;
@@ -211,45 +213,64 @@ describe("I3 — enroll rejects invalid frames", () => {
 
   it("returns 400 pose_invalid when CompreFace detect returns a bad yaw", async () => {
     faceContext({ seedSession: false });
-    // Non-match frames so pose validation runs; front yaw 90 is out of range.
-    comprefaceMock.detect.mockResolvedValue({ faces: [{ yaw: 90 }] });
-    const res = await enroll.POST(
-      req({ frames: ["data:image/jpeg;base64,PLAIN_F", "data:image/jpeg;base64,PLAIN_L", "data:image/jpeg;base64,PLAIN_R"] }),
-    );
-    expect(res.status).toBe(400);
-    expect((await res.json()).error).toBe("pose_invalid");
+    // Real-mode simulation: pose validation only runs OUTSIDE mock mode
+    // (the route skips it entirely while COMPREFACE_MOCK_ENABLED=1 because
+    // the mocked detect() returns yaw 0 for everything).
+    const prevFlag = process.env.COMPREFACE_MOCK_ENABLED;
+    delete process.env.COMPREFACE_MOCK_ENABLED;
+    try {
+      // Non-match frames so pose validation runs; front yaw 90 is out of range.
+      comprefaceMock.detect.mockResolvedValue({ faces: [{ yaw: 90 }] });
+      const res = await enroll.POST(
+        req({ frames: ["data:image/jpeg;base64,PLAIN_F", "data:image/jpeg;base64,PLAIN_L", "data:image/jpeg;base64,PLAIN_R"] }),
+      );
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("pose_invalid");
+    } finally {
+      if (prevFlag === undefined) delete process.env.COMPREFACE_MOCK_ENABLED;
+      else process.env.COMPREFACE_MOCK_ENABLED = prevFlag;
+    }
   });
 });
 
 describe("I-dup — duplicate identity detected at enroll → pending_review", () => {
   it("flags pending_review when a different subject matches with high similarity", async () => {
     const ctx = faceContext({ seedSession: false });
-    // Use NON-match frames so the route's duplicate check (recognize) runs.
-    const nonMatchFrames = [
-      "data:image/jpeg;base64,PLAIN_FRONT",
-      "data:image/jpeg;base64,PLAIN_LEFT",
-      "data:image/jpeg;base64,PLAIN_RIGHT",
-    ];
-    // Pose validation: detect returns yaw 0 for all (front ok, but left/right
-    // would fail pose... so mock detect to return valid yaw per frame).
-    comprefaceMock.detect.mockImplementation(async (frame: string) => {
-      if (frame.includes("PLAIN_LEFT")) return { faces: [{ yaw: 40 }] };
-      if (frame.includes("PLAIN_RIGHT")) return { faces: [{ yaw: -40 }] };
-      return { faces: [{ yaw: 0 }] };
-    });
-    // CompreFace recognize (used for the duplicate check) returns a DIFFERENT
-    // subject with similarity above FACE_SUSPICION_MIN (0.45).
-    comprefaceMock.recognize.mockResolvedValue({
-      subject: "00000000-0000-4000-8000-0000000000aa",
-      similarity: 0.8,
-      subjects: [{ subject: "00000000-0000-4000-8000-0000000000aa", similarity: 0.8 }],
-    });
-    const res = await enroll.POST(req({ frames: nonMatchFrames }));
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.status).toBe("pending_review");
-    const profile = ctx.client.tables["profiles"]!.find((p) => p.id === STUDENT_ID);
-    expect(profile?.face_enrollment_status).toBe("pending_review");
+    // Real-mode simulation: the duplicate check only runs OUTSIDE mock mode
+    // (mirrors the pose-validation skip — see I3 above).
+    const prevFlag = process.env.COMPREFACE_MOCK_ENABLED;
+    delete process.env.COMPREFACE_MOCK_ENABLED;
+    try {
+      // Use NON-match frames so the route's duplicate check (recognize) runs.
+      const nonMatchFrames = [
+        "data:image/jpeg;base64,PLAIN_FRONT",
+        "data:image/jpeg;base64,PLAIN_LEFT",
+        "data:image/jpeg;base64,PLAIN_RIGHT",
+      ];
+      // Pose validation: detect returns yaw 0 for all (front ok, but left/right
+      // would fail pose... so mock detect to return valid yaw per frame).
+      comprefaceMock.detect.mockImplementation(async (frame: string) => {
+        if (frame.includes("PLAIN_LEFT")) return { faces: [{ yaw: 40 }] };
+        if (frame.includes("PLAIN_RIGHT")) return { faces: [{ yaw: -40 }] };
+        return { faces: [{ yaw: 0 }] };
+      });
+      // CompreFace recognize (used for the duplicate check) returns a DIFFERENT
+      // subject with similarity above FACE_SUSPICION_MIN (0.45).
+      comprefaceMock.recognize.mockResolvedValue({
+        subject: "00000000-0000-4000-8000-0000000000aa",
+        similarity: 0.8,
+        subjects: [{ subject: "00000000-0000-4000-8000-0000000000aa", similarity: 0.8 }],
+      });
+      const res = await enroll.POST(req({ frames: nonMatchFrames }));
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.status).toBe("pending_review");
+      const profile = ctx.client.tables["profiles"]!.find((p) => p.id === STUDENT_ID);
+      expect(profile?.face_enrollment_status).toBe("pending_review");
+    } finally {
+      if (prevFlag === undefined) delete process.env.COMPREFACE_MOCK_ENABLED;
+      else process.env.COMPREFACE_MOCK_ENABLED = prevFlag;
+    }
   });
 });
 

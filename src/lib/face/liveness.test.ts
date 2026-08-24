@@ -25,7 +25,7 @@ describe("BlinkDetector", () => {
   it("U-F5: already-closed at start → failed (not a false pass)", () => {
     const d = new BlinkDetector();
     expect(d.update(0.9, 0.9)).toBe("pending"); // still closed, no open seen
-    expect(d.update(0.5, 0.5)).toBe("failed"); // ambiguous after closed → failed
+    expect(d.update(0.45, 0.45)).toBe("failed"); // ambiguous after closed → failed
   });
 
   it("U-F5: reset re-arms the detector", () => {
@@ -43,14 +43,29 @@ describe("BlinkDetector", () => {
     const d = new BlinkDetector();
     // First see a genuine open sample.
     expect(d.update(0.1, 0.1)).toBe("pending");
-    // 0.5 is above EYE_OPEN_MAX (0.4) and below EYE_CLOSED_MIN (0.6).
-    expect(d.update(0.5, 0.5)).toBe("pending");
+    // 0.45 is above EYE_OPEN_MAX (0.4) and below EYE_CLOSED_MIN (0.5).
+    expect(d.update(0.45, 0.45)).toBe("pending");
     expect(d.update(0.1, 0.1)).toBe("pending");
+  });
+
+  it("U-F5: soft blink peaking at 0.55 → passed (natural-speed blinks count)", () => {
+    const d = new BlinkDetector();
+    expect(d.update(0.1, 0.1)).toBe("pending"); // open
+    expect(d.update(0.3, 0.3)).toBe("pending"); // ramping (ambiguous zone)
+    expect(d.update(0.55, 0.55)).toBe("passed"); // peak crosses EYE_CLOSED_MIN=0.5
+  });
+
+  it("U-F5: turned-pose blink (far eye occluded) → passed via dominant single eye", () => {
+    const d = new BlinkDetector();
+    expect(d.update(0.12, 0.12)).toBe("pending"); // both eyes open
+    // Near eye closes fully, far eye barely moves — the classic turned-pose
+    // signature that the both-eyes rule used to strand.
+    expect(d.update(0.62, 0.18)).toBe("passed");
   });
 
   it("U-F5: ambiguous before any open sample → failed (unverifiable start)", () => {
     const d = new BlinkDetector();
-    expect(d.update(0.5, 0.5)).toBe("failed");
+    expect(d.update(0.45, 0.45)).toBe("failed");
   });
 
   it("U-F5: threshold boundaries use the constants", () => {

@@ -92,6 +92,17 @@ export function isMockMismatchFrame(frame: string): boolean {
   return isMockMode() && frame.includes(MOCK_MISMATCH_MARKER);
 }
 
+/**
+ * True when CompreFace mock mode is enabled (dev/E2E only — production
+ * never qualifies). Routes branch on this to skip live-service validation
+ * (e.g. enroll pose checks) that would otherwise be fed canned responses.
+ * A developer testing the UI with a REAL webcam while the flag is on is not
+ * an error case anymore: their frames simply bypass the mocked-out stages.
+ */
+export function isMockModeEnabled(): boolean {
+  return isMockMode();
+}
+
 let warnedMissingKey = false;
 
 async function comprefaceFetch(

@@ -37,17 +37,22 @@ export class BlinkDetector {
   update(left: number, right: number): BlinkState {
     if (this.state !== "pending") return this.state;
 
+    // CLOSED is evaluated FIRST: the single-eye rule overlaps the open
+    // fallbacks (e.g. left=0.62/right=0.18 averages to "open"), and a strong
+    // closure must always win the tie — otherwise turned-pose blinks read as
+    // permanently open.
+    const isClosed =
+      (left >= this.eyeClosedMin && right >= this.eyeClosedMin) ||
+      // Dominant single-eye closure also counts: at a turned pose the FAR eye
+      // is geometrically occluded and its blendshape stays low even mid-blink
+      // — requiring both eyes stranded blinks at the exact angles the guided
+      // enrollment asks for. A strong one-eye close is still a voluntary
+      // live-motion transition (a photo can never produce it).
+      Math.max(left, right) >= this.eyeClosedMin;
     const isOpen =
       (left <= this.eyeOpenMax && right <= this.eyeOpenMax) ||
       (Math.min(left, right) <= this.eyeOpenMax && (left + right) / 2 <= 0.48);
-    const isClosed =
-      (left >= this.eyeClosedMin && right >= this.eyeClosedMin) ||
-      (Math.max(left, right) >= this.eyeClosedMin && (left + right) / 2 >= 0.45);
 
-    if (isOpen) {
-      this.wasOpen = true;
-      return this.state;
-    }
     if (isClosed) {
       if (this.wasOpen) {
         // Open→closed transition → genuine blink observed.
@@ -55,6 +60,10 @@ export class BlinkDetector {
         return this.state;
       }
       // Closed but no open sample yet (camera started mid-blink) — wait.
+      return this.state;
+    }
+    if (isOpen) {
+      this.wasOpen = true;
       return this.state;
     }
 

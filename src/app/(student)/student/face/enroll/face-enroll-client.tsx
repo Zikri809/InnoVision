@@ -3,8 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { CircleAlert, CircleCheck, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useFaceTracker } from "@/components/face/use-face-tracker";
 import type { LivePose } from "@/lib/face/types";
 import {
@@ -14,7 +22,14 @@ import {
   LIVENESS_TIMEOUT_MS,
 } from "@/lib/face/constants";
 
-type CaptureState = "idle" | "blink" | "capturing" | "done" | "failed" | "pending_review";
+type CaptureState =
+  | "idle"
+  | "blink"
+  | "capturing"
+  | "processing"
+  | "done"
+  | "failed"
+  | "pending_review";
 
 export function FaceEnrollClient({
   consentGiven,
@@ -39,6 +54,7 @@ export function FaceEnrollClient({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [revoking, setRevoking] = useState(false);
+  const [resultOpen, setResultOpen] = useState(false);
   const [currentAngle, setCurrentAngle] = useState<number>(0);
   const [pose, setPose] = useState<LivePose>({
     yaw: 0,
@@ -69,6 +85,19 @@ export function FaceEnrollClient({
     if (index === 0) return t("angleFront");
     if (index === 1) return t("angleLeft");
     return t("angleRight");
+  }
+
+  // Single source of truth for the "what to do now" instruction — reused by
+  // BOTH the big video overlay and the bottom status chip so they can never
+  // drift apart.
+  function currentInstruction(): string | null {
+    if (captureState !== "blink") return null;
+    if (!pose.faceDetected) return null;
+    if (currentAngle === 0)
+      return Math.abs(pose.yaw) <= 15 ? t("goodBlink") : t("lookStraight");
+    if (currentAngle === 1)
+      return pose.yaw > 45 ? t("turnLess") : pose.yaw >= 10 ? t("goodBlink") : t("turnLeft");
+    return pose.yaw < -45 ? t("turnLess") : pose.yaw <= -10 ? t("goodBlink") : t("turnRight");
   }
 
   function getLightingText(lighting?: "good" | "too_dark" | "too_bright") {
@@ -171,6 +200,15 @@ export function FaceEnrollClient({
     captureStartRef.current = Date.now();
 
     try {
+      // Per-user calibration: the yaw proxy measures nose position relative
+      // to the cheeks, so "straight" is not a universal zero (webcam offset
+      // alone can read ~15-20 units). Sample ~1s of the user looking
+      // straight and make all thresholds RELATIVE to their neutral pose.
+      setNotice(t("lookStraight"));
+      await tracker.calibrateNeutral?.(900);
+      if (disposedRef.current) return;
+      setNotice(null);
+
       for (let i = 0; i < ENROLL_ANGLES.length; i++) {
         if (disposedRef.current) return;
         setCurrentAngle(i);
@@ -194,7 +232,12 @@ export function FaceEnrollClient({
         framesRef.current.push(frame);
       }
 
-      setCaptureState("capturing");
+      // All three frames are in — the remaining ~1.4s is server-side work
+      // (pose check + duplicate recognize ×3 + example upload ×3 + RPC).
+      // Surface it honestly: open the dialog as "Processing…" and let the
+      // content swap to the result when the response lands.
+      setCaptureState("processing");
+      setResultOpen(true);
       const res = await fetch("/api/face/enroll", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -204,14 +247,17 @@ export function FaceEnrollClient({
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         setCaptureState("failed");
+        setResultOpen(false);
         setError(body.message ?? body.error ?? t("statusFailed"));
         return;
       }
       if (body.status === "pending_review") {
         setCaptureState("pending_review");
+        setResultOpen(true);
         return;
       }
       setCaptureState("done");
+      setResultOpen(true);
       router.refresh();
     } catch {
       if (disposedRef.current) return;
@@ -248,48 +294,63 @@ export function FaceEnrollClient({
         {available && (
           <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-between p-4">
             <div className="flex gap-2 rounded-full bg-black/60 px-3 py-1.5 backdrop-blur-md">
-              <span
-                className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${
-                  currentAngle === 0
-                    ? "bg-amber-400 text-black"
-                    : currentAngle > 0
-                    ? "bg-emerald-500 text-white"
-                    : "bg-white/20 text-white/70"
-                }`}
-              >
-                1. {t("angleFront")} {currentAngle > 0 && "✓"}
-              </span>
-              <span
-                className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${
-                  currentAngle === 1
-                    ? "bg-amber-400 text-black"
-                    : currentAngle > 1
-                    ? "bg-emerald-500 text-white"
-                    : "bg-white/20 text-white/70"
-                }`}
-              >
-                2. {t("angleLeft")} {currentAngle > 1 && "✓"}
-              </span>
-              <span
-                className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${
-                  currentAngle === 2
-                    ? "bg-amber-400 text-black"
-                    : captureState === "done"
-                    ? "bg-emerald-500 text-white"
-                    : "bg-white/20 text-white/70"
-                }`}
-              >
-                3. {t("angleRight")} {captureState === "done" && "✓"}
-              </span>
+              {([
+                { label: t("angleFront"), index: 0 },
+                { label: t("angleLeft"), index: 1 },
+                { label: t("angleRight"), index: 2 },
+              ] as const).map(({ label, index }) => {
+                // Completed = flow finished (incl. pending_review) or already
+                // past this angle; active = currently being captured.
+                const complete =
+                  captureState === "done" || captureState === "pending_review" || currentAngle > index;
+                const active = !complete && currentAngle === index;
+                return (
+                  <span
+                    key={index}
+                    className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${
+                      complete
+                        ? "bg-emerald-500 text-white"
+                        : active
+                        ? "bg-amber-400 text-black"
+                        : "bg-white/20 text-white/70"
+                    }`}
+                  >
+                    {index + 1}. {label} {complete && "✓"}
+                  </span>
+                );
+              })}
             </div>
+
+            {/* BIG instruction overlay — mirrors currentInstruction() so the
+                prompt is readable at arm's length, not just in the tiny
+                bottom chip. aria-hidden: the bottom chip stays the live
+                region so screen readers announce it exactly once. */}
+            {currentInstruction() && (
+              <div
+                aria-hidden
+                className="absolute left-1/2 top-[4.5rem] -translate-x-1/2 rounded-full bg-black/80 px-5 py-2.5 text-base sm:text-lg font-extrabold text-white shadow-lg backdrop-blur-md"
+              >
+                <span
+                  className={
+                    currentInstruction() === t("goodBlink")
+                      ? "text-emerald-400"
+                      : currentInstruction() === t("turnLess")
+                      ? "text-rose-300"
+                      : "text-white"
+                  }
+                >
+                  {currentInstruction()}
+                </span>
+              </div>
+            )}
 
             <div
               className={`h-40 w-32 sm:h-48 sm:w-36 rounded-[50%] border-4 transition-all duration-300 ${
                 !pose.faceDetected
                   ? "border-dashed border-white/50"
                   : (currentAngle === 0 && Math.abs(pose.yaw) <= 15 && pose.centered) ||
-                    (currentAngle === 1 && pose.yaw >= 10) ||
-                    (currentAngle === 2 && pose.yaw <= -10)
+                    (currentAngle === 1 && pose.yaw >= 10 && pose.yaw <= 45) ||
+                    (currentAngle === 2 && pose.yaw <= -10 && pose.yaw >= -45)
                   ? "scale-105 border-emerald-400 bg-emerald-500/10 shadow-[0_0_20px_rgba(52,211,153,0.5)]"
                   : "border-amber-400/80 bg-amber-400/5 shadow-[0_0_15px_rgba(251,191,36,0.3)]"
               }`}
@@ -309,11 +370,9 @@ export function FaceEnrollClient({
                   </span>
                   <span className="text-white/40">|</span>
                   <span>{t("angleStatus", { deg: Math.abs(pose.yaw) })}</span>
-                  <span className="text-emerald-300">
-                    {currentAngle === 0 && (Math.abs(pose.yaw) <= 15 ? t("goodBlink") : t("lookStraight"))}
-                    {currentAngle === 1 && (pose.yaw >= 10 ? t("goodBlink") : t("turnLeft"))}
-                    {currentAngle === 2 && (pose.yaw <= -10 ? t("goodBlink") : t("turnRight"))}
-                  </span>
+                  {currentInstruction() && (
+                    <span className="text-emerald-300">{currentInstruction()}</span>
+                  )}
                 </>
               )}
             </div>
@@ -389,6 +448,7 @@ export function FaceEnrollClient({
               {!booting && captureState === "blink" && t("statusBlink", { angle: getAngleLabel(currentAngle) })}
               {!booting && captureState === "capturing" &&
                 t("statusCapturing", { current: currentAngle + 1, total: ENROLL_ANGLES.length, angle: getAngleLabel(currentAngle) })}
+              {!booting && captureState === "processing" && t("statusProcessing")}
               {!booting && captureState === "done" && t("statusDone")}
               {!booting && captureState === "pending_review" && t("statusPendingReview")}
               {!booting && captureState === "failed" && t("statusFailed")}
@@ -410,7 +470,7 @@ export function FaceEnrollClient({
               variant="outline"
               size="lg"
               onClick={() => void handleRevoke()}
-              disabled={revoking || captureState === "capturing" || captureState === "blink"}
+              disabled={revoking || captureState === "capturing" || captureState === "blink" || captureState === "processing"}
               className="text-destructive hover:bg-destructive/10 hover:text-destructive"
             >
               {revoking ? t("revokingConsent") : t("revokeConsentBtn")}
@@ -418,6 +478,47 @@ export function FaceEnrollClient({
           </div>
         </div>
       )}
+
+      {/* Result popup — opens as "Processing…" the moment frames are in,
+          then transitions in place to success / pending-review. */}
+      <Dialog open={resultOpen} onOpenChange={setResultOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            {captureState === "processing" ? (
+              <>
+                <div className="mb-1 grid h-12 w-12 place-items-center rounded-2xl bg-primary/15 text-primary">
+                  <Loader2 className="h-6 w-6 animate-spin" aria-hidden />
+                </div>
+                <DialogTitle className="text-base">{t("processingTitle")}</DialogTitle>
+                <DialogDescription>{t("processingBody")}</DialogDescription>
+              </>
+            ) : captureState === "pending_review" ? (
+              <>
+                <div className="mb-1 grid h-12 w-12 place-items-center rounded-2xl bg-amber-100 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400">
+                  <CircleAlert className="h-6 w-6" aria-hidden />
+                </div>
+                <DialogTitle className="text-base">{t("pendingTitle")}</DialogTitle>
+                <DialogDescription>{t("pendingBody")}</DialogDescription>
+              </>
+            ) : (
+              <>
+                <div className="mb-1 grid h-12 w-12 place-items-center rounded-2xl bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400">
+                  <CircleCheck className="h-6 w-6" aria-hidden />
+                </div>
+                <DialogTitle className="text-base">{t("successTitle")}</DialogTitle>
+                <DialogDescription>{t("successBody")}</DialogDescription>
+              </>
+            )}
+          </DialogHeader>
+          <Button
+            onClick={() => setResultOpen(false)}
+            className="w-full"
+            disabled={captureState === "processing"}
+          >
+            {captureState === "processing" ? tCommon("loading") : tCommon("ok")}
+          </Button>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

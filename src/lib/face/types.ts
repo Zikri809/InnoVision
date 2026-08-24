@@ -61,6 +61,14 @@ export interface IFaceTracker {
   onError?(cb: (err: unknown) => void): () => void;
   /** Read current framing & lighting health. */
   getFaceHealth?(): { aligned: boolean; lightingOk: boolean; faceDetected: boolean };
+  /**
+   * Sample the current head pose as the caller's NEUTRAL baseline for
+   * `yaw` (per-user calibration: nose-position proxies depend on facial
+   * anatomy + webcam placement, so "straight" is not a universal zero).
+   * Call while the user looks straight ahead — e.g. at the top of the guided
+   * enrollment flow. Optional: trackers without it keep absolute yaw.
+   */
+  calibrateNeutral?(sampleMs?: number): Promise<void>;
   stop(): void;
 }
 

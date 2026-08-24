@@ -11,6 +11,7 @@ import {
   invalidBody,
   invalidJson,
   internalError,
+  jsonError,
   payloadTooLarge,
 } from "@/lib/http";
 
@@ -120,15 +121,41 @@ export async function POST(request: Request) {
     }
   }
 
+  // ── Stage timing instrumentation ──────────────────────────────────────
+  // Every CompreFace round-trip is measured and logged (dev console + the
+  // `_timings` field on dev responses) so capture-latency complaints can be
+  // attributed to a specific stage without terminal access.
+  const routeStart = Date.now();
+  const timings: Record<string, number> = {};
+  const tick = (key: string, from: number) => {
+    timings[key] = Date.now() - from;
+    return timings[key];
+  };
+
   // 1. Pose validation via CompreFace /detect (recognize with pose plugin).
-  //    Skipped in E2E mock mode.
-  if (!compreface.isMockMatchFrame(front)) {
+  //    Skipped in E2E mock mode (marker frames OR the whole mock flag — the
+  //    mock detect() returns yaw 0, which would fail every side check for a
+  //    developer testing with a real webcam while the flag is on). Dev
+  //    responses carry the measured yaws so a failing capture can be
+  //    diagnosed from the UI error alone.
+  if (!compreface.isMockMatchFrame(front) && !compreface.isMockModeEnabled()) {
+    const detectStart = Date.now();
     const detections = await Promise.all(angles.map((a) => compreface.detect(a.frame)));
+    timings.detectBatchMs = Date.now() - detectStart;
     const validDetections: { faces: { yaw: number }[] }[] = [];
-    for (const det of detections) {
+    for (let i = 0; i < detections.length; i++) {
+      const det = detections[i];
+      const angleName = ["front", "left", "right"][i];
       if ("error" in det) return mapFaceError(det) ?? internalError("Something went wrong.");
       if (!det.faces || det.faces.length === 0) {
-        return mapFaceError({ error: "pose_invalid" }) ?? internalError("Something went wrong.");
+        console.error(`[enroll-timing] ${angleName}: NO FACE DETECTED after ${timings.detectBatchMs}ms batch`);
+        return jsonError(
+          "pose_invalid",
+          process.env.NODE_ENV !== "production"
+            ? `No face detected in the ${angleName} frame — retake with better light/less motion.`
+            : undefined,
+          400,
+        );
       }
       validDetections.push(det);
     }
@@ -136,9 +163,17 @@ export async function POST(request: Request) {
     const leftYaw = validDetections[1].faces[0].yaw;
     const rightYaw = validDetections[2].faces[0].yaw;
 
+    const yawDetail = `front=${frontYaw}° left=${leftYaw}° right=${rightYaw}° (server needs |front|≤30, sides within 10–75)`;
+    console.info(`[enroll-timing] detect ${timings.detectBatchMs}ms — ${yawDetail}`);
+
     // Front: centered (|yaw| <= 30)
     if (Math.abs(frontYaw) > 30) {
-      return mapFaceError({ error: "pose_invalid" }) ?? internalError("Something went wrong.");
+      console.error(`[enroll-pose] FRONT out of range: ${yawDetail}`);
+      return jsonError(
+        "pose_invalid",
+        process.env.NODE_ENV !== "production" ? `Front frame too turned: ${yawDetail}` : undefined,
+        400,
+      );
     }
     // Side angles: must have a clear head turn (|yaw| >= 10 and <= 75)
     if (
@@ -147,7 +182,12 @@ export async function POST(request: Request) {
       Math.abs(rightYaw) < 10 ||
       Math.abs(rightYaw) > 75
     ) {
-      return mapFaceError({ error: "pose_invalid" }) ?? internalError("Something went wrong.");
+      console.error(`[enroll-pose] SIDE out of range: ${yawDetail}`);
+      return jsonError(
+        "pose_invalid",
+        process.env.NODE_ENV !== "production" ? `Side frames need a clearer turn: ${yawDetail}` : undefined,
+        400,
+      );
     }
   }
 
@@ -156,9 +196,11 @@ export async function POST(request: Request) {
   //    skip the duplicate check (the mock subject is not a real student).
   let dupSubject: string | null = null;
   let dupSimilarity = 0;
-  if (!compreface.isMockMatchFrame(front)) {
-    for (const angle of angles) {
+  if (!compreface.isMockMatchFrame(front) && !compreface.isMockModeEnabled()) {
+    for (const [i, angle] of angles.entries()) {
+      const recStart = Date.now();
       const rec = await compreface.recognize(angle.frame);
+      tick(`recognize${i + 1}Ms`, recStart);
       if ("error" in rec) return mapFaceError(rec) ?? internalError("Something went wrong.");
       for (const s of rec.subjects) {
         if (s.subject !== auth.userId && s.similarity > dupSimilarity) {
@@ -167,6 +209,7 @@ export async function POST(request: Request) {
         }
       }
     }
+    console.info(`[enroll-timing] recognize x3 — ${timings.recognize1Ms}/${timings.recognize2Ms}/${timings.recognize3Ms}ms, dup=${dupSubject ? `${dupSimilarity}` : "none"}`);
   }
 
   // 3. Add examples to the subject (multi-sample enrollment).
@@ -179,18 +222,26 @@ export async function POST(request: Request) {
   // never leaves abandoned biometric samples behind.
   const rollback = () => void compreface.deleteSubject(auth.userId);
   try {
-    for (const angle of angles) {
+    for (const [i, angle] of angles.entries()) {
+      const addStart = Date.now();
       const add = await compreface.addSubjectExample(auth.userId, angle.frame);
+      timings[`addExample${i + 1}Ms`] = Date.now() - addStart;
       if ("error" in add) {
         rollback();
         return mapFaceError(add) ?? internalError("Something went wrong.");
       }
     }
 
+    const rpcStart = Date.now();
     const { data, error } = await supabase.rpc("enroll_face", {
       p_duplicate_subject: dupSubject as string,
       p_duplicate_similarity: dupSimilarity,
     });
+    timings.rpcMs = Date.now() - rpcStart;
+    timings.totalMs = Date.now() - routeStart;
+    console.info(
+      `[enroll-timing] add x3 — ${timings.addExample1Ms}/${timings.addExample2Ms}/${timings.addExample3Ms}ms, rpc ${timings.rpcMs}ms, TOTAL ${timings.totalMs}ms`,
+    );
 
     if (error) {
       rollback();
@@ -212,8 +263,15 @@ export async function POST(request: Request) {
     }
 
     if (payload?.ok === true) {
+      const status = payload.status === "pending_review" ? "pending_review" : "enrolled";
       return Response.json(
-        { ok: true, status: payload.status === "pending_review" ? "pending_review" : "enrolled" },
+        {
+          ok: true,
+          status,
+          // Dev-only: stage timings ride along so the browser probe (or the
+          // network tab) can attribute capture latency without terminal access.
+          ...(process.env.NODE_ENV !== "production" ? { _timings: timings } : {}),
+        },
         { status: 200, headers: { "content-type": "application/json" } },
       );
     }
