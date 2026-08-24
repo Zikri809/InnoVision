@@ -4,14 +4,16 @@
 > is a historical record, and which has been superseded in part. When a plan
 > and the code disagree, the code + migrations win — then update the doc.
 >
-> Last reconciled: 2026-08-22 (after integrity suite migrations 0020/0021).
+> Last reconciled: 2026-08-24 (after notifications 0022 and student practice quizzes 0023).
 
 ## ✅ Current / authoritative
 
 | Doc | Scope |
 |---|---|
 | **PLAN_INTEGRITY_SUITE.md** | Face verification (1:1-by-lookup multi-frame voting), focus-loss pause, session advisories, incident recording. Migrations 0020+0021. THE source of truth for the face/integrity pipeline. |
-| **TESTING.md** | Test plan by layer: Vitest units, route tests, SQL harnesses (`verify:*.mjs`), E2E inventory. ⚠️ The Phase-7-era body predates the integrity suite — the suite's tests (I-vote/focus/advisory route tests, incident route tests, `vote`/`attention`/`vad` units, e16, verify-face 59 checks) are catalogued in PLAN_INTEGRITY_SUITE.md §5 instead. |
+| **PLAN_NOTIFICATIONS.md** | Per-user notification feed (migration 0022): bell island, polling/merge/dedup, i18n copy, role-layout wiring. THE source of truth for notifications. |
+| **PLAN_STUDENT_PRACTICE_QUIZZES.md** | Student-created practice quizzes (migration 0023): creator-only authoring, unlisted share codes minted ONLY via definer RPC, stateless server-side grading, DB-side caps, `/s/[code]` play. THE source of truth for the SQ feature (post-critique final). |
+| **TESTING.md** | Test plan by layer: Vitest units, route tests, SQL harnesses (`verify:*.mjs`), E2E inventory. ⚠️ The Phase-7-era body predates the integrity suite — the suite's tests (I-vote/focus/advisory route tests, incident route tests, `vote`/`attention`/`vad` units, e16, verify-face 59 checks) are catalogued in PLAN_INTEGRITY_SUITE.md §5 instead; the student-quizzes suite lives in TESTING.md §2.7 + the E17 row. |
 | **COMPREFACE_SETUP.md** | Self-hosted CompreFace Docker setup (enrollment subjects, API keys, mock mode for E2E). |
 | **GLM_OCR_SETUP.md** | Optional GLM-OCR (vLLM) extraction engine setup. |
 | **COSTS.md** | Infra/service cost breakdown for MVP scale. |
@@ -48,7 +50,7 @@ context/invariants; verify details against code.
 - **Stack**: Next.js (App Router) · Supabase (Postgres, Auth, Storage) ·
   MediaPipe tasks-vision (face landmarker + hand landmarker, vendored) ·
   self-hosted CompreFace (Docker) · optional GLM-OCR (vLLM).
-- **Migrations**: `supabase/migrations/0001…0021` — authoritative schema.
+- **Migrations**: `supabase/migrations/0001…0023` — authoritative schema.
   Regenerate types after schema changes: `npm run gen:types`.
 - **Face pipeline (current)**: enroll 3 angles → gate (blink + `'start'`
   verify) → periodic/question re-verification with **up-to-3-frame majority
@@ -58,6 +60,19 @@ context/invariants; verify details against code.
   debounced focus-loss (`focus_lost`, 3rd strike ⇒ flagged). Tab-hide records
   nothing (cadence pause + catch-up verify). Details: PLAN_INTEGRITY_SUITE.md
   §1b/§2/§2b.
+- **Student practice quizzes (current)**: students author practice-only
+  quizzes (no mode/status machinery), play them statelessly (grading RPC
+  performs ZERO writes — creators cannot see who played, by construction),
+  and share via unlisted 10-char codes. `share_code` is minted ONLY by the
+  `student_quiz_share_action` definer RPC — INSERT/UPDATE column grants
+  exclude it, closing the revoked-code hijack vector. Caps: 25 quizzes/
+  student, 50 questions/quiz (DB-side triggers). Play routes are open to ANY
+  authenticated user; authoring is student-only. Details:
+  PLAN_STUDENT_PRACTICE_QUIZZES.md.
+- **Demo seed**: `npm run seed:demo` provisions a realistic semester (2
+  lecturers, 10 students, closed quiz with revealed history, shared student
+  quizzes at `/s/STUDYHARD2` and `/s/EXAMPREP24`). Password `Password123!`.
+  Face setup is intentionally not seeded.
 - **Verification commands**:
   ```bash
   npm run test            # vitest units + route tests
@@ -66,6 +81,7 @@ context/invariants; verify details against code.
   npm run db:reset        # rebuild local DB from migrations (destructive)
   npm run gen:types       # regenerate src/lib/types/database.ts
   npm run verify:face     # live-SQL face RPC harness (needs local supabase)
+  npm run verify:student-quizzes # SQ RLS/RPC/cap probes SQ-D1–D9 (21 checks)
   npm run face:report     # threshold-tuning report over recorded face_checks
   npm run incident:cleanup # delete incident clips older than 30d (cron-able; no scheduler wired)
   npm run verify:sessions # …plus verify:classes/quizzes/ai/results/security

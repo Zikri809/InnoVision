@@ -102,6 +102,32 @@
 | U-S3 | negative / non-int `selectedIndex` | rejected |
 | U-S4 | `SubmitSchema` accepts `{}` (boundary) | empty body tolerated |
 
+### 2.7 Student practice quizzes (`lib/student-quizzes`, SQ)
+> **Status: SHIPPED (0023)** — catalogued here; full design in
+> PLAN_STUDENT_PRACTICE_QUIZZES.md. Route tests use the extended fake
+> (`fake-student-supabase.ts`: player-view mapping + RPC stubs in lockstep
+> with 0023); the authoritative SQL-semantics layer is
+> `scripts/verify-student-quizzes.mjs`.
+>
+> - **Units:** share-code generate/normalize (alphabet-only, I/1/L/0/O
+>   excluded — fixtures must respect this), validation schemas incl.
+>   bidi-strip titles and exclusive action payloads, guards, pure
+>   option-draft reducers (`lib/quizzes/question-draft.ts`).
+> - **Route tests:** creator authz (foreign student folds to no-oracle 404),
+>   share mint/idempotent/unshare/regenerate via the definer RPC, cap → 429,
+>   code-collision retry exhaustion → typed 503, lecturer CAN play shared,
+>   answer key never in player payloads, NULL/out-of-bounds selection → one
+>   uniform `unavailable`, rate limits (create 5/h, resolve 20/min,
+>   answers 60/min).
+> - **Live-DB probes (`verify:student-quizzes`, 21 checks):** SQ-D1 creator
+>   CRUD via RLS · SQ-D2 unshared-invisible/shared-visible · SQ-D3 questions
+>   table creator-only + player view hides `correct_index`/`explanation` ·
+>   SQ-D4 grading semantics incl. revoked→unavailable + creator self-grade ·
+>   SQ-D5 resolve = first name only, unknown≡revoked → NULL · SQ-D6 unshare →
+>   re-share mints fresh · SQ-D7 26th quiz rejected by trigger · SQ-D8
+>   lecturers play but cannot author · SQ-D9 direct INSERT with `share_code`
+>   permission-denied (revoked-code hijack closed).
+
 ---
 
 ## 3. DB / RLS Tests (local Supabase)
@@ -280,13 +306,14 @@
 | E12 | **Continuous verify mid-quiz (P7, UNTIMED)** | assessment → fake tracker match markers at start → reload-before-Begin (gate re-renders) → Q1 → Q-transition verify → Q2 → `setFacePeriodic({minMs:2000,maxMs:3000})` → `expect.poll` a real `trigger:'periodic'` within 5s → mismatch anchored after Q2 feedback → Q3 transition fails → pause overlay AND GET `paused` → blocked-answer proof: direct server answer → **409** + `expectNoAnswerPost` zero-POST | quiz pauses/flags at Q3, not silently passes (cadence works; the gate is not bypassable by reload) |
 | E13 | **Timer-gate pin (P7)** | TIMED assessment (`timeLimitSec≈3`); the student starts and lands in the gate; **liveness withheld (no Begin)** | the gate can only be exited by timer expiry; EndScreen with `0 / N` within ~`timeLimitSec + grace + margin` (≈20s), no deadlock |
 | E13b | **Attendance = session (P8)** | 4 students take quiz (A/B completed, C in-progress, D abandoned) → lecturer opens results | 4 sessions listed with scores + face-check timelines; abandoned shown as "abandoned"; A's row has ≥1 face check; B's row shows the camera-unavailable marker; no `verify_nonce`/`correct_index` on the rendered DOM |
+| E17 | **Student practice quizzes (SQ)** — 3 serial tests | (1) creator: create → builder adds MCQ → self-play wrong answer → feedback "Not quite" → See results end screen. (2) creator mints share code via dialog (spinner→link = stale-snapshot regression guard); recipient registers FIRST, then logged-out visit to `/s/<code>` hits login wall and **returns to the link** after sign-in; plays to end screen. (3) unshare → link renders the SAME neutral invalid screen as unknown codes; delete cascades off dashboard | per-question reveal on every answer incl. the LAST one; login-wall redirect preserved; revocation uniform |
 
 ---
 
 ## 6. Coverage Targets & CI
 
-- **Unit + integration:** run on every push (`vitest run`), target **≥80%** on `lib/face`, `lib/gestures`, `lib/ai`, `lib/extract`, scoring/timer, **`app/api/sessions/*` and `app/api/face/*`** (they carry the integrity logic). CRUD/UI can be lower. Coverage thresholds are per-file (vitest v8) — P5 added `lib/sessions/**` + `app/api/sessions/**` to `coverage.include` with literal per-file keys; P6 added `lib/gestures/**` (`finger-count`/`hold-confirm`/`hand-loss` ≥80% stmts/lines/funcs, ≥70% branches; `hand-tracker.ts` 0-key browser-only); browser-only UI components (`play-client`, `question-card`, `option-card`, `progress-hud`, `end-screen`, `student-quizzes-client`, `gesture-layer`, `gesture-calibration`) are E2E-covered and excluded from the report.
-- **DB/RLS:** `supabase start` in CI, run SQL test suite; **D1–D18 are blocking** (they guard the demo's core promises). Phase 2 D8/D12 are additionally proven by `scripts/verify-classes.mjs` (real anon-token clients).
+- **Unit + integration:** run on every push (`vitest run`), target **≥80%** on `lib/face`, `lib/gestures`, `lib/ai`, `lib/extract`, scoring/timer, **`app/api/sessions/*` and `app/api/face/*`** (they carry the integrity logic). CRUD/UI can be lower. Coverage thresholds are per-file (vitest v8) — P5 added `lib/sessions/**` + `app/api/sessions/**` to `coverage.include` with literal per-file keys; P6 added `lib/gestures/**` (`finger-count`/`hold-confirm`/`hand-loss` ≥80% stmts/lines/funcs, ≥70% branches; `hand-tracker.ts` 0-key browser-only); browser-only UI components (`play-client`, `question-card`, `option-card`, `progress-hud`, `end-screen`, `student-quizzes-client`, `gesture-layer`, `gesture-calibration`) are E2E-covered and excluded from the report; **SQ** added `lib/student-quizzes/**` + `app/api/student-quizzes/**` to include with literal rows (libs 80/80/80/70, routes 60/60/60/50, `question-draft.ts` 80/80/80/70).
+- **DB/RLS:** `supabase start` in CI, run SQL test suite; **D1–D18 are blocking** (they guard the demo's core promises). Phase 2 D8/D12 are additionally proven by `scripts/verify-classes.mjs` (real anon-token clients). SQ adds `scripts/verify-student-quizzes.mjs` (SQ-D1–D9, 21 checks) as a blocking CI step.
 - **E2E:** Playwright on PRs; **E5, E6, E7, E8, E12 are the "demo-killer" tests** (with the D1 data-integrity gate; counts drifted across phases — treat the §9 list as the canonical set). ⚠️ As of 2026-08-22 the face-cycle specs (e6/e7) carry choreography drift from the integrity-suite re-architecture; `e16-integrity.spec.ts` is the green face-flow reference until they are rehabilitated. — if any fail, do not demo.
 - **AI tests never hit a real model** — MSW serves canned valid/invalid JSON (keeps CI free and deterministic).
 
