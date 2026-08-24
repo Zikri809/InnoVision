@@ -71,7 +71,6 @@ export async function runExtractionPipeline(
   opts: PipelineOptions,
 ): Promise<ExtractionResult> {
   const engine = opts.engine ?? "tesseract";
-  const cfg = opts.config ?? {};
 
   let data: ArrayBuffer;
   let filename: string;
@@ -92,7 +91,7 @@ export async function runExtractionPipeline(
   // that vision models cannot decode directly as images; they are always parsed natively.
   const isImageOrPdf = /\.(pdf|png|jpe?g|webp)$/i.test(filename);
   if (engine === "glm" && isImageOrPdf) {
-    return runOcr(opts, engine, cfg);
+    return runOcr(opts, engine);
   }
 
   opts.onProgress?.({ stage: "native", page: 0, total: 1 });
@@ -141,7 +140,7 @@ export async function runExtractionPipeline(
     throw new Error("ocr_required_browser");
   }
 
-  return runOcr(opts, engine, cfg);
+  return runOcr(opts, engine);
 }
 
 /**
@@ -152,16 +151,13 @@ export async function runExtractionPipeline(
 async function runOcr(
   opts: PipelineOptions,
   engine: ExtractEngine,
-  cfg: Partial<OcrConfig>,
 ): Promise<ExtractionResult> {
   const file = opts.file;
   if (!file) throw new Error("no_input");
 
   if (engine === "glm") {
-    const glm = await glmExtract(
-      file,
-      { baseUrl: cfg.glmBaseUrl ?? "http://localhost:11434", model: cfg.glmModel ?? "glm-ocr" },
-      (page, total) => opts.onProgress?.({ stage: "ocr", page, total, engine: "glm" }),
+    const glm = await glmExtract(file, (page, total) =>
+      opts.onProgress?.({ stage: "ocr", page, total, engine: "glm" }),
     );
     return glm;
   }

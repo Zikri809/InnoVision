@@ -1,36 +1,37 @@
 /**
- * GLM-OCR via local Docker (vLLM) — opt-in high-accuracy engine (PLAN §3.1).
+ * GLM-OCR client (extraction pipeline, browser side).
  *
- * ⚠️ GLM-OCR is a vision-language CHAT model, not a strict OCR API — it must
- * be prompted to transcribe. Availability is gated behind `probeGlm()`; the
- * engine picker only shows it when the probe finds the model locally.
+ * The heavy lifting is SERVER-SIDE now: `/api/extract/ocr` proxies to the
+ * local GLM-OCR container (vLLM), so remote users (e.g. via a tunnel) can use
+ * the engine even though the container is loopback-bound on the host machine.
+ * This module keeps only what genuinely needs the browser:
+ *  - PDF → PNG rasterization (pdf.js + canvas)
+ *  - image decompression-bomb guard
+ *  - per-page progress reporting
  *
- * Client-only by design: the lecturer's browser talks directly to their own
- * GLM-OCR container (localhost). The server NEVER proxies this endpoint
- * (SSRF guard).
+ * Error contract (pinned by GenerateFromFileDialog's i18n mapping):
+ * `glm_model_unavailable` / `glm_timeout` / `glm_error`.
  */
 
 import { MAX_OCR_PAGES, type ExtractionResult } from "@/lib/extract/types";
-import { httpChatCompletions, probeGlmModel } from "@/lib/ai/http-compat";
 import { destroyPdf, loadPdfJs } from "@/lib/extract/pdf";
 import { assertSafeImageDimensions } from "@/lib/extract/image-guard";
 
-export type GlmOcrConfig = {
-  baseUrl: string; // ROOT URL, e.g. http://localhost:11434
-  model: string;
-};
-
-export { probeGlmModel };
-
 /** Probe wrapper matching the picker's needs (U-E4/U-E8). */
-export async function glmAvailable(cfg: GlmOcrConfig): Promise<boolean> {
-  return probeGlmModel({ baseUrl: cfg.baseUrl, model: cfg.model });
+export async function glmAvailable(): Promise<boolean> {
+  try {
+    const res = await fetch("/api/extract/ocr", { signal: AbortSignal.timeout(5_000) });
+    if (!res.ok) return false;
+    const json = (await res.json()) as { available?: boolean };
+    return json.available === true;
+  } catch {
+    return false;
+  }
 }
 
 /** Rasterize a PDF to base64 PNG pages in the browser. */
 const MAX_CANVAS_DIMENSION = 4096;
 
-/** Rasterize a PDF to base64 PNG pages in the browser. */
 async function rasterizePdfToPngs(file: File): Promise<{ dataUrl: string; page: number }[]> {
   const pdfjs = await loadPdfJs();
   const arrayBuffer = await file.arrayBuffer();
@@ -61,36 +62,43 @@ async function rasterizePdfToPngs(file: File): Promise<{ dataUrl: string; page: 
   }
 }
 
-const GLM_TRANSCRIBE_PROMPT =
-  "You are an OCR engine. Transcribe ALL visible text from this page image " +
-  "faithfully, preserving structure (headings, bullets, tables as text). " +
-  "Output ONLY the transcribed text, no commentary.";
-
 // Overall wall-clock budget for a whole GLM OCR run (all pages up to 200).
 const GLM_OCR_BUDGET_MS = 20 * 60_000;
+const PAGE_TIMEOUT_MS = 90_000;
+
+/** Page OCR under the run's remaining wall-clock budget. */
+async function ocrPage(dataUrl: string, remainingMs: number): Promise<string> {
+  const res = await fetch("/api/extract/ocr", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ image: dataUrl }),
+    signal: AbortSignal.timeout(Math.min(PAGE_TIMEOUT_MS, remainingMs)),
+  });
+  const json = (await res.json().catch(() => null)) as
+    | { text?: string; error?: string }
+    | null;
+  if (!res.ok || !json?.text) {
+    throw new Error(json?.error ?? "glm_error");
+  }
+  return json.text;
+}
 
 /**
- * OCR a file with the local GLM-OCR model (Docker/vLLM). Images/PDF pages are
+ * OCR a file with GLM-OCR through the server proxy. Images/PDF pages are
  * sent one at a time (vision-language models accept a single image per
- * message). Returns concatenated text with engine='glm'.
+ * message; also preserves per-page progress). Returns concatenated text with
+ * engine='glm'.
  */
 export async function glmExtract(
   file: File,
-  cfg: GlmOcrConfig,
   onProgress?: (page: number, total: number) => void,
 ): Promise<ExtractionResult> {
-  const available = await glmAvailable(cfg);
-  if (!available) {
-    throw new Error("glm_model_unavailable");
-  }
-
   let images: { dataUrl: string; page: number }[];
   const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
   if (isPdf) {
     images = await rasterizePdfToPngs(file);
   } else {
-    // Same decompression-bomb gate as the Tesseract path: the raw image is
-    // base64-encoded and POSTed to the container as-is, so reject absurd
+    // Same decompression-bomb gate as the Tesseract path: reject absurd
     // dimensions before encoding/uploading.
     await assertSafeImageDimensions(file);
     images = [{ dataUrl: await fileToDataUrl(file), page: 1 }];
@@ -103,34 +111,12 @@ export async function glmExtract(
     onProgress?.(i + 1, images.length);
     const remaining = Math.max(1_000, deadline - Date.now());
     try {
-      const res = await httpChatCompletions({
-        baseUrl: cfg.baseUrl,
-        model: cfg.model,
-        messages: [
-          { role: "system", content: GLM_TRANSCRIBE_PROMPT },
-          {
-            role: "user",
-            content: [
-              { type: "text", text: "Transcribe this page:" },
-              { type: "image_url", image_url: { url: images[i].dataUrl } },
-            ],
-          },
-        ],
-        maxTokens: 2000,
-        timeoutMs: Math.min(90_000, remaining),
-      });
-      if (res.ok) {
-        parts.push(res.text);
-        successCount++;
-      } else {
-        console.warn(`[GLM-OCR] Page ${i + 1} extraction failed: ${res.error}`);
-        // If all pages fail, error out; if partial pages fail, keep existing
-        if (images.length === 1) {
-          throw new Error(res.error === "timeout" ? "glm_timeout" : "glm_error");
-        }
-      }
+      const text = await ocrPage(images[i].dataUrl, remaining);
+      parts.push(text);
+      successCount++;
     } catch (err) {
       console.warn(`[GLM-OCR] Error on page ${i + 1}:`, err);
+      // If all pages fail, error out; if partial pages fail, keep existing.
       if (images.length === 1) throw err;
     }
   }

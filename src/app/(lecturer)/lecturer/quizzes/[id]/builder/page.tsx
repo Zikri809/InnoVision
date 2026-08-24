@@ -122,8 +122,6 @@ export default async function QuizBuilderPage({
       userId={user.id}
       ocrConfig={{
         defaultEngine: (process.env.OCR_DEFAULT_ENGINE as "tesseract" | "glm") ?? "tesseract",
-        glmBaseUrl: process.env.GLM_BASE_URL ?? "http://localhost:11434",
-        glmModel: process.env.OCR_GLM_MODEL ?? "glm-ocr",
       }}
     />
   );

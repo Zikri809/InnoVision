@@ -355,7 +355,6 @@ export function GenerateFromFileDialog({
               />
 
               <EnginePicker
-                config={config}
                 value={engine}
                 onChange={setEngine}
                 files={files}

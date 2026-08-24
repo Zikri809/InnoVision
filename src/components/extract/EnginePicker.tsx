@@ -12,19 +12,17 @@ import {
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { glmAvailable } from "@/lib/extract/glm-ocr";
-import type { ExtractEngine, OcrConfig } from "@/lib/extract/types";
+import type { ExtractEngine } from "@/lib/extract/types";
 import type { UploadedFileItem } from "./UploadDropzone";
 
 const STORAGE_KEY = "innovision.ocrEngine";
 
 export function EnginePicker({
-  config,
   value,
   onChange,
   files = [],
   disabled = false,
 }: {
-  config: OcrConfig;
   value: ExtractEngine;
   onChange: (engine: ExtractEngine) => void;
   files?: UploadedFileItem[];
@@ -41,13 +39,13 @@ export function EnginePicker({
 
   useEffect(() => {
     let cancelled = false;
-    glmAvailable({ baseUrl: config.glmBaseUrl, model: config.glmModel }).then((ok) => {
+    glmAvailable().then((ok) => {
       if (!cancelled) setGlmAvailableFlag(ok);
     });
     return () => {
       cancelled = true;
     };
-  }, [config.glmBaseUrl, config.glmModel]);
+  }, []);
 
   // Persist the selection (so a reload restores it — read below on init).
   useEffect(() => {

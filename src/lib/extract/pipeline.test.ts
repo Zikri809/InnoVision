@@ -206,7 +206,7 @@ describe("Pipeline engine branching", () => {
         arrayBuffer: async () =>
           new TextEncoder().encode(dense).buffer as ArrayBuffer,
       } as unknown as File,
-      config: { defaultEngine: "glm", glmBaseUrl: "x", glmModel: "y" },
+      config: { defaultEngine: "glm" },
     });
     expect(r.engine).toBe("native");
   });

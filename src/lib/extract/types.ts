@@ -16,11 +16,11 @@ export type ExtractionResult = {
   lowConfidence?: boolean;
 };
 
-/** Config passed from the builder page (server component reads env). */
+/** Config passed from the builder page (server component reads env).
+ * GLM connection details are server-only env now — the browser never needs
+ * them (extraction proxies through /api/extract/ocr). */
 export type OcrConfig = {
   defaultEngine: ExtractEngine;
-  glmBaseUrl: string;
-  glmModel: string;
 };
 
 /** Text density: a page is "scanned" (needs OCR) below this many chars. */

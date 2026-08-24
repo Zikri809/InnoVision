@@ -1,6 +1,6 @@
 import { readFileSync } from "fs";
 import path from "path";
-import { test, expect } from "@playwright/test";
+import { test, expect, type TestInfo } from "@playwright/test";
 
 /**
  * Opt-in CompreFace integration smoke (REAL Docker service — no mocks).
@@ -59,9 +59,10 @@ async function recognizeForm(
  * same scale the app client consumes, no rescaling. */
 function readings(json: unknown): { subject: string; similarity: number }[] {
   const out: { subject: string; similarity: number }[] = [];
-  for (const face of ((json as { result?: unknown[] })?.result ?? []) as {
-    subjects?: { subject: string; similarity: number };
-  }[]) {
+  const faces =
+    (json as { result?: { subjects?: { subject: string; similarity: number }[] }[] })
+      ?.result ?? [];
+  for (const face of faces) {
     for (const s of face.subjects ?? []) {
       out.push({ subject: s.subject, similarity: s.similarity });
     }
@@ -103,12 +104,14 @@ test.describe.serial("CompreFace smoke (real service)", () => {
     }
   });
 
-  const guard = (t: test.TestInfo) =>
-    t.skip(!API_KEY, "COMPREFACE_API_KEY unset") ||
-    t.skip(
-      !serviceUp,
-      `CompreFace not healthy at ${BASE_URL} — run \`npm run compreface:start\``,
-    );
+  const guard = (t: TestInfo) => {
+    if (!API_KEY) t.skip(true, "COMPREFACE_API_KEY unset");
+    if (!serviceUp)
+      t.skip(
+        true,
+        `CompreFace not healthy at ${BASE_URL} — run \`npm run compreface:start\``,
+      );
+  };
 
   test("health endpoint reports an consistent DB", async ({}, testInfo) => {
     guard(testInfo);
