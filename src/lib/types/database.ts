@@ -1252,6 +1252,7 @@ export type Database = {
       }
       backfill_notification_state: { Args: never; Returns: Json }
       can_student_view_quiz: { Args: { p_quiz_id: string }; Returns: boolean }
+      confirm_face_subject_deleted: { Args: never; Returns: Json }
       enroll_face: {
         Args: { p_duplicate_similarity: number; p_duplicate_subject: string }
         Returns: Json
@@ -1298,7 +1299,6 @@ export type Database = {
         Returns: Json
       }
       reject_face_enrollment: { Args: { p_student_id: string }; Returns: Json }
-      confirm_face_subject_deleted: { Args: never; Returns: Json }
       reorder_questions: {
         Args: { p_ordered_ids: string[]; p_quiz_id: string }
         Returns: undefined
