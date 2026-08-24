@@ -13,12 +13,15 @@ import { AppNavLink } from "./app-nav-link";
 export async function AppShell({
   role,
   email,
+  fullName,
   consentGiven,
   notificationBell,
   children,
 }: {
   role: "lecturer" | "student";
   email: string;
+  /** Profile display name (profiles.full_name) — shown in the account menu. */
+  fullName?: string;
   consentGiven: boolean;
   /** Server-fetched <NotificationBell /> island (see role layouts). */
   notificationBell?: ReactNode;
@@ -63,7 +66,7 @@ export async function AppShell({
 
           <div className="flex items-center gap-1.5">
             {notificationBell}
-            <AppUserMenu email={email} consentGiven={consentGiven} />
+            <AppUserMenu email={email} fullName={fullName} consentGiven={consentGiven} />
           </div>
         </div>
       </header>

@@ -16,29 +16,38 @@ import {
 import { CircleCheck, CircleAlert, LogOut, UserRound } from "lucide-react";
 import { LanguageToggle } from "./language-toggle";
 
-function initialsFrom(email: string): string {
-  const name = email.split("@")[0] ?? "";
-  const parts = name.split(/[._-]+/).filter(Boolean);
-  const letters = (parts.length >= 2 ? parts[0][0] + parts[1][0] : name.slice(0, 2)).toUpperCase();
+function initialsFrom(source: string): string {
+  // Names ("Nur Aisyah" → NA) and emails ("nur.aisyah@…" → NA) share one
+  // splitter: whitespace for names, ./_/- for email local-parts.
+  const local = source.includes("@") ? source.split("@")[0] : source;
+  const parts = local.split(/[\s._-]+/).filter(Boolean);
+  const letters = (
+    parts.length >= 2 ? parts[0][0] + parts[1][0] : (parts[0] ?? "").slice(0, 2)
+  ).toUpperCase();
   return letters || "IV";
 }
 
 /**
- * Clay user menu for the app shell. Shows the signed-in email, biometric
- * consent state, language switcher, and a sign-out action inside a chunky dialog.
+ * Clay user menu for the app shell. Shows the signed-in name (falling back to
+ * email), biometric consent state, language switcher, and a sign-out action
+ * inside a chunky dialog.
  */
 export function AppUserMenu({
   email,
   consentGiven,
+  fullName,
 }: {
   email: string;
   consentGiven: boolean;
+  /** Profile display name (profiles.full_name) — preferred over email. */
+  fullName?: string;
 }) {
   const router = useRouter();
   const t = useTranslations("nav");
   const [open, setOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState(false);
+  const displayName = fullName?.trim() || email;
 
   async function handleLogout() {
     setSigningOut(true);
@@ -64,7 +73,7 @@ export function AppUserMenu({
           aria-label={t("accountMenu")}
           className="grid h-11 w-11 cursor-pointer place-items-center rounded-2xl border-[3px] border-border bg-card font-sans text-sm font-extrabold text-foreground shadow-[0_4px_0_var(--border)] transition-[transform,box-shadow] duration-[180ms] ease-out hover:-translate-y-0.5 hover:shadow-[0_6px_0_var(--border)] active:translate-y-0.5 active:shadow-[0_1px_0_var(--border)]"
         >
-          {initialsFrom(email)}
+          {initialsFrom(displayName)}
         </DialogTrigger>
 
         <DialogContent className="sm:max-w-sm">
@@ -72,8 +81,11 @@ export function AppUserMenu({
             <div className="mb-1 grid h-12 w-12 place-items-center rounded-2xl bg-primary/15 text-primary">
               <UserRound className="h-6 w-6" aria-hidden />
             </div>
-            <DialogTitle className="break-all text-base">{email}</DialogTitle>
-            <DialogDescription>{t("accountMenu")}</DialogDescription>
+            <DialogTitle className="break-all text-base">{displayName}</DialogTitle>
+            <DialogDescription className="flex flex-col gap-1">
+              {fullName?.trim() ? <span className="break-all">{email}</span> : null}
+              <span>{t("accountMenu")}</span>
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-3">
