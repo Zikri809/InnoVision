@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatDuration } from "@/lib/format/duration";
@@ -106,8 +105,6 @@ export function ResultsDashboardClient({
 
   const [revealOpen, setRevealOpen] = useState(false);
   const [revealing, setRevealing] = useState(false);
-  const [autoReveal, setAutoReveal] = useState(autoRevealOnComplete);
-  const [settingsSaving, setSettingsSaving] = useState(false);
   const [revealError, setRevealError] = useState<string | null>(null);
 
   const [exporting, setExporting] = useState(false);
@@ -176,30 +173,6 @@ export function ResultsDashboardClient({
       setRevealError(tCommon("errorGeneric"));
     } finally {
       setRevealing(false);
-    }
-  }
-
-  async function handleAutoRevealToggle(checked: boolean) {
-    const prev = autoReveal;
-    setAutoReveal(checked);
-    setRevealError(null);
-    setSettingsSaving(true);
-    try {
-      const res = await fetch(`/api/quizzes/${quizId}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ auto_reveal_on_complete: checked }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        setAutoReveal(prev);
-        setRevealError(body.message ?? body.error ?? tCommon("errorGeneric"));
-      }
-    } catch {
-      setAutoReveal(prev);
-      setRevealError(tCommon("errorGeneric"));
-    } finally {
-      setSettingsSaving(false);
     }
   }
 
@@ -357,14 +330,14 @@ export function ResultsDashboardClient({
                     <p className="mt-0.5 text-sm font-semibold text-muted-foreground">
                       {t("hiddenSubtitle")}
                     </p>
-                    <label className="mt-2 flex cursor-pointer items-center gap-2 text-sm font-semibold text-foreground">
-                      <Checkbox
-                        checked={autoReveal}
-                        disabled={settingsSaving}
-                        onCheckedChange={(v: boolean) => void handleAutoRevealToggle(v)}
-                      />
-                      {t("autoRevealLabel")}
-                    </label>
+                    {/* Static status line, not a control — auto-release is the
+                        configured default; no toggle in the banner. */}
+                    {autoRevealOnComplete && (
+                      <p className="mt-1.5 inline-flex items-center gap-1.5 rounded-full border-[2px] border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-700">
+                        <Check className="size-3" aria-hidden />
+                        {t("autoRevealLabel")}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <Button variant="default" onClick={() => setRevealOpen(true)}>
@@ -537,6 +510,11 @@ export function ResultsDashboardClient({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t("exemptBtn")}</DialogTitle>
+            <DialogDescription>
+              {t("exemptConfirm", {
+                name: rows.find((r) => r.id === exemptRow)?.studentName ?? "—",
+              })}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
             <Label htmlFor="exempt-reason" className="sr-only">
@@ -572,6 +550,11 @@ export function ResultsDashboardClient({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t("resetBtn")}</DialogTitle>
+            <DialogDescription>
+              {t("resetConfirm", {
+                name: rows.find((r) => r.id === resetRow)?.studentName ?? "—",
+              })}
+            </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => { setResetRow(null); setResetCooled(false); }}>

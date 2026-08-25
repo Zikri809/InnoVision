@@ -34,11 +34,16 @@ export async function registerUser(
   if (role === "lecturer") {
     await page.getByLabel("Lecturer invite code").fill(inviteCode);
   } else {
-    // Matric (0027): REQUIRED for students. Digit-tail of the email keeps
-    // reruns deterministic; prefix 8 stays clear of the reserved 99xxxx range.
-    const digits = email.replace(/\D/g, "");
-    const tail = (digits || Date.now().toString()).slice(-5).padStart(5, "8");
-    matric = `8${tail}`;
+    // Matric (0027): REQUIRED for students. Derived from a cheap string HASH
+    // of the whole email so two accounts minted in the SAME run from the same
+    // timestamp base (e.g. `x-<stamp>@` creator/player pairs) never collide,
+    // while reruns of the same spec stay deterministic. Prefix "8" stays
+    // clear of the reserved 99xxxx range.
+    let h = 0;
+    for (let i = 0; i < email.length; i++) {
+      h = (h * 31 + email.charCodeAt(i)) % 100000;
+    }
+    matric = `8${String(h).padStart(5, "0")}`;
     await page.getByLabel(/Matric number/i).fill(matric);
   }
 

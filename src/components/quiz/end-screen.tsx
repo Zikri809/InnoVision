@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { BotAvatar } from "@/components/bot/bot-avatar";
+import { QuestionImage } from "@/components/media/question-image";
 import { Lock } from "lucide-react";
 import type { ResultsBreakdownRow } from "@/app/play/[sessionId]/page";
 
@@ -156,6 +157,11 @@ export function EndScreen({
                       {b.selected_index == null ? "—" : isCorrect ? "✓" : "✗"}
                     </span>
                   </div>
+                  {b.has_image && (
+                    <div className="px-5">
+                      <QuestionImage questionId={b.question_id} prompt={b.prompt} compact />
+                    </div>
+                  )}
                   <ul className="space-y-2 px-5 pb-5">
                     {b.options.map((opt, i) => {
                       const selected = i === b.selected_index;

@@ -45,20 +45,22 @@ export default async function SelfPlayPage({ params }: Params) {
 
   const { data: rows } = await supabase
     .from("student_quiz_questions")
-    .select("id, order_index, type, prompt, options, created_at")
+    .select("id, order_index, type, prompt, options, image_path, created_at")
     .eq("quiz_id", quizId)
     .order("order_index")
     .order("created_at");
 
   // Strip everything except the safe player shape (defense-in-depth: even
   // though this page is creator-only, the player component must never receive
-  // correct_index/explanation).
+  // correct_index/explanation). Only the image PRESENCE flag crosses — never
+  // the storage path (signing is route-mediated).
   const questions: SafeQuestion[] = (rows ?? []).map((q) => ({
     id: q.id,
     order_index: q.order_index,
     type: q.type,
     prompt: q.prompt,
     options: q.options,
+    has_image: q.image_path != null,
   }));
 
   return (

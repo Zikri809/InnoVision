@@ -20,12 +20,25 @@ export const validQuizJson = JSON.stringify({
 
 export const invalidJson = "this is not json";
 
+/**
+ * Captured request bodies from chat-completions calls (prompt-contract
+ * pinning). Tests assert markers (questionCount / difficulty / language)
+ * survive prompt-build → wire, closing the blind spot where the canned
+ * handler served JSON regardless of what the route actually asked for.
+ */
+export const capturedChatBodies: unknown[] = [];
+
 export const aiHandlers = [
-  http.post(CHAT_URL, () =>
-    HttpResponse.json({
+  http.post(CHAT_URL, async ({ request }) => {
+    capturedChatBodies.push(await request.text());
+    return HttpResponse.json({
       choices: [{ message: { content: validQuizJson } }],
-    }),
-  ),
+    });
+  }),
 ];
+
+export function resetCapturedChatBodies() {
+  capturedChatBodies.length = 0;
+}
 
 export const defaultAiServer = setupServer(...aiHandlers);

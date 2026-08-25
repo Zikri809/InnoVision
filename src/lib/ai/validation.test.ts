@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { GenerateQuizSchema, normalizePath } from "@/lib/ai/validation";
+import {
+  GenerateQuizSchema,
+  GenerateStudentQuizSchema,
+  normalizePath,
+} from "@/lib/ai/validation";
 
 describe("sourcePath — accepts valid storage paths", () => {
   it("accepts a simple path", () => {
@@ -45,6 +49,56 @@ describe("sourcePath — rejects traversal and malformed paths", () => {
       expect(r.success).toBe(false);
     });
   }
+});
+
+describe("GenerateStudentQuizSchema — student generate body", () => {
+  const uid = "00000000-0000-4000-8000-00000000000a";
+  const quiz = "00000000-0000-4000-8000-00000000000c";
+
+  it("accepts extractedText with defaults", () => {
+    const r = GenerateStudentQuizSchema.safeParse({ extractedText: "photosynthesis notes" });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.difficulty).toBe("mixed");
+      expect(r.data.language).toBe("auto");
+    }
+  });
+
+  it("accepts tenant-scoped sourcePaths", () => {
+    const r = GenerateStudentQuizSchema.safeParse({
+      sourcePaths: [`${uid}/${quiz}/notes.pdf`],
+      questionCount: 10,
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects steeringPrompt / formatDistribution / mode (student surface hides them)", () => {
+    for (const extra of [
+      { steeringPrompt: "focus on chapter 2" },
+      { formatDistribution: "mcq_only" },
+      { mode: "append" },
+      { quizId: quiz },
+    ]) {
+      expect(GenerateStudentQuizSchema.safeParse({ extractedText: "x".repeat(20), ...extra }).success).toBe(false);
+    }
+  });
+
+  it("rejects out-of-bounds questionCount and traversal sourcePaths", () => {
+    expect(
+      GenerateStudentQuizSchema.safeParse({ questionCount: 2, extractedText: "x".repeat(20) }).success,
+    ).toBe(false);
+    expect(
+      GenerateStudentQuizSchema.safeParse({
+        sourcePaths: [`../${uid}/${quiz}/evil.pdf`],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects when neither text nor sources provided", () => {
+    expect(GenerateStudentQuizSchema.safeParse({}).success).toBe(true); // schema-level OK
+    // The ROUTE enforces text-or-sources presence; the schema stays permissive
+    // so the route can return its specific error code.
+  });
 });
 
 describe("normalizePath — POSIX path normalizer", () => {

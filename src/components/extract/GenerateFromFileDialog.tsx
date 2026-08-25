@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { toast } from "sonner";
 import {
   AlertCircle,
   AlertTriangle,
@@ -45,6 +46,15 @@ import type {
 
 const CLIENT_TIMEOUT_MS = 20 * 60_000;
 
+/**
+ * AI generation from uploaded/pasted material. Two modes share this dialog:
+ *  - "lecturer" (default): posts to /api/ai/generate-quiz with the full
+ *    control set and refreshes the server components on success.
+ *  - "student": posts to the practice-quiz endpoint passed via `endpoint`,
+ *    HIDES steering/format-mix/mode controls (plan F1), and reports the
+ *    generated questions through `onGenerated` so the editor can merge them
+ *    locally (the practice editor owns its state; no router.refresh needed).
+ */
 export function GenerateFromFileDialog({
   quizId,
   userId,
@@ -52,6 +62,9 @@ export function GenerateFromFileDialog({
   open,
   onOpenChange,
   hasQuestions,
+  mode = "lecturer",
+  endpoint,
+  onGenerated,
 }: {
   quizId: string;
   userId: string;
@@ -59,7 +72,15 @@ export function GenerateFromFileDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   hasQuestions: boolean;
+  /** Which surface is generating — controls visibility + body shape. */
+  mode?: "lecturer" | "student";
+  /** Override of the POST target (student surface passes its own route). */
+  endpoint?: string;
+  /** Student mode only: receives `{questions}` rows on success (+ cap info). */
+  onGenerated?: (questions: unknown[], info: { capped: boolean }) => void;
 }) {
+  const isStudent = mode === "student";
+  const target = endpoint ?? "/api/ai/generate-quiz";
   const router = useRouter();
   const t = useTranslations("extract");
   const tCommon = useTranslations("common");
@@ -68,6 +89,7 @@ export function GenerateFromFileDialog({
   const stepContainerRef = useRef<HTMLDivElement>(null);
 
   const [files, setFiles] = useState<UploadedFileItem[]>([]);
+  const [pastedText, setPastedText] = useState("");
   // Lazy localStorage read is hydration-safe here: the dialog body (and this
   // state consumer) only mounts client-side when `open` flips true — it never
   // renders during SSR or the hydration pass.
@@ -98,7 +120,6 @@ export function GenerateFromFileDialog({
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const submitLock = useRef(false);
   const activeAbortRef = useRef<AbortController | null>(null);
 
@@ -107,12 +128,12 @@ export function GenerateFromFileDialog({
     activeAbortRef.current = null;
     setStep(1);
     setFiles([]);
+    setPastedText("");
     setExtractedText(null);
     setIsLowDensity(false);
     setProgress(null);
     setCurrentExtractingFile(null);
     setError(null);
-    setNotice(null);
     setSteeringPrompt("");
     setDifficulty("mixed");
     setFormatDistribution("mixed");
@@ -146,7 +167,6 @@ export function GenerateFromFileDialog({
     if (files.length === 0 || busy) return;
     setBusy(true);
     setError(null);
-    setNotice(null);
 
     const controller = new AbortController();
     activeAbortRef.current = controller;
@@ -236,38 +256,73 @@ export function GenerateFromFileDialog({
     submitLock.current = true;
     setBusy(true);
     setError(null);
-    setNotice(null);
 
     const controller = new AbortController();
     activeAbortRef.current = controller;
     const timer = setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
 
     try {
-      const res = await fetch("/api/ai/generate-quiz", {
+      const bodyPayload = isStudent
+        ? {
+            extractedText,
+            questionCount,
+            difficulty,
+            language,
+            // Omit when empty — an explicit [] would trip the schema's min(1).
+            ...(files.length > 0 ? { sourcePaths: files.map((f) => f.path) } : {}),
+          }
+        : {
+            quizId,
+            extractedText,
+            questionCount,
+            mode: generationMode,
+            difficulty,
+            formatDistribution,
+            steeringPrompt: steeringPrompt.trim() || undefined,
+            language,
+            // Omit when empty — an explicit [] would trip the schema's min(1)
+            // on the paste-only path.
+            ...(files.length > 0 ? { sourcePaths: files.map((f) => f.path) } : {}),
+          };
+
+      const res = await fetch(target, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          quizId,
-          extractedText,
-          questionCount,
-          mode: generationMode,
-          difficulty,
-          formatDistribution,
-          steeringPrompt: steeringPrompt.trim() || undefined,
-          language,
-          sourcePaths: files.map((f) => f.path),
-        }),
+        body: JSON.stringify(bodyPayload),
         signal: controller.signal,
       });
 
       const body = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        setError(body.message ?? body.error ?? tCommon("errorGeneric"));
+        // Student surface: map known error CODES to localized strings (the
+        // raw server messages are English-only); unknown codes fall back to
+        // the server message, then the generic.
+        if (isStudent) {
+          const codeMap: Record<string, string> = {
+            question_cap_reached: t("errQuestionCap"),
+            rate_limited: t("errRateLimited"),
+            invalid_ai_output: t("errInvalidAi"),
+            ai_unavailable: t("errInvalidAi"),
+          };
+          setError(codeMap[body.error as string] ?? body.message ?? tCommon("errorGeneric"));
+        } else {
+          setError(body.message ?? body.error ?? tCommon("errorGeneric"));
+        }
         return;
       }
 
-      setNotice(t("questionsGenerated"));
+      if (isStudent && onGenerated) {
+        onGenerated(Array.isArray(body.questions) ? body.questions : [], {
+          capped: Boolean(body.capped),
+        });
+        toast.success(t("questionsGenerated"));
+        onOpenChange(false);
+        reset();
+        return;
+      }
+
+      toast.success(t("questionsGenerated"));
       router.refresh();
       onOpenChange(false);
       reset();
@@ -333,14 +388,6 @@ export function GenerateFromFileDialog({
                 {error}
               </p>
             )}
-            {notice && (
-              <p
-                className="rounded-xl border-[3px] border-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-4 py-2.5 text-xs font-bold text-emerald-800 dark:text-emerald-300"
-                role="status"
-              >
-                {notice}
-              </p>
-            )}
           </div>
 
           {step === 1 && (
@@ -353,6 +400,47 @@ export function GenerateFromFileDialog({
                 onError={setError}
                 disabled={busy}
               />
+
+              {/* Paste-text leg (plan G1/F1: "pasting text or uploading") —
+                  bypasses extraction entirely. */}
+              <div className="space-y-2 rounded-2xl border-[3px] border-border bg-card p-3.5 shadow-[var(--shadow-clay-sm)]">
+                <Label htmlFor="paste-source" className="text-xs font-extrabold text-foreground">
+                  {t("pasteLabel")}
+                </Label>
+                <Textarea
+                  id="paste-source"
+                  value={pastedText}
+                  onChange={(e) => setPastedText(e.target.value)}
+                  placeholder={t("pastePlaceholder")}
+                  rows={4}
+                  maxLength={400000}
+                  disabled={busy}
+                  className="resize-y text-xs font-medium rounded-xl border-[3px] border-border bg-background/50 focus:bg-background focus:border-primary transition-colors"
+                />
+                <div className="flex justify-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const text = pastedText.trim();
+                      if (!text) {
+                        setError(t("emptyTextError"));
+                        return;
+                      }
+                      setExtractedText(text);
+                      setIsLowDensity(false);
+                      setError(null);
+                      setStep(2);
+                    }}
+                    disabled={busy || pastedText.trim().length === 0}
+                    className="gap-1.5 rounded-xl text-xs font-bold"
+                  >
+                    {t("pasteUseBtn")}
+                    <ArrowRight className="size-3.5" />
+                  </Button>
+                </div>
+              </div>
 
               <EnginePicker
                 value={engine}
@@ -449,7 +537,8 @@ export function GenerateFromFileDialog({
                 </div>
               )}
 
-              {/* Custom Steering Prompt */}
+              {/* Custom Steering Prompt (lecturer surface only) */}
+              {!isStudent && (
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <Label htmlFor="steering-prompt" className="text-xs font-extrabold text-foreground">
@@ -470,9 +559,10 @@ export function GenerateFromFileDialog({
                   className="resize-y text-xs font-medium rounded-xl border-[3px] border-border bg-background/50 focus:bg-background focus:border-primary transition-colors"
                 />
               </div>
+              )}
 
               {/* Controls: Difficulty & Question Type Mix (Equal Height) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-stretch">
+              <div className={`grid grid-cols-1 gap-3.5 items-stretch ${isStudent ? "" : "sm:grid-cols-2"}`}>
                 {/* Difficulty Selector (Stretches to fill remaining space) */}
                 <div className="flex flex-col gap-1.5">
                   <Label className="text-xs font-extrabold text-foreground">
@@ -505,7 +595,8 @@ export function GenerateFromFileDialog({
                   </div>
                 </div>
 
-                {/* Question Type Mix */}
+                {/* Question Type Mix (lecturer surface only) */}
+                {!isStudent && (
                 <div className="flex flex-col gap-1.5">
                   <Label className="text-xs font-extrabold text-foreground">
                     {t("typeMixLabel")}
@@ -536,6 +627,7 @@ export function GenerateFromFileDialog({
                     ))}
                   </div>
                 </div>
+                )}
               </div>
 
               {/* Question Count & Language */}
@@ -644,8 +736,9 @@ export function GenerateFromFileDialog({
                 </div>
               </div>
 
-              {/* Append vs Replace Choice */}
-              {hasQuestions && (
+              {/* Append vs Replace Choice (lecturer surface only — the
+                  practice route seeds-or-appends server-side) */}
+              {!isStudent && hasQuestions && (
                 <div className="space-y-2 rounded-2xl border-[3px] border-border bg-card p-3.5 shadow-[var(--shadow-clay-sm)]">
                   <Label className="text-xs font-extrabold text-foreground">
                     {t("modeLabel")}

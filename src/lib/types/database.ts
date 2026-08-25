@@ -34,6 +34,24 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_generation_usage: {
+        Row: {
+          count: number
+          day: string
+          user_id: string
+        }
+        Insert: {
+          count?: number
+          day?: string
+          user_id: string
+        }
+        Update: {
+          count?: number
+          day?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       audit_events: {
         Row: {
           action: string
@@ -326,6 +344,7 @@ export type Database = {
       }
       profiles: {
         Row: {
+          avatar_path: string | null
           consent_given_at: string | null
           created_at: string
           face_deletion_pending: boolean
@@ -337,6 +356,7 @@ export type Database = {
           role: Database["public"]["Enums"]["user_role"]
         }
         Insert: {
+          avatar_path?: string | null
           consent_given_at?: string | null
           created_at?: string
           face_deletion_pending?: boolean
@@ -348,6 +368,7 @@ export type Database = {
           role: Database["public"]["Enums"]["user_role"]
         }
         Update: {
+          avatar_path?: string | null
           consent_given_at?: string | null
           created_at?: string
           face_deletion_pending?: boolean
@@ -366,6 +387,7 @@ export type Database = {
           created_at: string
           explanation: string | null
           id: string
+          image_path: string | null
           options: string[]
           order_index: number
           prompt: string
@@ -377,6 +399,7 @@ export type Database = {
           created_at?: string
           explanation?: string | null
           id?: string
+          image_path?: string | null
           options: string[]
           order_index: number
           prompt: string
@@ -388,6 +411,7 @@ export type Database = {
           created_at?: string
           explanation?: string | null
           id?: string
+          image_path?: string | null
           options?: string[]
           order_index?: number
           prompt?: string
@@ -675,6 +699,7 @@ export type Database = {
           created_at: string
           explanation: string | null
           id: string
+          image_path: string | null
           options: string[]
           order_index: number
           prompt: string
@@ -686,6 +711,7 @@ export type Database = {
           created_at?: string
           explanation?: string | null
           id?: string
+          image_path?: string | null
           options: string[]
           order_index: number
           prompt: string
@@ -697,6 +723,7 @@ export type Database = {
           created_at?: string
           explanation?: string | null
           id?: string
+          image_path?: string | null
           options?: string[]
           order_index?: number
           prompt?: string
@@ -976,6 +1003,7 @@ export type Database = {
       student_question_view: {
         Row: {
           created_at: string | null
+          has_image: boolean | null
           id: string | null
           options: string[] | null
           order_index: number | null
@@ -985,6 +1013,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string | null
+          has_image?: never
           id?: string | null
           options?: string[] | null
           order_index?: number | null
@@ -994,6 +1023,7 @@ export type Database = {
         }
         Update: {
           created_at?: string | null
+          has_image?: never
           id?: string | null
           options?: string[] | null
           order_index?: number | null
@@ -1021,6 +1051,7 @@ export type Database = {
       student_quiz_player_question_view: {
         Row: {
           created_at: string | null
+          has_image: boolean | null
           id: string | null
           options: string[] | null
           order_index: number | null
@@ -1030,6 +1061,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string | null
+          has_image?: never
           id?: string | null
           options?: string[] | null
           order_index?: number | null
@@ -1039,6 +1071,7 @@ export type Database = {
         }
         Update: {
           created_at?: string | null
+          has_image?: never
           id?: string | null
           options?: string[] | null
           order_index?: number | null
@@ -1214,6 +1247,7 @@ export type Database = {
           created_at: string
           explanation: string | null
           id: string
+          image_path: string | null
           options: string[]
           order_index: number
           prompt: string
@@ -1241,6 +1275,7 @@ export type Database = {
           created_at: string
           explanation: string | null
           id: string
+          image_path: string | null
           options: string[]
           order_index: number
           prompt: string
@@ -1317,6 +1352,13 @@ export type Database = {
         Returns: Json
       }
       reset_session: { Args: { p_session_id: string }; Returns: Json }
+      resolve_question_image: {
+        Args: { p_question_id: string }
+        Returns: {
+          image_path: string
+          ttl_seconds: number
+        }[]
+      }
       resolve_shared_student_quiz: { Args: { p_code: string }; Returns: Json }
       revoke_face_consent: { Args: never; Returns: Json }
       safe_audit_uuid: { Args: { p_value: string }; Returns: string }
@@ -1330,6 +1372,27 @@ export type Database = {
           p_title: string
         }
         Returns: undefined
+      }
+      save_student_quiz_questions: {
+        Args: { p_mode?: string; p_questions: Json; p_quiz_id: string }
+        Returns: {
+          correct_index: number
+          created_at: string
+          explanation: string | null
+          id: string
+          image_path: string | null
+          options: string[]
+          order_index: number
+          prompt: string
+          quiz_id: string
+          type: Database["public"]["Enums"]["question_type"]
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "student_quiz_questions"
+          isOneToOne: false
+          isSetofReturn: true
+        }
       }
       self_recover_session: { Args: { p_session_id: string }; Returns: Json }
       start_quiz_session: { Args: { p_quiz_id: string }; Returns: Json }

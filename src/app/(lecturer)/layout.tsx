@@ -25,7 +25,7 @@ export default async function LecturerLayout({
   if (!user) redirect("/login");
 
   const [profileRes, listRes, countRes] = await Promise.all([
-    supabase.from("profiles").select("role, consent_given_at, full_name").eq("id", user.id).maybeSingle(),
+    supabase.from("profiles").select("role, consent_given_at, full_name, avatar_path, created_at").eq("id", user.id).maybeSingle(),
     supabase
       .from("notifications")
       .select("id, seq, type, payload, read_at, created_at")
@@ -52,6 +52,8 @@ export default async function LecturerLayout({
       email={user.email ?? ""}
       fullName={profile?.full_name ?? undefined}
       consentGiven={Boolean(profile?.consent_given_at)}
+      avatarPath={profile?.avatar_path ?? null}
+      memberSince={profile?.created_at ?? null}
       notificationBell={
         <NotificationBell
           userId={user.id}

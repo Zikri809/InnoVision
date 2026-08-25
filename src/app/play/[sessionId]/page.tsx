@@ -17,6 +17,7 @@ type QuestionRow = {
   type: "mcq" | "true_false";
   prompt: string;
   options: string[];
+  has_image: boolean;
   created_at: string;
 };
 
@@ -63,6 +64,7 @@ export type ResultsBreakdownRow = {
   is_correct: boolean | null;
   correct_index: number;
   explanation: string | null;
+  has_image?: boolean;
 };
 
 /**
@@ -160,7 +162,7 @@ export default async function PlayPage({ params }: PageProps) {
       .maybeSingle(),
     supabase
       .from("student_question_view")
-      .select("id, order_index, type, prompt, options, created_at")
+      .select("id, order_index, type, prompt, options, has_image, created_at")
       .eq("quiz_id", s.quiz_id)
       .order("order_index", { ascending: true })
       .order("created_at", { ascending: true }),

@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -33,14 +34,12 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
   const [code, setCode] = useState("");
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const submitLock = useRef(false);
 
   async function handleJoin(e: React.FormEvent) {
     e.preventDefault();
     if (submitLock.current) return;
     setError(null);
-    setNotice(null);
     submitLock.current = true;
     setJoining(true);
     try {
@@ -52,14 +51,14 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
       const body = await res.json();
       if (!res.ok) {
         if (res.status === 409) {
-          setNotice(t("alreadyEnrolled"));
+          toast.info(t("alreadyEnrolled"));
         } else {
           setError(body.message ?? body.error ?? tCommon("errorGeneric"));
         }
         return;
       }
       setCode("");
-      setNotice(t("joinedNotice", { title: body.class?.title ?? "" }));
+      toast.success(t("joinedNotice", { title: body.class?.title ?? "" }));
       router.refresh();
 
     } catch {
@@ -147,11 +146,6 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
                 {error && (
                   <p className="rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm font-bold text-destructive" role="alert">
                     {error}
-                  </p>
-                )}
-                {notice && (
-                  <p className="rounded-xl border-[3px] border-emerald-300 bg-emerald-50 px-4 py-2.5 text-sm font-bold text-emerald-800" role="status">
-                    {notice}
                   </p>
                 )}
               </div>

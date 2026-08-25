@@ -4,6 +4,7 @@ import { useId, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -15,6 +16,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -26,7 +28,9 @@ import {
   type OptionDraftState,
 } from "@/lib/quizzes/question-draft";
 import { QuestionInputSchema } from "@/lib/quizzes/validation";
-import { ArrowDown, ArrowUp, Check, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
+import { GenerateFromFileDialog } from "@/components/extract/GenerateFromFileDialog";
+import { QuestionImageAttach } from "@/components/media/question-image-attach";
+import { ArrowDown, ArrowUp, Check, Loader2, Pencil, Plus, Sparkles, Trash2, X } from "lucide-react";
 
 export type EditorQuestion = {
   id: string;
@@ -37,6 +41,7 @@ export type EditorQuestion = {
   options: string[];
   correct_index: number;
   explanation: string | null;
+  image_path?: string | null;
 };
 
 type QuizMeta = { id: string; title: string; description: string | null };
@@ -53,9 +58,13 @@ const QUESTION_CAP = 50;
 export function QuizEditorClient({
   quiz,
   initialQuestions,
+  userId,
+  ocrConfig,
 }: {
   quiz: QuizMeta;
   initialQuestions: EditorQuestion[];
+  userId: string;
+  ocrConfig: { defaultEngine: "tesseract" | "glm" };
 }) {
   const router = useRouter();
   const t = useTranslations("quizEditor");
@@ -89,6 +98,32 @@ export function QuizEditorClient({
   // so edit failures must render inside <DialogContent> to be visible.
   const [editError, setEditError] = useState<string | null>(null);
   const [editExplanation, setEditExplanation] = useState("");
+
+  // AI generation (student mode): dialog reports generated rows here.
+  const [generateOpen, setGenerateOpen] = useState(false);
+
+  // Per-question image presence: BASE derived from the live questions prop
+  // (stays honest across router.refresh / AI replace), overlaid by optimistic
+  // local flags set at attach/remove time.
+  const [imageFlags, setImageFlags] = useState<Record<string, boolean>>({});
+
+  function hasImageFor(id: string): boolean {
+    if (id in imageFlags) return imageFlags[id];
+    return Boolean(initialQuestions.find((q) => q.id === id)?.image_path);
+  }
+
+  function setImageFlag(id: string, has: boolean) {
+    setImageFlags((prev) => ({ ...prev, [id]: has }));
+  }
+
+  function handleGenerated(rows: unknown[], info: { capped: boolean }) {
+    const before = questions.length;
+    const next = rows as EditorQuestion[];
+    setQuestions((prev) => [...prev, ...next].slice(0, QUESTION_CAP));
+    if (info.capped || questions.length + next.length > QUESTION_CAP) {
+      toast.info(t("capNotice", { count: QUESTION_CAP - before, max: QUESTION_CAP }));
+    }
+  }
 
   async function api(path: string, init: RequestInit) {
     const res = await fetch(path, init);
@@ -342,6 +377,14 @@ export function QuizEditorClient({
               ) : null}
               {t("metaSave")}
             </Button>
+            <Button
+              variant="outline"
+              onClick={() => setGenerateOpen(true)}
+              disabled={questions.length >= QUESTION_CAP}
+            >
+              <Sparkles className="h-4 w-4" aria-hidden />
+              {t("generateWithAi")}
+            </Button>
             <Link href={`/play/student/${quiz.id}`}>
               <Button variant="outline">
                 <Check className="h-4 w-4" aria-hidden /> {t("openBuilder")}
@@ -378,6 +421,11 @@ export function QuizEditorClient({
                     <Check className="inline h-3.5 w-3.5" aria-hidden />{" "}
                     {q.options[q.correct_index]}
                   </p>
+                  <QuestionImageAttach
+                    uploadEndpoint={`/api/student-quizzes/${quiz.id}/questions/${q.id}/image`}
+                    hasImage={hasImageFor(q.id)}
+                    onChanged={(has) => setImageFlag(q.id, has)}
+                  />
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                   <Button
@@ -455,11 +503,25 @@ export function QuizEditorClient({
         </CardContent>
       </Card>
 
+      {/* ── AI generation dialog (student mode) ── */}
+      <GenerateFromFileDialog
+        quizId={quiz.id}
+        userId={userId}
+        config={ocrConfig}
+        open={generateOpen}
+        onOpenChange={setGenerateOpen}
+        hasQuestions={questions.length > 0}
+        mode="student"
+        endpoint={`/api/student-quizzes/${quiz.id}/generate`}
+        onGenerated={handleGenerated}
+      />
+
       {/* ── Edit dialog ── */}
       <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{t("editQuestion")}</DialogTitle>
+            <DialogDescription>{t("editQuestionHint")}</DialogDescription>
           </DialogHeader>
           {editing && (
             <div className="space-y-4">

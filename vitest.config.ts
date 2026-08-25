@@ -19,10 +19,13 @@ export default defineConfig({
         "src/lib/results/**",
         "src/lib/quizzes/**",
         "src/lib/student-quizzes/**",
+        "src/lib/media/**",
         "src/lib/vision/camera.ts",
         "src/app/api/ai/**",
         "src/app/api/quizzes/**",
         "src/app/api/student-quizzes/**",
+        "src/app/api/question-images/**",
+        "src/app/api/profile/**",
         "src/app/api/sessions/**",
         "src/app/api/face/**",
       ],
@@ -115,6 +118,18 @@ export default defineConfig({
         "src/app/api/student-quizzes/[id]/reorder/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
         "src/app/api/student-quizzes/shared/[code]/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
         "src/app/api/student-quizzes/shared/answer/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
+        // Media (plan MEDIA_AND_STUDENT_AI): pure validators at the lib bar;
+        // new routes mirror the sibling route gates. Client glue
+        // (use-question-image.ts, media components) is browser-only — E2E
+        // owns it (hand-tracker/tesseract 0-key precedent).
+        "src/lib/media/validation.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        "src/lib/media/server.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
+        "src/lib/media/use-question-image.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
+        "src/app/api/question-images/[qid]/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
+        "src/app/api/profile/avatar/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
+        "src/app/api/quizzes/[id]/questions/[questionId]/image/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
+        "src/app/api/student-quizzes/[id]/questions/[questionId]/image/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
+        "src/app/api/student-quizzes/[id]/generate/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
       },
     },
   },

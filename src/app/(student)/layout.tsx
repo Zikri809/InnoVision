@@ -25,7 +25,7 @@ export default async function StudentLayout({
   if (!user) redirect("/login");
 
   const [profileRes, listRes, countRes] = await Promise.all([
-    supabase.from("profiles").select("role, consent_given_at, full_name, matric_no").eq("id", user.id).maybeSingle(),
+    supabase.from("profiles").select("role, consent_given_at, full_name, matric_no, avatar_path, created_at").eq("id", user.id).maybeSingle(),
     supabase
       .from("notifications")
       .select("id, seq, type, payload, read_at, created_at")
@@ -53,6 +53,8 @@ export default async function StudentLayout({
       fullName={profile?.full_name ?? undefined}
       matricNo={profile?.matric_no ?? undefined}
       consentGiven={Boolean(profile?.consent_given_at)}
+      avatarPath={profile?.avatar_path ?? null}
+      memberSince={profile?.created_at ?? null}
       notificationBell={
         <NotificationBell
           userId={user.id}

@@ -81,6 +81,41 @@ export const GenerateQuizSchema = z.object({
 
 export type GenerateQuizInput = z.infer<typeof GenerateQuizSchema>;
 
+/**
+ * Student practice-quiz generation body (POST /api/student-quizzes/[id]/generate).
+ * Differences from the lecturer contract (deliberate):
+ *  - NO quizId in the body — the quiz comes from the URL param.
+ *  - NO steeringPrompt / formatDistribution / mode controls (plan §5: student
+ *    mode hides steering + format mix; generation is always replace-or-append
+ *    decided by the route's save call).
+ * questionCount stays within the shared AI bounds; sourcePath(s) reuse the
+ * same two-UUID-segment tenant contract (`${uid}/${quizId}/file`).
+ */
+export const GenerateStudentQuizSchema = z.object({
+  extractedText: z
+    .string()
+    .max(MAX_AGGREGATE_CHARS, `Extracted text exceeds the maximum cap of ${MAX_AGGREGATE_CHARS} characters.`)
+    .optional(),
+  sourcePaths: z
+    .array(sourcePathSchema)
+    .min(1, "Provide at least one source path.")
+    .max(5, "Maximum 5 source files allowed per generation.")
+    .optional(),
+  questionCount: z
+    .number()
+    .int()
+    .min(AI_QUESTIONS_MIN)
+    .max(AI_QUESTIONS_MAX)
+    .optional(),
+  difficulty: QuizDifficultySchema.optional().default("mixed"),
+  language: z.enum(["en", "ms", "auto"]).optional().default("auto"),
+}).strict();
+
+export type GenerateStudentQuizInput = z.infer<typeof GenerateStudentQuizSchema>;
+
+/** Daily AI-generation budget per user (DB-side cost guard, plan D7). */
+export const STUDENT_AI_DAILY_LIMIT = 20;
+
 export const RegenerateQuestionSchema = z.object({
   questionId: z.string().uuid("questionId must be a valid UUID."),
   instruction: z

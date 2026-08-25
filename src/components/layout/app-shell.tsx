@@ -16,6 +16,8 @@ export async function AppShell({
   fullName,
   matricNo,
   consentGiven,
+  avatarPath,
+  memberSince,
   notificationBell,
   children,
 }: {
@@ -26,6 +28,10 @@ export async function AppShell({
   /** profiles.matric_no — students only; shown (and editable) in the account menu. */
   matricNo?: string | null;
   consentGiven: boolean;
+  /** profiles.avatar_path — presence only; the URL is fetched client-side. */
+  avatarPath?: string | null;
+  /** profiles.created_at — "member since" line in the account menu. */
+  memberSince?: string | null;
   /** Server-fetched <NotificationBell /> island (see role layouts). */
   notificationBell?: ReactNode;
   children: ReactNode;
@@ -60,7 +66,7 @@ export async function AppShell({
               </span>
             </Link>
 
-            <nav aria-label="Primary" className="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-1">
+            <nav aria-label={t("primaryNav")} className="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-1">
               {links.map((l) => (
                 <AppNavLink key={l.href} href={l.href} label={l.label} />
               ))}
@@ -75,6 +81,8 @@ export async function AppShell({
               matricNo={matricNo}
               isStudent={role === "student"}
               consentGiven={consentGiven}
+              hasAvatar={Boolean(avatarPath)}
+              memberSince={memberSince}
             />
           </div>
         </div>

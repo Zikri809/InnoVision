@@ -6,6 +6,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { BotAvatar } from "@/components/bot/bot-avatar";
+import { QuestionImage } from "@/components/media/question-image";
 import { ArrowRight, Check, X } from "lucide-react";
 
 export type SafeQuestion = {
@@ -14,6 +15,8 @@ export type SafeQuestion = {
   type: "mcq" | "true_false";
   prompt: string;
   options: string[];
+  /** Presence flag only — the storage path never crosses to the client. */
+  has_image?: boolean;
 };
 
 type GradedResult = {
@@ -385,6 +388,10 @@ export function StudentPracticePlayer({
           >
             {current.prompt}
           </h1>
+
+          {current.has_image && (
+            <QuestionImage key={current.id} questionId={current.id} prompt={current.prompt} />
+          )}
 
           <div className="grid gap-3">
             {current.options.map((opt, i) => {

@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from "vitest";
 import { FakeSupabase, makeOwnerContext } from "@/app/api/quizzes/__tests__/fake-supabase";
-import { defaultAiServer, invalidJson } from "@/test/msw/server";
+import {
+  defaultAiServer,
+  invalidJson,
+  capturedChatBodies,
+  resetCapturedChatBodies,
+} from "@/test/msw/server";
 import { _resetRateLimiter } from "@/lib/classes/rate-limit";
 import { http, HttpResponse } from "msw";
 import * as generateRoute from "@/app/api/ai/generate-quiz/route";
@@ -524,5 +529,74 @@ describe("Server-side parse failure paths (downloadAndParseNative hardening)", (
     );
     expect(res.status).toBe(422);
     expect((await res.json()).error).toBe("parse_error");
+  });
+});
+
+describe("I-PREAMBLE � generate route preamble pins (plan �6 blind-spot fix)", () => {
+  it("CSRF: cross-origin POST ? 403 before any parsing", async () => {
+    ownerContext({ quizStatus: "draft" });
+    const req = new Request("http://localhost", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://evil.example" },
+      body: JSON.stringify({ quizId: QUIZ_C }),
+    });
+    const { generate } = await importHandlers();
+    const res = await generate.POST(req, { params: Promise.resolve({ id: QUIZ_C }) });
+    expect(res.status).toBe(403);
+  });
+
+  it("rate limit 10/h per user ? 429", async () => {
+    ownerContext({ quizStatus: "draft" });
+    const { _seedRateLimit } = await import("@/lib/classes/rate-limit");
+    _seedRateLimit(`aiGenerate:${OWNER_ID}`, 10);
+    const { generate } = await importHandlers();
+    const res = await generate.POST(
+      req({ quizId: QUIZ_C, extractedText: "some text long enough for generation attempts" }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(429);
+  });
+
+  it("body over 512 KB declared ? 413", async () => {
+    ownerContext({ quizStatus: "draft" });
+    const { generate } = await importHandlers();
+    const req = new Request("http://localhost", {
+      method: "POST",
+      headers: { "content-type": "application/json", "content-length": String(600 * 1024) },
+      body: JSON.stringify({ quizId: QUIZ_C }),
+    });
+    const res = await generate.POST(req, { params: Promise.resolve({ id: QUIZ_C }) });
+    expect(res.status).toBe(413);
+  });
+
+  it("unauthenticated caller with malformed body ? 404 (auth BEFORE parse)", async () => {
+    const client = new FakeSupabase(); // no user set
+    fakeHolder.current = client;
+    const { generate } = await importHandlers();
+    const res = await generate.POST(new Request("http://localhost", { method: "POST" }), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("prompt contract: questionCount/difficulty/language markers reach the wire", async () => {
+    ownerContext({ quizStatus: "draft" });
+    resetCapturedChatBodies();
+    const { generate } = await importHandlers();
+    const res = await generate.POST(
+      req({
+        quizId: QUIZ_C,
+        extractedText: "photosynthesis converts light into chemical energy in plants",
+        questionCount: 5,
+        difficulty: "hard",
+        language: "en",
+      }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(200);
+    expect(capturedChatBodies.length).toBeGreaterThan(0);
+    const wire = String(capturedChatBodies[0]);
+    expect(wire).toContain("exactly 5 questions"); // question-count marker
+    expect(wire.toLowerCase()).toContain("hard"); // difficulty marker
   });
 });

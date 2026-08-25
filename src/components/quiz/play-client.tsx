@@ -25,6 +25,7 @@ type Question = {
   type: "mcq" | "true_false";
   prompt: string;
   options: string[];
+  has_image?: boolean;
   created_at: string;
 };
 

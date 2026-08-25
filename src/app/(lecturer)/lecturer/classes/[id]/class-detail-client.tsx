@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,7 +32,6 @@ import {
 } from "@/components/ui/dialog";
 import {
   ArrowLeft,
-  Check,
   Copy,
   Archive,
   RotateCcw,
@@ -87,7 +87,6 @@ export function ClassDetailClient({
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
 
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
   const [archiving, setArchiving] = useState(false);
@@ -99,14 +98,6 @@ export function ClassDetailClient({
 
   // Ref lock guards against a fast double-click before React re-renders.
   const submitLock = useRef(false);
-  // Copied ✓ timer — cleared on repeat copies and on unmount so the state
-  // flip can't land after navigation (and rapid copies don't stack timers).
-  const copiedTimerRef = useRef<number | null>(null);
-  useEffect(() => {
-    return () => {
-      if (copiedTimerRef.current !== null) window.clearTimeout(copiedTimerRef.current);
-    };
-  }, []);
 
   function formatDate(iso: string | null | undefined): string {
     if (!iso) return "—";
@@ -131,9 +122,7 @@ export function ClassDetailClient({
     setCopyError(null);
     try {
       await navigator.clipboard.writeText(cls.join_code);
-      setCopied(true);
-      if (copiedTimerRef.current !== null) window.clearTimeout(copiedTimerRef.current);
-      copiedTimerRef.current = window.setTimeout(() => setCopied(false), 1500);
+      toast.success(t("joinCodeCopied"));
     } catch {
       setCopyError(t("copyJoinCodeError"));
     }
@@ -300,13 +289,9 @@ export function ClassDetailClient({
                   variant="ghost"
                   size="icon-sm"
                   onClick={copyJoinCode}
-                  aria-label={copied ? t("joinCodeCopied") : t("copyJoinCode")}
+                  aria-label={t("copyJoinCode")}
                 >
-                  {copied ? (
-                    <Check className="size-4" aria-hidden />
-                  ) : (
-                    <Copy className="size-4" aria-hidden />
-                  )}
+                  <Copy className="size-4" aria-hidden />
                 </Button>
               </div>
               {copyError && (

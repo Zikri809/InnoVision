@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { toast } from "sonner";
 import { CircleAlert, CircleCheck, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -159,7 +160,7 @@ export function FaceEnrollClient({
       }
       setConsent(false);
       setCaptureState("idle");
-      setNotice(tCommon("ok"));
+      toast.success(tCommon("ok"));
     } catch {
       setError(tCommon("errorGeneric"));
     } finally {

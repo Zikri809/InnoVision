@@ -2,6 +2,7 @@
 
 import { useLocale, useTranslations } from "next-intl";
 import { OptionCard } from "@/components/quiz/option-card";
+import { QuestionImage } from "@/components/media/question-image";
 import type { AnswerState } from "@/components/quiz/play-client";
 import type { HoldProgress } from "@/lib/gestures/types";
 
@@ -11,6 +12,7 @@ type Question = {
   type: "mcq" | "true_false";
   prompt: string;
   options: string[];
+  has_image?: boolean;
   created_at: string;
 };
 
@@ -75,6 +77,10 @@ export function QuestionCard({
       <h2 id="question-prompt" className="mb-5 font-heading text-xl font-semibold leading-snug [text-wrap:balance] md:text-2xl">
         {question.prompt}
       </h2>
+
+      {question.has_image && (
+        <QuestionImage key={question.id} questionId={question.id} prompt={question.prompt} />
+      )}
 
       <ul className="space-y-3">
         {question.options.map((opt, i) => {

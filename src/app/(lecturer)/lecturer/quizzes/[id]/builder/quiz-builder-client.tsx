@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
+import { toast } from "sonner";
 import { ArrowDown, ArrowLeft, ArrowUp, Check, Pencil, Settings2, Timer, Trash2, Wand2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,6 +32,7 @@ import { SourceTextPreview } from "@/components/extract/SourceTextPreview";
 import { EditQuestionDialog } from "@/components/quiz/edit-question-dialog";
 import { RegenerateQuestionDialog } from "@/components/quiz/regenerate-question-dialog";
 import { EditQuizDialog } from "@/components/quiz/edit-quiz-dialog";
+import { QuestionImageAttach } from "@/components/media/question-image-attach";
 import type { OcrConfig } from "@/lib/extract/types";
 
 export type QuizInfo = {
@@ -55,6 +57,7 @@ export type QuestionRow = {
   options: string[];
   correct_index: number;
   explanation: string | null;
+  image_path?: string | null;
 };
 
 type QuestionDraft = {
@@ -102,6 +105,16 @@ export function QuizBuilderClient({
   const settingsBtnRef = useRef<HTMLButtonElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
 
+  // Per-question image presence: BASE derived from the live questions state
+  // (stays honest across refreshes/replaces), overlaid by optimistic flags
+  // set at attach/remove time. The storage path itself never lives client-side.
+  const [imageFlags, setImageFlags] = useState<Record<string, boolean>>({});
+
+  function hasImageFor(id: string): boolean {
+    if (id in imageFlags) return imageFlags[id];
+    return Boolean(questions.find((q) => q.id === id)?.image_path);
+  }
+
   function handleDialogClose(open: boolean) {
     setSettingsOpen(open);
     if (!open) {
@@ -129,7 +142,6 @@ export function QuizBuilderClient({
     setTitleDraft(quiz.title);
     setEditingTitle(true);
     setError(null);
-    setNotice(null);
   }
 
   function cancelTitleEdit() {
@@ -160,7 +172,6 @@ export function QuizBuilderClient({
     titleSubmitLock.current = true;
     setSavingTitle(true);
     setError(null);
-    setNotice(null);
 
     try {
       const res = await fetch(`/api/quizzes/${quiz.id}`, {
@@ -181,7 +192,7 @@ export function QuizBuilderClient({
         return;
       }
       setEditingTitle(false);
-      setNotice(t("titleUpdated"));
+      toast.success(t("titleUpdated"));
       router.refresh();
       headingRef.current?.focus();
     } catch {
@@ -201,7 +212,6 @@ export function QuizBuilderClient({
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [generateOpen, setGenerateOpen] = useState(false);
   const [reordering, setReordering] = useState(false);
 
@@ -246,7 +256,6 @@ export function QuizBuilderClient({
     setEditingQuestion(q);
     setEditingIndex(index);
     setError(null);
-    setNotice(null);
   }
 
   async function handleSave(e: React.FormEvent) {
@@ -254,7 +263,6 @@ export function QuizBuilderClient({
     if (saving) return;
     setSaving(true);
     setError(null);
-    setNotice(null);
 
     const payload = {
       type: draft.type,
@@ -276,7 +284,7 @@ export function QuizBuilderClient({
         return;
       }
       setDraft(emptyDraft);
-      setNotice(t("questionAdded"));
+      toast.success(t("questionAdded"));
       router.refresh();
     } catch {
       setError(tCommon("errorGeneric"));
@@ -294,7 +302,6 @@ export function QuizBuilderClient({
     if (!window.confirm(t("deleteQuestionConfirm"))) return;
     deletingId.current = q.id;
     setError(null);
-    setNotice(null);
     try {
       const res = await fetch(`/api/quizzes/${quiz.id}/questions/${q.id}`, {
         method: "DELETE",
@@ -304,7 +311,7 @@ export function QuizBuilderClient({
         setError(body.message ?? body.error ?? tCommon("errorGeneric"));
         return;
       }
-      setNotice(t("questionDeleted"));
+      toast.success(t("questionDeleted"));
       router.refresh();
     } catch {
       setError(tCommon("errorGeneric"));
@@ -321,7 +328,6 @@ export function QuizBuilderClient({
 
     setReordering(true);
     setError(null);
-    setNotice(null);
 
     const nextQuestions = [...questions];
     const [moved] = nextQuestions.splice(currentIdx, 1);
@@ -531,7 +537,7 @@ export function QuizBuilderClient({
         onOpenChange={handleDialogClose}
         quiz={quiz}
         onSuccess={() => {
-          setNotice(t("titleUpdated"));
+          toast.success(t("titleUpdated"));
           router.refresh();
         }}
         onError={(status, message) => {
@@ -565,7 +571,7 @@ export function QuizBuilderClient({
         question={editingQuestion}
         questionIndex={editingIndex ?? undefined}
         onSuccess={() => {
-          setNotice(t("questionUpdated"));
+          toast.success(t("questionUpdated"));
           router.refresh();
         }}
       />
@@ -581,37 +587,12 @@ export function QuizBuilderClient({
         question={regeneratingQuestion}
         questionIndex={regeneratingIndex ?? undefined}
         onSuccess={() => {
-          setNotice(t("questionRegenerated"));
+          toast.success(t("questionRegenerated"));
           router.refresh();
         }}
       />
 
-      {!isDraft && (
-        <div
-          role="alert"
-          className="mb-6 rounded-2xl border-[3px] border-amber-300 bg-amber-50 p-4 text-sm font-semibold text-amber-900"
-        >
-          {quiz.status === "live" ? tCommon("active") : tCommon("closed")}
-        </div>
-      )}
-
       <div aria-live="polite">
-        {notice && (
-          <div
-            className="mb-4 flex items-center justify-between gap-3 rounded-2xl border-[3px] border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-800"
-            role="status"
-          >
-            <span>{notice}</span>
-            <button
-              type="button"
-              onClick={() => setNotice(null)}
-              aria-label={tCommon("close")}
-              className="shrink-0 cursor-pointer rounded-lg p-1.5 transition-colors hover:bg-emerald-100 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/40"
-            >
-              <X className="size-4" aria-hidden="true" />
-            </button>
-          </div>
-        )}
         {error && (
           <div
             className="mb-4 flex items-center justify-between gap-3 rounded-2xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2 text-sm font-bold text-destructive"
@@ -850,6 +831,15 @@ export function QuizBuilderClient({
                       <p className="mt-1.5 text-xs font-semibold text-muted-foreground">
                         <strong className="font-extrabold text-foreground">{t("explanationLabel")}:</strong> {q.explanation}
                       </p>
+                    )}
+                    {isDraft && (
+                      <QuestionImageAttach
+                        uploadEndpoint={`/api/quizzes/${quiz.id}/questions/${q.id}/image`}
+                        hasImage={hasImageFor(q.id)}
+                        onChanged={(has) =>
+                          setImageFlags((prev) => ({ ...prev, [q.id]: has }))
+                        }
+                      />
                     )}
                   </div>
                   {isDraft && (

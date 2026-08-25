@@ -243,6 +243,8 @@ export class FakeSupabase {
   };
   /** Fake storage files keyed by object path. */
   storageFiles: Record<string, Uint8Array> = {};
+  /** resolve_question_image stub decisions (media routes). */
+  resolvedImages: Record<string, { image_path: string; ttl_seconds: number }> = {};
   /** When true, replace_quiz_questions returns an error (simulated). */
   rpcError: { message: string } | null = null;
   /**
@@ -347,6 +349,13 @@ export class FakeSupabase {
       const quiz = (this.tables["quizzes"] ?? []).find((q) => q.id === quizId);
       const cls = quiz ? (this.tables["classes"] ?? []).find((c) => c.id === quiz.class_id) : undefined;
       return { data: cls?.lecturer_id === this.user?.id, error: null };
+    }
+    if (name === "resolve_question_image") {
+      // Media visibility stub (0028): returns the seeded decision or an EMPTY
+      // array — never a path for unseeded ids. Lockstep note in seedResolvedImage.
+      const questionId = String(args?.p_question_id ?? "");
+      const entry = this.resolvedImages[questionId];
+      return { data: entry ? [entry] : [], error: null };
     }
     if (name === "append_question") {
       const questions = this.tables["questions"] ?? [];
@@ -718,6 +727,15 @@ export class FakeSupabase {
   /** Seed a fake stored file for storage.download (I16b). */
   seedStorageFile(path: string, bytes: Uint8Array) {
     this.storageFiles[path] = bytes;
+  }
+
+  /**
+   * Seeded visibility decisions for the resolve_question_image RPC stub
+   * (media routes). Keyed by question id; STUBS ONLY — the authoritative
+   * matrix checks live in scripts/verify-media.mjs (lockstep with 0028).
+   */
+  seedResolvedImage(questionId: string, entry: { image_path: string; ttl_seconds: number }) {
+    this.resolvedImages[questionId] = entry;
   }
 
   // ── Phase 7 face helpers ──────────────────────────────────────────

@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -53,7 +54,6 @@ export function MyQuizzesClient({ quizzes }: { quizzes: MyQuiz[] }) {
   const lock = useRef(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [shareTarget, setShareTarget] = useState<MyQuiz | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<MyQuiz | null>(null);
   const [regenArmed, setRegenArmed] = useState(false);
@@ -64,7 +64,6 @@ export function MyQuizzesClient({ quizzes }: { quizzes: MyQuiz[] }) {
   ): Promise<{ ok: boolean; body: Record<string, unknown> }> {
     if (lock.current) return { ok: false, body: {} };
     setError(null);
-    setNotice(null);
     lock.current = true;
     setBusyId(quiz.id);
     try {
@@ -91,7 +90,7 @@ export function MyQuizzesClient({ quizzes }: { quizzes: MyQuiz[] }) {
     const { ok } = await mutate(deleteTarget, { method: "DELETE" });
     if (ok) {
       setDeleteTarget(null);
-      setNotice(t("deletedNotice"));
+      toast.success(t("deletedNotice"));
     }
   }
 
@@ -107,7 +106,7 @@ export function MyQuizzesClient({ quizzes }: { quizzes: MyQuiz[] }) {
       body: JSON.stringify({ action }),
     });
     if (!ok) return;
-    if (action === "unshare") setNotice(t("unsharedNotice"));
+    if (action === "unshare") toast.success(t("unsharedNotice"));
     const updated = body.quiz as Partial<MyQuiz> | undefined;
     if (updated?.id) {
       setShareTarget((prev) =>
@@ -169,11 +168,6 @@ export function MyQuizzesClient({ quizzes }: { quizzes: MyQuiz[] }) {
             role="alert"
           >
             {error}
-          </p>
-        )}
-        {!error && notice && (
-          <p className="rounded-2xl border-[3px] border-emerald-300 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-800" role="status">
-            {notice}
           </p>
         )}
       </div>
@@ -285,11 +279,10 @@ export function MyQuizzesClient({ quizzes }: { quizzes: MyQuiz[] }) {
                     try {
                       await navigator.clipboard.writeText(shareHref);
                       setError(null);
-                      setNotice(tCommon("copied"));
+                      toast.success(tCommon("copied"));
                     } catch {
                       // Clipboard denied / insecure context — the link stays
                       // selected in the readonly input for manual copying.
-                      setNotice(null);
                     }
                   }}
                 >

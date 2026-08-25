@@ -27,6 +27,7 @@
    - 7.9 Results & reveal gating
    - 7.10 Notifications
    - 7.11 Student practice quizzes & sharing
+   - 7.12 Media: question images, avatars, student AI generation
 8. [i18n](#8-i18n)
 9. [Testing map](#9-testing-map)
 10. [Environment variables](#10-environment-variables)
@@ -72,12 +73,13 @@ Postgres functions.
 └──────────────┬──────────────────────────────────────────────┘
                │ PostgREST (supabase-js) — user JWT or service role
 ┌──────────────▼──────────────────────────────────────────────┐
-│  Supabase (self-hosted local / hosted)                      │
-│  ├─ Postgres: tables, RLS on everything, SECURITY DEFINER   │
-│  │   RPCs own every sensitive write                         │
-│  ├─ Auth (GoTrue): sessions, cookies via @supabase/ssr      │
-│  ├─ Storage: private buckets (quiz-sources, incident-footage)│
-│  └─ Realtime: notifications channel                         │
+       │  Supabase (self-hosted local / hosted)                     │
+       │  ├─ Postgres: tables, RLS on everything, SECURITY DEFINER   │
+       │  │   RPCs own every sensitive write                         │
+       │  ├─ Auth (GoTrue): sessions, cookies via @supabase/ssr      │
+       │  ├─ Storage: private buckets (quiz-sources, incident-footage│
+       │  │   question-images, avatars — last two zero-policy)        │
+       │  └─ Realtime: notifications channel                         │
 └──────────────┬──────────────────────────────┬───────────────┘
                │ HTTP                          │ HTTP
 ┌──────────────▼─────────────┐  ┌─────────────▼───────────────┐
@@ -570,8 +572,55 @@ Deliberately simpler than assessments (migration 0023):
   `resolve_shared_student_quiz` (uniform 404 for unknown/revoked);
   questions served through a security-barrier view WITHOUT answers;
   grading via `answer_student_question` RPC performs ZERO writes (creator
-  cannot see who played — privacy by construction). Play is open to any
+   cannot see who played — privacy by construction). Play is open to any
   authenticated user; authoring is student-only.
+
+### 7.12 Media: question images, avatars, student AI generation
+
+Migration 0028/0029 (plan: `docs/PLAN_MEDIA_AND_STUDENT_AI.md`). Shared
+invariant: **storage paths never cross to the client** — rendering exchanges
+question ids for short-TTL signed URLs through the API.
+
+**Question images** — `image_path text` on both question tables, private
+`question-images` bucket with ZERO client policies (incident-footage posture;
+grants ≠ authorization). Writes ride the multipart API routes: declared
+content-length gate → magic-byte sniff (PNG/JPEG/WebP ≤5 MB) → admin-client
+upload `<uid>/<uuid>.<ext>` → guarded column UPDATE → best-effort old-object
+remove AFTER success (races leave swept orphans; `npm run media:cleanup`).
+Reads go through the SECURITY DEFINER RPC `resolve_question_image(question_id)`
+— THE visibility boundary: class-owner any status / enrolled+live /
+enrolled+closed+reveal-allowed (archived classes excluded) for assessment
+questions; creator or shared-code-holder for practice questions. Everything
+else folds into the same empty result → uniform 404. The sign route
+(`GET /api/question-images/[qid]`, 60/min) clamps the RPC-provided TTL
+(3600 s standard, **300 s for shared-practice** so unshare kills mints fast)
+and re-validates the stored path shape before signing. Players see only a
+`has_image` boolean on the views/RPC rows (`student_question_view`,
+`student_quiz_player_question_view`, `student_results`) and fetch URLs via an
+expiry-aware client hook.
+
+**Avatars** — `profiles.avatar_path` (self-writable; NOT a restricted column),
+private `avatars` bucket, contract `<uid>/avatar.<ext>`. Same route-mediated
+upload + sniffing (≤2 MB); a camera BADGE on the topbar avatar opens the file
+picker directly (one-click upload/replace) and the self-only signed URL is
+served by `/api/profile/avatar`. Removal lives inside the account menu; no
+other surface renders it (roster visibility deliberately out of scope).
+
+**Matric numbers** — captured at registration (validated + uniqueness-guarded
+by 0027's unique index) and READ-ONLY in the app thereafter: the profile menu
+shows the value with no edit control, and corrections are dev/service-role
+operations against the DB.
+
+**Student AI generation** — `POST /api/student-quizzes/[id]/generate`
+composes the SAME lib/ai pipeline as the lecturer route but guards on
+creator ownership, hides steering/format controls in the shared dialog, and
+saves atomically via `save_student_quiz_questions` (0025-parity bulk RPC:
+is_student recheck, jsonb depth, counts under the VERBATIM 0023 advisory-lock
+key `'student_quiz_append:'||quiz_id`). Cost guards: 5/h in-memory PLUS the
+service-role-only `ai_generation_usage` daily counter. The quiz-sources
+INSERT policy was WIDENED back to owner-folder-for-any-authenticated-user
+(0007 had restricted it to lecturers) so students can upload source material
+into `${uid}/${quizId}/…`.
 
 ---
 
@@ -596,7 +645,7 @@ Deliberately simpler than assessments (migration 0023):
 | Pure units | Vitest (`src/**/*.test.ts`) | scoring, timers, validation, gestures, liveness, merge logic, derive |
 | Route tests | Vitest + `fake-supabase.ts` (a fake that mimics RLS/RPC semantics and THROWS on unknown filters) | every API route's guard/CSRF/rate-limit/validation/error-mapping contracts |
 | AI boundary | MSW (`src/test/msw`) | mocked OpenAI-compatible endpoints |
-| Live-SQL harnesses | `npm run verify:*` (needs local supabase) | RLS policies, RPC state machines, caps, secrecy probes (e.g. `verify:student-quizzes` SQ-D1–D9) |
+| Live-SQL harnesses | `npm run verify:*` (needs local supabase) | RLS policies, RPC state machines, caps, secrecy probes (e.g. `verify:student-quizzes` SQ-D1–D9, `verify:media` MEDIA-D1–D12) |
 | E2E | Playwright, chromium, dev-server + mock AI + CompreFace mock seam | full user journeys; `e16` is the integrity reference spec; specs skip loudly if `LECTURER_INVITE_CODE` unset |
 | Types/schema drift | `gen:types` + CI diff | database.ts vs migrated schema |
 | Copy drift | `check:i18n` | en/ms parity + referenced-key existence |

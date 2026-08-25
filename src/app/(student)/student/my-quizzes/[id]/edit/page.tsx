@@ -40,7 +40,7 @@ export default async function EditStudentQuizPage({ params }: Params) {
   const { data: questions } = await supabase
     .from("student_quiz_questions")
     .select(
-      "id, quiz_id, order_index, type, prompt, options, correct_index, explanation",
+      "id, quiz_id, order_index, type, prompt, options, correct_index, explanation, image_path",
     )
     .eq("quiz_id", id)
     .order("order_index")
@@ -50,6 +50,10 @@ export default async function EditStudentQuizPage({ params }: Params) {
     <QuizEditorClient
       quiz={{ id: quiz.id, title: quiz.title, description: quiz.description }}
       initialQuestions={(questions ?? []) as unknown as EditorQuestion[]}
+      userId={user.id}
+      ocrConfig={{
+        defaultEngine: (process.env.OCR_DEFAULT_ENGINE as "tesseract" | "glm") ?? "tesseract",
+      }}
     />
   );
 }

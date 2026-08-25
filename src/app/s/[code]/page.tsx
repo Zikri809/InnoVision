@@ -87,7 +87,7 @@ export default async function SharedQuizPage({ params }: Params) {
   // Questions ONLY via the player view (no correct_index / explanation).
   const { data: questions } = await supabase
     .from("student_quiz_player_question_view")
-    .select("id, quiz_id, order_index, type, prompt, options, created_at")
+    .select("id, quiz_id, order_index, type, prompt, options, has_image, created_at")
     .eq("quiz_id", meta.id)
     .order("order_index")
     .order("created_at");
@@ -105,6 +105,7 @@ export default async function SharedQuizPage({ params }: Params) {
             type: q.type!,
             prompt: q.prompt!,
             options: q.options!,
+            has_image: q.has_image === true,
           }))}
       />
     </div>

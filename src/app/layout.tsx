@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Fredoka, Nunito } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
+import { Toaster } from "@/components/ui/toaster";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 
@@ -46,6 +47,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       <body className="min-h-full flex flex-col font-sans">
         <NextIntlClientProvider messages={messages} locale={locale}>
           {children}
+          <Toaster />
         </NextIntlClientProvider>
       </body>
     </html>

@@ -33,6 +33,7 @@ export class StudentFakeSupabase extends FakeSupabase {
     if (name === "answer_student_question") return this._answerStudentQuestion(args);
     if (name === "resolve_shared_student_quiz") return this._resolveShared(args);
     if (name === "student_quiz_share_action") return this._shareAction(args);
+    if (name === "save_student_quiz_questions") return this._saveStudentQuizQuestions(args);
     return super.rpc(name, args);
   }
 
@@ -54,6 +55,81 @@ export class StudentFakeSupabase extends FakeSupabase {
       created_at: "2026-01-01T00:00:00Z",
       ...question,
     });
+  }
+
+  /**
+   * Bulk-save mirror (0029) — STUBS ONLY, lockstep with the migration; the
+   * authoritative checks live in scripts/verify-media.mjs. Models: auth null,
+   * is_student demotion, ownership, mode whitelist, jsonb shape (array +
+   * per-row object + required fields), cap counting under the same error key
+   * the route maps, and ATOMIC replace/append (a mid-batch failure inserts
+   * nothing).
+   */
+  private async _saveStudentQuizQuestions(args?: Record<string, unknown>) {
+    if (this.rpcResult.data !== null || this.rpcResult.error !== null) {
+      return this.rpcResult;
+    }
+    if (!this.user) return { data: null, error: { message: "not_authenticated" } };
+    if (this.profileRole !== "student") {
+      return { data: null, error: { message: "not_student" } };
+    }
+    const quizId = String(args?.p_quiz_id);
+    const quiz = (this.tables["student_quizzes"] ?? []).find(
+      (q) => q.id === quizId && q.created_by === this.user?.id,
+    );
+    if (!quiz) return { data: null, error: { message: "not_owner" } };
+
+    const mode = args?.p_mode ?? "replace";
+    if (mode !== "replace" && mode !== "append") {
+      return { data: null, error: { message: "invalid_mode" } };
+    }
+
+    const rows = args?.p_questions;
+    if (!Array.isArray(rows) || rows.length < 1 || rows.length > 50) {
+      return { data: null, error: { message: "invalid_questions_json" } };
+    }
+    for (const r of rows) {
+      if (
+        typeof r !== "object" || r === null ||
+        typeof (r as Row).type !== "string" ||
+        typeof (r as Row).prompt !== "string" ||
+        !Array.isArray((r as Row).options) ||
+        typeof (r as Row).correct_index !== "number"
+      ) {
+        return { data: null, error: { message: "invalid_question_fields" } };
+      }
+    }
+
+    const questions = (this.tables["student_quiz_questions"] ??= []);
+    const mine = questions.filter((q) => q.quiz_id === quizId);
+    if (mode === "append" && mine.length + rows.length > 50) {
+      return { data: null, error: { message: "question_cap_reached" } };
+    }
+
+    // Atomicity: validate everything BEFORE mutating anything.
+    const staged: Row[] = [];
+    let order = mode === "replace" ? 0 : mine.reduce((m, q) => Math.max(m, (q.order_index as number) ?? -1), -1) + 1;
+    for (const r of rows as Row[]) {
+      staged.push({
+        id: randomUuid(),
+        quiz_id: quizId,
+        order_index: order++,
+        type: r.type,
+        prompt: r.prompt,
+        options: r.options,
+        correct_index: r.correct_index,
+        explanation: r.explanation ?? null,
+        created_at: "2026-01-01T00:00:00Z",
+      });
+    }
+
+    if (mode === "replace") {
+      this.tables["student_quiz_questions"] = questions.filter((q) => q.quiz_id !== quizId);
+    }
+    this.tables["student_quiz_questions"].push(...staged);
+
+    // setof semantics: return ONLY the rows inserted by THIS call.
+    return { data: staged, error: null };
   }
 
   /** Mirror of append_question + the 50-question cap trigger's error key. */
