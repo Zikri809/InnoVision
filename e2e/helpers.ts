@@ -8,13 +8,18 @@ export const E2E_PASSWORD = "testpass123";
 /**
  * Register a user via the UI (role radio + consent checkbox + lecturer invite
  * code when applicable), then wait for the role-based landing page.
+ *
+ * Students additionally fill the REQUIRED 6-digit matric field (0027),
+ * deterministically derived from the email's trailing digits so reruns of the
+ * same spec produce the same account, different specs never collide. The
+ * matric used is returned (null for lecturers) so specs can assert exports.
  */
 export async function registerUser(
   page: Page,
   email: string,
   role: "lecturer" | "student",
   inviteCode: string,
-) {
+): Promise<{ matric: string | null }> {
   await page.goto("/register");
   // The label was renamed "Full name" (no "(optional)") by the i18n pass —
   // match loosely so either era of the form works.
@@ -25,8 +30,16 @@ export async function registerUser(
   const roleLabel = role.charAt(0).toUpperCase() + role.slice(1);
   await page.getByRole("radio", { name: roleLabel }).check();
 
+  let matric: string | null = null;
   if (role === "lecturer") {
     await page.getByLabel("Lecturer invite code").fill(inviteCode);
+  } else {
+    // Matric (0027): REQUIRED for students. Digit-tail of the email keeps
+    // reruns deterministic; prefix 8 stays clear of the reserved 99xxxx range.
+    const digits = email.replace(/\D/g, "");
+    const tail = (digits || Date.now().toString()).slice(-5).padStart(5, "8");
+    matric = `8${tail}`;
+    await page.getByLabel(/Matric number/i).fill(matric);
   }
 
   await page.getByRole("checkbox").check();
@@ -39,6 +52,7 @@ export async function registerUser(
     role === "lecturer" ? /\/lecturer\/classes/ : /\/student\/classes/,
     { timeout: 30_000 },
   );
+  return { matric };
 }
 
 /**

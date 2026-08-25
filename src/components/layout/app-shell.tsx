@@ -14,6 +14,7 @@ export async function AppShell({
   role,
   email,
   fullName,
+  matricNo,
   consentGiven,
   notificationBell,
   children,
@@ -22,6 +23,8 @@ export async function AppShell({
   email: string;
   /** Profile display name (profiles.full_name) — shown in the account menu. */
   fullName?: string;
+  /** profiles.matric_no — students only; shown (and editable) in the account menu. */
+  matricNo?: string | null;
   consentGiven: boolean;
   /** Server-fetched <NotificationBell /> island (see role layouts). */
   notificationBell?: ReactNode;
@@ -66,7 +69,13 @@ export async function AppShell({
 
           <div className="flex items-center gap-1.5">
             {notificationBell}
-            <AppUserMenu email={email} fullName={fullName} consentGiven={consentGiven} />
+            <AppUserMenu
+              email={email}
+              fullName={fullName}
+              matricNo={matricNo}
+              isStudent={role === "student"}
+              consentGiven={consentGiven}
+            />
           </div>
         </div>
       </header>

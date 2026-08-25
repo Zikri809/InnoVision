@@ -14,6 +14,7 @@
 | **PLAN_INTEGRITY_SUITE.md** | Face verification (1:1-by-lookup multi-frame voting), focus-loss pause, session advisories, incident recording. Migrations 0020+0021. THE source of truth for the face/integrity pipeline. |
 | **PLAN_NOTIFICATIONS.md** | Per-user notification feed (migration 0022): bell island, polling/merge/dedup, i18n copy, role-layout wiring. THE source of truth for notifications. |
 | **PLAN_STUDENT_PRACTICE_QUIZZES.md** | Student-created practice quizzes (migration 0023): creator-only authoring, unlisted share codes minted ONLY via definer RPC, stateless server-side grading, DB-side caps, `/s/[code]` play. THE source of truth for the SQ feature (post-critique final). |
+| **PLAN_MATRIC_EXCEL_EXPORT.md** | Matric numbers (migration 0027: 6-digit, 99xxxx reserved) + lecturer Excel export (`/api/quizzes/[id]/export`, exceljs, 3 sheets). Post-audit final; three subagent review iterations. |
 | **TESTING.md** | Test plan by layer: Vitest units, route tests, SQL harnesses (`verify:*.mjs`), E2E inventory. ⚠️ The Phase-7-era body predates the integrity suite — the suite's tests (I-vote/focus/advisory route tests, incident route tests, `vote`/`attention`/`vad` units, e16, verify-face 59 checks) are catalogued in PLAN_INTEGRITY_SUITE.md §5 instead; the student-quizzes suite lives in TESTING.md §2.7 + the E17 row. |
 | **COMPREFACE_SETUP.md** | Self-hosted CompreFace Docker setup (enrollment subjects, API keys, mock mode for E2E). |
 | **GLM_OCR_SETUP.md** | Optional GLM-OCR (vLLM) extraction engine setup. |

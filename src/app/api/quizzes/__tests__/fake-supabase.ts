@@ -702,7 +702,7 @@ export class FakeSupabase {
 
   seedClass(id: string, lecturerId: string) {
     this.tables["classes"] ??= [];
-    this.tables["classes"].push({ id, lecturer_id: lecturerId });
+    this.tables["classes"].push({ id, title: "Test Class", lecturer_id: lecturerId });
   }
 
   seedQuiz(quiz: Row) {

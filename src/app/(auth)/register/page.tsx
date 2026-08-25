@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 
 import { register } from "@/lib/auth/register";
+import { normalizeMatric } from "@/lib/auth/matric";
 import type { UserRole, SupportedLocale } from "@/lib/types/aliases";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,6 +37,7 @@ export default function RegisterPage() {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [matricNo, setMatricNo] = useState("");
   // Display-only for the picker; the server action always registers "student".
   const [role, setRole] = useState<UserRole>("student");
   const [inviteCode, setInviteCode] = useState("");
@@ -68,6 +70,23 @@ export default function RegisterPage() {
       return;
     }
 
+    // Client mirror of the server-action matric rules (shared helper — the
+    // same normalization the DB CHECK expects). Server re-validates.
+    let normalizedMatric: string | undefined;
+    if (role === "student") {
+      const matric = normalizeMatric(matricNo);
+      if (!matric.ok) {
+        setError(
+          matric.reason === "empty"
+            ? t("matricRequired")
+            : matric.reason === "reserved"
+              ? t("matricReserved")
+              : t("matricInvalid"),
+        );
+        return;
+      }
+      normalizedMatric = matric.value;
+    }
 
     if (role === "lecturer" && !inviteCode.trim()) {
       setError(t("inviteCodeHelp"));
@@ -81,6 +100,7 @@ export default function RegisterPage() {
         email,
         password,
         fullName: fullName || undefined,
+        matricNo: normalizedMatric,
         inviteCode: role === "lecturer" ? inviteCode : undefined,
         locale,
       });
@@ -207,6 +227,30 @@ export default function RegisterPage() {
                   </div>
                 </RadioGroup>
               </div>
+
+              {role === "student" && (
+                <div className="space-y-2">
+                  <Label htmlFor="matric-no">{t("matricLabel")}</Label>
+                  <Input
+                    id="matric-no"
+                    name="matricNo"
+                    type="text"
+                    inputMode="text"
+                    spellCheck={false}
+                    autoComplete="off"
+                    placeholder={t("matricPlaceholder")}
+                    value={matricNo}
+                    onChange={(e) => {
+                      setMatricNo(e.target.value);
+                      setError(null);
+                    }}
+                    required
+                  />
+                  <p className="text-xs font-semibold text-muted-foreground">
+                    {t("matricHelp")}
+                  </p>
+                </div>
+              )}
 
               {/* Preferred language selector during registration */}
               <div className="space-y-2.5">

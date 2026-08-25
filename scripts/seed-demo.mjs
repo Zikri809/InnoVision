@@ -67,16 +67,16 @@ const PASSWORD = "Password123!";
 const PEOPLE = [
   { email: "lecturer@innovision.test", name: "Dr. Farah Omar", role: "lecturer" },
   { email: "lecturer2@innovision.test", name: "Dr. Rajesh Kumar", role: "lecturer" },
-  { email: "student1@innovision.test", name: "Muhammad Danish", role: "student" },
-  { email: "student2@innovision.test", name: "Nur Aisyah", role: "student" },
-  { email: "student3@innovision.test", name: "Lim Wei Jian", role: "student" },
-  { email: "student4@innovision.test", name: "Tan Mei Mei", role: "student" },
-  { email: "student5@innovision.test", name: "Arjun Kumar", role: "student" },
-  { email: "student6@innovision.test", name: "Siti Zubaidah", role: "student" },
-  { email: "student7@innovision.test", name: "Ahmad Firdaus", role: "student" },
-  { email: "student8@innovision.test", name: "Priya Nair", role: "student" },
-  { email: "student9@innovision.test", name: "Chong Kah Meng", role: "student" },
-  { email: "student10@innovision.test", name: "Nurul Huda", role: "student" },
+  { email: "student1@innovision.test", name: "Muhammad Danish", role: "student", matric: "231201" },
+  { email: "student2@innovision.test", name: "Nur Aisyah", role: "student", matric: "231202" },
+  { email: "student3@innovision.test", name: "Lim Wei Jian", role: "student", matric: "231203" },
+  { email: "student4@innovision.test", name: "Tan Mei Mei", role: "student", matric: "231204" },
+  { email: "student5@innovision.test", name: "Arjun Kumar", role: "student", matric: "231205" },
+  { email: "student6@innovision.test", name: "Siti Zubaidah", role: "student", matric: "231206" },
+  { email: "student7@innovision.test", name: "Ahmad Firdaus", role: "student", matric: "231207" },
+  { email: "student8@innovision.test", name: "Priya Nair", role: "student", matric: "231208" },
+  { email: "student9@innovision.test", name: "Chong Kah Meng", role: "student", matric: "231209" },
+  { email: "student10@innovision.test", name: "Nurul Huda", role: "student", matric: "231210" },
 ];
 
 function log(msg) {
@@ -90,16 +90,26 @@ async function listAllUsers() {
   return data.users;
 }
 
-async function ensureUser({ email, name, role }) {
+async function ensureUser({ email, name, role, matric }) {
   const existing = (await listAllUsers()).find((u) => u.email === email);
   let user = existing;
   if (!user) {
-    const { data, error } = await admin.auth.admin.createUser({
+    const payload = {
       email,
       password: PASSWORD,
       email_confirm: true,
-      user_metadata: { full_name: name },
-    });
+      user_metadata: { full_name: name, ...(matric ? { matric_no: matric } : {}) },
+    };
+    let { data, error } = await admin.auth.admin.createUser(payload);
+    // Same collision guard as the profile repair below: never let one claimed
+    // matric abort the whole demo provisioning.
+    if (error && /duplicate key|matric_no_unique|23505/i.test(error.message ?? "")) {
+      log(`  ⚠ matric ${matric} already claimed — creating ${email} without it`);
+      ({ data, error } = await admin.auth.admin.createUser({
+        ...payload,
+        user_metadata: { full_name: name },
+      }));
+    }
     if (error) throw error;
     user = data.user;
     log(`  + created user ${email}`);
@@ -109,12 +119,19 @@ async function ensureUser({ email, name, role }) {
     await admin.auth.admin.updateUserById(user.id, { password: PASSWORD, email_confirm: true });
   }
 
-  // Ensure profile role + name (the signup trigger creates a 'student' row;
-  // promote lecturers via service role, bypassing RLS).
-  const { error } = await admin
-    .from("profiles")
-    .update({ role, full_name: name })
-    .eq("id", user.id);
+  // Ensure profile role + name + matric (the signup trigger creates a
+  // 'student' row; promote lecturers via service role, bypassing RLS). The
+  // matric repair here is what gives EXISTING demo DBs their matrics — the
+  // createUser metadata alone only covers fresh databases (idempotent re-runs).
+  // A claimed matric (real user got there first) must never abort the whole
+  // seed: retry once WITHOUT the matric and carry on.
+  const baseProfile = { role, full_name: name };
+  const withMatric = matric ? { ...baseProfile, matric_no: matric } : baseProfile;
+  let { error } = await admin.from("profiles").update(withMatric).eq("id", user.id);
+  if (error && /duplicate key|matric_no_unique|23505/i.test(error.message ?? "")) {
+    log(`  ⚠ matric ${matric} already claimed by another account — skipping for ${email}`);
+    ({ error } = await admin.from("profiles").update(baseProfile).eq("id", user.id));
+  }
   if (error) throw error;
   return { id: user.id, email, name, role };
 }

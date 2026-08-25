@@ -3,9 +3,10 @@
 import { createServerActionClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isValidInviteCode } from "@/lib/auth/invite-code";
+import { normalizeMatric } from "@/lib/auth/matric";
 import { rateLimit } from "@/lib/classes/rate-limit";
 
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { LOCALE_COOKIE_NAME } from "@/i18n/config";
 import { tFor } from "@/lib/i18n/messages";
 import type { SupportedLocale } from "@/lib/types/aliases";
@@ -22,6 +23,11 @@ export interface RegisterResult {
 // compare in isValidInviteCode already defeats timing side-channels.
 const INVITE_RATE = { limit: 10, windowMs: 60_000 };
 
+// Per-IP budget on the WHOLE signup path (not just the invite branch): caps
+// matric-squatting spam (mass-registering plausible matrics so real students
+// can't claim them) and blunts the duplicate-matric pre-check oracle below.
+const SIGNUP_IP_RATE = { limit: 10, windowMs: 60_000 };
+
 /**
  * Self-signup server action.
  *
@@ -36,12 +42,15 @@ export async function register({
   email,
   password,
   fullName,
+  matricNo,
   inviteCode,
   locale = "en",
 }: {
   email: string;
   password: string;
   fullName?: string;
+  /** Student-only identity field. Ignored on the lecturer (invite) path. */
+  matricNo?: string;
   inviteCode?: string;
   locale?: SupportedLocale;
 }): Promise<RegisterResult> {
@@ -64,6 +73,37 @@ export async function register({
   const trimmedName = fullName?.trim() ?? "";
   if (trimmedName.length > 200) {
     return { session: false, error: t("authErrors.nameTooLong") };
+  }
+
+  // Matric: required for the student path, normalized via the shared helper
+  // (same rules as the UI + the 0027 CHECK constraint). The DB unique index
+  // on matric_no stays the race-safe correctness net; the pre-check
+  // below just makes the common duplicate case a friendly message.
+  let normalizedMatric: string | null = null;
+  if (!wantsLecturer) {
+    const matric = normalizeMatric(matricNo ?? "");
+    if (matric.ok === false && matric.reason === "empty") {
+      return { session: false, error: t("authErrors.matricRequired") };
+    }
+    if (matric.ok === false && matric.reason === "reserved") {
+      return { session: false, error: t("authErrors.matricReserved") };
+    }
+    if (!matric.ok) {
+      return { session: false, error: t("authErrors.matricInvalid") };
+    }
+    normalizedMatric = matric.value;
+  }
+
+  // Per-IP signup budget (see SIGNUP_IP_RATE). Best-effort x-forwarded-for
+  // key, mirroring the sq-resolve-ip pattern; runs before any DB work.
+  try {
+    const hdrs = await headers();
+    const ip = hdrs.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+    if (!rateLimit(`signup-ip:${ip}`, SIGNUP_IP_RATE)) {
+      return { session: false, error: t("authErrors.tooManyAttempts") };
+    }
+  } catch {
+    // headers() unavailable outside a request scope — never block signup.
   }
 
   // Rate-limit lecturer signup attempts (the invite code is a shared secret;
@@ -93,6 +133,25 @@ export async function register({
 
   const supabase = await createServerActionClient();
 
+  // Friendly duplicate-matric pre-check via the SERVICE-ROLE client: profiles
+  // SELECT is self-only (0001), so the anon-cookie RLS client could never see
+  // another student's row and this check would silently pass everything.
+  // The residual "which matrics exist?" oracle is blunted by SIGNUP_IP_RATE
+  // and strictly more expensive than nothing — accepted at demo scale
+  // (documented in PLAN_MATRIC_EXCEL_EXPORT §5). The unique index remains
+  // authoritative for races.
+  if (normalizedMatric) {
+    const adminProbe = createAdminClient();
+    const { data: clash } = await adminProbe
+      .from("profiles")
+      .select("id")
+      .ilike("matric_no", normalizedMatric)
+      .limit(1);
+    if (clash && clash.length > 0) {
+      return { session: false, error: t("authErrors.matricTaken") };
+    }
+  }
+
   const { data, error } = await supabase.auth.signUp({
     email: trimmedEmail,
     password,
@@ -103,12 +162,19 @@ export async function register({
         role: "student",
         full_name: fullName || undefined,
         locale: userLocale,
+        matric_no: normalizedMatric ?? undefined,
       },
     },
   });
 
   if (error) {
     console.error("signUp error:", error.message);
+    // Best-effort: a pre-check↔insert race that lost to the unique index
+    // surfaces here (GoTrue wraps the Postgres error opaquely) — map the
+    // recognizable duplicate case to the friendly message, else generic.
+    if (/duplicate key|matric_no_unique/i.test(error.message)) {
+      return { session: false, error: t("authErrors.matricTaken") };
+    }
     return { session: false, error: t("authErrors.signupFailed") };
   }
 
@@ -243,6 +309,7 @@ export async function register({
             role: "student",
             full_name: fullName || null,
             locale: userLocale,
+            matric_no: normalizedMatric,
             consent_given_at: consentAt,
           },
           { onConflict: "id" },

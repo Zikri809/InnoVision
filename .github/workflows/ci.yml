@@ -93,6 +93,9 @@ jobs:
       - name: Phase SQ student-quiz probes (SQ-D1-D8)
         run: npm run verify:student-quizzes
 
+      - name: Matric number probes (0027: trigger/uniqueness/RLS/roster)
+        run: npm run verify:matric
+
       - name: Build
         run: npm run build
 

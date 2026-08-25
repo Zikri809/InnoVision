@@ -4,7 +4,10 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { logout } from "@/lib/auth/logout";
+import { updateMyMatric } from "@/lib/auth/update-matric";
+import { isSystemAssignedMatric } from "@/lib/auth/matric";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -13,7 +16,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { CircleCheck, CircleAlert, LogOut, UserRound } from "lucide-react";
+import { CircleCheck, CircleAlert, Hash, LogOut, Pencil, UserRound } from "lucide-react";
 import { LanguageToggle } from "./language-toggle";
 
 function initialsFrom(source: string): string {
@@ -29,25 +32,37 @@ function initialsFrom(source: string): string {
 
 /**
  * Clay user menu for the app shell. Shows the signed-in name (falling back to
- * email), biometric consent state, language switcher, and a sign-out action
- * inside a chunky dialog.
+ * email), the student's matric number (inline self-edit), biometric consent
+ * state, language switcher, and a sign-out action inside a chunky dialog.
  */
 export function AppUserMenu({
   email,
   consentGiven,
   fullName,
+  matricNo,
+  isStudent,
 }: {
   email: string;
   consentGiven: boolean;
   /** Profile display name (profiles.full_name) — preferred over email. */
   fullName?: string;
+  /** profiles.matric_no — shown (and editable) in the account menu. */
+  matricNo?: string | null;
+  /** Students see the matric block even before one is set (empty state). */
+  isStudent?: boolean;
 }) {
   const router = useRouter();
   const t = useTranslations("nav");
+  const tCommon = useTranslations("common");
   const [open, setOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState(false);
   const displayName = fullName?.trim() || email;
+
+  const [editingMatric, setEditingMatric] = useState(false);
+  const [matricDraft, setMatricDraft] = useState(matricNo ?? "");
+  const [savingMatric, setSavingMatric] = useState(false);
+  const [matricError, setMatricError] = useState<string | null>(null);
 
   async function handleLogout() {
     setSigningOut(true);
@@ -61,6 +76,25 @@ export function AppUserMenu({
       setSignOutError(true);
     } finally {
       setSigningOut(false);
+    }
+  }
+
+  async function handleSaveMatric() {
+    if (savingMatric) return;
+    setSavingMatric(true);
+    setMatricError(null);
+    try {
+      const res = await updateMyMatric(matricDraft);
+      if (!res.ok) {
+        setMatricError(res.error);
+        return;
+      }
+      setEditingMatric(false);
+      router.refresh();
+    } catch {
+      setMatricError(tCommon("errorGeneric"));
+    } finally {
+      setSavingMatric(false);
     }
   }
 
@@ -89,6 +123,81 @@ export function AppUserMenu({
           </DialogHeader>
 
           <div className="space-y-3">
+            {(matricNo != null || isStudent) && (
+              <div className="rounded-2xl border-[3px] border-border bg-muted/60 px-4 py-3">
+                {editingMatric ? (
+                  <div className="space-y-2">
+                    <label htmlFor="matric-edit" className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">
+                      {t("matricNumber")}
+                    </label>
+                    <Input
+                      id="matric-edit"
+                      type="text"
+                      spellCheck={false}
+                      autoComplete="off"
+                      value={matricDraft}
+                      onChange={(e) => {
+                        setMatricDraft(e.target.value);
+                        setMatricError(null);
+                      }}
+                      disabled={savingMatric}
+                    />
+                    {matricError && (
+                      <p role="alert" className="text-sm font-bold text-destructive">
+                        {matricError}
+                      </p>
+                    )}
+                    <div className="flex justify-end gap-2 pt-1">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setEditingMatric(false);
+                          setMatricDraft(matricNo ?? "");
+                          setMatricError(null);
+                        }}
+                        disabled={savingMatric}
+                      >
+                        {tCommon("cancel")}
+                      </Button>
+                      <Button size="sm" onClick={handleSaveMatric} disabled={savingMatric}>
+                        {savingMatric ? tCommon("saving") : tCommon("save")}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex min-w-0 items-start gap-2.5">
+                      <Hash className="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden />
+                      <div className="min-w-0 space-y-0.5">
+                        <p className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">
+                          {t("matricNumber")}
+                        </p>
+                        <p className="break-all text-sm font-bold">{matricNo ?? "—"}</p>
+                        <p className="text-xs font-semibold leading-relaxed text-muted-foreground">
+                          {matricNo != null && isSystemAssignedMatric(matricNo)
+                            ? t("matricSystemHint")
+                            : t("matricHint")}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      aria-label={tCommon("edit")}
+                      onClick={() => {
+                        setMatricDraft(matricNo ?? "");
+                        setMatricError(null);
+                        setEditingMatric(true);
+                      }}
+                      className="grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-xl border-2 border-border bg-card text-muted-foreground shadow-[0_2px_0_var(--border)] transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:text-primary active:translate-y-0"
+                    >
+                      <Pencil className="h-4 w-4" aria-hidden />
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="flex items-center gap-2.5 rounded-2xl border-[3px] border-border bg-muted/60 px-4 py-3 text-sm font-bold">
               {consentGiven ? (
                 <>

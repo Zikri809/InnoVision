@@ -53,6 +53,9 @@ const SECURITY_HEADERS = [
 
 const nextConfig: NextConfig = {
   reactCompiler: true,
+  // exceljs is a heavy CJS Node module used only inside the export route —
+  // keep it out of the bundler (runtime require, no client impact).
+  serverExternalPackages: ["exceljs"],
   async headers() {
     return [{ source: "/:path*", headers: SECURITY_HEADERS }];
   },

@@ -9,7 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatDuration } from "@/lib/format/duration";
-import { ArrowLeft, Check, Megaphone } from "lucide-react";
+import { ArrowLeft, Check, FileSpreadsheet, Megaphone } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
@@ -109,6 +109,50 @@ export function ResultsDashboardClient({
   const [autoReveal, setAutoReveal] = useState(autoRevealOnComplete);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [revealError, setRevealError] = useState<string | null>(null);
+
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  function pickFilename(res: Response): string {
+    // Blob URLs ignore Content-Disposition — mirror its filename explicitly.
+    const disposition = res.headers.get("content-disposition") ?? "";
+    const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
+    if (utf8) {
+      try {
+        return decodeURIComponent(utf8[1]);
+      } catch {
+        /* fall through */
+      }
+    }
+    const plain = /filename="([^"]+)"/i.exec(disposition);
+    return plain?.[1] ?? "quiz-results.xlsx";
+  }
+
+  async function handleExport() {
+    if (exporting) return;
+    setExporting(true);
+    setExportError(null);
+    try {
+      const res = await fetch(`/api/quizzes/${quizId}/export`);
+      if (!res.ok) {
+        setExportError(t("exportError"));
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = pickFilename(res);
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setExportError(t("exportError"));
+    } finally {
+      setExporting(false);
+    }
+  }
 
   const isAssessment = mode === "assessment";
   const revealed = resultsRevealedAt != null;
@@ -237,12 +281,23 @@ export function ResultsDashboardClient({
       <section className="relative overflow-hidden rounded-[28px] border-[3px] border-border bg-gradient-to-br from-orange-100 via-orange-50 to-blue-50 p-7 shadow-[var(--shadow-clay)] md:p-8">
         <div aria-hidden className="pointer-events-none absolute -right-8 -top-10 h-36 w-36 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-white/50" />
         <div className="relative">
-          <Link
-            href={`/lecturer/quizzes/${quizId}/builder`}
-            className="inline-flex items-center gap-1.5 text-sm font-extrabold text-muted-foreground transition-colors hover:text-primary"
-          >
-            <ArrowLeft className="h-4 w-4" aria-hidden /> {t("backToQuizzes")}
-          </Link>
+          <div className="flex items-start justify-between gap-3">
+            <Link
+              href={`/lecturer/quizzes/${quizId}/builder`}
+              className="inline-flex items-center gap-1.5 text-sm font-extrabold text-muted-foreground transition-colors hover:text-primary"
+            >
+              <ArrowLeft className="h-4 w-4" aria-hidden /> {t("backToQuizzes")}
+            </Link>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExport}
+              disabled={exporting}
+            >
+              <FileSpreadsheet className="h-4 w-4" aria-hidden />
+              {exporting ? t("exporting") : t("exportButton")}
+            </Button>
+          </div>
           <h1 className="mt-3 font-heading text-3xl font-semibold [text-wrap:balance]">{quizTitle}</h1>
           <p className="mt-2 text-sm font-semibold text-muted-foreground">
             {mode === "assessment" ? tCommon("assessment") : tCommon("practice")} · {status === "live" ? tCommon("active") : status === "closed" ? tCommon("closed") : tCommon("draft")}
@@ -269,6 +324,12 @@ export function ResultsDashboardClient({
               <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">{t("statInProgress")}</p>
             </div>
           </div>
+
+          {exportError && (
+            <p role="alert" className="mt-4 rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm font-bold text-destructive">
+              {exportError}
+            </p>
+          )}
         </div>
       </section>
 

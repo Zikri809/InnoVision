@@ -333,6 +333,7 @@ export type Database = {
           full_name: string | null
           id: string
           locale: string
+          matric_no: string | null
           role: Database["public"]["Enums"]["user_role"]
         }
         Insert: {
@@ -343,6 +344,7 @@ export type Database = {
           full_name?: string | null
           id: string
           locale?: string
+          matric_no?: string | null
           role: Database["public"]["Enums"]["user_role"]
         }
         Update: {
@@ -353,6 +355,7 @@ export type Database = {
           full_name?: string | null
           id?: string
           locale?: string
+          matric_no?: string | null
           role?: Database["public"]["Enums"]["user_role"]
         }
         Relationships: []
@@ -1086,6 +1089,7 @@ export type Database = {
           class_id: string | null
           enrolled_at: string | null
           full_name: string | null
+          matric_no: string | null
           student_id: string | null
         }
         Relationships: [
