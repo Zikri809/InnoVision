@@ -35,7 +35,9 @@ test.describe("E1a — Auth both roles + consent persists", () => {
     ).toBeVisible();
     await page.getByRole("button", { name: /account/i }).click();
     await expect(page.getByText(LECTURER_EMAIL)).toBeVisible();
-    await expect(page.getByText("Biometric consent given")).toBeVisible();
+    // Lecturers show the role chip — the consent card is students-only
+    // (lecturer consent is auto-granted at signup and never gated in UI).
+    await expect(page.getByText("Lecturer", { exact: true })).toBeVisible();
 
     // ── 2. Logout ────────────────────────────────────────────
     await page.getByRole("button", { name: /sign out/i }).click();

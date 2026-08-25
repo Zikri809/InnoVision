@@ -3,10 +3,11 @@ import { registerUser } from "./helpers";
 
 /**
  * E21 — Profile photo (avatar) end-to-end (plan F3, badge redesign).
- * The camera BADGE on the topbar avatar opens the file picker DIRECTLY
- * (upload/replace in one click); removal lives inside the account menu;
- * removal restores initials. Self-only surface. Also pins the READ-ONLY
- * matric display (self-edit removed by policy).
+ * The camera BADGE sits on the profile avatar INSIDE the account menu and
+ * opens the file picker DIRECTLY (upload/replace in one click); removal
+ * lives in the menu's photo card; removal restores initials. Self-only
+ * surface. Also pins the READ-ONLY matric display (self-edit removed by
+ * policy).
  */
 
 const stamp = Date.now();
@@ -17,8 +18,14 @@ test("badge uploads avatar → menu shows it; remove → initials return; matric
 }) => {
   await registerUser(page, USER, "student", "");
 
-  // The badge sits on the topbar avatar (aria-label = media.upload).
-  const badge = page.getByRole("button", { name: /upload photo/i });
+  // Open the account menu — the badge overlays the profile avatar in the
+  // modal header (aria-label = media.upload).
+  const trigger = page.getByRole("button", { name: /your innovision account/i });
+  await trigger.click();
+
+  const badge = page
+    .getByRole("dialog")
+    .getByRole("button", { name: /upload photo/i });
   await expect(badge).toBeVisible();
 
   // One click → file picker → instant upload.
@@ -27,13 +34,13 @@ test("badge uploads avatar → menu shows it; remove → initials return; matric
   const chooser = await chooserPromise;
   await chooser.setFiles("e2e/fixtures/tiny.png");
 
-  // The trigger button itself renders an <img> once the signed URL loads.
-  const trigger = page.getByRole("button", { name: /your innovision account/i });
+  // The trigger button behind the modal renders an <img> once the signed
+  // URL loads; the menu's photo card appears with ONLY a remove control
+  // (no upload button, no empty-state hint).
   await expect(trigger.locator("img")).toBeVisible({ timeout: 15_000 });
 
-  // Menu shows the photo block with ONLY a remove control (no upload button,
-  // no empty-state hint).
-  await trigger.click();
+  // Menu (already open) shows the photo block with ONLY a remove control
+  // (no upload button, no empty-state hint).
   await expect(page.getByText(/profile photo/i)).toBeVisible();
   await expect(page.getByText(/shown only to you/i)).toBeVisible();
   await expect(page.getByRole("button", { name: /^remove$/i })).toBeVisible();
