@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { registerUser } from "./helpers";
+import { registerUser, createClass, createQuizWithQuestions } from "./helpers";
 
 const TEST_TIMESTAMP = Date.now();
 const LECTURER_EMAIL = `lecturer-e2-${TEST_TIMESTAMP}@innovision.test`;
@@ -61,10 +61,12 @@ test.describe("E2 — AI quiz from a PDF is editable and publishable", () => {
       lecturerPage.getByRole("heading", { name: "Generate quiz from file" }),
     ).toBeVisible();
 
-    // Target the hidden file input directly (the dropzone wraps it).
-    await lecturerPage.locator('input[type="file"]').setInputFiles(
-      "e2e/fixtures/chapter-sample.pdf",
-    );
+    // Scope to the upload dropzone (role=button) — other hidden file inputs
+    // (avatar banner, question-image field) make an unscoped locator ambiguous.
+    await lecturerPage
+      .getByRole("button", { name: /upload course slides/i })
+      .locator('input[type="file"]')
+      .setInputFiles("e2e/fixtures/chapter-sample.pdf");
 
     await lecturerPage.getByRole("button", { name: /Read Files & Continue/i }).click();
     await expect(
@@ -128,5 +130,64 @@ test.describe("E2 — AI quiz from a PDF is editable and publishable", () => {
 
     await lecturerCtx.close();
     await studentCtx.close();
+  });
+
+  test("append/replace radios on a non-empty draft; multi-file upload; dropzone rejects .exe", async ({
+    page,
+  }) => {
+    test.skip(!LECTURER_INVITE_CODE, "LECTURER_INVITE_CODE not set");
+    const lec = `lecturer-e2mode-${TEST_TIMESTAMP}@innovision.test`;
+    await registerUser(page, lec, "lecturer", LECTURER_INVITE_CODE);
+    await createClass(page, "E2 Mode");
+    await createQuizWithQuestions(page, {
+      classTitle: "E2 Mode",
+      quizTitle: "E2 Mode Draft",
+      questions: [{ prompt: "Seeded draft question?", options: ["x1", "x2"] }],
+    });
+
+    // Open the dialog → the mode radios only render because the draft is
+    // NON-empty (GenerateFromFileDialog hasQuestions gate).
+    await page.getByRole("button", { name: /generate from file/i }).click();
+    await expect(page.getByRole("heading", { name: "Generate quiz from file" })).toBeVisible();
+    const dropzone = page.getByRole("button", { name: /upload course slides/i });
+
+    // Dropzone rejects an unsupported .exe with the unsupportedType copy.
+    await dropzone.locator('input[type="file"]').setInputFiles({
+      name: "virus.exe",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from("MZ"),
+    });
+    await expect(
+      page.getByRole("alert").filter({ hasText: "Unsupported file type." }),
+    ).toBeVisible();
+
+    // Multi-file upload: two PDFs → both staged with names visible.
+    await dropzone.locator('input[type="file"]').setInputFiles([
+      "e2e/fixtures/chapter-sample.pdf",
+      "e2e/fixtures/chapter-sample.pdf",
+    ]);
+    await expect(page.getByText("Uploaded Files (2/5)")).toBeVisible();
+    await expect(page.getByText("chapter-sample.pdf", { exact: true })).toHaveCount(2);
+
+    // Extract → step 2; the mode radios must be visible (non-empty draft).
+    await page.getByRole("button", { name: /read files & continue/i }).click();
+    await expect(page.getByText(/2 files ready/)).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText("Existing Questions Action", { exact: true })).toBeVisible();
+    await expect(page.getByRole("radio", { name: /Add to Existing/i })).toBeVisible();
+    await expect(page.getByRole("radio", { name: /Replace All/i })).toBeVisible();
+
+    // "Replace All" shows the amber warning; "Add to Existing" clears it.
+    await page.getByRole("radio", { name: /Replace All/i }).click();
+    await expect(
+      page.getByText("Note: All current draft questions will be replaced."),
+    ).toBeVisible();
+    await page.getByRole("radio", { name: /Add to Existing/i }).click();
+    await expect(
+      page.getByText("Note: All current draft questions will be replaced."),
+    ).toHaveCount(0);
+
+    await page.getByRole("button", { name: /^add questions to quiz$/i }).click();
+    await expect(page.getByText("What is velocity?", { exact: true })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText("Seeded draft question?", { exact: true })).toBeVisible();
   });
 });

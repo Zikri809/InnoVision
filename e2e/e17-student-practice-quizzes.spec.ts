@@ -130,6 +130,13 @@ test("revocation — unshare kills the link; delete cascades", async ({ browser 
     player.getByText(/invalid or no longer available/i),
   ).toBeVisible({ timeout: 10_000 });
 
+  // A syntactically invalid code renders the same neutral screen (literal
+  // normalizeShareCode miss, no-oracle contract).
+  await player.goto("/s/!!!");
+  await expect(
+    player.getByText(/invalid or no longer available/i),
+  ).toBeVisible({ timeout: 10_000 });
+
   // Delete cascades — the quiz disappears from the dashboard.
   await creator.getByRole("dialog").getByRole("button", { name: /close|cancel|×/i }).click();
   const quizCard = creator.locator("li").filter({ hasText: QUIZ_TITLE });

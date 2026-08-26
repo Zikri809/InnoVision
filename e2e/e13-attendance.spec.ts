@@ -87,6 +87,12 @@ test.describe("E13b — attendance = sessions", () => {
 
     // Reveal the assessment results so the completed students' EndScreen shows
     // the score (hidden assessments show "awaiting release").
+    await lecturerPage.evaluate(
+      () =>
+        fetch("/api/quizzes/00000000-0000-0000-0000-000000000000/reveal", {
+          method: "POST",
+        }).catch(() => {}),
+    );
     await revealQuiz(lecturerPage, CLASS_TITLE, QUIZ_TITLE);
 
     // ── 2. Student A: enroll → gate (face check) → answer → submit ──
@@ -99,6 +105,7 @@ test.describe("E13b — attendance = sessions", () => {
     await studentAPage.getByRole("button", { name: "Start", exact: true }).click();
     await expect(studentAPage).toHaveURL(/\/play\/[0-9a-f-]+/);
     await passAssessmentGate(studentAPage);
+    await expect(studentAPage.getByRole("alertdialog")).toBeHidden({ timeout: 30_000 });
     await expect(studentAPage.getByText("What is 2+2?", { exact: true })).toBeVisible();
     await studentAPage.getByRole("button", { name: /4/i }).click();
     await expect(studentAPage.getByRole("button", { name: /^(Next|Finish)$/, exact: true })).toBeVisible();

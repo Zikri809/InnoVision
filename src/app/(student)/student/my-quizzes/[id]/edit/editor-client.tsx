@@ -29,8 +29,8 @@ import {
 } from "@/lib/quizzes/question-draft";
 import { QuestionInputSchema } from "@/lib/quizzes/validation";
 import { GenerateFromFileDialog } from "@/components/extract/GenerateFromFileDialog";
-import { QuestionImageAttach } from "@/components/media/question-image-attach";
-import { ArrowDown, ArrowUp, Check, Loader2, Pencil, Plus, Sparkles, Trash2, X } from "lucide-react";
+import { QuestionImageField } from "@/components/media/question-image-field";
+import { ArrowDown, ArrowUp, Check, Image as ImageIcon, Loader2, Pencil, Plus, Sparkles, Trash2, X } from "lucide-react";
 
 export type EditorQuestion = {
   id: string;
@@ -70,6 +70,7 @@ export function QuizEditorClient({
   const t = useTranslations("quizEditor");
   const tMy = useTranslations("myQuizzes");
   const tCommon = useTranslations("common");
+  const tMedia = useTranslations("media");
 
   const lock = useRef(false);
   const [busy, setBusy] = useState(false);
@@ -86,6 +87,10 @@ export function QuizEditorClient({
     correctIndex: 0,
   });
   const [adding, setAdding] = useState(false);
+  // Image staged in the add-question dropzone — uploaded AFTER the question
+  // exists (the POST returns the new id). Cleared on every submit outcome so
+  // it can never silently attach to a LATER question.
+  const [newPendingImage, setNewPendingImage] = useState<File | null>(null);
 
   // Edit dialog state.
   const [editing, setEditing] = useState<EditorQuestion | null>(null);
@@ -99,17 +104,55 @@ export function QuizEditorClient({
   const [editError, setEditError] = useState<string | null>(null);
   const [editExplanation, setEditExplanation] = useState("");
 
+  // Image ops commit immediately from the edit dialog (endpoint parity with
+  // the old attach row); failures surface inline AND via toast — the toast
+  // survives a mid-upload dialog close, the inline text does not.
+  const [editImageBusy, setEditImageBusy] = useState(false);
+  const [editImageError, setEditImageError] = useState<string | null>(null);
+
+  async function runEditImageOp(
+    questionId: string,
+    op: () => Promise<Response>,
+    nextHasImage: boolean,
+    failureKey: "uploadFailed" | "removeFailed",
+  ) {
+    if (editImageBusy) return;
+    setEditImageBusy(true);
+    setEditImageError(null);
+    let ok = false;
+    try {
+      const res = await op();
+      if (res.ok) {
+        ok = true;
+        setImageFlag(questionId, nextHasImage);
+      }
+    } catch {
+      // Network-level throw — surfaced like an HTTP failure below.
+    }
+    setEditImageBusy(false);
+    if (!ok) {
+      // Inline AND toast: the toast survives a mid-upload dialog close, the
+      // inline text does not. Localized copy only (server messages are
+      // English-only and would leak under the ms locale).
+      const message = tMedia(failureKey);
+      setEditImageError(message);
+      toast.error(message);
+      // Rejection contract for the field's await: resolve only on success.
+      throw new Error("image_op_failed");
+    }
+  }
+
   // AI generation (student mode): dialog reports generated rows here.
   const [generateOpen, setGenerateOpen] = useState(false);
 
-  // Per-question image presence: BASE derived from the live questions prop
-  // (stays honest across router.refresh / AI replace), overlaid by optimistic
-  // local flags set at attach/remove time.
+  // Per-question image presence: BASE derived from the live questions state
+  // (stays honest across router.refresh / AI replace / appends), overlaid by
+  // optimistic local flags set at attach/remove time.
   const [imageFlags, setImageFlags] = useState<Record<string, boolean>>({});
 
   function hasImageFor(id: string): boolean {
     if (id in imageFlags) return imageFlags[id];
-    return Boolean(initialQuestions.find((q) => q.id === id)?.image_path);
+    return Boolean(questions.find((q) => q.id === id)?.image_path);
   }
 
   function setImageFlag(id: string, has: boolean) {
@@ -235,7 +278,27 @@ export function QuizEditorClient({
         body: JSON.stringify(candidate.value),
       });
       if (!ok) return fail(body.message);
-      setQuestions((prev) => [...prev, body.question as EditorQuestion]);
+      const created = body.question as EditorQuestion;
+      setQuestions((prev) => [...prev, created]);
+
+      // Image phase — its failure never loses the created question; the user
+      // retries via the question's edit dialog.
+      if (newPendingImage && created?.id) {
+        try {
+          const form = new FormData();
+          form.append("image", newPendingImage, newPendingImage.name);
+          const imgRes = await fetch(
+            `/api/student-quizzes/${quiz.id}/questions/${created.id}/image`,
+            { method: "POST", body: form },
+          );
+          if (!imgRes.ok) toast.error(tMedia("addedImageFailed"));
+          else setImageFlag(created.id, true);
+        } catch {
+          toast.error(tMedia("addedImageFailed"));
+        }
+      }
+
+      setNewPendingImage(null);
       setNewPrompt("");
       setNewOptions({ options: ["", ""], correctIndex: 0 });
     } catch {
@@ -254,6 +317,8 @@ export function QuizEditorClient({
     // replace, so dropping it here would silently erase it on save.
     setEditExplanation(q.explanation ?? "");
     setEditError(null);
+    // Don't bleed the previous question's inline image error into this one.
+    setEditImageError(null);
   }
 
   async function handleSaveEdit() {
@@ -421,11 +486,12 @@ export function QuizEditorClient({
                     <Check className="inline h-3.5 w-3.5" aria-hidden />{" "}
                     {q.options[q.correct_index]}
                   </p>
-                  <QuestionImageAttach
-                    uploadEndpoint={`/api/student-quizzes/${quiz.id}/questions/${q.id}/image`}
-                    hasImage={hasImageFor(q.id)}
-                    onChanged={(has) => setImageFlag(q.id, has)}
-                  />
+                  {hasImageFor(q.id) && (
+                    <p className="mt-1.5 inline-flex items-center gap-1 rounded-full border-[3px] border-border bg-muted px-2.5 py-0.5 text-xs font-extrabold text-foreground">
+                      <ImageIcon className="size-3" aria-hidden />
+                      {tMedia("imageBadge")}
+                    </p>
+                  )}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                   <Button
@@ -491,6 +557,13 @@ export function QuizEditorClient({
                 maxLength={2000}
               />
             </div>
+            <QuestionImageField
+              variant="staged"
+              file={newPendingImage}
+              onFileChange={setNewPendingImage}
+              altPrompt={newPrompt}
+              disabled={adding || busy}
+            />
             <Button type="submit" disabled={adding || busy}>
               {adding ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -559,6 +632,45 @@ export function QuizEditorClient({
                   maxLength={2000}
                 />
               </div>
+
+              {/* Image (commits immediately — independent of Save below). */}
+              <QuestionImageField
+                variant="committed"
+                questionId={editing.id}
+                // Live flag (overlay) — editing.image_path is the row
+                // captured at open time and goes stale after in-dialog ops.
+                hasImage={hasImageFor(editing.id)}
+                altPrompt={editing.prompt}
+                busy={editImageBusy}
+                errorText={editImageError}
+                disabled={savingEdit}
+                onFile={(file) => {
+                  const form = new FormData();
+                  form.append("image", file, file.name);
+                  return runEditImageOp(
+                    editing.id,
+                    () =>
+                      fetch(
+                        `/api/student-quizzes/${quiz.id}/questions/${editing.id}/image`,
+                        { method: "POST", body: form },
+                      ),
+                    true,
+                    "uploadFailed",
+                  );
+                }}
+                onRemove={() =>
+                  runEditImageOp(
+                    editing.id,
+                    () =>
+                      fetch(
+                        `/api/student-quizzes/${quiz.id}/questions/${editing.id}/image`,
+                        { method: "DELETE" },
+                      ),
+                    false,
+                    "removeFailed",
+                  )
+                }
+              />
             </div>
           )}
           <DialogFooter className="gap-2">

@@ -21,7 +21,10 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 1,
-  workers: process.env.CI ? 1 : undefined,
+  // Capped locally: `next dev` compiles every route on demand and is the
+  // shared bottleneck — uncapped workers (cores/2 = 6 here) saturate it until
+  // even login navigations exceed 30s (mass registerUser waitForURL flakes).
+  workers: process.env.CI ? 1 : 4,
   reporter: "html",
   use: {
     baseURL: BASE_URL,
@@ -49,6 +52,12 @@ export default defineConfig({
       timeout: 60_000,
       env: {
         ...process.env,
+        // The suite registers dozens of accounts from 127.0.0.1 inside a
+        // single rate-limit window; the app's anti-abuse budget (10/min)
+        // would silently reject the overflow and poison every later auth
+        // step. Raised for the harness only — production default is 10.
+        SIGNUP_RATE_LIMIT: "1000",
+        INVITE_RATE_LIMIT: "1000",
         AI_BASE_URL: `http://127.0.0.1:${MOCK_AI_PORT}/v1`,
         AI_API_KEY: "test-key",
         AI_MODEL: "gpt-4o-mini",

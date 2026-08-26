@@ -99,17 +99,41 @@ test.describe("E1b — Manual quiz → publish → visible to student", () => {
     await expect(publishButton).toBeEnabled();
     await publishButton.click();
     await expect(lecturerPage.getByText(/^Live/)).toBeVisible();
-    // The quiz is now Live and questions are locked (read-only banner).
+    // The quiz is now Live and questions are locked (read-only builder):
     await expect(lecturerPage.getByText("Live", { exact: true })).toBeVisible();
-    await expect(lecturerPage.getByRole("alert").filter({ hasText: "Active" })).toBeVisible();
+    // Published mode swaps editing affordances for a results link.
+    await expect(
+      lecturerPage.getByRole("link", { name: "View results" }),
+    ).toBeVisible();
+    await expect(lecturerPage.getByRole("button", { name: /publish/i })).toHaveCount(0);
+    // Add-question form is gone → questions are read-only.
+    await expect(
+      lecturerPage.getByRole("textbox", { name: "Question prompt" }),
+    ).toHaveCount(0);
 
     // ── 4. Student registers, joins, sees the live quiz ────────
+    // Non-vacuous draft secrecy: the lecturer leaves a SECOND quiz unpublished
+    // so the student's list must show exactly ONE (the live) quiz.
+    await lecturerPage.goto(`/lecturer/classes`);
+    await lecturerPage.getByText("E1b Physics", { exact: true }).click();
+    await expect(lecturerPage).toHaveURL(/\/lecturer\/classes\/[^/]+$/);
+    await lecturerPage.getByLabel("Quiz title").fill("Chapter 2: Draft Only");
+    await lecturerPage.getByRole("button", { name: /create quiz|new quiz/i }).click();
+    await expect(
+      lecturerPage.getByText("Chapter 2: Draft Only", { exact: true }),
+    ).toBeVisible();
+    // Leave it unpublished (no questions, still draft).
+
     await registerUser(studentPage, STUDENT_EMAIL, "student", LECTURER_INVITE_CODE);
     await expect(studentPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
 
     await studentPage.getByLabel("Join code").fill(joinCode!);
     await studentPage.getByRole("button", { name: /join/i }).click();
     await expect(studentPage.getByText("E1b Physics", { exact: true })).toBeVisible();
+    // Class card quiz-count reflects ONLY the live quiz (draft invisible):
+    // the badge reads "1 Live quiz" — a draft would make it "0".
+    const studentCard = studentPage.locator("a").filter({ hasText: "E1b Physics" });
+    await expect(studentCard.getByText("1 Live quiz", { exact: true })).toBeVisible();
 
     // Navigate to the quizzes list and confirm the published quiz + mode badge.
     await studentPage.getByRole("link", { name: /View quizzes/i }).click();
@@ -119,7 +143,9 @@ test.describe("E1b — Manual quiz → publish → visible to student", () => {
     ).toBeVisible();
     await expect(studentPage.getByText("Chapter 1: Motion", { exact: true })).toBeVisible();
     await expect(studentPage.getByRole("list").getByText("Practice")).toBeVisible();
-    // Draft secrecy: no draft quiz exists for this student to see beyond the live one.
+    // Draft secrecy (non-vacuous): the draft quiz NEVER appears, and the live
+    // one is the ONLY row (count of 1 proves we're not just missing content).
+    await expect(studentPage.getByText("Chapter 2: Draft Only", { exact: true })).toHaveCount(0);
     await expect(studentPage.getByText("Chapter 1: Motion", { exact: true })).toHaveCount(1);
 
     await lecturerCtx.close();

@@ -134,6 +134,15 @@ export function useQuestionImage(
   };
 }
 
+/**
+ * Drops ONE cached signed URL. Authoring surfaces MUST call this after a
+ * successful attach/replace/remove — otherwise the module cache serves the
+ * superseded image (or contradicts hasImage=false) for up to ~59 min.
+ */
+export function invalidateQuestionImage(questionId: string) {
+  cache.delete(questionId);
+}
+
 /** Test seam: clear the module cache between tests/sessions. */
 export function clearQuestionImageCache() {
   cache.clear();

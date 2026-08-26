@@ -20,6 +20,7 @@
     "supabase:stop": "supabase stop",
     "verify:security": "node scripts/verify-security.mjs",
     "verify:classes": "node scripts/verify-classes.mjs",
+    "verify:class-archiving": "node scripts/verify-class-archiving.mjs",
     "verify:quizzes": "node scripts/verify-quizzes.mjs",
     "verify:student-quizzes": "node scripts/verify-student-quizzes.mjs",
     "verify:media": "node scripts/verify-media.mjs",

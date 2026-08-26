@@ -152,4 +152,59 @@ test.describe("E18 — results Excel export", () => {
     await lecturerCtx.close();
     await studentCtx.close();
   });
+
+  test("zero-session export keeps roster rows as Not started with headers intact", async ({ browser }, testInfo) => {
+    testInfo.setTimeout(90_000);
+    test.skip(!LECTURER_INVITE_CODE, "LECTURER_INVITE_CODE not set");
+
+    const lecturerCtx = await browser.newContext();
+    const studentCtx = await browser.newContext();
+    const lecturerPage = await lecturerCtx.newPage();
+    const studentPage = await studentCtx.newPage();
+
+    // Lecturer: class + published assessment.
+    const lec = `lecturer-e18z-${TEST_TIMESTAMP}@innovision.test`;
+    const stu = `student-e18z-${TEST_TIMESTAMP}@innovision.test`;
+    await registerUser(lecturerPage, lec, "lecturer", LECTURER_INVITE_CODE);
+    const joinCode = await createClass(lecturerPage, `${CLASS_TITLE} Z`);
+    await createAssessmentAndPublish(lecturerPage, {
+      classTitle: `${CLASS_TITLE} Z`,
+      quizTitle: `${QUIZ_TITLE} Z`,
+      questions: [{ prompt: "Nobody will answer this?", options: ["a", "b"] }],
+    });
+
+    // Student joins but NEVER attempts.
+    const { matric } = await registerUser(studentPage, stu, "student", LECTURER_INVITE_CODE);
+    expect(matric).toMatch(/^[0-9]{6}$/);
+    await joinClass(studentPage, joinCode, `${CLASS_TITLE} Z`);
+
+    // Export from a zero-session quiz.
+    await openResults(lecturerPage, `${CLASS_TITLE} Z`, `${QUIZ_TITLE} Z`);
+    const downloadPromise = lecturerPage.waitForEvent("download");
+    await lecturerPage.getByRole("button", { name: /Export Excel/i }).click();
+    const download = await downloadPromise;
+    const filePath = await download.path();
+    expect(filePath).toBeTruthy();
+
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile(filePath as string);
+    expect(wb.worksheets.map((w) => w.name)).toEqual([
+      "Results",
+      "Questions & Key",
+      "Choice Distribution",
+    ]);
+
+    // Headers intact + a roster row for the never-attempted student.
+    const results = wb.getWorksheet("Results")!;
+    expect(results.getCell(4, 3).value).toBe("Name");
+    expect(results.getCell(4, 4).value).toBe("Status");
+    expect(results.getCell(5, 1).value).toBe(1);
+    expect(results.getCell(5, 2).value).toBe(matric);
+    expect(results.getCell(5, 4).value).toBe("Not started");
+    // Never-attempted: score cell stays EMPTY (null), not a fabricated 0.
+    expect(results.getCell(5, 5).value).toBe(null);
+
+    await lecturerCtx.close();
+    await studentCtx.close();
+  });
 });

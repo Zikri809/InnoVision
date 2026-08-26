@@ -21,12 +21,19 @@ export interface RegisterResult {
 // Invite-code brute-force guard: a fixed budget per source IP per window.
 // This is a per-process limiter (adequate for the demo scale); the constant-time
 // compare in isValidInviteCode already defeats timing side-channels.
-const INVITE_RATE = { limit: 10, windowMs: 60_000 };
+// Limits are env-tunable ONLY upward for the local E2E harness, which
+// registers dozens of accounts from 127.0.0.1 inside one window (the default
+// production posture stays 10/min).
+const envLimit = (name: string, fallback: number): number => {
+  const parsed = Number(process.env[name] ?? "");
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+const INVITE_RATE = { limit: envLimit("INVITE_RATE_LIMIT", 10), windowMs: 60_000 };
 
 // Per-IP budget on the WHOLE signup path (not just the invite branch): caps
 // matric-squatting spam (mass-registering plausible matrics so real students
 // can't claim them) and blunts the duplicate-matric pre-check oracle below.
-const SIGNUP_IP_RATE = { limit: 10, windowMs: 60_000 };
+const SIGNUP_IP_RATE = { limit: envLimit("SIGNUP_RATE_LIMIT", 10), windowMs: 60_000 };
 
 /**
  * Self-signup server action.

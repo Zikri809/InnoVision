@@ -7,16 +7,44 @@ const STUDENT_EMAIL = `student-e11-${TEST_TIMESTAMP}@innovision.test`;
 const LECTURER_INVITE_CODE = process.env.LECTURER_INVITE_CODE ?? "";
 const CLASS_TITLE = "E11 Secrecy";
 const QUIZ_TITLE = "E11 Assessment";
+/** Q1's explanation — the strongest leak candidate (asserted by its VALUE below). */
+const Q1_EXPLANATION = "Two plus two equals four.";
+
+/**
+ * Matches a correct-answer KEY carrying a VALUE — plain JSON (`"correct_index":0`,
+ * `"correctIndex":"1"`, `"correct_index":null`) and the backslash-quote-escaped
+ * form Next.js embeds inside HTML flight scripts (`\"correctIndex\":0`).
+ *
+ * Why not a bare substring match on the key names? The root layout ships the
+ * ENTIRE next-intl message catalog to the client (src/app/layout.tsx passes
+ * unscoped `getMessages()` to <NextIntlClientProvider>), so EVERY full-document
+ * render embeds unrelated builder/practice UI strings whose keys literally
+ * contain "explanation" (en.json: "explanationLabel", "explanationPlaceholder",
+ * "explanation":"Explanation:" …). Those are framework UI chrome, not answer
+ * data — a bare `body.includes("explanation")` false-positives on any /play
+ * document load. The catalog contains NO correct_index/correctIndex keys, but
+ * key+colon matching keeps this detector honest against future catalog edits too.
+ */
+const CORRECT_KEY_WITH_VALUE = /\\?"(?:correct_index|correctIndex)\\?"\s*:/;
 
 /**
  * E11 (Phase 5 scope) — Answer secrecy, assessment only.
  *
  * Collects same-origin text responses filtered by content-type (document,
  * text/x-component, application/json) AND by URL (the play page + any
- * /api/sessions/—¦ endpoints) AND only response.ok() responses. Asserts
- * `correct_index`/`explanation` are ABSENT across the entire flow, and that
- * the assessment answer response is KEYLESS (`recorded`, no isCorrect, no
- * correctIndex) — PLAN_RESEAL_RESULTS v4: correctness is withhold until reveal.
+ * /api/sessions/… endpoints) AND only response.ok() responses. Asserts, across
+ * the entire flow INCLUDING post-Finish revalidation:
+ *  - the lecturer's explanation TEXT never reaches any student-facing response;
+ *  - no correct_index/correctKey data (key-with-a-value) rides in any payload;
+ *  - pure API JSON (/api/sessions/*) carries none of the key NAMES at all —
+ *    those responses bypass the root layout, so the i18n catalog cannot appear;
+ *  - the assessment answer response is KEYLESS (`recorded`, no isCorrect, no
+ *    correctIndex) — PLAN_RESEAL_RESULTS v4: correctness is withheld until reveal.
+ *
+ * A mid-assessment FULL RELOAD of /play is part of the flow (realistic student
+ * behaviour): it forces the document-render class whose flight bootstrap embeds
+ * the shared i18n catalog, exactly the payload shape that regressed the naive
+ * matcher. Resume-seeding through student_answers_view is exercised by it.
  *
  * (Practice disclosure assertions live in E4, not E11.)
  */
@@ -32,7 +60,7 @@ test.describe("E11 — answer secrecy (assessment)", () => {
     const lecturerPage = await lecturerCtx.newPage();
     const studentPage = await studentCtx.newPage();
 
-    // â”€â”€ Lecturer: class + UNTIMED assessment + publish â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Lecturer: class + UNTIMED assessment + publish ──────────────────
     await registerUser(lecturerPage, LECTURER_EMAIL, "lecturer", LECTURER_INVITE_CODE);
     await expect(lecturerPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
     const joinCode = await createClass(lecturerPage, CLASS_TITLE);
@@ -51,7 +79,7 @@ test.describe("E11 — answer secrecy (assessment)", () => {
     await lecturerPage.getByRole("textbox", { name: "Question prompt" }).fill("What is 2+2?");
     await lecturerPage.getByLabel("Option 1").fill("3");
     await lecturerPage.getByLabel("Option 2").fill("4");
-    await lecturerPage.getByLabel("Explanation (optional)").fill("Two plus two equals four.");
+    await lecturerPage.getByLabel("Explanation (optional)").fill(Q1_EXPLANATION);
     await lecturerPage.getByRole("button", { name: /add question/i }).click();
     await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
 
@@ -66,7 +94,7 @@ test.describe("E11 — answer secrecy (assessment)", () => {
     await publishButton.click();
     await expect(lecturerPage.getByText(/^Live/)).toBeVisible();
 
-    // â”€â”€ Student: register + join + collect responses â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Student: register + join + collect responses ────────────────────
     await registerUser(studentPage, STUDENT_EMAIL, "student", LECTURER_INVITE_CODE);
     await expect(studentPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
     await joinClass(studentPage, joinCode, CLASS_TITLE);
@@ -92,7 +120,7 @@ test.describe("E11 — answer secrecy (assessment)", () => {
         url.includes("/play/") || url.includes("/api/sessions/") || url.includes("/student/quizzes");
       if (!isRelevantType || !isRelevantUrl) return;
       const body = await res.text().catch(() => "");
-      // Split OK bodies (asserted for key-absence) from ERROR bodies (also
+      // Split OK bodies (asserted for absence) from ERROR bodies (also
       // asserted — a 409 body that lacks the key would trivially "pass" if we
       // only checked 2xx).
       if (res.ok()) {
@@ -102,12 +130,17 @@ test.describe("E11 — answer secrecy (assessment)", () => {
       }
     });
 
-    // â”€â”€ Full assessment flow â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Full assessment flow ────────────────────────────────────────────
     await studentPage.getByRole("link", { name: /View quizzes/i }).click();
     await expect(studentPage).toHaveURL(/\/student\/quizzes/);
     await studentPage.getByRole("button", { name: "Start", exact: true }).click();
     await expect(studentPage).toHaveURL(/\/play\/[0-9a-f-]+/);
 
+    await expect(studentPage.getByText("What is 2+2?", { exact: true })).toBeVisible();
+    // Mid-assessment full-document reload: exercises resume seeding AND the
+    // document-render payload class (i18n-catalog-bearing) that the value-based
+    // detector below must see through. See header comment.
+    await studentPage.reload();
     await expect(studentPage.getByText("What is 2+2?", { exact: true })).toBeVisible();
     await studentPage.getByRole("button", { name: /4/i }).click();
     await expect(studentPage.getByRole("button", { name: /^(Next|Finish)$/, exact: true })).toBeVisible();
@@ -138,24 +171,30 @@ test.describe("E11 — answer secrecy (assessment)", () => {
     // Hidden assessment → "awaiting release" message, NOT the score.
     await expect(studentPage.getByText(/results will be released by your lecturer/i)).toBeVisible({ timeout: 10_000 });
 
-    // ── Assert: no key/explanation across all captured OK responses ──
+    // ── Assert: no leaked ANSWER DATA across all captured OK responses ──
+    // Value-based (see CORRECT_KEY_WITH_VALUE above): scans every phase,
+    // including post-Finish RSC revalidations where disclosure would be
+    // legitimate ONLY after an explicit lecturer reveal — E11 never reveals.
     expect(capturedBodies.length).toBeGreaterThan(0);
     for (const { url, body } of capturedBodies) {
-      expect(
-        body.includes("correct_index") || body.includes("correctIndex") || body.includes("explanation"),
-        `answer key leaked in ${url}`,
-      ).toBe(false);
+      // The lecturer's actual explanation TEXT must never ship to the client.
+      expect(body.includes(Q1_EXPLANATION), `explanation text leaked in ${url}`).toBe(false);
+      // No correct-answer index serialized as data (any key:value form).
+      expect(CORRECT_KEY_WITH_VALUE.test(body), `correct-index data leaked in ${url}`).toBe(false);
     }
 
-    // ── Assert: error bodies (409 already_answered etc.) also carry no key ──
-    // A 409 body that lacks the key would trivially "pass" if we only checked
-    // 2xx responses. The forced duplicate-answer 409 is asserted directly via
-    // `dupBody` above; any browser-triggered session error bodies captured here
-    // must also be key-free.
-    for (const { body } of capturedErrorBodies) {
+    // ── Assert: API JSON carries none of the key NAMES at all ───────────
+    // /api/sessions/* responses are rendered by route handlers, NOT the root
+    // layout, so the i18n catalog cannot ride along — strict key-absence is
+    // sound here (covers null-valued keys too, which key:value regex skips).
+    const apiBodies = [
+      ...capturedBodies.filter((c) => c.url.includes("/api/sessions/")),
+      ...capturedErrorBodies,
+    ];
+    for (const { url, body } of apiBodies) {
       expect(
         body.includes("correct_index") || body.includes("correctIndex") || body.includes("explanation"),
-        "answer key leaked in an error response",
+        `answer key leaked in an API response: ${url}`,
       ).toBe(false);
     }
 

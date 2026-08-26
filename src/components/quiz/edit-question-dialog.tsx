@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ArrowDown, ArrowUp, Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,6 +24,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import {
+  applyOptionDraftOp,
+  type OptionDraftOp,
+} from "@/lib/quizzes/question-draft";
+import { QuestionImageField } from "@/components/media/question-image-field";
 import type { QuestionRow } from "@/app/(lecturer)/lecturer/quizzes/[id]/builder/quiz-builder-client";
 
 type QuestionDraft = {
@@ -40,6 +46,18 @@ export interface EditQuestionDialogProps {
   question: QuestionRow | null;
   questionIndex?: number;
   onSuccess?: () => void;
+  /**
+   * Live has-image state from the owner's flags overlay. question.image_path
+   * is the row captured at edit-start and goes stale after in-dialog image
+   * ops (attach → close → reopen would otherwise seed the field wrong).
+   */
+  hasImageOverride?: boolean;
+  /**
+   * Fires after each COMMITTED image op (attach/replace/remove) so the owning
+   * list can keep its has-image badge honest without a router refresh — image
+   * ops are independent of the text PATCH (same as the old attach buttons).
+   */
+  onImageChanged?: (hasImage: boolean) => void;
 }
 
 function EditQuestionForm({
@@ -48,17 +66,22 @@ function EditQuestionForm({
   questionIndex,
   onClose,
   onSuccess,
+  hasImageOverride,
+  onImageChanged,
 }: {
   quizId: string;
   question: QuestionRow;
   questionIndex?: number;
   onClose: () => void;
   onSuccess?: () => void;
+  hasImageOverride?: boolean;
+  onImageChanged?: (hasImage: boolean) => void;
 }) {
   const locale = useLocale();
   const t = useTranslations("lecturer.dialogs");
   const tBuilder = useTranslations("lecturer.builder");
   const tCommon = useTranslations("common");
+  const tMedia = useTranslations("media");
 
   const [draft, setDraft] = useState<QuestionDraft>(() => ({
     type: question.type,
@@ -70,41 +93,98 @@ function EditQuestionForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Image ops commit immediately (endpoint parity with the old attach row);
+  // failures surface inline AND via toast — the toast survives a mid-upload
+  // dialog close, the inline text does not.
+  const [imageBusy, setImageBusy] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
+
+  async function runImageOp(
+    op: () => Promise<Response>,
+    nextHasImage: boolean,
+    failureKey: string,
+  ) {
+    if (imageBusy) return;
+    setImageBusy(true);
+    setImageError(null);
+    let ok = false;
+    try {
+      const res = await op();
+      if (res.ok) {
+        ok = true;
+        onImageChanged?.(nextHasImage);
+      }
+    } catch {
+      // Network-level throw — surfaced like an HTTP failure below.
+    }
+    setImageBusy(false);
+    if (!ok) {
+      // Inline AND toast: the toast survives a mid-upload dialog close, the
+      // inline text does not. Localized copy only (server messages are
+      // English-only and would leak under the ms locale).
+      const message = tMedia(failureKey);
+      setImageError(message);
+      toast.error(message);
+      // Rejection contract for the field's await: resolve only on success.
+      throw new Error("image_op_failed");
+    }
+  }
+
+  function uploadImage(file: File) {
+    const form = new FormData();
+    form.append("image", file, file.name);
+    return runImageOp(
+      () =>
+        fetch(`/api/quizzes/${quizId}/questions/${question.id}/image`, {
+          method: "POST",
+          body: form,
+        }),
+      true,
+      "uploadFailed",
+    );
+  }
+
+  function removeImage() {
+    return runImageOp(
+      () =>
+        fetch(`/api/quizzes/${quizId}/questions/${question.id}/image`, {
+          method: "DELETE",
+        }),
+      false,
+      "removeFailed",
+    );
+  }
+
+  // Shared pure reducers (see quiz-builder-client) — the answer key follows
+  // its option on remove/move; no drifted inline copies.
+  function applyOptions(draft: QuestionDraft, op: OptionDraftOp): QuestionDraft {
+    const next = applyOptionDraftOp(
+      { options: draft.options, correctIndex: draft.correctIndex },
+      op,
+    );
+    return { ...draft, ...next };
+  }
+
   function setOption(index: number, value: string) {
-    setDraft((d) => {
-      const options = [...d.options];
-      options[index] = value;
-      return { ...d, options };
-    });
+    setDraft((d) => applyOptions(d, { kind: "set", index, value }));
   }
 
   function addOption() {
-    setDraft((d) => {
-      if (d.options.length >= 5) return d;
-      return { ...d, options: [...d.options, ""] };
-    });
+    setDraft((d) => applyOptions(d, { kind: "add" }));
   }
 
   function removeOption(index: number) {
-    setDraft((d) => {
-      if (d.options.length <= 2) return d;
-      const options = d.options.filter((_, i) => i !== index);
-      const correctIndex = Math.min(d.correctIndex, options.length - 1);
-      return { ...d, options, correctIndex };
-    });
+    setDraft((d) => applyOptions(d, { kind: "remove", index }));
   }
 
   function moveOption(index: number, direction: "up" | "down") {
-    setDraft((d) => {
-      const target = direction === "up" ? index - 1 : index + 1;
-      if (target < 0 || target >= d.options.length) return d;
-      const options = [...d.options];
-      [options[index], options[target]] = [options[target], options[index]];
-      let correctIndex = d.correctIndex;
-      if (correctIndex === index) correctIndex = target;
-      else if (correctIndex === target) correctIndex = index;
-      return { ...d, options, correctIndex };
-    });
+    setDraft((d) =>
+      applyOptions(d, {
+        kind: "move",
+        from: index,
+        to: direction === "up" ? index - 1 : index + 1,
+      }),
+    );
   }
 
   async function handleSave(e: React.FormEvent) {
@@ -354,6 +434,19 @@ function EditQuestionForm({
             />
           </div>
 
+          {/* Image (commits immediately — independent of Save below). */}
+          <QuestionImageField
+            variant="committed"
+            questionId={question.id}
+            hasImage={hasImageOverride ?? Boolean(question.image_path)}
+            altPrompt={draft.prompt}
+            busy={imageBusy}
+            errorText={imageError}
+            disabled={saving}
+            onFile={(file) => uploadImage(file)}
+            onRemove={() => removeImage()}
+          />
+
           {error && (
             <p
               className="rounded-2xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-3 text-sm font-bold text-destructive"
@@ -393,6 +486,8 @@ export function EditQuestionDialog({
   question,
   questionIndex,
   onSuccess,
+  hasImageOverride,
+  onImageChanged,
 }: EditQuestionDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -405,6 +500,8 @@ export function EditQuestionDialog({
             questionIndex={questionIndex}
             onClose={() => onOpenChange(false)}
             onSuccess={onSuccess}
+            hasImageOverride={hasImageOverride}
+            onImageChanged={onImageChanged}
           />
         </DialogContent>
       )}

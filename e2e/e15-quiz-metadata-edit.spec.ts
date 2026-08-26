@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { registerUser, createClass } from "./helpers";
+import { registerUser, createClass, createQuizWithQuestions } from "./helpers";
 
 const TEST_TIMESTAMP = Date.now();
 const LECTURER_EMAIL = `lecturer-e15-${TEST_TIMESTAMP}@innovision.test`;
@@ -147,5 +147,46 @@ test.describe("E15 — Quiz Metadata Editing (Title, Mode, Time Limit)", () => {
 
     expect(directPatchRes.status).toBe(409);
     expect(directPatchRes.body.error).toBe("quiz_not_draft");
+  });
+
+  test("E15-11: practice → assessment + time chip appears and persists", async ({
+    page,
+  }) => {
+    // Fresh class + practice quiz with one question (the plan's MEDIUM g: the
+    // chip only renders for assessment quizzes, so this starts practice).
+    await registerUser(page, `lecturer-e15b-${TEST_TIMESTAMP}@innovision.test`, "lecturer", LECTURER_INVITE_CODE);
+    await createClass(page, `${CLASS_TITLE} B`);
+    await createQuizWithQuestions(page, {
+      classTitle: `${CLASS_TITLE} B`,
+      quizTitle: "E15B Practice",
+      questions: [{ prompt: "What is 5 + 5?", options: ["10", "9"] }],
+    });
+
+    // Open settings via the Mode pill, switch to Assessment, set 1h 15m, save.
+    await page.getByRole("button", { name: /Quiz mode: Practice/i }).click();
+    await expect(page.getByRole("dialog", { name: "Edit quiz settings" })).toBeVisible();
+    await page.getByRole("dialog").getByRole("combobox", { name: "Quiz mode" }).click();
+    await page.getByRole("option", { name: "Assessment" }).click();
+    await page.getByLabel("h", { exact: true }).fill("1");
+    await page.getByLabel("min", { exact: true }).fill("15");
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByRole("dialog")).toBeHidden();
+
+    // Chip "1h 15m" appears (assessment + time limit).
+    await expect(page.getByText("1h 15m")).toBeVisible();
+
+    // Persists across a full reload.
+    await page.reload();
+    await expect(page.getByRole("heading", { level: 1, name: "E15B Practice" })).toBeVisible();
+    await expect(page.getByText("1h 15m")).toBeVisible();
+
+    // Flip back to Practice → chip gone.
+    await page.getByRole("button", { name: /Quiz mode: Assessment/i }).click();
+    await page.getByRole("dialog").getByRole("combobox", { name: "Quiz mode" }).click();
+    await page.getByRole("option", { name: "Practice" }).click();
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByRole("dialog")).toBeHidden();
+    await expect(page.getByText("1h 15m")).toBeHidden();
+    await expect(page.getByRole("button", { name: /Quiz mode: Practice/i })).toBeVisible();
   });
 });

@@ -86,4 +86,57 @@ test.describe("E1a — Auth both roles + consent persists", () => {
     await page.goto("/dashboard");
     await expect(page).toHaveURL(/\/login/);
   });
+
+  test("wrong-password error, duplicate-email generic signup, logout goBack re-guard", async ({
+    page,
+  }) => {
+    // Self-contained account so the parallel worker never races test 1's signup.
+    const email = `e1a-dup-${TEST_TIMESTAMP}@innovision.test`;
+    await registerUser(page, email, "student", "");
+
+    // Derive an UNUSED deterministic matric from a distinct seed, so the
+    // duplicate-email attempt below can never be blocked early by the matric
+    // pre-check (register.ts:158) — only the email-uniqueness check fires.
+    const seed = `e1a-dup-seed-${TEST_TIMESTAMP}@innovision.test`;
+    let h = 0;
+    for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) % 100000;
+    const unusedMatric = `8${String(h).padStart(5, "0")}`;
+
+    // Wrong password → localized generic error surfaces inline.
+    await page.goto("/login");
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password", { exact: true }).fill("wrongpass123");
+    await page.getByRole("button", { name: /sign in/i }).click();
+    await expect(
+      page.getByRole("alert").filter({ hasText: "Invalid email or password." }),
+    ).toBeVisible();
+    await expect(page).toHaveURL(/\/login/);
+
+    // Duplicate-email signup → the GENERIC signupFailed copy (register.ts:185
+    // — no email-specific key so the form can't oracle registered addresses).
+    await page.goto("/register");
+    await page.getByLabel(/Full name/).fill("Dup User");
+    await page.getByLabel(/Email/).fill(email);
+    await page.getByLabel("Password", { exact: true }).fill(E2E_PASSWORD);
+    await page.getByRole("radio", { name: "Student" }).check();
+    await page.getByLabel(/Matric number/i).fill(unusedMatric);
+    await page.getByRole("checkbox").check();
+    await page.getByRole("button", { name: /create account|register/i }).click();
+    await expect(
+      page.getByRole("alert").filter({ hasText: /could not create the account/i }),
+    ).toBeVisible({ timeout: 15_000 });
+    await expect(page).toHaveURL(/\/register/);
+
+    // Sign in, then logout → the shell re-guards even a back-navigation.
+    await page.goto("/login");
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password", { exact: true }).fill(E2E_PASSWORD);
+    await page.getByRole("button", { name: /sign in/i }).click();
+    await expect(page).toHaveURL(/\/student\/classes/);
+    await page.getByRole("button", { name: /account/i }).click();
+    await page.getByRole("button", { name: /sign out/i }).click();
+    await expect(page).toHaveURL(/\/login/);
+    await page.goBack();
+    await expect(page).toHaveURL(/\/login/);
+  });
 });

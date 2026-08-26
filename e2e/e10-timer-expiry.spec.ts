@@ -185,6 +185,16 @@ test.describe("E10 — timer expiry (API + UI halves)", () => {
     await studentPage.getByRole("button", { name: "Start" }).click();
     await expect(studentPage).toHaveURL(/\/play\/[0-9a-f-]+/);
 
+    // UI half: with a 10s limit the countdown sits far under the 30s warning
+    // threshold, so the HUD time chip must carry the destructive tint
+    // (progress-hud.tsx:6,55-58) THE WHOLE time. Assert immediately on mount —
+    // the countdown burns fast. The chip is the only tabular-nums span in the
+    // top bar (not a <header> element).
+    const hudTimer = studentPage.locator("span.tabular-nums").first();
+    await expect(hudTimer).toBeVisible({ timeout: 15_000 });
+    await expect(hudTimer).toHaveClass(/text-destructive/);
+    await expect(hudTimer).toHaveClass(/bg-destructive\/15/);
+
     // Answer one question correctly (correct_index defaults to option 1 = "3"
     // in createTimedAssessment) — well within 10s.
     await expect(studentPage.getByText("What is 2+2?", { exact: true })).toBeVisible();

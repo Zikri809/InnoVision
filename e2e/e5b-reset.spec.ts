@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import {
   registerUser,
   createClass,
@@ -17,6 +17,33 @@ const CLASS_TITLE = "E5b Reset";
 const QUIZ_TITLE = "E5b Assessment";
 
 type ServiceClient = NonNullable<ReturnType<typeof resolveServiceClient>>;
+
+/**
+ * Click a play-view option and wait for the advance control (Next/Finish).
+ * Wrapped in toPass because BOTH failure modes are otherwise unrecoverable
+ * mid-test: a dev-mode click lost to the hydration race never selects, and a
+ * transient answer-POST failure drops the phase back to "question". Re-click
+ * re-POSTs safely (selectOption no-ops while locked/already-answered).
+ */
+async function answerAndAwaitAdvance(page: Page, option: RegExp) {
+  await expect(async () => {
+    await page.getByRole("button", { name: option }).click();
+    await expect(
+      page.getByRole("button", { name: /^(Next|Finish)$/, exact: true }),
+    ).toBeVisible({ timeout: 5_000 });
+  }).toPass({ timeout: 45_000 });
+}
+
+/**
+ * Navigate with one retry budget: the Next.js dev server occasionally drops
+ * connections mid-run (net::ERR_CONNECTION_REFUSED) while staying alive, and a
+ * bare page.goto has no recovery. Every caller below is idempotent navigation.
+ */
+async function gotoWithRetry(page: Page, url: string) {
+  await expect(async () => {
+    await page.goto(url);
+  }).toPass({ timeout: 30_000 });
+}
 
 /** Service-role lookup: the quiz id for a (class title, quiz title) pair.
  * Prior E2E runs leave identically-titled rows behind, so take the newest. */
@@ -85,30 +112,47 @@ test.describe("E5b — lecturer resets attempt", () => {
     await registerUser(studentPage, STUDENT_EMAIL, "student", LECTURER_INVITE_CODE);
     await expect(studentPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
     await joinClass(studentPage, joinCode, CLASS_TITLE);
-    await studentPage.getByRole("link", { name: /View quizzes/i }).click();
-    await expect(studentPage).toHaveURL(/\/student\/quizzes/);
-    await studentPage.getByRole("button", { name: "Start", exact: true }).click();
-    await expect(studentPage).toHaveURL(/\/play\/[0-9a-f-]+/);
+    // Click-then-assert pairs are retried via toPass: a lost dev-mode click
+    // (hydration race) must not strand the flow before the play view.
+    await expect(async () => {
+      if (!studentPage.url().includes("/student/quizzes")) {
+        await studentPage.getByRole("link", { name: /View quizzes/i }).click();
+      }
+      await expect(studentPage).toHaveURL(/\/student\/quizzes/, { timeout: 5_000 });
+    }).toPass({ timeout: 30_000 });
+    await expect(async () => {
+      if (!/\/play\/[0-9a-f-]+/.test(studentPage.url())) {
+        await studentPage.getByRole("button", { name: "Start", exact: true }).click();
+      }
+      await expect(studentPage).toHaveURL(/\/play\/[0-9a-f-]+/, { timeout: 5_000 });
+    }).toPass({ timeout: 30_000 });
     const session1Id = studentPage.url().split("/play/")[1];
     await expect(studentPage.getByText("What is 2+2?", { exact: true })).toBeVisible();
-    await studentPage.getByRole("button", { name: /4/i }).click();
-    await expect(studentPage.getByRole("button", { name: /^(Next|Finish)$/, exact: true })).toBeVisible();
+    await answerAndAwaitAdvance(studentPage, /4/i);
     await studentPage.getByRole("button", { name: "Next", exact: true }).click();
     await expect(studentPage.getByText("Capital of France?", { exact: true })).toBeVisible();
-    await studentPage.getByRole("button", { name: /Paris/i }).click();
-    await expect(studentPage.getByRole("button", { name: /^(Next|Finish)$/, exact: true })).toBeVisible();
+    await answerAndAwaitAdvance(studentPage, /Paris/i);
     await studentPage.getByRole("button", { name: "Finish", exact: true }).click();
     await expect(studentPage.getByText("Assessment complete", { exact: false })).toBeVisible({ timeout: 10_000 });
 
     // ── 2. Lecturer: results → Reset (confirm dialog) → row gone ─────
-    await openResults(lecturerPage, CLASS_TITLE, QUIZ_TITLE);
+    await expect(async () => {
+      await openResults(lecturerPage, CLASS_TITLE, QUIZ_TITLE);
+    }).toPass({ timeout: 60_000 });
     const studentList1 = lecturerPage.getByRole("list");
     await expect(studentList1.getByText("Completed", { exact: true })).toHaveCount(1);
-    // The Reset button is rendered on the completed row.
-    await lecturerPage.getByRole("button", { name: "Reset", exact: true }).click();
-    await expect(
-      lecturerPage.getByRole("dialog").getByRole("heading", { name: "Reset", exact: true }),
-    ).toBeVisible();
+    // The Reset button is rendered on the completed row. The dialog-open
+    // click is retried (guarded on the dialog not already being up) so a lost
+    // dev-mode click cannot strand the reset.
+    const resetDialogHeading = lecturerPage
+      .getByRole("dialog")
+      .getByRole("heading", { name: "Reset", exact: true });
+    await expect(async () => {
+      if (!(await resetDialogHeading.isVisible())) {
+        await lecturerPage.getByRole("button", { name: "Reset", exact: true }).click();
+      }
+      await expect(resetDialogHeading).toBeVisible({ timeout: 5_000 });
+    }).toPass({ timeout: 30_000 });
     await lecturerPage.getByRole("dialog").getByRole("button", { name: "Reset", exact: true }).click();
     // The row disappears after refresh.
     await expect(studentList1.getByText("Completed", { exact: true })).toHaveCount(0);
@@ -135,38 +179,54 @@ test.describe("E5b — lecturer resets attempt", () => {
     }
 
     // ── 3. Student: Start again → SUCCEEDS (slot released) ──────────
-    await studentPage.goto("/student/quizzes");
+    await gotoWithRetry(studentPage, "/student/quizzes");
     await expect(studentPage.getByText("Available quizzes", { exact: false })).toBeVisible();
     await expect(studentPage.getByRole("list").getByText("Completed", { exact: true })).toHaveCount(0);
-    await studentPage.getByRole("button", { name: "Start", exact: true }).click();
-    await expect(studentPage).toHaveURL(new RegExp(`/play/(?!${session1Id})[0-9a-f-]+`));
+    await expect(async () => {
+      if (!/\/play\/[0-9a-f-]+/.test(studentPage.url())) {
+        await studentPage.getByRole("button", { name: "Start", exact: true }).click();
+      }
+      await expect(studentPage).toHaveURL(new RegExp(`/play/(?!${session1Id})[0-9a-f-]+`), {
+        timeout: 5_000,
+      });
+    }).toPass({ timeout: 30_000 });
     await expect(studentPage.getByText("What is 2+2?", { exact: true })).toBeVisible();
-    await studentPage.getByRole("button", { name: /4/i }).click();
-    await expect(studentPage.getByRole("button", { name: /^(Next|Finish)$/, exact: true })).toBeVisible();
+    await answerAndAwaitAdvance(studentPage, /4/i);
 
     // ── 4. Lecturer: reset the re-take row mid-flight ────────────────
-    await openResults(lecturerPage, CLASS_TITLE, QUIZ_TITLE);
+    await expect(async () => {
+      await openResults(lecturerPage, CLASS_TITLE, QUIZ_TITLE);
+    }).toPass({ timeout: 60_000 });
     const studentList2 = lecturerPage.getByRole("list");
     await expect(studentList2.getByText("In progress", { exact: true })).toHaveCount(1);
-    await lecturerPage.getByRole("button", { name: "Reset", exact: true }).click();
-    await expect(
-      lecturerPage.getByRole("dialog").getByRole("heading", { name: "Reset", exact: true }),
-    ).toBeVisible();
+    const resetDialogHeading2 = lecturerPage
+      .getByRole("dialog")
+      .getByRole("heading", { name: "Reset", exact: true });
+    await expect(async () => {
+      if (!(await resetDialogHeading2.isVisible())) {
+        await lecturerPage.getByRole("button", { name: "Reset", exact: true }).click();
+      }
+      await expect(resetDialogHeading2).toBeVisible({ timeout: 5_000 });
+    }).toPass({ timeout: 30_000 });
     await lecturerPage.getByRole("dialog").getByRole("button", { name: "Reset", exact: true }).click();
     await expect(studentList2.getByText("In progress", { exact: true })).toHaveCount(0);
 
     // ── 5. Student: next answer POST → D13 dead screen (NOT a 404 loop) ──
     await studentPage.getByRole("button", { name: "Next", exact: true }).click();
     await expect(studentPage.getByText("Capital of France?", { exact: true })).toBeVisible();
-    await studentPage.getByRole("button", { name: /Paris/i }).click();
     // The answer POST returns 404 (session gone) → the client surfaces the
-    // terminal dead screen.
-    await expect(
-      studentPage.getByText(
-        "This attempt was reset by your lecturer — ask them to restart you.",
-        { exact: false },
-      ),
-    ).toBeVisible({ timeout: 10_000 });
+    // terminal dead screen. Retried: a transient network failure (NOT a 404)
+    // drops the phase back to "question"; re-clicking re-POSTs and then hits
+    // the 404 — the assertion still proves the terminal D13 screen.
+    await expect(async () => {
+      await studentPage.getByRole("button", { name: /Paris/i }).click();
+      await expect(
+        studentPage.getByText(
+          "This attempt was reset by your lecturer — ask them to restart you.",
+          { exact: false },
+        ),
+      ).toBeVisible({ timeout: 5_000 });
+    }).toPass({ timeout: 30_000 });
     // NOT stuck in a recoverable state: no "Answered", no Finish submit.
     await expect(studentPage.getByText("Your score", { exact: true })).toHaveCount(0);
 

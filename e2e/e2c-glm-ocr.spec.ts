@@ -63,9 +63,12 @@ test.describe("E2-GLM — GLM-OCR extraction from a scanned image", () => {
       page.getByRole("heading", { name: "Generate quiz from file" }),
     ).toBeVisible();
 
-    await page.locator('input[type="file"]').setInputFiles(
-      "e2e/fixtures/scanned-chapter.png",
-    );
+    // Scope to the dropzone: the page also renders hidden avatar and
+    // question-image file inputs.
+    await page
+      .getByRole("button", { name: /upload course slides/i })
+      .locator('input[type="file"]')
+      .setInputFiles("e2e/fixtures/scanned-chapter.png");
 
     // ── 3. Select GLM-OCR (only present when the Docker container is reachable) ──
     // The probe succeeded; open the dropdown, then pick the AI Vision option.

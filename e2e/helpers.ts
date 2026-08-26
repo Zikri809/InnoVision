@@ -53,10 +53,23 @@ export async function registerUser(
   await page.getByRole("button", { name: /create account|register/i }).click();
 
   // Wait for the role-based landing page (also settles the hydration race).
-  await page.waitForURL(
-    role === "lecturer" ? /\/lecturer\/classes/ : /\/student\/classes/,
-    { timeout: 30_000 },
-  );
+  // 45s: a cold dev server compiles /register, the action round-trip AND the
+  // landing route on first touch — 30s proved too tight under 4-worker load.
+  const landing = role === "lecturer" ? /\/lecturer\/classes/ : /\/student\/classes/;
+  try {
+    await page.waitForURL(landing, { timeout: 45_000 });
+  } catch {
+    // Poisoned-retry recovery: a stalled prior attempt (dev-server cold
+    // compile, load spike) often created the account BEFORE this navigation
+    // resolved — so the retried registration of the SAME email can never
+    // succeed ("already registered"). Fall back to signing in with the
+    // shared E2E password; the landing assertion below stays authoritative.
+    await page.goto("/login");
+    await page.getByLabel(/Email/).fill(email);
+    await page.getByLabel("Password", { exact: true }).fill(E2E_PASSWORD);
+    await page.getByRole("button", { name: /sign in/i }).click();
+    await page.waitForURL(landing, { timeout: 45_000 });
+  }
   return { matric };
 }
 

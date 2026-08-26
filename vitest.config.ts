@@ -121,8 +121,10 @@ export default defineConfig({
         // Media (plan MEDIA_AND_STUDENT_AI): pure validators at the lib bar;
         // new routes mirror the sibling route gates. Client glue
         // (use-question-image.ts, media components) is browser-only — E2E
-        // owns it (hand-tracker/tesseract 0-key precedent).
+        // owns it (hand-tracker/tesseract 0-key precedent). media/client.ts
+        // is the pure pick-pre-validation gate (Node-unit-tested).
         "src/lib/media/validation.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        "src/lib/media/client.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/lib/media/server.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
         "src/lib/media/use-question-image.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
         "src/app/api/question-images/[qid]/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },

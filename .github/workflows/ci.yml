@@ -75,6 +75,9 @@ jobs:
       - name: Phase 2 classes probes (D8/D12)
         run: npm run verify:classes
 
+      - name: Class archiving probes (D26b: archive/restore lifecycle)
+        run: npm run verify:class-archiving
+
       - name: Phase 3 quizzes probes (D5/D6/D19-D24)
         run: npm run verify:quizzes
 

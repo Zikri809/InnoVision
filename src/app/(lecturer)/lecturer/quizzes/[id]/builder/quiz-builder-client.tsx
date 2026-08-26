@@ -5,13 +5,17 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { ArrowDown, ArrowLeft, ArrowUp, Check, Pencil, Settings2, Timer, Trash2, Wand2, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, Check, Image as ImageIcon, Pencil, Settings2, Timer, Trash2, Wand2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDuration } from "@/lib/format/duration";
 import { TITLE_MAX } from "@/lib/quizzes/validation";
+import {
+  applyOptionDraftOp,
+  type OptionDraftOp,
+} from "@/lib/quizzes/question-draft";
 import { MODE_CLASS, STATUS_CLASS, getModeLabel, getStatusLabel } from "@/lib/quizzes/labels";
 import {
   Select,
@@ -32,7 +36,7 @@ import { SourceTextPreview } from "@/components/extract/SourceTextPreview";
 import { EditQuestionDialog } from "@/components/quiz/edit-question-dialog";
 import { RegenerateQuestionDialog } from "@/components/quiz/regenerate-question-dialog";
 import { EditQuizDialog } from "@/components/quiz/edit-quiz-dialog";
-import { QuestionImageAttach } from "@/components/media/question-image-attach";
+import { QuestionImageField } from "@/components/media/question-image-field";
 import type { OcrConfig } from "@/lib/extract/types";
 
 export type QuizInfo = {
@@ -91,6 +95,7 @@ export function QuizBuilderClient({
   const locale = useLocale();
   const t = useTranslations("lecturer.builder");
   const tCommon = useTranslations("common");
+  const tMedia = useTranslations("media");
   const isDraft = quiz.status === "draft";
 
   // Title editing state
@@ -205,6 +210,9 @@ export function QuizBuilderClient({
 
   // Question form state (top card: adding new questions).
   const [draft, setDraft] = useState<QuestionDraft>(emptyDraft);
+  // Image staged in the add-question dropzone — uploaded AFTER the question
+  // exists (the POST returns the new id). Never persists across questions.
+  const [pendingImage, setPendingImage] = useState<File | null>(null);
   const [editingQuestion, setEditingQuestion] = useState<QuestionRow | null>(null);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [regeneratingQuestion, setRegeneratingQuestion] = useState<QuestionRow | null>(null);
@@ -215,41 +223,38 @@ export function QuizBuilderClient({
   const [generateOpen, setGenerateOpen] = useState(false);
   const [reordering, setReordering] = useState(false);
 
+  // Option-array mutations ride the SHARED pure reducers
+  // (lib/quizzes/question-draft.ts) so the answer key follows its option on
+  // remove/move — the old inline copies drifted (deleting an option ABOVE the
+  // key left correctIndex pointing at the wrong option).
+  function applyOptions(draft: QuestionDraft, op: OptionDraftOp): QuestionDraft {
+    const next = applyOptionDraftOp(
+      { options: draft.options, correctIndex: draft.correctIndex },
+      op,
+    );
+    return { ...draft, ...next };
+  }
+
   function setOption(index: number, value: string) {
-    setDraft((d) => {
-      const options = [...d.options];
-      options[index] = value;
-      return { ...d, options };
-    });
+    setDraft((d) => applyOptions(d, { kind: "set", index, value }));
   }
 
   function addOption() {
-    setDraft((d) => {
-      if (d.options.length >= 5) return d;
-      return { ...d, options: [...d.options, ""] };
-    });
+    setDraft((d) => applyOptions(d, { kind: "add" }));
   }
 
   function removeOption(index: number) {
-    setDraft((d) => {
-      if (d.options.length <= 2) return d;
-      const options = d.options.filter((_, i) => i !== index);
-      const correctIndex = Math.min(d.correctIndex, options.length - 1);
-      return { ...d, options, correctIndex };
-    });
+    setDraft((d) => applyOptions(d, { kind: "remove", index }));
   }
 
   function moveOption(index: number, direction: "up" | "down") {
-    setDraft((d) => {
-      const target = direction === "up" ? index - 1 : index + 1;
-      if (target < 0 || target >= d.options.length) return d;
-      const options = [...d.options];
-      [options[index], options[target]] = [options[target], options[index]];
-      let correctIndex = d.correctIndex;
-      if (correctIndex === index) correctIndex = target;
-      else if (correctIndex === target) correctIndex = index;
-      return { ...d, options, correctIndex };
-    });
+    setDraft((d) =>
+      applyOptions(d, {
+        kind: "move",
+        from: index,
+        to: direction === "up" ? index - 1 : index + 1,
+      }),
+    );
   }
 
   function startEdit(q: QuestionRow, index: number) {
@@ -278,13 +283,42 @@ export function QuizBuilderClient({
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const body = await res.json();
+      const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(body.message ?? body.error ?? tCommon("errorGeneric"));
         return;
       }
+
+      // Image phase — its failure never loses the created question; the user
+      // retries via the question's edit dialog. The staged file is always
+      // cleared so it can never silently attach to a LATER question.
+      const createdId =
+        typeof body.question?.id === "string" ? body.question.id : null;
+      if (pendingImage) {
+        if (!createdId) {
+          // Question created but response lacked its id — say the image was
+          // NOT attached instead of dropping it silently.
+          toast.error(tMedia("addedImageFailed"));
+        } else {
+          try {
+            const form = new FormData();
+            form.append("image", pendingImage, pendingImage.name);
+            const imgRes = await fetch(
+              `/api/quizzes/${quiz.id}/questions/${createdId}/image`,
+              { method: "POST", body: form },
+            );
+            if (!imgRes.ok) toast.error(tMedia("addedImageFailed"));
+          } catch {
+            toast.error(tMedia("addedImageFailed"));
+          }
+        }
+      }
+
       setDraft(emptyDraft);
+      setPendingImage(null);
       toast.success(t("questionAdded"));
+      // Refresh only AFTER the image phase settles so the fresh payload's
+      // image_path (feeding the list badge) is already honest.
       router.refresh();
     } catch {
       setError(tCommon("errorGeneric"));
@@ -335,7 +369,10 @@ export function QuizBuilderClient({
     const questionIds = nextQuestions.map((x) => x.id);
 
     try {
-      const res = await fetch(`/api/quizzes/${quiz.id}/questions/reorder`, {
+      // NOTE: `/reorder`, NOT `/questions/reorder` — the latter is captured by
+      // the questions/[questionId] route (questionId="reorder") which has no
+      // POST handler → 405, silently breaking every lecturer reorder.
+      const res = await fetch(`/api/quizzes/${quiz.id}/reorder`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ questionIds }),
@@ -570,10 +607,19 @@ export function QuizBuilderClient({
         quizId={quiz.id}
         question={editingQuestion}
         questionIndex={editingIndex ?? undefined}
+        // Live has-image state (flags overlay) — question.image_path is the
+        // row captured at edit-start and goes stale after in-dialog ops.
+        hasImageOverride={
+          editingQuestion ? hasImageFor(editingQuestion.id) : undefined
+        }
         onSuccess={() => {
           toast.success(t("questionUpdated"));
           router.refresh();
         }}
+        onImageChanged={(has) =>
+          editingQuestion &&
+          setImageFlags((prev) => ({ ...prev, [editingQuestion.id]: has }))
+        }
       />
 
       <RegenerateQuestionDialog
@@ -687,6 +733,16 @@ export function QuizBuilderClient({
                   placeholder={t("promptPlaceholder")}
                 />
               </div>
+
+              {/* Image sits between prompt and options — mirroring where the
+                  player renders it above the options (WYSIWYG authoring). */}
+              <QuestionImageField
+                variant="staged"
+                file={pendingImage}
+                onFileChange={setPendingImage}
+                altPrompt={draft.prompt}
+                disabled={saving}
+              />
 
               <div className="space-y-2">
                 <Label>{t("correctAnswerLabel")}</Label>
@@ -819,6 +875,12 @@ export function QuizBuilderClient({
                       <span className="rounded-full border-[3px] border-border bg-muted px-2.5 py-0.5 text-xs font-extrabold text-foreground">
                         {q.type === "mcq" ? tCommon("mcq") : tCommon("trueFalse")}
                       </span>
+                      {hasImageFor(q.id) && (
+                        <span className="inline-flex items-center gap-1 rounded-full border-[3px] border-border bg-muted px-2.5 py-0.5 text-xs font-extrabold text-foreground">
+                          <ImageIcon className="size-3" aria-hidden />
+                          {tMedia("imageBadge")}
+                        </span>
+                      )}
                       <span className="text-xs font-bold text-muted-foreground">
                         {t("correctAnswerLabel")}: {t("optionLabel", { index: q.correct_index + 1 })}
                       </span>
@@ -831,15 +893,6 @@ export function QuizBuilderClient({
                       <p className="mt-1.5 text-xs font-semibold text-muted-foreground">
                         <strong className="font-extrabold text-foreground">{t("explanationLabel")}:</strong> {q.explanation}
                       </p>
-                    )}
-                    {isDraft && (
-                      <QuestionImageAttach
-                        uploadEndpoint={`/api/quizzes/${quiz.id}/questions/${q.id}/image`}
-                        hasImage={hasImageFor(q.id)}
-                        onChanged={(has) =>
-                          setImageFlags((prev) => ({ ...prev, [q.id]: has }))
-                        }
-                      />
                     )}
                   </div>
                   {isDraft && (
