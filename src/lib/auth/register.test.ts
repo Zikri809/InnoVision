@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { register } from "./register";
+import { _resetRateLimiter, _seedRateLimit } from "@/lib/classes/rate-limit";
 
 /**
  * Focused tests for the signup server action's matric handling (the matric
@@ -109,6 +110,7 @@ beforeEach(() => {
   process.env.LECTURER_INVITE_CODE = "TESTCODE";
   rlsHolder.current = undefined;
   adminHolder.current = undefined;
+  _resetRateLimiter();
 });
 
 describe("register — matric validation", () => {
@@ -169,5 +171,73 @@ describe("register — matric validation", () => {
     expect(res.error).toBeUndefined();
     const meta = rlsHolder.current!.signUpCalls[0].options?.data;
     expect(meta?.matric_no).toBeUndefined();
+  });
+});
+
+describe("register - rate limits & invite gate", () => {
+  it("per-IP signup budget exhausted -> tooManyAttempts, no signUp call", async () => {
+    // headers() is mocked to return null for x-forwarded-for => key "signup-ip:unknown".
+    _seedRateLimit("signup-ip:unknown", 10);
+    rlsHolder.current = makeRlsClient();
+    adminHolder.current = makeAdminClient();
+    const res = await register({ email: "a@b.com", password: "hunter22", matricNo: "231456" });
+    expect(res.session).toBe(false);
+    expect(res.error).toMatch(/too many|attempts/i);
+    expect(rlsHolder.current!.signUpCalls).toHaveLength(0);
+  });
+
+  it("per-email invite budget exhausted -> tooManyAttempts before invite validation", async () => {
+    const email = "lect@b.com";
+    _seedRateLimit(`invite:${email}`, 10);
+    rlsHolder.current = makeRlsClient();
+    adminHolder.current = makeAdminClient();
+    const res = await register({
+      email,
+      password: "hunter22",
+      inviteCode: "WRONGCODE",
+    });
+    expect(res.error).toMatch(/too many|attempts/i);
+    expect(rlsHolder.current!.signUpCalls).toHaveLength(0);
+  });
+
+  it("global invite budget exhausted (rotating emails) -> tooManyAttempts", async () => {
+    _seedRateLimit("invite:global", 100);
+    rlsHolder.current = makeRlsClient();
+    adminHolder.current = makeAdminClient();
+    const res = await register({
+      email: "other@b.com",
+      password: "hunter22",
+      inviteCode: "WRONGCODE",
+    });
+    expect(res.error).toMatch(/too many|attempts/i);
+    expect(rlsHolder.current!.signUpCalls).toHaveLength(0);
+  });
+
+  it("invalid invite code -> invalidInviteCode and NO account is created", async () => {
+    rlsHolder.current = makeRlsClient();
+    adminHolder.current = makeAdminClient();
+    const res = await register({
+      email: "lect2@b.com",
+      password: "hunter22",
+      inviteCode: "DEFINITELY-WRONG",
+    });
+    expect(res.session).toBe(false);
+    expect(res.error).toMatch(/invite/i);
+    expect(rlsHolder.current!.signUpCalls).toHaveLength(0);
+  });
+
+  it("student path consumes the signup-ip budget but not the invite budgets", async () => {
+    rlsHolder.current = makeRlsClient();
+    adminHolder.current = makeAdminClient();
+    const res = await register({ email: "a@b.com", password: "hunter22", matricNo: "231456" });
+    expect(res.session).toBe(true);
+    // invite keys untouched => a subsequent lecturer attempt validates the code normally.
+    const res2 = await register({
+      email: "l3@b.com",
+      password: "hunter22",
+      inviteCode: "TESTCODE",
+    });
+    expect(res2.session).toBe(true);
+    expect(res2.error).toBeUndefined();
   });
 });

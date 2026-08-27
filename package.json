@@ -9,6 +9,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:unit": "vitest run --coverage",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:face-smoke": "playwright test e2e/compreface-smoke.spec.ts",

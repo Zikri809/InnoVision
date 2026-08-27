@@ -196,4 +196,32 @@ test.describe("E16 — integrity suite", () => {
       await studentCtx.close();
     }
   });
+
+  test("C — sustained looked-away pose → lecturer dashboard advisory chip", async ({ browser }, testInfo) => {
+    testInfo.setTimeout(90_000);
+    test.skip(!LECTURER_INVITE_CODE, "LECTURER_INVITE_CODE not set");
+
+    const { lecturerCtx, studentCtx, lecturerPage, studentPage, quizId } =
+      await setupAssessment(browser, "lookaway");
+    try {
+      // Off-axis pose (yaw beyond LOOK_AWAY_YAW_DEG = 25) sustained past
+      // LOOK_AWAY_ACCUMULATE_MS = 8s fires the looked_away advisory through
+      // the same hook as second_face. Wait for the POST to land so the
+      // lecturer's static RSC render sees it.
+      await setFacePose(studentPage, { yaw: 40, centered: false, facesSeen: 1 });
+      const advisoryPosted = studentPage.waitForResponse(
+        (r) => r.url().includes("/advisory") && r.request().method() === "POST" && r.ok(),
+        { timeout: 30_000 },
+      );
+      await advisoryPosted;
+
+      await lecturerPage.goto(`/lecturer/quizzes/${quizId}/results`);
+      await expect(
+        lecturerPage.getByText(/Looked away/i).first(),
+      ).toBeVisible({ timeout: 15_000 });
+    } finally {
+      await lecturerCtx.close();
+      await studentCtx.close();
+    }
+  });
 });

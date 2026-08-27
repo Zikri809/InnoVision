@@ -332,15 +332,21 @@ describe("incident upload � ring-buffer clip route", () => {
     adminMock.from = vi.fn(() => incidentInsertBuilder());
   });
 
-  function incidentReq(opts?: { size?: number; declared?: number; type?: string }) {
+  function incidentReq(opts?: {
+    size?: number;
+    declared?: number;
+    type?: string;
+    content?: Uint8Array;
+  }) {
     const size = opts?.size ?? 1024;
-    const bytes = new Uint8Array(size);
-    // WebM/EBML magic (0x1A45DFA3) — the route magic-byte-sniffs uploads.
-    bytes[0] = 0x1a;
-    bytes[1] = 0x45;
-    bytes[2] = 0xdf;
-    bytes[3] = 0xa3;
-    const blob = new Blob([bytes], { type: opts?.type ?? "video/webm" });
+    const bytes = opts?.content ?? new Uint8Array(size);    if (!opts?.content) {
+      // WebM/EBML magic (0x1A45DFA3) — the route magic-byte-sniffs uploads.
+      bytes[0] = 0x1a;
+      bytes[1] = 0x45;
+      bytes[2] = 0xdf;
+      bytes[3] = 0xa3;
+    }
+    const blob = new Blob([bytes.buffer as ArrayBuffer], { type: opts?.type ?? "video/webm" });
     const form = new FormData();
     form.append("clip", blob, "clip.webm");
     form.append("reason", "paused");
@@ -407,6 +413,30 @@ describe("incident upload � ring-buffer clip route", () => {
     _seedRateLimit(`session-incident:${STUDENT_ID}`, 6);
     const res = await incident.POST(incidentReq(), { params: Promise.resolve({ id: SESSION_ID }) });
     expect(res.status).toBe(429);
+  });
+
+  it("garbage bytes (not WebM/MP4 magic) → 400 invalid_body, NO storage write", async () => {
+    assessmentContext();
+    const garbage = new TextEncoder().encode("this is definitely not a video");
+    const res = await incident.POST(
+      incidentReq({ content: new Uint8Array(garbage) }),
+      { params: Promise.resolve({ id: SESSION_ID }) },
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("invalid_body");
+    expect(adminMock.storage.from).not.toHaveBeenCalled();
+  });
+
+  it("mislabeled MIME does not bypass the magic-byte sniff → 400", async () => {
+    assessmentContext();
+    const fakePng = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const res = await incident.POST(
+      incidentReq({ type: "video/webm", content: fakePng }),
+      { params: Promise.resolve({ id: SESSION_ID }) },
+    );
+    expect(res.status).toBe(400);
+    expect(adminMock.storage.from).not.toHaveBeenCalled();
   });
 
   it("storage failure ? 503, no row inserted", async () => {

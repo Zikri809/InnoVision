@@ -20,6 +20,13 @@ export default defineConfig({
         "src/lib/quizzes/**",
         "src/lib/student-quizzes/**",
         "src/lib/media/**",
+        // Report-only additions (no thresholds yet): auth wall, route guards,
+        // shared HTTP primitives, middleware redirect matrix.
+        "src/lib/classes/guards.ts",
+        "src/lib/classes/roster.ts",
+        "src/lib/auth/**",
+        "src/lib/http.ts",
+        "src/lib/supabase/middleware.ts",
         "src/lib/vision/camera.ts",
         "src/app/api/ai/**",
         "src/app/api/quizzes/**",

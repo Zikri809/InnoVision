@@ -96,10 +96,10 @@ test.describe("E1 — Class create → join via code → roster", () => {
     await lecturerPage.getByRole("button", { name: /^create class$/i }).click();
     const cardTwo = lecturerPage.locator("li").filter({ hasText: "E1 Isolation Two" });
     await expect(cardTwo).toBeVisible();
-    const codeTwo = await cardTwo
+    const codeTwo = (await cardTwo
       .getByText(/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/)
       .first()
-      .textContent();
+      .textContent()) as string;
     expect(codeTwo).toMatch(/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/);
 
     await registerUser(studentPage, `${STUDENT_EMAIL}-iso`, "student", LECTURER_INVITE_CODE);

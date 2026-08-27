@@ -519,6 +519,62 @@ describe("I-C6 — POST /api/classes/join on archived classes", () => {
   });
 });
 
+describe("POST /api/classes/join — brute-force rate limits", () => {
+  /**
+   * The route imports { rateLimit } statically, and these tests use
+   * vi.resetModules() in beforeEach — so the limiter must be seeded through
+   * the SAME module instance the dynamically-imported route resolves, not a
+   * top-level static import (which would be a stale copy).
+   */
+  async function rateLimiter() {
+    return await import("@/lib/classes/rate-limit");
+  }
+
+  function joinReq() {
+    return new Request("http://localhost/api/classes/join", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({ code: "ABCDEF" }),
+    });
+  }
+
+  it("per-user join budget exhausted → 429 rate_limited before any RPC call", async () => {
+    const STUDENT_ID = "00000000-0000-4000-8000-0000000000ff";
+    studentContext();
+    const { _seedRateLimit } = await rateLimiter();
+    _seedRateLimit(`join:${STUDENT_ID}`, 20);
+
+    const { joinRoute } = await importHandlers();
+    const res = await joinRoute.POST(joinReq());
+    expect(res.status).toBe(429);
+    const body = await res.json();
+    expect(body.error).toBe("rate_limited");
+  });
+
+  it("RPC join_locked (DB lockout) → 429 with typed error", async () => {
+    const client = studentContext();
+    client.rpcResult = { data: { error: "join_locked" }, error: null };
+
+    const { joinRoute } = await importHandlers();
+    const res = await joinRoute.POST(joinReq());
+    expect(res.status).toBe(429);
+    const body = await res.json();
+    expect(body.error).toBe("join_locked");
+    expect(body.message).toMatch(/too many invalid codes/i);
+  });
+
+  it("valid joins stay under budget → RPC result passthrough (no false 429)", async () => {
+    const client = studentContext();
+    client.rpcResult = { data: { class: { id: CLASS_B, title: "B" } }, error: null };
+
+    const { joinRoute } = await importHandlers();
+    const res = await joinRoute.POST(joinReq());
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.class.id).toBe(CLASS_B);
+  });
+});
+
 describe("PATCH /api/classes/[id] — combined mutations", () => {
   it("lecturer can update title and unarchive simultaneously", async () => {
     const client = lecturerContext();
