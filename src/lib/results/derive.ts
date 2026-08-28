@@ -350,6 +350,7 @@ export function assembleResultsRows({
       face_exempt: s.face_exempt,
       face_fail_streak: s.face_fail_streak,
       focus_pause_count: s.focus_pause_count ?? null,
+      attempt: s.attempt ?? null,
       studentName: nameByStudent.get(s.student_id) ?? null,
       displayStatus: deriveSessionDisplayStatus(s, { quizStatus: quiz.status, nowMs }),
       faceSummary: summarizeFaceChecks(sessionChecks),

@@ -17,7 +17,12 @@ Control when students see their results (score, breakdown, explanations) by quiz
 - **Auto-reveal intent**: `quizzes.auto_reveal_on_complete boolean not null default false`.
 - **Reveal rule** (`is_student_reveal_allowed`): enrolled in quiz's class AND (`mode='practice'` OR `results_revealed_at is not null`). Practice is always revealed; no "hide a practice" override (removed v2 contradiction).
 - **Reveal is ONE-WAY, enforced by a DB trigger.** `reveal_once_only` raises on ANY change from a non-null `results_revealed_at`; same-value no-op allowed (idempotent auto-reveal).
-- **Manual reveal is only offered while the quiz is LIVE** (UI and route both gate on `status='live'`). Documented consequence: closing a quiz before revealing permanently locks results out (one-way; the student_quiz_view is live-only so nothing can reach them). Follow-up (out of scope): a closed-quiz recovery surface.
+- **Manual reveal is offered while the quiz is LIVE or CLOSED** (QC-2,
+  migration 0031: draft → 409 `quiz_not_revealable`; the route's status
+  term was dropped — the `.is(null)` guard carries one-way idempotency).
+  The closed+revealed student recovery surface ships via
+  `student_closed_revealed_quiz_view` (see PLAN_CLOSE_AND_SCHEDULE.md
+  QC-2; closed+unrevealed session URLs stay a truthful 404).
 - **Auto-reveal is submit-triggered only — NO background job.** A class whose remaining students never submit never auto-reveals; lecturer manual reveal is the escape. State this on the checkbox copy.
 
 ## 3. A single sealing story (round-2 BLOCKER: `quiz_sessions.score` + `session_answers.is_correct`)  
@@ -141,6 +146,12 @@ The client engine `src/components/quiz/play-client.tsx` is IN SCOPE (v3 missed i
   quiz mode for reachable rows). NULL/future `last_activity_at`: SQL side treats
   only explicit-completed/stale as done.
 
+**QC-4 amendment (0032):** the predicate ALSO stays unfinished while the
+  SUBMITTING student still has retake budget (completed assessment attempts
+  < `max_attempts` when `allow_retake`) — submitter-scoped, so a non-retaking
+  student's completed attempt never holds the quiz unrevealed. Rationale and
+  probes: PLAN_CLOSE_AND_SCHEDULE.md QC-4 (verify-sessions D54).
+
 **Exactly-once** in `submit_session`, in this order:
 1. session row `for update` (existing `0009:810-813`);
 2. `pg_advisory_xact_lock(hashtext('quiz_reveal:' || p_quiz_id))`;
@@ -156,14 +167,15 @@ update quizzes
  where id = p_quiz_id
    and auto_reveal_on_complete
    and results_revealed_at is null
-   and status = 'live';             -- round-2: must not run on a closed quiz
+   -- QC-2 / 0024 F8b: NO status='live' term — the quiz may already be
+   -- closed by the time the last submission lands; reveal-once semantics
+   -- are carried by results_revealed_at is null alone.
 get diagnostics v_rows = row_count; -- v_rows = 1 ⇒ first flipper
 ```
-- **`status = 'live'` is REQUIRED** (round-2 HIGH): the bare flip would fire
-  `quiz_status_transition`'s same-status branch which can raise
-  `closed_quiz_cannot_transition` if a lecturer closed concurrently → the final
-  student's submit 500s/rolls back, and a retry reveals a closed quiz. With the
-  WHERE guard, 0 rows match → trigger never fires.
+- **The `status='live'` term was REMOVED in 0024 (F8b)**: with it, a
+  lecturer closing before the last submit silently disabled auto-reveal
+  forever — the exact stranding QC-2 exists to fix. `quiz_status_transition`
+  cannot raise here: the UPDATE touches only `results_revealed_at`.
 - The reveal write is a `security definer` write into `quizzes` — document that
   it is WHERE-bounded to ONLY `results_revealed_at` on an owned session's quiz,
   and must never touch other quiz columns.
@@ -176,7 +188,7 @@ get diagnostics v_rows = row_count; -- v_rows = 1 ⇒ first flipper
 
 ## 9. Lecturer side — results page
 - Controls in a white `Card` row BELOW the hero band (not on the orange band):
-  - Assessment + live only: **"Reveal to students"** `variant="default"`
+  - Assessment + live or closed (QC-2): **"Reveal to students"** `variant="default"`
     (primary orange; disclosure, not destructive — irreversibility carried in copy).
   - Hint while hidden: **"N of M enrolled students haven't submitted yet"**
     (N = `roster.length − completed`; completed counted from the session slice —
@@ -198,17 +210,20 @@ get diagnostics v_rows = row_count; -- v_rows = 1 ⇒ first flipper
 
 ## 10. API routes
 - `POST /api/quizzes/[id]/reveal` — lecturer-only (`requireQuizOwner`), CSRF +
-  rate-limit, `status='live'` REQUIRED, guarded ONE-WAY-safe UPDATE
+  rate-limit, QC-2: `status='draft'` → 409 `quiz_not_revealable` (live and
+  closed both allowed); guarded ONE-WAY-safe UPDATE
   (`where id=$1 and results_revealed_at is null returning …`); idempotent
-  (second click → 0 rows → 200/`{already:true}`), maps `reveal_once_only` to
-  409, never 500.
+  (second click → 0 rows → 200/`{already:true}`); a concurrent-winner
+  `reveal_once_only` maps to idempotent 200, never 500.
 - `PATCH /api/quizzes/[id]/reveal-settings` — set `auto_reveal_on_complete`
   (lecturer-only; draft or live).
 - All auto-reveal logic lives INSIDE `submit_session` (never the route).
 
 ## 11. Out of scope (v4)
 - Per-student answers archive page; scheduled reveal; notifications;
-  closed-quiz reveal recovery surface; practice "hide results" override.
+  practice "hide results" override.
+  (The former "closed-quiz reveal recovery surface" item SHIPPED as QC-2 /
+  migration 0031 — see PLAN_CLOSE_AND_SCHEDULE.md.)
 
 ## 12. Test plan
 DB/API (prior list retained, corrected):

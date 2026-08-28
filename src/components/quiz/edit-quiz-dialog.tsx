@@ -23,6 +23,10 @@ import {
 } from "@/components/ui/dialog";
 import { TITLE_MAX } from "@/lib/quizzes/validation";
 import { HOURS_MAX, MINUTES_MAX, hmToSeconds, secondsToHm } from "@/lib/quizzes/time-limit";
+import {
+  windowIsoToLocalInput,
+  windowLocalInputToIso,
+} from "@/lib/format/window";
 import { getModeLabel } from "@/lib/quizzes/labels";
 import type { QuizInfo } from "@/app/(lecturer)/lecturer/quizzes/[id]/builder/quiz-builder-client";
 import type { QuizMode } from "@/lib/types/aliases";
@@ -68,6 +72,18 @@ function EditQuizForm({
 
   const [timeTouched, setTimeTouched] = useState(false);
   const lastAssessmentHm = useRef<{ hours: string; minutes: string } | null>(null);
+
+  // Availability-window inputs (QC-3). datetime-local strings at the edit
+  // surface; converted once at the client boundary by lib/format/window.
+  const [opensAt, setOpensAt] = useState<string>(() => windowIsoToLocalInput(quiz.opens_at));
+  const [closesAt, setClosesAt] = useState<string>(() => windowIsoToLocalInput(quiz.closes_at));
+
+  // Retake config (QC-4). Assessment-only concept; live-editable like
+  // windows (outside the DB edit-freeze).
+  const [allowRetake, setAllowRetake] = useState<boolean>(quiz.allow_retake ?? false);
+  const [maxAttempts, setMaxAttempts] = useState<string>(
+    () => String(quiz.max_attempts ?? 1),
+  );
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -159,6 +175,34 @@ function EditQuizForm({
       payload.timeLimitSec = newTimeLimitSec;
     }
 
+    // Window diff: only include when changed. Compare INSTANTS (Date.parse)
+    // — PostgREST returns "+00:00"-suffixed instants while the parser emits
+    // ".000Z", and raw string comparison would flag identical instants as
+    // dirty, re-sending windows on every save.
+    const newOpens = windowLocalInputToIso(opensAt);
+    const newCloses = windowLocalInputToIso(closesAt);
+    const opensDirty =
+      (newOpens === null) !== (quiz.opens_at == null) ||
+      (newOpens !== null && quiz.opens_at != null &&
+        Date.parse(newOpens) !== Date.parse(quiz.opens_at));
+    const closesDirty =
+      (newCloses === null) !== (quiz.closes_at == null) ||
+      (newCloses !== null && quiz.closes_at != null &&
+        Date.parse(newCloses) !== Date.parse(quiz.closes_at));
+    if (opensDirty) payload.opensAt = newOpens;
+    if (closesDirty) payload.closesAt = newCloses;
+    if (newOpens !== null && newCloses !== null && !(new Date(newCloses) > new Date(newOpens))) {
+      setError(t("windowOrderError"));
+      return;
+    }
+
+    // Retake diff (QC-4): assessment-only; only sent when changed.
+    const newMaxAttempts = Math.trunc(Number(maxAttempts)) || 1;
+    if (mode === "assessment") {
+      if (allowRetake !== (quiz.allow_retake ?? false)) payload.allowRetake = allowRetake;
+      if (newMaxAttempts !== (quiz.max_attempts ?? 1)) payload.maxAttempts = newMaxAttempts;
+    }
+
 
     if (Object.keys(payload).length === 0) {
       onClose();
@@ -198,6 +242,10 @@ function EditQuizForm({
 
   const isPractice = mode === "practice";
   const isHoursMax = Number(hours) === HOURS_MAX;
+  // Metadata (title/mode/time limit) is DRAFT-ONLY server-side (the DB
+  // edit-freeze + route's notDraft()); availability windows are live-quiz
+  // management (QC-3) and stay editable on ANY status.
+  const metadataLocked = quiz.status !== "draft";
 
   return (
     <>
@@ -226,7 +274,7 @@ function EditQuizForm({
               }}
               required
               maxLength={TITLE_MAX}
-              disabled={saving}
+              disabled={saving || metadataLocked}
               placeholder={tDetail("quizTitlePlaceholder")}
             />
           </div>
@@ -239,7 +287,7 @@ function EditQuizForm({
             <Select
               value={mode}
               onValueChange={(v) => handleModeChange(v as QuizMode)}
-              disabled={saving}
+              disabled={saving || metadataLocked}
             >
               <SelectTrigger id="edit-quiz-mode" className="w-full">
                 <SelectValue placeholder={tDetail("modeLabel")}>
@@ -254,7 +302,7 @@ function EditQuizForm({
           </div>
 
           {/* Time Limit Section */}
-          <fieldset className="space-y-2.5" disabled={isPractice || saving}>
+          <fieldset className="space-y-2.5" disabled={isPractice || saving || metadataLocked}>
             <legend className="w-full">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-extrabold text-foreground">
@@ -334,6 +382,109 @@ function EditQuizForm({
               )}
             </div>
           </fieldset>
+
+          {/* Availability window (QC-3): editable on ANY status — scheduling
+              is live-quiz management; the route bypasses the draft lock for
+              window-only payloads. */}
+          <fieldset className="space-y-2.5" disabled={saving}>
+            <legend className="w-full">
+              <span className="text-xs font-extrabold text-foreground">
+                {t("windowOpensLabel")} / {t("windowClosesLabel")}
+              </span>
+            </legend>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-1.5">
+                <Label htmlFor="edit-quiz-opens-at" className="sr-only">
+                  {t("windowOpensLabel")}
+                </Label>
+                <Input
+                  id="edit-quiz-opens-at"
+                  type="datetime-local"
+                  value={opensAt}
+                  onChange={(e) => setOpensAt(e.target.value)}
+                  disabled={saving}
+                  className="w-56"
+                />
+              </div>
+              <span aria-hidden="true" className="text-xs font-extrabold text-muted-foreground">
+                –
+              </span>
+              <div className="flex items-center gap-1.5">
+                <Label htmlFor="edit-quiz-closes-at" className="sr-only">
+                  {t("windowClosesLabel")}
+                </Label>
+                <Input
+                  id="edit-quiz-closes-at"
+                  type="datetime-local"
+                  value={closesAt}
+                  onChange={(e) => setClosesAt(e.target.value)}
+                  disabled={saving}
+                  className="w-56"
+                />
+              </div>
+            </div>
+
+            <p className="text-xs font-semibold text-muted-foreground">
+              {opensAt || closesAt ? t("windowHelper") : t("windowHelperNone")}
+            </p>
+          </fieldset>
+
+          {/* Retake config (QC-4): assessment-only, editable on ANY status
+              — retake config is live-quiz management; the route bypasses the
+              draft lock for retake-only payloads. */}
+          {mode === "assessment" && (
+            <fieldset className="space-y-2.5" disabled={saving}>
+              <legend className="w-full">
+                <span className="text-xs font-extrabold text-foreground">
+                  {t("retakeLabel")}
+                </span>
+              </legend>
+
+              <label className="flex items-center gap-2.5 text-sm font-semibold text-foreground">
+                <input
+                  id="edit-quiz-allow-retake"
+                  type="checkbox"
+                  checked={allowRetake}
+                  onChange={(e) => setAllowRetake(e.target.checked)}
+                  disabled={saving}
+                  className="size-4 accent-[var(--primary)]"
+                />
+                {t("retakeAllow")}
+              </label>
+
+              {allowRetake && (
+                <div className="flex items-center gap-3">
+                  <Label htmlFor="edit-quiz-max-attempts" className="text-xs font-extrabold text-foreground">
+                    {t("retakeMaxAttempts")}
+                  </Label>
+                  <Input
+                    id="edit-quiz-max-attempts"
+                    type="number"
+                    min={1}
+                    max={3}
+                    step={1}
+                    value={maxAttempts}
+                    onChange={(e) => {
+                      const num = Number(e.target.value);
+                      if (Number.isNaN(num)) return;
+                      setMaxAttempts(String(Math.max(1, Math.min(3, Math.trunc(num)))));
+                    }}
+                    onFocus={(e) => e.target.select()}
+                    onKeyDown={blockNonNumeric}
+                    disabled={saving}
+                    className="w-16 text-center font-bold [appearance:textfield] [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  />
+                </div>
+              )}
+
+              <p className="text-xs font-semibold text-muted-foreground">
+                {allowRetake
+                  ? t("retakeHelperOn", { count: Math.max(1, Math.min(3, Math.trunc(Number(maxAttempts)) || 1)) })
+                  : t("retakeHelperOff")}
+              </p>
+            </fieldset>
+          )}
 
           {error && (
             <p

@@ -43,6 +43,7 @@ export const NOTIF_COPY: Record<
   incident_clip_recorded: { titleKey: "items.incident_clip_recorded.title", bodyKey: "items.incident_clip_recorded.body" },
   face_unavailable_reported: { titleKey: "items.face_unavailable_reported.title", bodyKey: "items.face_unavailable_reported.body" },
   face_enrollment_held: { titleKey: "items.face_enrollment_held.title", bodyKey: "items.face_enrollment_held.body" },
+  quiz_closed: { titleKey: "items.quiz_closed.title", bodyKey: "items.quiz_closed.body" },
 };
 
 export const DIGEST_COPY_KEYS = [

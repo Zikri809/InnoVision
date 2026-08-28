@@ -103,6 +103,26 @@ export const QuestionInputSchema = z
 
 export type QuestionInput = z.infer<typeof QuestionInputSchema>;
 
+/**
+ * Availability-window bounds for a quiz. Both endpoints are optional
+ * (null = unbounded); when both are set, closes_at must be strictly after
+ * opens_at. Must stay in lockstep with the DB CHECK in
+ * supabase/migrations/0030_quiz_lifecycle_windows.sql.
+ *
+ * Max horizon (7 days) mirrors the practical exam-scheduling horizon and
+ * keeps the datetime-local wire format bounded.
+ */
+export const WINDOW_MIN_GAP_SEC = 60;
+export const WINDOW_MAX_HORIZON_SEC = 14 * 24 * 3600;
+
+/**
+ * Retake config bounds (QC-4). max_attempts 1..3 mirrors the DB CHECK in
+ * supabase/migrations/0032_retake_policy.sql. Both fields are live-quiz
+ * management (outside the DB edit-freeze) like the windows above.
+ */
+export const MAX_ATTEMPTS_MIN = 1;
+export const MAX_ATTEMPTS_MAX = 3;
+
 /** Shared quiz fields (no defaults — see UpdateQuizSchema note). */
 const QuizFieldsSchema = z.object({
   title: z
@@ -123,12 +143,70 @@ const QuizFieldsSchema = z.object({
     .max(TIME_LIMIT_MAX_SEC, "Time limit must be at most 2 hours (120 minutes).")
     .nullable()
     .optional(),
+  opensAt: z
+    .string()
+    .datetime({ offset: true, message: "opensAt must be an ISO 8601 timestamp." })
+    .nullable()
+    .optional(),
+  closesAt: z
+    .string()
+    .datetime({ offset: true, message: "closesAt must be an ISO 8601 timestamp." })
+    .nullable()
+    .optional(),
+  allowRetake: z.boolean().nullable().optional(),
+  maxAttempts: z
+    .number({ message: "Max attempts must be a whole number." })
+    .int("Max attempts must be a whole number.")
+    .min(MAX_ATTEMPTS_MIN, `Max attempts must be at least ${MAX_ATTEMPTS_MIN}.`)
+    .max(MAX_ATTEMPTS_MAX, `Max attempts must be at most ${MAX_ATTEMPTS_MAX}.`)
+    .nullable()
+    .optional(),
 });
+
+/**
+ * Shared cross-field window rules (order + min gap + horizon). Mirrors the DB
+ * CHECK in supabase/migrations/0030_quiz_lifecycle_windows.sql so a bad pair
+ * fails at the boundary with a readable message instead of a 500.
+ */
+function refineWindowRules(
+  q: { opensAt?: string | null; closesAt?: string | null },
+  ctx: z.RefinementCtx,
+): void {
+  const opensAt = q.opensAt ?? null;
+  const closesAt = q.closesAt ?? null;
+  if (opensAt !== null && closesAt !== null) {
+    const opens = new Date(opensAt).getTime();
+    const closes = new Date(closesAt).getTime();
+    if (!(closes > opens)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["closesAt"],
+        message: "The closing time must be after the opening time.",
+      });
+    } else if (closes - opens < WINDOW_MIN_GAP_SEC * 1000) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["closesAt"],
+        message: "The quiz window must stay open for at least a minute.",
+      });
+    }
+  }
+  if (closesAt !== null) {
+    const closes = new Date(closesAt).getTime();
+    if (closes > Date.now() + WINDOW_MAX_HORIZON_SEC * 1000) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["closesAt"],
+        message: "The closing time is too far in the future (max 14 days).",
+      });
+    }
+  }
+}
 
 /** Create-quiz payload. `mode` defaults to practice; time limit optional. */
 export const CreateQuizSchema = QuizFieldsSchema.extend({
   mode: z.enum(["practice", "assessment"]).default("practice"),
-});
+}).superRefine(refineWindowRules);
 
 export type CreateQuizInput = z.infer<typeof CreateQuizSchema>;
 
@@ -142,7 +220,7 @@ export type CreateQuizInput = z.infer<typeof CreateQuizSchema>;
  * edits only the title/time limit. `.partial()` on the default-free base keeps
  * every field optional with NO implicit values.
  */
-export const UpdateQuizSchema = QuizFieldsSchema.partial();
+export const UpdateQuizSchema = QuizFieldsSchema.partial().superRefine(refineWindowRules);
 
 export type UpdateQuizInput = z.infer<typeof UpdateQuizSchema>;
 

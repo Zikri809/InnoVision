@@ -91,7 +91,8 @@ async function main() {
   // ── Provision: lecturer A, student S (enrolled), student S2 (outsider) ──
   const lecturerA = await createUser(`arcLect-${stamp}@innovision.test`);
   const studentS = await createUser(`arcStud-${stamp}@innovision.test`);
-  const studentS2 = await createUser(`arcStud2-${stamp}@innovision.test`);
+  // Created only so clientS2 has a real outsider account to auth as.
+  await createUser(`arcStud2-${stamp}@innovision.test`);
   await promoteLecturer(lecturerA.id);
 
   const clientA = await asUser(`arcLect-${stamp}@innovision.test`);

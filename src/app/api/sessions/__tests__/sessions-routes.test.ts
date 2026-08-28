@@ -171,6 +171,82 @@ describe("I-S3 — start not-live / not-enrolled → 404 (no oracle)", () => {
   });
 });
 
+describe("QC-3 — availability window mappings", () => {
+  it("start before opens_at → 409 quiz_not_open", async () => {
+    const ctx = makeOwnerContext({ quizStatus: "live" });
+    const quizRow = ctx.client.tables["quizzes"]![0];
+    quizRow.opens_at = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    ctx.client.setUser(STUDENT_ID, "student");
+    fakeHolder.current = ctx.client;
+    const res = await start.POST(req({ quizId: QUIZ_C }));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("quiz_not_open");
+  });
+
+  it("start at/after closes_at → 409 quiz_window_closed", async () => {
+    const ctx = makeOwnerContext({ quizStatus: "live" });
+    const quizRow = ctx.client.tables["quizzes"]![0];
+    quizRow.closes_at = new Date(Date.now() - 1000).toISOString();
+    ctx.client.setUser(STUDENT_ID, "student");
+    fakeHolder.current = ctx.client;
+    const res = await start.POST(req({ quizId: QUIZ_C }));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("quiz_window_closed");
+  });
+
+  it("start inside the window → 201 (windows do not block)", async () => {
+    const ctx = makeOwnerContext({ quizStatus: "live" });
+    const quizRow = ctx.client.tables["quizzes"]![0];
+    quizRow.opens_at = new Date(Date.now() - 60_000).toISOString();
+    quizRow.closes_at = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    ctx.client.setUser(STUDENT_ID, "student");
+    fakeHolder.current = ctx.client;
+    const res = await start.POST(req({ quizId: QUIZ_C }));
+    expect(res.status).toBe(201);
+  });
+
+  it("NULL windows never block (regression: pre-QC-3 quizzes unaffected)", async () => {
+    playContext();
+    const res = await start.POST(req({ quizId: QUIZ_C }));
+    expect(res.status).toBe(201);
+  });
+
+  it("answer: RPC quiz_window_closed → 409 (mid-session window hard stop)", async () => {
+    const ctx = playContext();
+    ctx.client.seedSession({
+      id: "00000000-0000-4000-8000-0000000000aa",
+      quiz_id: QUIZ_C,
+      student_id: STUDENT_ID,
+      mode: "practice",
+      status: "active",
+    });
+    ctx.client.rpcResult = { data: { error: "quiz_window_closed" }, error: null };
+    const res = await answer.POST(req({ questionId: QUESTION_D, selectedIndex: 0 }), {
+      params: Promise.resolve({ id: "00000000-0000-4000-8000-0000000000aa" }),
+    });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("quiz_window_closed");
+  });
+
+  it("answer: stub models closes_at hard stop directly (lockstep probe)", async () => {
+    const ctx = playContext();
+    const quizRow = ctx.client.tables["quizzes"]![0];
+    quizRow.closes_at = new Date(Date.now() - 1000).toISOString();
+    ctx.client.seedSession({
+      id: "00000000-0000-4000-8000-0000000000ab",
+      quiz_id: QUIZ_C,
+      student_id: STUDENT_ID,
+      mode: "practice",
+      status: "active",
+    });
+    const res = await answer.POST(req({ questionId: QUESTION_D, selectedIndex: 0 }), {
+      params: Promise.resolve({ id: "00000000-0000-4000-8000-0000000000ab" }),
+    });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("quiz_window_closed");
+  });
+});
+
 describe("I-S4 — start as lecturer → 403", () => {
   it("returns 403 before any RPC call", async () => {
     const ctx = makeOwnerContext({ quizStatus: "live" });

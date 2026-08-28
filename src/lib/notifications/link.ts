@@ -34,6 +34,7 @@ export function resolveNotificationLink(
     // Student list pages — always valid, no probe.
     case "quiz_live":
     case "session_reset":
+    case "quiz_closed":
       return { href: "/student/quizzes" };
     case "results_revealed":
       return {

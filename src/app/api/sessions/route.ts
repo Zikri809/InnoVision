@@ -10,6 +10,7 @@ import {
   internalError,
   invalidBody,
   invalidJson,
+  jsonError,
   notFound,
   rateLimited,
   unauthorized,
@@ -74,6 +75,13 @@ export async function POST(request: Request) {
   if (payload?.error === "not_authenticated") return unauthorized();
   if (payload?.error === "quiz_not_live" || payload?.error === "not_enrolled") {
     return notFound();
+  }
+  // Schedule state (QC-3): distinct from the identity 404s — an ENROLLED
+  // student legitimately learns the window state so SQ copy can say
+  // "not open yet" / "already closed". Unenrolled probers never reach these
+  // (the RPC checks enrollment first and folds to not_enrolled → 404).
+  if (payload?.error === "quiz_not_open" || payload?.error === "quiz_window_closed") {
+    return jsonError(payload.error, undefined, 409);
   }
   if (payload?.error === "already_attempted") {
     return NextResponse.json(

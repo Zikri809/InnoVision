@@ -39,6 +39,7 @@ export function ResultsDashboardClient({
   resultsRevealedAt,
   autoRevealOnComplete,
   totalQuestions,
+  unrevealedCompleted,
   rows,
   incidentClips = {},
 }: {
@@ -50,6 +51,8 @@ export function ResultsDashboardClient({
   resultsRevealedAt: string | null;
   autoRevealOnComplete: boolean;
   totalQuestions: number;
+  /** Completed assessment sessions whose results are still hidden (QC-2 close-dialog warning). */
+  unrevealedCompleted: number;
   rows: ResultsSessionRow[];
   /** Signed (1h) playback URLs per session — empty for clean sessions. */
   incidentClips?: Record<
@@ -109,6 +112,13 @@ export function ResultsDashboardClient({
 
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+
+  // Close flow (QC-1/QC-2): dialog + cool-down + reveal-first CTA when
+  // completed sessions exist whose results are still hidden.
+  const [closeOpen, setCloseOpen] = useState(false);
+  const [closeCooled, setCloseCooled] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const [closeError, setCloseError] = useState<string | null>(null);
 
   function pickFilename(res: Response): string {
     // Blob URLs ignore Content-Disposition — mirror its filename explicitly.
@@ -173,6 +183,63 @@ export function ResultsDashboardClient({
       setRevealError(tCommon("errorGeneric"));
     } finally {
       setRevealing(false);
+    }
+  }
+
+  async function handleCloseQuiz() {
+    if (closing) return;
+    // Cool-down guard (reset-dialog pattern): one attempt per open.
+    setCloseCooled(true);
+    setClosing(true);
+    setCloseError(null);
+    try {
+      const res = await fetch(`/api/quizzes/${quizId}/close`, {
+        method: "POST",
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCloseError(body.message ?? body.error ?? tCommon("errorGeneric"));
+        return;
+      }
+      setCloseOpen(false);
+      router.refresh();
+    } catch {
+      setCloseError(tCommon("errorGeneric"));
+    } finally {
+      setClosing(false);
+    }
+  }
+
+  /** QC-2 prevention CTA: reveal (idempotent), then close (CAS) — both
+   * safe in either order, so a partial sequence never strands results. */
+  async function handleRevealThenClose() {
+    if (closing || revealing) return;
+    setCloseCooled(true);
+    setClosing(true);
+    setCloseError(null);
+    try {
+      const revealRes = await fetch(`/api/quizzes/${quizId}/reveal`, {
+        method: "POST",
+      });
+      if (!revealRes.ok) {
+        const body = await revealRes.json().catch(() => ({}));
+        setCloseError(body.message ?? body.error ?? tCommon("errorGeneric"));
+        return;
+      }
+      const res = await fetch(`/api/quizzes/${quizId}/close`, {
+        method: "POST",
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCloseError(body.message ?? body.error ?? tCommon("errorGeneric"));
+        return;
+      }
+      setCloseOpen(false);
+      router.refresh();
+    } catch {
+      setCloseError(tCommon("errorGeneric"));
+    } finally {
+      setClosing(false);
     }
   }
 
@@ -261,15 +328,31 @@ export function ResultsDashboardClient({
             >
               <ArrowLeft className="h-4 w-4" aria-hidden /> {t("backToQuizzes")}
             </Link>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleExport}
-              disabled={exporting}
-            >
-              <FileSpreadsheet className="h-4 w-4" aria-hidden />
-              {exporting ? t("exporting") : t("exportButton")}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExport}
+                disabled={exporting}
+              >
+                <FileSpreadsheet className="h-4 w-4" aria-hidden />
+                {exporting ? t("exporting") : t("exportButton")}
+              </Button>
+              {status === "live" && (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => {
+                    setCloseCooled(false);
+                    setCloseError(null);
+                    setCloseOpen(true);
+                  }}
+                  disabled={closing}
+                >
+                  {closing ? tBuilder("closing") : tBuilder("closeQuiz")}
+                </Button>
+              )}
+            </div>
           </div>
           <h1 className="mt-3 font-heading text-3xl font-semibold [text-wrap:balance]">{quizTitle}</h1>
           <p className="mt-2 text-sm font-semibold text-muted-foreground">
@@ -306,7 +389,7 @@ export function ResultsDashboardClient({
         </div>
       </section>
 
-      {isAssessment && (
+      {isAssessment && status !== "draft" && (
         <Card className="mb-6">
           <CardContent>
             {revealed ? (
@@ -438,6 +521,11 @@ export function ResultsDashboardClient({
                       <span className={`rounded-full border-[3px] px-2.5 py-0.5 text-xs font-extrabold ${STATUS_CLASS[row.displayStatus]}`}>
                         {getStatusLabel(row.displayStatus)}
                       </span>
+                      {(row.attempt ?? 1) > 1 && (
+                        <span className="rounded-full border-[2px] border-border bg-muted px-2 py-0.5 text-[11px] font-extrabold text-muted-foreground">
+                          {t("attemptChip", { count: row.attempt ?? 1 })}
+                        </span>
+                      )}
                       <span className="font-heading text-base font-semibold tabular-nums">
                         {row.score === null ? "—" : `${row.score} / ${row.total}`}
                       </span>
@@ -589,6 +677,70 @@ export function ResultsDashboardClient({
             </Button>
             <Button variant="default" disabled={revealing} onClick={() => void handleReveal()}>
               {revealing ? tCommon("loading") : t("revealBtn")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Close confirm dialog (QC-1/QC-2) — with reveal-first CTA when
+          completed-but-unrevealed sessions exist. */}
+      <Dialog
+        open={closeOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCloseOpen(false);
+            setCloseCooled(false);
+            setCloseError(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{tBuilder("closeConfirmTitle")}</DialogTitle>
+            <DialogDescription>{tBuilder("closeConfirmBody")}</DialogDescription>
+          </DialogHeader>
+          {unrevealedCompleted > 0 && (
+            <p
+              role="status"
+              className="rounded-2xl border-[3px] border-amber-400/50 bg-amber-100/70 px-4 py-3 text-sm font-bold text-amber-950 dark:border-amber-600/40 dark:bg-amber-950/40 dark:text-amber-200"
+            >
+              {tBuilder("closeUnrevealedWarn", { count: unrevealedCompleted })}
+            </p>
+          )}
+          {closeError && (
+            <p
+              role="alert"
+              className="rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm font-bold text-destructive"
+            >
+              {closeError}
+            </p>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setCloseOpen(false);
+                setCloseCooled(false);
+                setCloseError(null);
+              }}
+            >
+              {tCommon("cancel")}
+            </Button>
+            {unrevealedCompleted > 0 && (
+              <Button
+                variant="default"
+                disabled={closeCooled || closing || revealing}
+                onClick={() => void handleRevealThenClose()}
+              >
+                {closing || revealing ? tCommon("loading") : tBuilder("revealFirstThenClose")}
+              </Button>
+            )}
+            <Button
+              variant="destructive"
+              disabled={closeCooled || closing}
+              onClick={() => void handleCloseQuiz()}
+            >
+              {closing ? tBuilder("closing") : unrevealedCompleted > 0 ? tBuilder("closeAnyway") : tBuilder("closeQuiz")}
             </Button>
           </DialogFooter>
         </DialogContent>

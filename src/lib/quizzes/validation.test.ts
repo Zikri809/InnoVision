@@ -217,6 +217,70 @@ describe("UpdateQuizSchema (U-M1..U-M5)", () => {
   });
 });
 
+describe("Availability-window validation (QC-3)", () => {
+  const opens = "2026-09-01T02:00:00.000Z";
+  const closes = "2026-09-01T04:00:00.000Z";
+
+  it("accepts a well-ordered window (create + update)", () => {
+    expect(CreateQuizSchema.safeParse({ title: "Q", opensAt: opens, closesAt: closes }).success).toBe(true);
+    expect(UpdateQuizSchema.safeParse({ opensAt: opens, closesAt: closes }).success).toBe(true);
+  });
+
+  it("accepts single-ended windows and nulls (unbounded semantics)", () => {
+    expect(UpdateQuizSchema.safeParse({ opensAt: opens }).success).toBe(true);
+    expect(UpdateQuizSchema.safeParse({ closesAt: closes }).success).toBe(true);
+    expect(UpdateQuizSchema.safeParse({ opensAt: null, closesAt: null }).success).toBe(true);
+  });
+
+  it("rejects an inverted window", () => {
+    expect(UpdateQuizSchema.safeParse({ opensAt: closes, closesAt: opens }).success).toBe(false);
+    expect(CreateQuizSchema.safeParse({ title: "Q", opensAt: closes, closesAt: opens }).success).toBe(false);
+  });
+
+  it("rejects an equal-instant window (closes_at must be strictly after)", () => {
+    expect(UpdateQuizSchema.safeParse({ opensAt: opens, closesAt: opens }).success).toBe(false);
+  });
+
+  it("rejects a sub-minute window (< 60s gap)", () => {
+    expect(
+      UpdateQuizSchema.safeParse({ opensAt: opens, closesAt: "2026-09-01T02:00:30.000Z" }).success,
+    ).toBe(false);
+  });
+
+  it("rejects non-ISO window values", () => {
+    expect(UpdateQuizSchema.safeParse({ opensAt: "tomorrow" }).success).toBe(false);
+    expect(UpdateQuizSchema.safeParse({ closesAt: "2026-09-01 04:00:00" }).success).toBe(false);
+  });
+
+  it("rejects a closes_at beyond the 14-day horizon", () => {
+    const farFuture = new Date(Date.now() + 15 * 24 * 3600 * 1000).toISOString();
+    expect(UpdateQuizSchema.safeParse({ closesAt: farFuture }).success).toBe(false);
+  });
+});
+
+describe("Retake config validation (QC-4)", () => {
+  it("accepts valid retake payloads (create + update)", () => {
+    expect(
+      CreateQuizSchema.safeParse({ title: "Q", allowRetake: true, maxAttempts: 2 }).success,
+    ).toBe(true);
+    expect(
+      UpdateQuizSchema.safeParse({ allowRetake: true, maxAttempts: 3 }).success,
+    ).toBe(true);
+    expect(UpdateQuizSchema.safeParse({ allowRetake: false }).success).toBe(true);
+    expect(UpdateQuizSchema.safeParse({ maxAttempts: null }).success).toBe(true);
+  });
+
+  it("rejects out-of-range maxAttempts (below 1, above 3, fractional)", () => {
+    expect(UpdateQuizSchema.safeParse({ maxAttempts: 0 }).success).toBe(false);
+    expect(UpdateQuizSchema.safeParse({ maxAttempts: 4 }).success).toBe(false);
+    expect(UpdateQuizSchema.safeParse({ maxAttempts: 1.5 }).success).toBe(false);
+  });
+
+  it("rejects non-boolean allowRetake", () => {
+    expect(UpdateQuizSchema.safeParse({ allowRetake: "yes" }).success).toBe(false);
+  });
+});
+
 describe("ReorderSchema", () => {
   const uuid = "11111111-1111-4111-8111-111111111111";
   it("accepts an array of uuids", () => {

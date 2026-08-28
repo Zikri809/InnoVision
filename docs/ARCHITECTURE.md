@@ -218,10 +218,10 @@ Views worth knowing (all definer-owned, `security_barrier`):
 | View | Purpose |
 |---|---|
 | `student_class_view` | enrolled classes without `join_code`/lecturer columns |
-| `student_quiz_view` | LIVE quizzes of enrolled classes (+ reveal metadata) |
-| `student_session_view` | own sessions incl. `verify_nonce`; score NULL until revealed |
-| `lecturer_session_view` | lecturer-visible sessions incl. score, never nonce |
-| `student_results` / breakdown views | reveal-gated score + per-question review |
+| `student_quiz_view` | LIVE quizzes of enrolled classes (+ reveal metadata, retake config) |
+| `student_session_view` | own sessions incl. `verify_nonce` + `attempt`; score NULL until revealed |
+| `lecturer_session_view` | lecturer-visible sessions incl. score + `attempt`, never nonce |
+| `student_results` / breakdown views | reveal-gated score + per-question review (latest completed attempt) |
 | `student_quiz_player_question_view` | shared practice play: omits `correct_index`/explanation behind barrier |
 
 ---
@@ -355,20 +355,42 @@ from env in client code.
 POST /api/quizzes/[id]/publish   draft→live   requires ≥1 question
                                  (route pre-check + cannot_publish_empty_quiz trigger)
                                  live→live idempotent; closed→live rejected 409
-POST /api/quizzes/[id] (close)   live→closed (one-way; trigger enforces)
+POST /api/quizzes/[id]/close     live→closed (one-way; trigger enforces;
+                                 idempotent re-close → 200; draft → 409)
+POST /api/quizzes/[id]/reveal    results_revealed_at flip — live OR closed
+                                 (QC-2; draft → 409 quiz_not_revealable)
 DELETE /api/quizzes/[id]         blocked 409 if any quiz_sessions exist
 ```
 
 A DB trigger (`quiz_status_transition`) is the backstop for every transition
 — the route can be raced, the trigger cannot. Publishing fires the
-`notify_quiz_live` notification trigger (see 7.10).
+`notify_quiz_live` notification trigger; closing fires `notify_quiz_closed`
+(see 7.10). Availability windows (`opens_at`/`closes_at`) gate STARTS and
+ANSWERS at the RPC boundary (`quiz_not_open` / `quiz_window_closed`) and a
+pg_cron job (`innovision-quiz-autoclose`, best-effort every 5 min) flips
+past-window quizzes closed — windows never filter the student list;
+visibility follows status only. Retake config (`allow_retake`/
+`max_attempts`) and windows are live-quiz management (outside the DB
+edit-freeze). Full record: PLAN_CLOSE_AND_SCHEDULE.md.
 
 ### 7.5 Assessment session: the core loop
 
 Entry point: student clicks Start on a live quiz → `POST /api/sessions`
-→ RPC `start_quiz_session` (partial unique index
-`one_assessment_attempt` guarantees one attempt per student per quiz;
-returns existing session on rejoin — crash-safe).
+→ RPC `start_quiz_session` (two partial unique indexes enforce the
+attempt invariant: `one_assessment_attempt_per_attempt` — one row per
+(quiz, student, attempt) — and `one_active_assessment_attempt` — at most
+one NON-completed attempt per (quiz, student); returns the existing
+session on rejoin — crash-safe). Default config (`allow_retake=false`,
+`max_attempts=1`) behaves as one attempt per student per quiz; when the
+lecturer enables retakes (QC-4, migration 0032), a COMPLETED student
+spawns attempt = max+1 while budget remains, and each attempt's evidence
+(answers, face checks) is preserved. A stale non-completed session whose
+window has PASSED is sealed completed on next start (evidence preserved;
+the spawn itself is window-stopped).
+
+The representative result is the LATEST completed attempt
+(`student_results`, export, EndScreen all order by `started_at DESC`) —
+never best-score.
 
 Then the play page (`play/[sessionId]/page.tsx`, server component) loads the
 envelope + first question via `student_session_view` and hands off to
@@ -522,7 +544,8 @@ Reveal switches:
 lecturer: PATCH /api/quizzes/[id]/reveal-settings {autoRevealOnComplete}
           POST   /api/quizzes/[id]/reveal            → sets results_revealed_at
 auto:     submit_session flips it when the LAST fresh session completes
-          (advisory-lock serialized, 2h staleness window, works on closed quizzes)
+          AND the submitting student has no retake budget left (QC-4;
+          advisory-lock serialized, 2h staleness window, works on closed quizzes)
 ```
 
 Once revealed: student sees score + per-question breakdown
@@ -538,7 +561,7 @@ never inserts notifications:
 | Trigger (on) | Creates |
 |---|---|
 | quiz → live | `quiz_live` to enrolled students |
-| session → completed/flagged | digest to lecturer / receipt to student |
+| session → completed/flagged | digest to lecturer / receipt to student (digest counts DISTINCT students — retake-safe, 0032) |
 | results revealed | `results_revealed` to completed sessions |
 | enrollment inserted/deleted | welcome / removed notices |
 | face status → pending_review | reviewer notice to lecturers |

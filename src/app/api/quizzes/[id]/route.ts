@@ -4,7 +4,7 @@ import { requireQuizOwner } from "@/lib/quizzes/guards";
 import { isUuid } from "@/lib/classes/roster";
 import { rateLimit } from "@/lib/classes/rate-limit";
 import { UpdateQuizSchema } from "@/lib/quizzes/validation";
-import { buildQuizUpdates } from "@/lib/quizzes/updates";
+import { buildQuizUpdates, hasNonWindowFields, hasRetakeFields, hasWindowFields } from "@/lib/quizzes/updates";
 import {
   checkBodyLimit,
   checkSameOrigin,
@@ -25,8 +25,13 @@ type Params = { params: Promise<{ id: string }> };
 const MUTATE_RATE = { limit: 60, windowMs: 60 * 60 * 1000 };
 
 /**
- * PATCH /api/quizzes/[id] — rename / change mode / change time limit.
- * Draft-only (a live/closed quiz is immutable). Owner only.
+ * PATCH /api/quizzes/[id] — rename / change mode / change time limit /
+ * set availability windows (opens_at/closes_at) / set retake config
+ * (allowRetake/maxAttempts).
+ * Metadata fields (title/mode/time limit) are DRAFT-ONLY (a live/closed quiz
+ * is immutable — DB trigger backstop). Window and retake fields bypass the
+ * draft lock: both are live-quiz management (PLAN_R_QUIZ_LIFECYCLE QC-3/QC-4).
+ * Owner only.
  */
 export async function PATCH(request: Request, { params }: Params) {
   const supabase = await createClient();
@@ -38,7 +43,6 @@ export async function PATCH(request: Request, { params }: Params) {
 
   const owner = await requireQuizOwner(supabase, id);
   if (!owner.ok) return owner.response;
-  if (owner.quiz.status !== "draft") return notDraft();
 
   // CSRF: reject cross-origin state changes (AI/session-route precedent).
   const originError = checkSameOrigin(request);
@@ -65,18 +69,36 @@ export async function PATCH(request: Request, { params }: Params) {
 
   // UpdateQuizSchema has NO defaults (see validation.ts), so an empty body
   // parses to {} and this guard is reachable — it is not dead code.
-  const { title, mode, timeLimitSec } = parsed.data;
-  if (title === undefined && mode === undefined && timeLimitSec === undefined) {
+  const { title, mode, timeLimitSec, opensAt, closesAt, allowRetake, maxAttempts } = parsed.data;
+  if (
+    title === undefined &&
+    mode === undefined &&
+    timeLimitSec === undefined &&
+    opensAt === undefined &&
+    closesAt === undefined &&
+    allowRetake === undefined &&
+    maxAttempts === undefined
+  ) {
     return invalidBody("No editable fields provided.");
   }
 
-  const updates = buildQuizUpdates({ title, mode, timeLimitSec }, owner.quiz.mode);
+  const patch = { title, mode, timeLimitSec, opensAt, closesAt, allowRetake, maxAttempts };
+
+  // Availability windows (QC-3) and retake config (QC-4) are LIVE-quiz
+  // management: a payload carrying ONLY those fields bypasses the draft-only
+  // lock. Any non-window/retake field (title/mode/time limit) on a non-draft
+  // quiz keeps the blanket 409 (DB trigger quiz_not_draft_edit is the backstop).
+  const liveManageableOnly =
+    (hasWindowFields(patch) || hasRetakeFields(patch)) && !hasNonWindowFields(patch);
+  if (owner.quiz.status !== "draft" && !liveManageableOnly) return notDraft();
+
+  const updates = buildQuizUpdates(patch, owner.quiz.mode);
 
   const { data: quiz, error } = await supabase
     .from("quizzes")
     .update(updates)
     .eq("id", id)
-    .select("id, class_id, title, mode, status, time_limit_sec, created_at")
+    .select("id, class_id, title, mode, status, time_limit_sec, opens_at, closes_at, allow_retake, max_attempts, created_at")
     .maybeSingle();
 
   if (error) {
@@ -84,10 +106,14 @@ export async function PATCH(request: Request, { params }: Params) {
     if (error.message?.includes("quiz_not_draft_edit")) {
       return notDraft();
     }
+    if (error.message?.includes("quizzes_window_order_check")) {
+      return invalidBody("The closing time must be after the opening time.");
+    }
     if (
       error.message?.includes("quizzes_practice_untimed") ||
       error.message?.includes("quizzes_time_limit_sec_check") ||
       error.message?.includes("quizzes_title_check") ||
+      error.message?.includes("quizzes_max_attempts_check") ||
       error.message?.includes("check constraint")
     ) {
       return invalidBody("Invalid quiz data.");

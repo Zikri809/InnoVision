@@ -20,6 +20,7 @@ export default defineConfig({
         "src/lib/quizzes/**",
         "src/lib/student-quizzes/**",
         "src/lib/media/**",
+        "src/lib/format/**",
         // Report-only additions (no thresholds yet): auth wall, route guards,
         // shared HTTP primitives, middleware redirect matrix.
         "src/lib/classes/guards.ts",
@@ -62,6 +63,8 @@ export default defineConfig({
         // but keep them in the report.
         "src/app/api/quizzes/[id]/route.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
         "src/app/api/quizzes/[id]/publish/route.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
+        // QC-1: the close route carries state-machine logic — session-route gate.
+        "src/app/api/quizzes/[id]/close/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
         "src/app/api/quizzes/[id]/questions/route.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
         "src/app/api/quizzes/[id]/questions/[questionId]/route.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
         "src/app/api/quizzes/[id]/reorder/route.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
@@ -115,6 +118,8 @@ export default defineConfig({
         // SQ: student practice quizzes — pure helpers at the lib/quizzes bar;
         // routes mirror the sibling session-route gates.
         "src/lib/quizzes/question-draft.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        // QC-3: window format helpers (parse/format/conversion) at the lib bar.
+        "src/lib/format/window.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/lib/student-quizzes/share-code.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/lib/student-quizzes/validation.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/lib/student-quizzes/guards.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },

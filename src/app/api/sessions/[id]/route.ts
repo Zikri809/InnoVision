@@ -114,6 +114,8 @@ export async function GET(_request: Request, { params }: Params) {
  * Student envelope: assessment score stays NULL until the quiz's results are
  * revealed (the lecturer view of the same session is unaffected). The reveal
  * state is derived from quiz metadata via RLS — no dedicated read needed here.
+ * QC-2: a closed+revealed quiz falls out of the live-only view; the closed-
+ * revealed view is the fallback so recovered results still reach the student.
  */
 async function studentEnvelope(
   supabase: Awaited<ReturnType<typeof createClient>>,
@@ -125,7 +127,16 @@ async function studentEnvelope(
       .from("student_quiz_view")
       .select("id, results_revealed_at")
       .eq("id", row.quiz_id)
-      .maybeSingle();
+      .maybeSingle()
+      .then(async (r) =>
+        r.data
+          ? r
+          : supabase
+              .from("student_closed_revealed_quiz_view")
+              .select("id, results_revealed_at")
+              .eq("id", row.quiz_id as string)
+              .maybeSingle(),
+      );
     if (!quiz?.results_revealed_at) row.score = null;
   }
   return row;

@@ -92,7 +92,7 @@ test("regenerate rotates the code; the old link renders the neutral screen", asy
   await expect
     .poll(async () => (await freshInput.inputValue()).split("/s/")[1] ?? "")
     .not.toBe(codeA);
-  let currentCode = (await freshInput.inputValue()).split("/s/")[1] ?? "";
+  const currentCode = (await freshInput.inputValue()).split("/s/")[1] ?? "";
   expect(currentCode).toMatch(CODE_REGEX);
   expect(currentCode).not.toBe(codeA);
 

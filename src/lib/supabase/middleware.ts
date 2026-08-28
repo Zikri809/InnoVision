@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import type { Database } from "@/lib/types/database";
 import { env } from "@/lib/env";
 
-const PUBLIC_ROUTES = ["/login", "/register", "/auth/callback"];
+const PUBLIC_ROUTES = ["/", "/login", "/register", "/auth/callback"];
 
 function isPublicRoute(pathname: string): boolean {
   return PUBLIC_ROUTES.some(

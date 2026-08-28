@@ -42,7 +42,7 @@ describe("updateSession — middleware redirect matrix", () => {
   it("lets anonymous users through public routes unchanged", async () => {
     mockGetUser.mockResolvedValue({ data: { user: null } });
 
-    for (const path of ["/login", "/register", "/auth/callback"]) {
+    for (const path of ["/", "/login", "/register", "/auth/callback"]) {
       const res = await updateSession(nextReq(path));
       expect(res.status).toBe(200);
     }

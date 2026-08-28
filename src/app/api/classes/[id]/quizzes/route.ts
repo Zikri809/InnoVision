@@ -24,7 +24,8 @@ const CREATE_RATE = { limit: 60, windowMs: 60 * 60 * 1000 };
 
 /**
  * POST /api/classes/[id]/quizzes — lecturer creates a quiz in their own class.
- * Body: { title, mode?, timeLimitSec? }. Always starts as a draft.
+ * Body: { title, mode?, timeLimitSec?, opensAt?, closesAt? }. Always starts as
+ * a draft. Window endpoints are optional ISO timestamps (null = unbounded).
  */
 export async function POST(request: Request, { params }: Params) {
   const supabase = await createClient();
@@ -63,7 +64,7 @@ export async function POST(request: Request, { params }: Params) {
     return invalidBody(firstIssueMessage(parsed.error.issues, "Invalid quiz data."));
   }
 
-  const { title, mode, timeLimitSec } = parsed.data;
+  const { title, mode, timeLimitSec, opensAt, closesAt, allowRetake, maxAttempts } = parsed.data;
   const effectiveTimeLimitSec = mode === "practice" ? null : (timeLimitSec ?? null);
 
   const { data: quiz, error } = await supabase
@@ -74,9 +75,13 @@ export async function POST(request: Request, { params }: Params) {
       title,
       mode,
       time_limit_sec: effectiveTimeLimitSec,
+      opens_at: opensAt ?? null,
+      closes_at: closesAt,
+      allow_retake: mode === "assessment" ? (allowRetake ?? false) : false,
+      max_attempts: mode === "assessment" ? (maxAttempts ?? 1) : 1,
       status: "draft",
     })
-    .select("id, class_id, title, mode, status, time_limit_sec, created_at")
+    .select("id, class_id, title, mode, status, time_limit_sec, opens_at, closes_at, allow_retake, max_attempts, created_at")
     .single();
 
   if (error) {
@@ -88,6 +93,8 @@ export async function POST(request: Request, { params }: Params) {
       error.message?.includes("quizzes_practice_untimed") ||
       error.message?.includes("time_limit") ||
       error.message?.includes("quizzes_title_check") ||
+      error.message?.includes("quizzes_window_order_check") ||
+      error.message?.includes("quizzes_max_attempts_check") ||
       error.message?.includes("check constraint")
     ) {
       return invalidBody("Invalid quiz configuration.");

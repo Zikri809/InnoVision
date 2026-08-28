@@ -43,7 +43,7 @@ export default async function QuizBuilderPage({
   // the explicit eq() on lecturer_id makes the not-found case unambiguous.
   const { data: quiz, error: quizError } = await supabase
     .from("quizzes")
-    .select("id, class_id, title, mode, status, time_limit_sec, created_at, source_file_url, source_text")
+    .select("id, class_id, title, mode, status, time_limit_sec, opens_at, closes_at, allow_retake, max_attempts, results_revealed_at, created_at, source_file_url, source_text")
     .eq("id", id)
     .maybeSingle();
 
@@ -61,10 +61,12 @@ export default async function QuizBuilderPage({
 
   // Re-verify class ownership explicitly (defense in depth on top of RLS) and
   // fetch the class title in the SAME query, in parallel with the questions
-  // fetch (both depend only on the quiz row we already have).
+  // fetch (both depend only on the quiz row we already have). The session
+  // count query feeds QC-2's close-dialog warning (completed-but-unrevealed).
   const [
     { data: ownedClass, error: ownedClassError },
     { data: questions, error: questionsError },
+    { count: completedUnrevealed, error: completedUnrevealedError },
   ] = await Promise.all([
     supabase
       .from("classes")
@@ -78,6 +80,14 @@ export default async function QuizBuilderPage({
       .eq("quiz_id", id)
       .order("order_index", { ascending: true })
       .order("created_at", { ascending: true }),
+    // Only meaningful for an unrevealed assessment; the count is cheap either
+    // way (exact count, head:true — no row transfer).
+    supabase
+      .from("quiz_sessions")
+      .select("id", { count: "exact", head: true })
+      .eq("quiz_id", id)
+      .eq("mode", "assessment")
+      .eq("status", "completed"),
   ]);
   // Distinguish a DB outage (503-style error panel) from genuinely-not-owned
   // (404). A transient error must not render as a not-found.
@@ -103,6 +113,16 @@ export default async function QuizBuilderPage({
       </div>
     );
   }
+  if (completedUnrevealedError) {
+    console.error("Completed-session count error:", completedUnrevealedError);
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-8">
+        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
+          {tBuilder("quizLoadError")}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <QuizBuilderClient
@@ -114,12 +134,23 @@ export default async function QuizBuilderPage({
         mode: quiz.mode,
         status: quiz.status,
         time_limit_sec: quiz.time_limit_sec,
+        opens_at: quiz.opens_at,
+        closes_at: quiz.closes_at,
+        allow_retake: quiz.allow_retake,
+        max_attempts: quiz.max_attempts,
         created_at: quiz.created_at,
         source_file_url: quiz.source_file_url,
         source_text: quiz.source_text,
       }}
       questions={questions ?? []}
       userId={user.id}
+      unrevealedCompleted={
+        quiz.status === "live" &&
+        quiz.mode === "assessment" &&
+        quiz.results_revealed_at == null
+          ? completedUnrevealed ?? 0
+          : 0
+      }
       ocrConfig={{
         defaultEngine: (process.env.OCR_DEFAULT_ENGINE as "tesseract" | "glm") ?? "tesseract",
       }}

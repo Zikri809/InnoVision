@@ -5,12 +5,13 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { ArrowDown, ArrowLeft, ArrowUp, Check, Image as ImageIcon, Pencil, Settings2, Timer, Trash2, Wand2, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, CalendarClock, Check, Image as ImageIcon, Pencil, Settings2, Timer, Trash2, Wand2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDuration } from "@/lib/format/duration";
+import { formatWindow } from "@/lib/format/window";
 import { TITLE_MAX } from "@/lib/quizzes/validation";
 import {
   applyOptionDraftOp,
@@ -31,6 +32,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { GenerateFromFileDialog } from "@/components/extract/GenerateFromFileDialog";
 import { SourceTextPreview } from "@/components/extract/SourceTextPreview";
 import { EditQuestionDialog } from "@/components/quiz/edit-question-dialog";
@@ -47,6 +56,10 @@ export type QuizInfo = {
   mode: "practice" | "assessment";
   status: "draft" | "live" | "closed";
   time_limit_sec: number | null;
+  opens_at: string | null;
+  closes_at: string | null;
+  allow_retake: boolean | null;
+  max_attempts: number | null;
   created_at: string;
   source_file_url: string | null;
   source_text: string | null;
@@ -84,11 +97,14 @@ export function QuizBuilderClient({
   quiz,
   questions,
   userId,
+  unrevealedCompleted = 0,
   ocrConfig,
 }: {
   quiz: QuizInfo;
   questions: QuestionRow[];
   userId: string;
+  /** QC-2: completed assessment sessions with hidden results (close-dialog warning). */
+  unrevealedCompleted?: number;
   ocrConfig: OcrConfig;
 }) {
   const router = useRouter();
@@ -222,6 +238,14 @@ export function QuizBuilderClient({
   const [error, setError] = useState<string | null>(null);
   const [generateOpen, setGenerateOpen] = useState(false);
   const [reordering, setReordering] = useState(false);
+
+  // Close flow (QC-1): confirm dialog + cool-down guard (reset-pattern
+  // discipline — the destructive confirm stays disabled until reopen settles)
+  // + submit-lock so double-click yields ONE flip.
+  const [closeOpen, setCloseOpen] = useState(false);
+  const [closeCooled, setCloseCooled] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const [closeError, setCloseError] = useState<string | null>(null);
 
   // Option-array mutations ride the SHARED pure reducers
   // (lib/quizzes/question-draft.ts) so the answer key follows its option on
@@ -410,6 +434,67 @@ export function QuizBuilderClient({
     }
   }
 
+  async function handleCloseQuiz() {
+    if (closing) return;
+    // Cool-down guard (reset-dialog pattern): after one attempt the confirm
+    // stays disabled until the dialog is closed and reopened — no blind
+    // re-clicks on a terminal action.
+    setCloseCooled(true);
+    setClosing(true);
+    setCloseError(null);
+    try {
+      const res = await fetch(`/api/quizzes/${quiz.id}/close`, {
+        method: "POST",
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCloseError(body.message ?? body.error ?? tCommon("errorGeneric"));
+        return;
+      }
+      setCloseOpen(false);
+      toast.success(t("quizClosed"));
+      router.refresh();
+    } catch {
+      setCloseError(tCommon("errorGeneric"));
+    } finally {
+      setClosing(false);
+    }
+  }
+
+  /** QC-2 prevention CTA: reveal (idempotent), then close (CAS) — both safe
+   * in either order, so a partial sequence never strands results. */
+  async function handleRevealThenClose() {
+    if (closing) return;
+    setCloseCooled(true);
+    setClosing(true);
+    setCloseError(null);
+    try {
+      const revealRes = await fetch(`/api/quizzes/${quiz.id}/reveal`, {
+        method: "POST",
+      });
+      if (!revealRes.ok) {
+        const body = await revealRes.json().catch(() => ({}));
+        setCloseError(body.message ?? body.error ?? tCommon("errorGeneric"));
+        return;
+      }
+      const res = await fetch(`/api/quizzes/${quiz.id}/close`, {
+        method: "POST",
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCloseError(body.message ?? body.error ?? tCommon("errorGeneric"));
+        return;
+      }
+      setCloseOpen(false);
+      toast.success(t("quizClosed"));
+      router.refresh();
+    } catch {
+      setCloseError(tCommon("errorGeneric"));
+    } finally {
+      setClosing(false);
+    }
+  }
+
   const defaultTrueFalseOptions = locale === "ms" ? ["Betul", "Salah"] : ["True", "False"];
 
   return (
@@ -543,6 +628,35 @@ export function QuizBuilderClient({
                     </span>
                   )
                 )}
+
+                {(quiz.opens_at || quiz.closes_at) || quiz.status === "live" ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      cancelTitleEdit();
+                      setSettingsOpen(true);
+                    }}
+                    disabled={savingTitle || publishing || closing}
+                    aria-haspopup="dialog"
+                    aria-expanded={settingsOpen}
+                    // Distinct accessible name when a window exists — the
+                    // draft settings gear keeps "Quiz settings", so a draft
+                    // with a window must not produce two identical names.
+                    aria-label={
+                      quiz.opens_at || quiz.closes_at
+                        ? t("scheduleChip", {
+                            window: formatWindow(quiz.opens_at, quiz.closes_at, locale),
+                          })
+                        : t("editSettings")
+                    }
+                    className="relative inline-flex items-center justify-center gap-1.5 h-8 rounded-full border-[3px] border-border bg-muted px-3.5 text-xs font-extrabold text-muted-foreground cursor-pointer transition-[transform,box-shadow] duration-150 hover:-translate-y-0.5 hover:shadow-[var(--shadow-clay-sm)] active:translate-y-0 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/70 disabled:pointer-events-none disabled:opacity-60 before:absolute before:-inset-1.5 before:content-['']"
+                  >
+                    <CalendarClock className="size-3.5" aria-hidden="true" />
+                    {(quiz.opens_at || quiz.closes_at)
+                      ? formatWindow(quiz.opens_at, quiz.closes_at, locale)
+                      : t("editSettings")}
+                  </button>
+                ) : null}
 
                 <span className="inline-flex items-center justify-center h-8 rounded-full border-[3px] border-border bg-muted px-3.5 text-xs font-extrabold text-muted-foreground select-none cursor-default">
                   {t("questionCount", { count: questions.length })}
@@ -859,6 +973,18 @@ export function QuizBuilderClient({
               {publishing ? t("publishingBtn") : t("publishBtn")}
             </Button>
           )}
+          {quiz.status === "live" && (
+            <Button
+              variant="destructive"
+              onClick={() => {
+                setCloseCooled(false);
+                setCloseOpen(true);
+              }}
+              disabled={closing}
+            >
+              {closing ? t("closing") : t("closeQuiz")}
+            </Button>
+          )}
         </CardHeader>
         <CardContent>
           {questions.length === 0 ? (
@@ -956,6 +1082,70 @@ export function QuizBuilderClient({
           )}
         </CardContent>
       </Card>
+
+      {/* Close confirm dialog (QC-1) — terminal action, cool-down + busy lock;
+          errors render INSIDE the modal (a page-level band would sit behind it) */}
+      <Dialog
+        open={closeOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCloseOpen(false);
+            setCloseCooled(false);
+            setCloseError(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("closeConfirmTitle")}</DialogTitle>
+            <DialogDescription>{t("closeConfirmBody")}</DialogDescription>
+          </DialogHeader>
+          {closeError && (
+            <p
+              role="alert"
+              className="rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm font-bold text-destructive"
+            >
+              {closeError}
+            </p>
+          )}
+          {unrevealedCompleted > 0 && (
+            <p
+              role="status"
+              className="rounded-2xl border-[3px] border-amber-400/50 bg-amber-100/70 px-4 py-3 text-sm font-bold text-amber-950 dark:border-amber-600/40 dark:bg-amber-950/40 dark:text-amber-200"
+            >
+              {t("closeUnrevealedWarn", { count: unrevealedCompleted })}
+            </p>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setCloseOpen(false);
+                setCloseCooled(false);
+                setCloseError(null);
+              }}
+            >
+              {tCommon("cancel")}
+            </Button>
+            {unrevealedCompleted > 0 && (
+              <Button
+                variant="default"
+                disabled={closeCooled || closing}
+                onClick={() => void handleRevealThenClose()}
+              >
+                {closing ? tCommon("loading") : t("revealFirstThenClose")}
+              </Button>
+            )}
+            <Button
+              variant="destructive"
+              disabled={closeCooled || closing}
+              onClick={() => void handleCloseQuiz()}
+            >
+              {closing ? t("closing") : unrevealedCompleted > 0 ? t("closeAnyway") : t("closeQuiz")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

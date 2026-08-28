@@ -95,6 +95,8 @@ export type ResultsSessionRow = {
   face_exempt: boolean;
   face_fail_streak: number;
   focus_pause_count?: number | null;
+  /** QC-4 retakes: 1-based attempt ordinal (null/undefined for practice or pre-0032 rows). */
+  attempt?: number | null;
   studentName: string | null;
   displayStatus: DisplayStatus;
   faceSummary: FaceCheckSummary;
@@ -118,6 +120,8 @@ export type ResultsSessionInput = {
   face_exempt: boolean;
   face_fail_streak: number;
   focus_pause_count?: number | null;
+  /** QC-4 retakes: 1-based attempt ordinal (null for pre-0032 rows). */
+  attempt?: number | null;
 };
 
 /** Shape of a face-check row fed into the timeline builder. */

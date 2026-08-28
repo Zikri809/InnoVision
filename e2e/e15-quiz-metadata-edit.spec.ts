@@ -129,10 +129,21 @@ test.describe("E15 — Quiz Metadata Editing (Title, Mode, Time Limit)", () => {
 
     await page.getByRole("button", { name: /publish/i }).click();
 
-    // Once live, settings gear and chip buttons are unmounted
+    // Once live, the settings gear and mode chip are unmounted, but the QC-3
+    // schedule chip REMAINS as the settings entry (live window management):
+    // opening it shows metadata fields disabled while windows stay editable.
     await expect(page.getByText("Live", { exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Quiz settings" })).toBeHidden();
     await expect(page.getByRole("button", { name: /Quiz mode:/i })).toBeHidden();
+
+    const liveSettingsBtn = page.getByRole("button", { name: "Quiz settings" });
+    await expect(liveSettingsBtn).toBeVisible();
+    await liveSettingsBtn.click();
+    const liveDialog = page.getByRole("dialog", { name: "Edit quiz settings" });
+    await expect(liveDialog).toBeVisible();
+    // Metadata is draft-only server-side — the inputs must be disabled.
+    await expect(liveDialog.getByLabel("Title")).toBeDisabled();
+    await liveDialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(liveDialog).toBeHidden();
 
     // Out-of-band PATCH attempt on live quiz returns 409
     const quizId = page.url().split("/builder")[0].split("/").pop()!;

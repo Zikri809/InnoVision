@@ -103,6 +103,9 @@ test.describe("E1a — Auth both roles + consent persists", () => {
     const unusedMatric = `8${String(h).padStart(5, "0")}`;
 
     // Wrong password → localized generic error surfaces inline.
+    // The proxy bounces authenticated users off /login, so this leg must run
+    // anonymous — drop the session cookie the signup above set.
+    await page.context().clearCookies();
     await page.goto("/login");
     await page.getByLabel("Email").fill(email);
     await page.getByLabel("Password", { exact: true }).fill("wrongpass123");

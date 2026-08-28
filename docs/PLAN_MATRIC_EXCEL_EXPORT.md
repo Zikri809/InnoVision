@@ -187,12 +187,16 @@ CVE-2024-22363 history, styling gaps).
   status + last_activity_at + quizStatus + nowMs) so screen and export never
   disagree. Sort default: **matric ascending** (mark-sheet convention),
   null-matrics last by name.
-- **Representative attempt per student**: assessment quizzes have at most one
-  session (one-attempt partial unique index is assessment-only); practice
-  retakes collapse to the terminal attempt (completed/flagged), else the most
-  recently started. Deliberate grading semantics, NOT strict dashboard parity
-  (the dashboard ranks in_progress above completed). Distribution math and
-  attemptedCount draw from exactly this session set.
+- **Representative attempt per student**: the export route feeds sessions
+  ordered `started_at DESC, id DESC` and `selectRepresentativeSessions`
+  collapses to newest-wins per student, terminal attempts preferred —
+  so assessment retakes (QC-4, migration 0032) are already handled:
+  the LATEST completed attempt is the graded row, earlier attempts never
+  double-count. Practice retakes collapse to the terminal attempt
+  (completed/flagged), else the most recently started. Deliberate grading
+  semantics, NOT strict dashboard parity (the dashboard ranks in_progress
+  above completed). Distribution math and attemptedCount draw from exactly
+  this session set.
 - **Orphan attempts** (session whose student left the roster) still get a row
   appended — same honesty rule as the dashboard's session-without-roster rows;
   blank names render via the dashboard's "Student"/"Pelajar" label.

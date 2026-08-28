@@ -484,6 +484,17 @@ export class FakeSupabase {
 
     const mode = (quiz.mode as string) ?? "practice";
 
+    // Window gating (0030 lockstep): enrolled callers get distinct schedule
+    // errors; the fake treats every setUser() caller as enrolled (enrollment
+    // semantics are a verify-harness concern, not a route-mapping one).
+    const now = Date.now();
+    if (typeof quiz.opens_at === "string" && now < Date.parse(quiz.opens_at)) {
+      return { data: { error: "quiz_not_open" }, error: null };
+    }
+    if (typeof quiz.closes_at === "string" && now >= Date.parse(quiz.closes_at)) {
+      return { data: { error: "quiz_window_closed" }, error: null };
+    }
+
     if (mode === "practice") {
       const existing = sessions.find(
         (s) =>
@@ -500,6 +511,7 @@ export class FakeSupabase {
         student_id: studentId,
         mode: "practice",
         status: "active",
+        attempt: 1,
         started_at: "2026-01-01T00:00:00Z",
         submitted_at: null,
         score: null,
@@ -509,10 +521,18 @@ export class FakeSupabase {
       return { data: { session: row }, error: null };
     }
 
-    // assessment: one-attempt.
-    const existing = sessions.find(
+    // assessment: resume-or-void-or-spawn (0032 lockstep). Resume/already
+    // semantics at route-mapping level: any existing assessment session →
+    // already_attempted with its id (the SQL stale-void path is a
+    // verify-harness concern, not a route-mapping one). The budget-exhausted
+    // branch returns the latest completed session id (legacy shape — the
+    // client lands on the completed session's EndScreen).
+    const mine = sessions.filter(
       (s) => s.quiz_id === quizId && s.student_id === studentId && s.mode === "assessment",
     );
+    const existing =
+      mine.find((s) => ["active", "paused", "flagged"].includes(s.status as string)) ??
+      mine[mine.length - 1];
     if (existing) {
       return { data: { error: "already_attempted", session_id: existing.id }, error: null };
     }
@@ -522,6 +542,7 @@ export class FakeSupabase {
       student_id: studentId,
       mode: "assessment",
       status: "active",
+      attempt: 1,
       started_at: "2026-01-01T00:00:00Z",
       submitted_at: null,
       score: null,
@@ -553,6 +574,21 @@ export class FakeSupabase {
     }
     if (session.status !== "active") {
       return { data: { error: "session_not_active" }, error: null };
+    }
+
+    // Live gate (0012:199-208 lockstep) BEFORE the window term: a closed/draft
+    // quiz folds to quiz_not_live exactly like the real RPC.
+    const quizRow = (this.tables["quizzes"] ?? []).find((q) => q.id === session.quiz_id);
+    if (!quizRow || quizRow.status !== "live") {
+      return { data: { error: "quiz_not_live" }, error: null };
+    }
+
+    // Window hard stop (0030 lockstep): closes_at passed → quiz_window_closed.
+    if (
+      typeof quizRow?.closes_at === "string" &&
+      Date.now() >= Date.parse(quizRow.closes_at as string)
+    ) {
+      return { data: { error: "quiz_window_closed" }, error: null };
     }
 
     const questionId = String(args?.p_question_id);
@@ -1250,6 +1286,10 @@ export function makeOwnerContext(opts?: {
     mode: "practice",
     status: opts?.quizStatus ?? "draft",
     time_limit_sec: null,
+    opens_at: null,
+    closes_at: null,
+    allow_retake: false,
+    max_attempts: 1,
     source_file_url: null,
     source_text: null,
     sources: [],

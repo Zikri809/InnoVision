@@ -265,6 +265,12 @@
       "timeLimitHelperNone": "Tiada had masa ditetapkan untuk penilaian ini.",
       "hoursShort": "j",
       "minutesShort": "min",
+      "windowOpensLabel": "Dibuka pada",
+      "windowClosesLabel": "Ditutup pada",
+      "windowHelperNone": "Tiada tetingkap ketersediaan — kuiz ikut penerbitan/penutupan manual.",
+      "windowHelperSet": "Pelajar hanya boleh memulakan kuiz dalam tetingkap ini (waktu kuiz, UTC).",
+      "retakeAllow": "Benarkan percubaan semula",
+      "retakeMaxAttempts": "Had percubaan",
       "createQuizBtn": "Cipta kuiz",
       "creatingQuizBtn": "Sedang mencipta…",
       "classQuizzes": "Senarai kuiz kelas",
@@ -307,6 +313,13 @@
       "publishing": "Sedang menerbitkan…",
       "closeQuiz": "Tutup kuiz",
       "closing": "Sedang menutup…",
+      "scheduleChip": "Tetingkap ketersediaan: {window}. Sunting jadual.",
+      "closeConfirmTitle": "Tutup kuiz ini?",
+      "closeConfirmBody": "Tindakan ini tidak boleh dibatalkan. Pelajar tidak lagi boleh memulakan kuiz. Pelajar yang sedang mendudukinya boleh menghantar jawapan sedia ada — mereka tidak boleh menjawab soalan seterusnya.",
+      "closeUnrevealedWarn": "{count, plural, =1 {1 pelajar telah menghantar tetapi keputusan tidak didedahkan.} other {# pelajar telah menghantar tetapi keputusan tidak didedahkan.}}",
+      "revealFirstThenClose": "Dedahkan dahulu, kemudian tutup",
+      "closeAnyway": "Tutup jua",
+      "quizClosed": "Kuiz ditutup.",
       "generateFromFile": "Jana daripada fail",
       "viewResults": "Lihat keputusan",
       "heroSubtitle": "Draf, susun semula, dan kemas kini soalan kuiz anda.",
@@ -343,7 +356,17 @@
     },
     "dialogs": {
       "editQuizTitle": "Sunting tetapan kuiz",
-      "editQuizSubtitle": "Tukar tajuk, mod, atau had masa. Perubahan dikenakan pada sesi pelajar akan datang.",
+      "editQuizSubtitle": "Tukar tajuk, mod, had masa, atau tetingkap ketersediaan. Perubahan dikenakan pada sesi pelajar akan datang.",
+      "windowOpensLabel": "Dibuka pada (UTC)",
+      "windowClosesLabel": "Ditutup pada (UTC)",
+      "windowHelper": "Kosong = tiada had. Pelajar hanya boleh memulakan dalam tetingkap; sesi berjalan masih boleh menghantar sehingga selesai.",
+      "windowHelperNone": "Tiada tetingkap ketersediaan — kuiz ikut penerbitan/penutupan manual.",
+      "windowOrderError": "Masa penutup mesti selepas masa pembukaan.",
+      "retakeLabel": "Percubaan semula (penilaian)",
+      "retakeAllow": "Benarkan pelajar mengulang penilaian ini",
+      "retakeMaxAttempts": "Had percubaan",
+      "retakeHelperOn": "Pelajar mendapat sehingga {count} percubaan; percubaan terkini yang dikira.",
+      "retakeHelperOff": "Satu percubaan sahaja.",
       "titleLabel": "Tajuk",
       "saveChanges": "Simpan perubahan",
       "editQuestionTitle": "Sunting soalan #{number}",
@@ -408,7 +431,8 @@
       "advisoryHeadset": "Set fon sebagai mikrofon",
       "incidentClipsTitle": "Rakaman insiden (direkod automatik sebelum insiden)",
       "incidentClipMeta": "{reason} · {sec}s · dari {time}",
-      "focusPauses": "{count, plural, other {Jeda kehilangan fokus ×#}}"
+      "focusPauses": "{count, plural, other {Jeda kehilangan fokus ×#}}",
+      "attemptChip": "Percubaan #{count}"
     }
   },
   "student": {
@@ -439,9 +463,12 @@
       "enrollBannerBody": "Kuiz penilaian menggunakan pengesahan wajah. Daftarkan wajah anda sekarang agar sedia semasa hari penilaian.",
       "enrollNowBtn": "Daftar wajah anda",
       "unlimitedTries": "Percubaan tanpa had",
+      "retakeAllowed": "Sehingga {count} percubaan — yang terkini dikira",
       "oneAttempt": "Satu percubaan sahaja",
       "startBtn": "Mula",
-      "startingBtn": "Sedang memulakan…",
+      "startingBtn": "Sedang memulakan.",
+      "quizNotOpen": "Kuiz ini belum dibuka — sila semak masa pembukaan.",
+      "quizWindowClosed": "Tetingkap kuiz ini telah ditutup — hubungi pensyarah anda.",
       "emptyTitle": "Belum ada kuiz tersedia",
       "emptySubtitle": "Pensyarah anda belum menerbitkan sebarang kuiz untuk kelas anda. Sila semak semula tidak lama lagi!"
     },
@@ -541,6 +568,7 @@
       "sessionFlaggedLecturer": "Sesi ini ditandakan untuk semakan. Pensyarah mesti membuka kuncinya.",
       "sessionInactive": "Sesi ini tidak lagi aktif.",
       "quizUnavailable": "Kuiz ini tidak lagi tersedia.",
+      "quizWindowClosed": "Tetingkap kuiz telah ditutup — pensyarah anda menamatkan tempoh ketersediaan. Hantar untuk menyimpan kemajuan anda.",
       "recordTimeout": "Permintaan tamat masa. Tekan jawapan anda sekali lagi untuk mencuba semula.",
       "recordError": "Ralat rangkaian semasa merekodkan jawapan anda. Tekan sekali lagi.",
       "submitTimeout": "Permintaan penghantaran tamat masa. Sila hantar sekali lagi.",
@@ -772,6 +800,10 @@
       "face_enrollment_held": {
         "title": "Pendaftaran wajah perlu semakan",
         "body": "Satu pendaftaran menunggu semakan pensyarah. Buka senarai kelas anda untuk menyelesaikannya."
+      },
+      "quiz_closed": {
+        "title": "Kuiz ditutup",
+        "body": "\"{quizTitle}\" kini ditutup. Jika anda belum selesai, hubungi pensyarah anda."
       }
     },
     "digest": {

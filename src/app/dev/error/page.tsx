@@ -16,6 +16,9 @@ export default function DevErrorPage() {
   // Throw on a RENDER pass (not an event handler) so Next's error boundary
   // picks it up. Arming via state keeps the initial SSR/prerender clean.
   useEffect(() => {
+    // Intentional: arming the error trigger IS the effect's job; there is no
+    // external system to subscribe to on this dev-only page.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setArmed(true);
   }, []);
 

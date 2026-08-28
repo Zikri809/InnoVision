@@ -66,6 +66,20 @@ const OTHER_QUIZ_ID = "00000000-0000-4000-8000-00000000000d";
 
 const PNG: number[] = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01, 0x02];
 
+const goodAi = {
+  ok: true as const,
+  quiz: {
+    title: "Generated",
+    questions: Array.from({ length: 3 }, (_, i) => ({
+      type: "mcq" as const,
+      prompt: `Generated question ${i}`,
+      options: ["alpha", "beta"],
+      correct_index: 0,
+      explanation: null,
+    })),
+  },
+};
+
 function multipart(bytes: string | number[], filename = "pic.png", type = "image/png"): Request {
   const form = new FormData();
   const body: BlobPart =
@@ -418,20 +432,6 @@ describe("student AI generate route", () => {
     return ctx;
   }
 
-  const goodAi = {
-    ok: true as const,
-    quiz: {
-      title: "Generated",
-      questions: Array.from({ length: 3 }, (_, i) => ({
-        type: "mcq" as const,
-        prompt: `Generated question ${i}`,
-        options: ["alpha", "beta"],
-        correct_index: 0,
-        explanation: null,
-      })),
-    },
-  };
-
   it("CSRF: cross-origin POST → 403", async () => {
     genCtx();
     const { generate } = await importMediaRoutes();
@@ -690,5 +690,348 @@ describe("iteration-1 audit additions", () => {
     expect(res.status).toBe(422);
     expect((await res.json()).error).toBe("question_cap_reached");
     expect(generateQuizMock).not.toHaveBeenCalled();
+  });
+});
+
+// ── CI-gate gap closers ──────────────────────────────────────────────────
+// These pin the previously-uncovered branches that kept the three media/AI
+// route files under their per-file thresholds: the best-effort storage
+// `.catch()` callbacks, both DELETE handlers, the generate route's
+// RPC-error mapping ladder, and the sourcePaths download/parse flows.
+
+describe("lecturer image route — additional branches", () => {
+  it("POST replace tolerates a failed old-object removal (orphan swept later)", async () => {
+    const ctx = lecturerContext("draft");
+    (ctx.client.tables["questions"]!.find((q) => q.id === QUESTION_ID)! as { image_path: string }).image_path =
+      `${LECTURER_ID}/old-object.png`;
+    storageMock.remove.mockRejectedValue(new Error("storage boom"));
+
+    const { lecturerImage } = await importMediaRoutes();
+    const res = await lecturerImage.POST(multipart(PNG), {
+      params: Promise.resolve({ id: QUIZ_ID, questionId: QUESTION_ID }),
+    });
+    expect(res.status).toBe(200);
+    // New state is durable despite the best-effort delete failing.
+    expect(ctx.client.tables["questions"]!.find((q) => q.id === QUESTION_ID)?.image_path)
+      .toMatch(/\.png$/);
+  });
+
+  it("DELETE update failure → 503 and object untouched", async () => {
+    const ctx = lecturerContext("draft");
+    ctx.client.updateError = "trigger exploded";
+    const { lecturerImage } = await importMediaRoutes();
+    const res = await lecturerImage.DELETE(
+      new Request("http://localhost/api/x", { method: "DELETE" }),
+      { params: Promise.resolve({ id: QUIZ_ID, questionId: QUESTION_ID }) },
+    );
+    expect(res.status).toBe(503);
+    expect(storageMock.remove).not.toHaveBeenCalled();
+  });
+
+  it("DELETE ignores a storage outage (column stays cleared, no throw)", async () => {
+    const ctx = lecturerContext("draft");
+    (ctx.client.tables["questions"]!.find((q) => q.id === QUESTION_ID)! as { image_path: string }).image_path =
+      `${LECTURER_ID}/doomed.png`;
+    storageMock.remove.mockRejectedValue(new Error("bucket down"));
+
+    const { lecturerImage } = await importMediaRoutes();
+    const res = await lecturerImage.DELETE(
+      new Request("http://localhost/api/x", { method: "DELETE" }),
+      { params: Promise.resolve({ id: QUIZ_ID, questionId: QUESTION_ID }) },
+    );
+    expect(res.status).toBe(200);
+    expect(ctx.client.tables["questions"]!.find((q) => q.id === QUESTION_ID)?.image_path).toBeNull();
+    expect(storageMock.remove).toHaveBeenCalledWith([`${LECTURER_ID}/doomed.png`]);
+  });
+});
+
+describe("practice image route — additional branches", () => {
+  function ownerCtx() {
+    const ctx = makeStudentQuizContext();
+    ctx.client.seedStudentQuestion({
+      id: QUESTION_ID,
+      quiz_id: ctx.quizId,
+      order_index: 2,
+      type: "mcq",
+      prompt: "Pick",
+      options: ["x", "y"],
+      correct_index: 0,
+      explanation: null,
+      image_path: null,
+    });
+    fakeHolder.current = ctx.client;
+    return ctx;
+  }
+
+  it("POST without content-length → 413 (fail closed, no length oracle)", async () => {
+    const ctx = ownerCtx();
+    const form = new FormData();
+    form.append("image", new File([new Uint8Array(PNG).buffer as ArrayBuffer], "pic.png", { type: "image/png" }));
+    const { studentImage } = await importMediaRoutes();
+    const res = await studentImage.POST(
+      new Request("http://localhost/api/x", { method: "POST", body: form }),
+      { params: Promise.resolve({ id: ctx.quizId, questionId: QUESTION_ID }) },
+    );
+    expect(res.status).toBe(413);
+    expect(storageMock.upload).not.toHaveBeenCalled();
+  });
+
+  it("POST upload failure → 503, column unchanged", async () => {
+    const ctx = ownerCtx();
+    storageMock.upload.mockResolvedValue({ error: { message: "bucket down" } });
+    const { studentImage } = await importMediaRoutes();
+    const res = await studentImage.POST(multipart(PNG), {
+      params: Promise.resolve({ id: ctx.quizId, questionId: QUESTION_ID }),
+    });
+    expect(res.status).toBe(503);
+    const row = ctx.client.tables["student_quiz_questions"]!.find((q) => q.id === QUESTION_ID);
+    expect(row?.image_path).toBeNull();
+  });
+
+  it("POST column-update failure rolls back the just-uploaded object", async () => {
+    const ctx = ownerCtx();
+    ctx.client.updateError = "trigger exploded";
+    const { studentImage } = await importMediaRoutes();
+    const res = await studentImage.POST(multipart(PNG), {
+      params: Promise.resolve({ id: ctx.quizId, questionId: QUESTION_ID }),
+    });
+    expect(res.status).toBe(503);
+    expect(storageMock.upload).toHaveBeenCalledTimes(1);
+    const [newPath] = storageMock.upload.mock.calls[0] as [string, Buffer, unknown];
+    expect(storageMock.remove).toHaveBeenCalledWith([newPath]);
+    const row = ctx.client.tables["student_quiz_questions"]!.find((q) => q.id === QUESTION_ID);
+    expect(row?.image_path).toBeNull();
+  });
+
+  it("POST cross-extension replace removes the OLD object", async () => {
+    const ctx = ownerCtx();
+    (ctx.client.tables["student_quiz_questions"]!.find((q) => q.id === QUESTION_ID)! as { image_path: string }).image_path =
+      `${ctx.ownerId}/old.jpeg`;
+    const JPEG: number[] = [0xff, 0xd8, 0xff, 0xe0];
+    const { studentImage } = await importMediaRoutes();
+    const res = await studentImage.POST(
+      multipart(JPEG, "pic.jpg", "image/jpeg"),
+      { params: Promise.resolve({ id: ctx.quizId, questionId: QUESTION_ID }) },
+    );
+    expect(res.status).toBe(200);
+    expect(storageMock.remove).toHaveBeenCalledWith([`${ctx.ownerId}/old.jpeg`]);
+    const row = ctx.client.tables["student_quiz_questions"]!.find((q) => q.id === QUESTION_ID);
+    expect(String(row?.image_path)).toMatch(/\.jpg$/);
+  });
+
+  it("DELETE clears the column first, then removes the object best-effort", async () => {
+    const ctx = ownerCtx();
+    const oldPath = `${ctx.ownerId}/gone.png`;
+    (ctx.client.tables["student_quiz_questions"]!.find((q) => q.id === QUESTION_ID)! as { image_path: string }).image_path = oldPath;
+
+    const { studentImage } = await importMediaRoutes();
+    const res = await studentImage.DELETE(
+      new Request("http://localhost/api/x", { method: "DELETE" }),
+      { params: Promise.resolve({ id: ctx.quizId, questionId: QUESTION_ID }) },
+    );
+    expect(res.status).toBe(200);
+    const row = ctx.client.tables["student_quiz_questions"]!.find((q) => q.id === QUESTION_ID);
+    expect(row?.image_path).toBeNull();
+    expect(storageMock.remove).toHaveBeenCalledWith([oldPath]);
+  });
+
+  it("DELETE tolerates a failed object removal (orphan swept later)", async () => {
+    const ctx = ownerCtx();
+    (ctx.client.tables["student_quiz_questions"]!.find((q) => q.id === QUESTION_ID)! as { image_path: string }).image_path =
+      `${ctx.ownerId}/doomed.png`;
+    storageMock.remove.mockRejectedValue(new Error("bucket down"));
+
+    const { studentImage } = await importMediaRoutes();
+    const res = await studentImage.DELETE(
+      new Request("http://localhost/api/x", { method: "DELETE" }),
+      { params: Promise.resolve({ id: ctx.quizId, questionId: QUESTION_ID }) },
+    );
+    expect(res.status).toBe(200);
+    expect(ctx.client.tables["student_quiz_questions"]!.find((q) => q.id === QUESTION_ID)?.image_path).toBeNull();
+  });
+
+  it("DELETE update failure → 503", async () => {
+    const ctx = ownerCtx();
+    ctx.client.updateError = "db down";
+    const { studentImage } = await importMediaRoutes();
+    const res = await studentImage.DELETE(
+      new Request("http://localhost/api/x", { method: "DELETE" }),
+      { params: Promise.resolve({ id: ctx.quizId, questionId: QUESTION_ID }) },
+    );
+    expect(res.status).toBe(503);
+    expect(storageMock.remove).not.toHaveBeenCalled();
+  });
+
+  it("DELETE on a foreign question id → uniform 404", async () => {
+    const ctx = ownerCtx();
+    const { studentImage } = await importMediaRoutes();
+    const res = await studentImage.DELETE(
+      new Request("http://localhost/api/x", { method: "DELETE" }),
+      { params: Promise.resolve({ id: ctx.quizId, questionId: OTHER_QUIZ_ID }) },
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("DELETE by a non-owner student → uniform 404", async () => {
+    const ctx = ownerCtx();
+    ctx.client.setUser("00000000-0000-4000-8000-0000000000ee", "student");
+    const { studentImage } = await importMediaRoutes();
+    const res = await studentImage.DELETE(
+      new Request("http://localhost/api/x", { method: "DELETE" }),
+      { params: Promise.resolve({ id: ctx.quizId, questionId: QUESTION_ID }) },
+    );
+    expect(res.status).toBe(404);
+    expect(storageMock.remove).not.toHaveBeenCalled();
+  });
+
+  it("image rate limit 20/h → 429", async () => {
+    const ctx = ownerCtx();
+    _seedRateLimit(`sq-image:${ctx.ownerId}`, 20);
+    const { studentImage } = await importMediaRoutes();
+    const res = await studentImage.POST(multipart(PNG), {
+      params: Promise.resolve({ id: ctx.quizId, questionId: QUESTION_ID }),
+    });
+    expect(res.status).toBe(429);
+  });
+});
+
+describe("generate route — additional branches", () => {
+  function genOwnerCtx() {
+    const ctx = makeStudentQuizContext();
+    fakeHolder.current = ctx.client;
+    return ctx;
+  }
+
+  it("blank extractedText and no sources → 400 invalid_body", async () => {
+    const ctx = genOwnerCtx();
+    const { generate } = await importMediaRoutes();
+    const res = await generate.POST(jsonReq("/api/generate", { extractedText: "" }), {
+      params: Promise.resolve({ id: ctx.quizId }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("count pre-check failure → 503", async () => {
+    const ctx = genOwnerCtx();
+    ctx.client.countError = "count blew up";
+    const { generate } = await importMediaRoutes();
+    const res = await generate.POST(
+      jsonReq("/api/generate", { extractedText: "some study notes text here" }),
+      { params: Promise.resolve({ id: ctx.quizId }) },
+    );
+    expect(res.status).toBe(503);
+  });
+
+  it("AI timeout → 503", async () => {
+    const ctx = genOwnerCtx();
+    generateQuizMock.mockResolvedValue({ ok: false as const, error: "timeout" });
+    const { generate } = await importMediaRoutes();
+    const res = await generate.POST(
+      jsonReq("/api/generate", { extractedText: "some study notes text here" }),
+      { params: Promise.resolve({ id: ctx.quizId }) },
+    );
+    expect(res.status).toBe(503);
+  });
+
+  it("AI unavailable → 422 ai_unavailable", async () => {
+    const ctx = genOwnerCtx();
+    generateQuizMock.mockResolvedValue({
+      ok: false as const,
+      error: "ai_unavailable",
+      message: "model endpoint down",
+    });
+    const { generate } = await importMediaRoutes();
+    const res = await generate.POST(
+      jsonReq("/api/generate", { extractedText: "some study notes text here" }),
+      { params: Promise.resolve({ id: ctx.quizId }) },
+    );
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe("ai_unavailable");
+  });
+
+  it.each([
+    ["not_owner", 404],
+    ["quiz_not_found", 404],
+    ["question_cap_reached", 422],
+    ["invalid_mode", 422],
+    ["duplicate_options", 422],
+  ])("save RPC error '%s' → %i", async (msg, expectedStatus) => {
+    const ctx = genOwnerCtx();
+    generateQuizMock.mockResolvedValue(goodAi);
+    ctx.client.rpcResult = { data: null, error: { message: msg } };
+    const { generate } = await importMediaRoutes();
+    const res = await generate.POST(
+      jsonReq("/api/generate", { extractedText: "some study notes text here" }),
+      { params: Promise.resolve({ id: ctx.quizId }) },
+    );
+    expect(res.status).toBe(expectedStatus);
+  });
+
+  it("unknown save RPC error → 503", async () => {
+    const ctx = genOwnerCtx();
+    generateQuizMock.mockResolvedValue(goodAi);
+    ctx.client.rpcResult = { data: null, error: { message: "connection reset" } };
+    const { generate } = await importMediaRoutes();
+    const res = await generate.POST(
+      jsonReq("/api/generate", { extractedText: "some study notes text here" }),
+      { params: Promise.resolve({ id: ctx.quizId }) },
+    );
+    expect(res.status).toBe(503);
+  });
+
+  it("sourcePaths: parses a stored txt file then generates from its text", async () => {
+    const ctx = genOwnerCtx();
+    generateQuizMock.mockResolvedValue(goodAi);
+    const content = "Arrays store elements contiguously; linked lists chain nodes across the heap.";
+    ctx.client.seedStorageFile(
+      `${ctx.ownerId}/${ctx.quizId}/notes.txt`,
+      new TextEncoder().encode(content),
+    );
+    const { generate } = await importMediaRoutes();
+    const res = await generate.POST(
+      jsonReq("/api/generate", { sourcePaths: [`${ctx.ownerId}/${ctx.quizId}/notes.txt`] }),
+      { params: Promise.resolve({ id: ctx.quizId }) },
+    );
+    expect(res.status).toBe(200);
+    expect(generateQuizMock).toHaveBeenCalledTimes(1);
+    const callArg = generateQuizMock.mock.calls[0][0] as { text: string };
+    expect(callArg.text).toBe(content);
+  });
+
+  it("sourcePaths: unsupported extension → 422 unsupported_file_type", async () => {
+    const ctx = genOwnerCtx();
+    ctx.client.seedStorageFile(`${ctx.ownerId}/${ctx.quizId}/archive.bin`, new Uint8Array([1, 2, 3]));
+    const { generate } = await importMediaRoutes();
+    const res = await generate.POST(
+      jsonReq("/api/generate", { sourcePaths: [`${ctx.ownerId}/${ctx.quizId}/archive.bin`] }),
+      { params: Promise.resolve({ id: ctx.quizId }) },
+    );
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe("unsupported_file_type");
+  });
+
+  it("sourcePaths: missing stored object → uniform 404", async () => {
+    const ctx = genOwnerCtx();
+    const { generate } = await importMediaRoutes();
+    const res = await generate.POST(
+      jsonReq("/api/generate", { sourcePaths: [`${ctx.ownerId}/${ctx.quizId}/absent.txt`] }),
+      { params: Promise.resolve({ id: ctx.quizId }) },
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("sourcePaths: near-empty single txt → 422 use_browser_ocr", async () => {
+    const ctx = genOwnerCtx();
+    ctx.client.seedStorageFile(
+      `${ctx.ownerId}/${ctx.quizId}/brief.txt`,
+      new TextEncoder().encode("hi"),
+    );
+    const { generate } = await importMediaRoutes();
+    const res = await generate.POST(
+      jsonReq("/api/generate", { sourcePaths: [`${ctx.ownerId}/${ctx.quizId}/brief.txt`] }),
+      { params: Promise.resolve({ id: ctx.quizId }) },
+    );
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe("use_browser_ocr");
   });
 });

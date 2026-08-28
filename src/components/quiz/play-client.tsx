@@ -397,6 +397,23 @@ export function PlayClient({
           return;
         }
 
+        // QC-3: closes_at passed mid-session — answers hard-stop but submit
+        // stays open (submit-only grace). Enter timeUp (Retry-submit UI).
+        // NOTE: an inline submitNow() here would no-op — answer() still holds
+        // submitLock until its finally (same reason the 403 time_expired
+        // branch relies on handleTimeUp's await-then-submit). The deferred
+        // hand-off below fires AFTER the lock is released; for timed quizzes
+        // the countdown's handleTimeUp path covers it instead.
+        if (res.status === 409 && body.error === "quiz_window_closed") {
+          const alreadyTimeUp = phaseRef.current === "timeUp";
+          setPhaseAndRef("timeUp");
+          if (!alreadyTimeUp) {
+            setError(t("toast.quizWindowClosed"));
+            setTimeout(() => void submitNow(), 0);
+          }
+          return;
+        }
+
         if (res.status === 404) {
           // D13 — the session was reset by a lecturer mid-flight (or is
           // otherwise gone). Terminal dead screen, no retry, no re-submit.

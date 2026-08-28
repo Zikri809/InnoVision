@@ -20,6 +20,12 @@
 | **GLM_OCR_SETUP.md** | Optional GLM-OCR (vLLM) extraction engine setup. |
 | **COSTS.md** | Infra/service cost breakdown for MVP scale. |
 
+## 🗺️ Roadmap (planned work — not yet spec)
+
+| Doc | Scope |
+|---|---|
+| **roadmap/README.md** | Master index + MANDATORY workflow for planned feature work: pre-implementation reconciliation against the codebase, implementation, move-out to executed `PLAN_*.md`, and final folder deletion. Domain plans live in `roadmap/PLAN_R_*.md`. |
+
 ## 🏗️ Executed plans (design records — accurate history, not current spec)
 
 Each phase plan documents WHAT was built and WHY at the time. Read for
@@ -38,6 +44,7 @@ context/invariants; verify details against code.
 | PLAN_AI_QUIZ_GENERATION_SUITE.md | Multi-file ingestion, steering, difficulty, append mode |
 | PLAN_QUIZ_METADATA_EDITING.md | Quiz title/mode/time-limit editing |
 | PLAN_REVEAL_RESULTS.md | One-way results reveal |
+| PLAN_CLOSE_AND_SCHEDULE.md | Quiz close + closed-reveal recovery + availability windows + retakes (QC-1..QC-4, migrations 0030–0032) |
 
 ## 📜 Superseded / snapshots (do NOT cite as current)
 
@@ -52,7 +59,7 @@ context/invariants; verify details against code.
 - **Stack**: Next.js (App Router) · Supabase (Postgres, Auth, Storage) ·
   MediaPipe tasks-vision (face landmarker + hand landmarker, vendored) ·
   self-hosted CompreFace (Docker) · optional GLM-OCR (vLLM).
-- **Migrations**: `supabase/migrations/0001…0023` — authoritative schema.
+- **Migrations**: `supabase/migrations/0001…0032` — authoritative schema.
   Regenerate types after schema changes: `npm run gen:types`.
 - **Face pipeline (current)**: enroll 3 angles → gate (blink + `'start'`
   verify) → periodic/question re-verification with **up-to-3-frame majority

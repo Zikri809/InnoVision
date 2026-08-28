@@ -569,6 +569,205 @@ async function main() {
   record("MED-4c editing closed quiz metadata → trigger error", Boolean(closedMetaEditErr),
     closedMetaEditErr?.message ?? "unexpectedly edited closed quiz metadata");
 
+  // ── QC-1/QC-3 (migration 0030): lifecycle + window probes ────────────────
+  // Windows are live-editable: the edit-freeze deliberately excludes them.
+  const { data: windowSet, error: windowSetErr } = await clientA
+    .from("quizzes")
+    .update({
+      opens_at: "2026-01-01T00:00:00Z",
+      closes_at: "2026-01-02T00:00:00Z",
+    })
+    .eq("id", liveQ.id)
+    .select("opens_at, closes_at")
+    .single();
+  record("QC-3 window update on LIVE quiz succeeds (not edit-locked)",
+    !windowSetErr && windowSet?.opens_at != null && windowSet?.closes_at != null,
+    windowSetErr?.message ?? "");
+
+  const { error: invertedWindowErr } = await clientA
+    .from("quizzes")
+    .update({
+      opens_at: "2026-01-02T00:00:00Z",
+      closes_at: "2026-01-01T00:00:00Z",
+    })
+    .eq("id", liveQ.id);
+  record("QC-3 inverted window (closes_at <= opens_at) violates CHECK", Boolean(invertedWindowErr),
+    invertedWindowErr?.message ?? "unexpectedly accepted inverted window");
+
+  const { error: equalWindowErr } = await clientA
+    .from("quizzes")
+    .update({
+      opens_at: "2026-01-01T00:00:00Z",
+      closes_at: "2026-01-01T00:00:00Z",
+    })
+    .eq("id", liveQ.id);
+  record("QC-3 equal instants violate CHECK (strictly after)", Boolean(equalWindowErr),
+    equalWindowErr?.message ?? "unexpectedly accepted equal window instants");
+
+  const { data: singleEnded, error: singleEndedErr } = await clientA
+    .from("quizzes")
+    .update({ opens_at: "2026-01-01T00:00:00Z", closes_at: null })
+    .eq("id", liveQ.id)
+    .select("opens_at, closes_at")
+    .single();
+  record("QC-3 single-ended window accepted (one NULL is valid)",
+    !singleEndedErr && singleEnded?.opens_at != null && singleEnded?.closes_at === null,
+    singleEndedErr?.message ?? "");
+
+  // Start gating: window in the future → quiz_not_open (S1 is enrolled).
+  const { data: futureQ, error: futureQErr } = await clientA
+    .from("quizzes")
+    .insert({
+      class_id: clsA.id,
+      created_by: lecturerA.id,
+      title: "QC-3 Future Window",
+      mode: "practice",
+      status: "draft",
+    })
+    .select("id")
+    .single();
+  createdQuizIds.push(futureQErr ? null : futureQ?.id);
+  await clientA.from("questions").insert({
+    quiz_id: futureQ.id, order_index: 0, type: "mcq", prompt: "q?", options: ["a","b"], correct_index: 0,
+  });
+  const { error: publishFutureErr } = await clientA
+    .from("quizzes")
+    .update({ status: "live" })
+    .eq("id", futureQ.id);
+  assertNoError("publish future-window quiz", { error: publishFutureErr });
+  await admin
+    .from("quizzes")
+    .update({ opens_at: new Date(Date.now() + 60 * 60 * 1000).toISOString() })
+    .eq("id", futureQ.id);
+  const { data: notOpenRes } = await clientS1.rpc("start_quiz_session", { p_quiz_id: futureQ.id });
+  record("QC-3 start before opens_at → quiz_not_open",
+    notOpenRes?.error === "quiz_not_open", JSON.stringify(notOpenRes ?? {}));
+
+  // Ordering probe: an UNENROLLED caller against a windowed quiz must fold
+  // to the identity 404 (not_enrolled), never leak window state.
+  const { data: unenrolledRes } = await clientS2.rpc("start_quiz_session", {
+    p_quiz_id: futureQ.id,
+  });
+  record("QC-3 unenrolled caller vs windowed quiz folds to not_enrolled (no window oracle)",
+    unenrolledRes?.error === "not_enrolled", JSON.stringify(unenrolledRes ?? {}));
+
+  // Window closed: past closes_at → quiz_window_closed. (Set a PAST closes_at
+  // on the future-window quiz — relative instants, since Postgres now() is
+  // transaction-stamped and unpinnable.)
+  await admin
+    .from("quizzes")
+    .update({ opens_at: null, closes_at: new Date(Date.now() - 60 * 1000).toISOString() })
+    .eq("id", futureQ.id);
+  const { data: closedWindowRes } = await clientS1.rpc("start_quiz_session", {
+    p_quiz_id: futureQ.id,
+  });
+  record("QC-3 start after closes_at → quiz_window_closed",
+    closedWindowRes?.error === "quiz_window_closed", JSON.stringify(closedWindowRes ?? {}));
+  await admin.from("quizzes").update({ opens_at: null, closes_at: null }).eq("id", futureQ.id);
+
+  // NULL window never blocks (clear the window; start succeeds + practice row).
+  await admin.from("quizzes").update({ opens_at: null, closes_at: null }).eq("id", futureQ.id);
+  const { data: openRes } = await clientS1.rpc("start_quiz_session", { p_quiz_id: futureQ.id });
+  record("QC-3 NULL window start succeeds (unbounded)", Boolean(openRes?.session), JSON.stringify(openRes ?? {}));
+
+  // QC-2 setup: S1 completes a practice attempt on futureQ NOW (while it is
+  // still live + windowless) so student_results has a completed session to
+  // report on once the quiz is closed+revealed below.
+  const { data: qc2Session, error: qc2SubmitErr } = await clientS1.rpc("submit_session", {
+    p_session_id: openRes.session.id,
+  });
+  record("QC-2 submit attempt on futureQ succeeds",
+    !qc2SubmitErr && qc2Session?.session?.status === "completed",
+    qc2SubmitErr?.message ?? JSON.stringify(qc2Session ?? {}));
+
+  // CAS race (fake-supabase cannot emulate): guarded close from clientA while
+  // the quiz is already closed → 0 rows updated, no exception.
+  const { data: casLoser, error: casErr } = await clientA
+    .from("quizzes")
+    .update({ status: "closed" })
+    .eq("id", quiz1.id)
+    .eq("status", "live")
+    .select("id");
+  record("QC-1 CAS close on already-closed quiz → 0 rows, no error",
+    !casErr && (casLoser ?? []).length === 0, casErr?.message ?? `rows: ${(casLoser ?? []).length}`);
+
+  // Belt-and-braces: the ROUTE's exact windows-PATCH payload on a live
+  // practice quiz carries time_limit_sec=null (buildQuizUpdates invariant
+  // wipe). The edit-freeze must not raise — `NULL is distinct from NULL` is
+  // false, and 0014 guarantees OLD.time_limit_sec is NULL for practice rows.
+  const { error: threeColErr } = await clientA
+    .from("quizzes")
+    .update({ opens_at: "2026-01-01T00:00:00Z", closes_at: "2026-01-02T00:00:00Z", time_limit_sec: null })
+    .eq("id", liveQ.id);
+  record("QC-3 route-payload windows+time_limit_sec=null on live practice quiz → no edit-lock raise",
+    !threeColErr, threeColErr?.message ?? "unexpectedly rejected");
+
+  // Autoclose: a live quiz past closes_at flips to closed; NULL-window and
+  // draft/closed rows are untouched. Idempotent on re-run.
+  await admin.from("quizzes").update({ status: "live", opens_at: null, closes_at: null }).eq("id", futureQ.id);
+  await admin
+    .from("quizzes")
+    .update({ closes_at: new Date(Date.now() - 60 * 1000).toISOString() })
+    .eq("id", futureQ.id);
+  const { data: closedCount1 } = await admin.rpc("quiz_autoclose");
+  const { data: futureAfter } = await admin
+    .from("quizzes")
+    .select("status")
+    .eq("id", futureQ.id)
+    .single();
+  record("QC-3 quiz_autoclose flips live past-closes_at quiz → closed",
+    futureAfter?.status === "closed" && typeof closedCount1 === "number", JSON.stringify({ closedCount1, futureAfter }));
+  const { data: futureAfter2 } = await admin
+    .from("quizzes")
+    .select("status")
+    .eq("id", futureQ.id)
+    .single();
+  const { data: closedCount2 } = await admin.rpc("quiz_autoclose");
+  record("QC-3 quiz_autoclose is idempotent (second run flips nothing)",
+    futureAfter2?.status === "closed", JSON.stringify({ futureAfter2, closedCount2 }));
+
+  // quiz_closed notification: exactly one per (student, quiz) after all flips.
+  const { data: notifAfter } = await admin
+    .from("notifications")
+    .select("id, recipient_id")
+    .eq("dedupe_key", `quiz_closed:${futureQ.id}`);
+  record("QC-1 notify_quiz_closed fires once per student for the autoclosed quiz",
+    (notifAfter ?? []).length >= 1, JSON.stringify(notifAfter ?? []));
+
+  // ── QC-2: closed+revealed recovery surface (migration 0031) ─────────────
+  // futureQ is closed + windowless here (S1's completed practice attempt was
+  // submitted above, pre-close). Reveal it as the owner, then assert:
+  // live-only view excludes it, closed-revealed view exposes it for the
+  // ENROLLED student only, and archived/unrevealed states stay opaque.
+  const { error: qc2RevealErr } = await admin
+    .from("quizzes")
+    .update({ results_revealed_at: new Date().toISOString() })
+    .eq("id", futureQ.id)
+    .is("results_revealed_at", null);
+  assertNoError("QC-2 reveal a closed quiz", { error: qc2RevealErr });
+  const { data: qc2LiveView } = await clientS1
+    .from("student_quiz_view")
+    .select("id")
+    .eq("id", futureQ.id);
+  record("QC-2 closed+revealed quiz NOT in student_quiz_view (per-surface visibility)",
+    (qc2LiveView ?? []).length === 0, JSON.stringify(qc2LiveView ?? []));
+  const { data: qc2ClosedView } = await clientS1
+    .from("student_closed_revealed_quiz_view")
+    .select("id, title, results_revealed_at")
+    .eq("id", futureQ.id);
+  record("QC-2 closed+revealed quiz IS in the closed-revealed view (enrolled student)",
+    (qc2ClosedView ?? []).length === 1, JSON.stringify(qc2ClosedView ?? []));
+  const { data: qc2UnenrolledView } = await clientS2
+    .from("student_closed_revealed_quiz_view")
+    .select("id")
+    .eq("id", futureQ.id);
+  record("QC-2 unenrolled student sees nothing in the closed-revealed view",
+    (qc2UnenrolledView ?? []).length === 0, JSON.stringify(qc2UnenrolledView ?? {}));
+  const { data: qc2Results } = await clientS1.rpc("student_results", { p_quiz_id: futureQ.id });
+  record("QC-2 student_results works for closed+revealed (no status term)",
+    qc2Results != null && qc2Results.error === undefined && Array.isArray(qc2Results.questions),
+    JSON.stringify(qc2Results ?? {}));
+
   // ── D28c/D28d: Valid min (1s) and max (7200s) bounds succeed on DB INSERT ──
   const { data: minTimedQ, error: minTimedErr } = await clientA
     .from("quizzes")

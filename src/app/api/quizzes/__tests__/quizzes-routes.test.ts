@@ -567,6 +567,100 @@ describe("Quiz PATCH route (I-M1..I-M10)", () => {
     expect(body.error).toBe("quiz_not_draft");
   });
 
+  it("QC-3: window-only PATCH on a LIVE quiz → 200 (bypass, persisted)", async () => {
+    const ctx = ownerContext({ quizStatus: "live" });
+    const { quizRoute } = await importHandlers();
+    const opens = "2026-01-01T00:00:00.000Z";
+    const closes = "2026-01-02T00:00:00.000Z";
+    const res = await quizRoute.PATCH(req({ opensAt: opens, closesAt: closes }), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.quiz.opens_at).toBe(opens);
+    expect(body.quiz.closes_at).toBe(closes);
+    expect(ctx.client.tables["quizzes"][0].opens_at).toBe(opens);
+  });
+
+  it("QC-3: window-only PATCH on a CLOSED quiz → 200 (harmless; unreachable by students)", async () => {
+    ownerContext({ quizStatus: "closed" });
+    const { quizRoute } = await importHandlers();
+    const res = await quizRoute.PATCH(req({ opensAt: null, closesAt: null }), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.quiz.opens_at).toBeNull();
+  });
+
+  it("QC-3: title on a live quiz with windows mixed in → still 409 (field-scoped)", async () => {
+    ownerContext({ quizStatus: "live" });
+    const { quizRoute } = await importHandlers();
+    const res = await quizRoute.PATCH(
+      req({ title: "Sneak", opensAt: "2026-01-01T00:00:00.000Z", closesAt: "2026-01-02T00:00:00.000Z" }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("quiz_not_draft");
+  });
+
+  it("QC-3: inverted window → 400 (Zod cross-field)", async () => {
+    ownerContext();
+    const { quizRoute } = await importHandlers();
+    const res = await quizRoute.PATCH(
+      req({ opensAt: "2026-01-02T00:00:00.000Z", closesAt: "2026-01-01T00:00:00.000Z" }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("invalid_body");
+  });
+
+  // ── QC-4: retake config PATCH (live-quiz management, field-scoped bypass) ──
+  it("QC-4: retake-only PATCH on a LIVE quiz → 200 (bypass, persisted)", async () => {
+    const ctx = ownerContext({ quizStatus: "live" });
+    const { quizRoute } = await importHandlers();
+    const res = await quizRoute.PATCH(req({ allowRetake: true, maxAttempts: 2 }), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.quiz.allow_retake).toBe(true);
+    expect(body.quiz.max_attempts).toBe(2);
+    expect(ctx.client.tables["quizzes"][0].allow_retake).toBe(true);
+    expect(ctx.client.tables["quizzes"][0].max_attempts).toBe(2);
+  });
+
+  it("QC-4: retake-only PATCH on a CLOSED quiz → 200 (harmless; unreachable by students)", async () => {
+    ownerContext({ quizStatus: "closed" });
+    const { quizRoute } = await importHandlers();
+    const res = await quizRoute.PATCH(req({ allowRetake: false }), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).quiz.allow_retake).toBe(false);
+  });
+
+  it("QC-4: title on a live quiz with retake mixed in → still 409 (field-scoped)", async () => {
+    ownerContext({ quizStatus: "live" });
+    const { quizRoute } = await importHandlers();
+    const res = await quizRoute.PATCH(
+      req({ title: "Sneak", allowRetake: true }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("quiz_not_draft");
+  });
+
+  it("QC-4: maxAttempts out of DB range → 400 (Zod bound mirrors the CHECK)", async () => {
+    ownerContext();
+    const { quizRoute } = await importHandlers();
+    const res = await quizRoute.PATCH(req({ maxAttempts: 4 }), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("invalid_body");
+  });
+
   it("I-M19 accepts unicode, emojis, and 200-character titles on PATCH", async () => {
     const ctx = makeOwnerContext();
     fakeHolder.current = ctx.client;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildQuizUpdates } from "./updates";
+import { buildQuizUpdates, hasRetakeFields } from "./updates";
 
 describe("buildQuizUpdates (U-M7..U-M13)", () => {
   it("U-M7 forces time_limit_sec to null when switching to practice mode", () => {
@@ -60,5 +60,33 @@ describe("buildQuizUpdates (U-M7..U-M13)", () => {
     expect((updates as Record<string, unknown>).status).toBeUndefined();
     expect((updates as Record<string, unknown>).created_by).toBeUndefined();
     expect((updates as Record<string, unknown>).source_file_url).toBeUndefined();
+  });
+
+  // ── QC-4: retake config (0032 lockstep) ────────────────────────────
+  it("U-M14 maps allowRetake/maxAttempts to snake_case columns (QC-4)", () => {
+    const res = buildQuizUpdates({ allowRetake: true, maxAttempts: 2 }, "assessment");
+    expect(res).toEqual({ allow_retake: true, max_attempts: 2 });
+  });
+
+  it("U-M15 retake fields pass through even for practice (inert — RPC reads them on the assessment path only)", () => {
+    const res = buildQuizUpdates({ allowRetake: true, maxAttempts: 3 }, "practice");
+    expect(res).toEqual({
+      allow_retake: true,
+      max_attempts: 3,
+      time_limit_sec: null,
+    });
+  });
+
+  it("U-M16 retake fields are omitted when not in the payload (default-config invisibility)", () => {
+    const res = buildQuizUpdates({ title: "Only Title" }, "assessment");
+    expect(res.allow_retake).toBeUndefined();
+    expect(res.max_attempts).toBeUndefined();
+  });
+
+  it("U-M17 hasRetakeFields detects each field independently", () => {
+    expect(hasRetakeFields({ allowRetake: false })).toBe(true);
+    expect(hasRetakeFields({ maxAttempts: 2 })).toBe(true);
+    expect(hasRetakeFields({ title: "x" })).toBe(false);
+    expect(hasRetakeFields({})).toBe(false);
   });
 });

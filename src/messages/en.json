@@ -265,6 +265,12 @@
       "timeLimitHelperNone": "No time limit set for this assessment.",
       "hoursShort": "h",
       "minutesShort": "min",
+      "windowOpensLabel": "Opens at",
+      "windowClosesLabel": "Closes at",
+      "windowHelperNone": "No availability window — the quiz follows manual publish/close.",
+      "windowHelperSet": "Students can start the quiz only inside this window (quiz time, UTC).",
+      "retakeAllow": "Allow retakes",
+      "retakeMaxAttempts": "Max attempts",
       "createQuizBtn": "Create quiz",
       "creatingQuizBtn": "Creating…",
       "classQuizzes": "Class quizzes",
@@ -307,6 +313,13 @@
       "publishing": "Publishing…",
       "closeQuiz": "Close quiz",
       "closing": "Closing…",
+      "scheduleChip": "Availability window: {window}. Edit schedule.",
+      "closeConfirmTitle": "Close this quiz?",
+      "closeConfirmBody": "This cannot be undone. Students can no longer start the quiz. Students already taking it can submit what they have — they cannot answer further questions.",
+      "closeUnrevealedWarn": "{count, plural, =1 {1 student has submitted but results are not revealed.} other {# students have submitted but results are not revealed.}}",
+      "revealFirstThenClose": "Reveal first, then close",
+      "closeAnyway": "Close anyway",
+      "quizClosed": "Quiz closed.",
       "generateFromFile": "Generate from file",
       "viewResults": "View results",
       "heroSubtitle": "Draft, reorder, and refine your quiz questions.",
@@ -343,7 +356,17 @@
     },
     "dialogs": {
       "editQuizTitle": "Edit quiz settings",
-      "editQuizSubtitle": "Change title, mode, or time limit. Changes apply to future student sessions.",
+      "editQuizSubtitle": "Change title, mode, time limit, or availability window. Changes apply to future student sessions.",
+      "windowOpensLabel": "Opens at (UTC)",
+      "windowClosesLabel": "Closes at (UTC)",
+      "windowHelper": "Empty = no bound. Students can start only inside the window; ongoing sessions may still submit until they finish.",
+      "windowHelperNone": "No availability window — the quiz follows manual publish/close.",
+      "windowOrderError": "The closing time must be after the opening time.",
+      "retakeLabel": "Retakes (assessment)",
+      "retakeAllow": "Allow students to retake this assessment",
+      "retakeMaxAttempts": "Max attempts",
+      "retakeHelperOn": "Students get up to {count} attempts; their latest completed attempt counts.",
+      "retakeHelperOff": "One attempt only.",
       "titleLabel": "Title",
       "saveChanges": "Save changes",
       "editQuestionTitle": "Edit question #{number}",
@@ -408,7 +431,8 @@
       "advisoryHeadset": "Headset as mic input",
       "incidentClipsTitle": "Incident footage (auto-recorded before the incident)",
       "incidentClipMeta": "{reason} · {sec}s · from {time}",
-      "focusPauses": "{count, plural, one {Focus loss pause ×1} other {Focus loss pauses ×#}}"
+      "focusPauses": "{count, plural, one {Focus loss pause ×1} other {Focus loss pauses ×#}}",
+      "attemptChip": "Attempt #{count}"
     }
   },
   "student": {
@@ -439,9 +463,12 @@
       "enrollBannerBody": "Assessment quizzes use face verification. Enroll your face now so you're ready when test day comes.",
       "enrollNowBtn": "Enroll your face",
       "unlimitedTries": "Unlimited tries",
+      "retakeAllowed": "Up to {count} attempts — latest counts",
       "oneAttempt": "One attempt only",
       "startBtn": "Start",
       "startingBtn": "Starting…",
+      "quizNotOpen": "This quiz isn't open yet — check the opening time.",
+      "quizWindowClosed": "This quiz's window has closed — ask your lecturer about it.",
       "emptyTitle": "No quizzes available yet",
       "emptySubtitle": "Your lecturers haven't published any quizzes for your classes yet. Check back soon!"
     },
@@ -541,6 +568,7 @@
       "sessionFlaggedLecturer": "This session is flagged for review. A lecturer must unlock it.",
       "sessionInactive": "This session is no longer active.",
       "quizUnavailable": "This quiz is no longer available.",
+      "quizWindowClosed": "The quiz window has closed — your lecturer ended the availability window. Submit to save your progress.",
       "recordTimeout": "The request timed out. Tap your answer again to retry.",
       "recordError": "Network error recording your answer. Tap again to retry.",
       "submitTimeout": "The submit request timed out. Please submit again.",
@@ -772,6 +800,10 @@
       "face_enrollment_held": {
         "title": "Face enrollment needs review",
         "body": "An enrollment is pending lecturer review. Open your class roster to resolve it."
+      },
+      "quiz_closed": {
+        "title": "Quiz closed",
+        "body": "\"{quizTitle}\" is now closed. If you haven't finished, check with your lecturer."
       }
     },
     "digest": {

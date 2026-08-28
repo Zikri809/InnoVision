@@ -16,6 +16,7 @@ export const NOTIFICATION_TYPES = [
   "incident_clip_recorded",
   "face_unavailable_reported",
   "face_enrollment_held",
+  "quiz_closed",
 ] as const;
 
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];

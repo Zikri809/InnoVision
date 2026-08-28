@@ -37,7 +37,7 @@ export default async function StudentQuizzesPage() {
     await Promise.all([
       supabase
         .from("student_quiz_view")
-        .select("id, class_id, title, mode, status, time_limit_sec, created_at")
+        .select("id, class_id, title, mode, status, time_limit_sec, allow_retake, max_attempts, created_at")
         .order("created_at", { ascending: false })
         .limit(QUIZ_LIST_LIMIT),
       supabase
@@ -66,6 +66,8 @@ export default async function StudentQuizzesPage() {
       mode: q.mode!,
       status: q.status!,
       time_limit_sec: q.time_limit_sec,
+      allow_retake: q.allow_retake,
+      max_attempts: q.max_attempts,
       created_at: q.created_at!,
       classes: classTitleById.get(q.class_id!) ? { title: classTitleById.get(q.class_id!)! } : null,
     }));

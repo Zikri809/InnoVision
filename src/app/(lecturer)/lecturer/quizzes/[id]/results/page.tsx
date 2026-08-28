@@ -89,7 +89,7 @@ export default async function LecturerQuizResultsPage({
         .from("lecturer_session_view")
         // GET-envelope columns MINUS verify_nonce (the student replay token).
         .select(
-          "id, quiz_id, student_id, mode, status, score, started_at, submitted_at, last_activity_at, face_unavailable_at, face_exempt, face_fail_streak, focus_pause_count",
+          "id, quiz_id, student_id, mode, status, score, started_at, submitted_at, last_activity_at, face_unavailable_at, face_exempt, face_fail_streak, focus_pause_count, attempt",
         )
         .eq("quiz_id", id)
         .order("started_at", { ascending: false })
@@ -241,6 +241,12 @@ export default async function LecturerQuizResultsPage({
     nowMs: Date.now(),
   });
 
+  // QC-2 prevention data: completed assessment sessions whose results are
+  // still hidden — drives the close dialog's reveal-first CTA.
+  const unrevealedCompleted = sessionRows.filter(
+    (s) => s.mode === "assessment" && s.status === "completed",
+  ).length;
+
   return (
     <ResultsDashboardClient
       quizId={quiz.id}
@@ -251,6 +257,7 @@ export default async function LecturerQuizResultsPage({
       resultsRevealedAt={quiz.results_revealed_at}
       autoRevealOnComplete={quiz.auto_reveal_on_complete}
       totalQuestions={totalQuestions ?? 0}
+      unrevealedCompleted={quiz.results_revealed_at == null ? unrevealedCompleted : 0}
       rows={rows}
       incidentClips={incidentClips}
     />

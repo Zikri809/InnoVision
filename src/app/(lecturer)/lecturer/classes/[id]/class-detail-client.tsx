@@ -38,6 +38,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { formatDuration } from "@/lib/format/duration";
+import { windowLocalInputToIso } from "@/lib/format/window";
 import { HOURS_MAX, MINUTES_MAX, hmToSeconds } from "@/lib/quizzes/time-limit";
 import { TITLE_MAX } from "@/lib/quizzes/validation";
 import { MODE_CLASS, STATUS_CLASS, getModeLabel, getStatusLabel } from "@/lib/quizzes/labels";
@@ -84,6 +85,13 @@ export function ClassDetailClient({
   const [mode, setMode] = useState<"practice" | "assessment">("practice");
   const [hours, setHours] = useState("");
   const [minutes, setMinutes] = useState("");
+  // QC-3: optional availability window at creation (datetime-local inputs;
+  // converted to UTC ISO instants once at the client boundary).
+  const [opensAt, setOpensAt] = useState("");
+  const [closesAt, setClosesAt] = useState("");
+  // Retake config (QC-4): assessment-only concept.
+  const [allowRetake, setAllowRetake] = useState(false);
+  const [maxAttempts, setMaxAttempts] = useState(2);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
@@ -193,6 +201,9 @@ export function ClassDetailClient({
           ? null
           : (hours === "" && minutes === "" ? null : hmToSeconds(Number(hours) || 0, Number(minutes) || 0));
 
+      const newOpens = windowLocalInputToIso(opensAt);
+      const newCloses = windowLocalInputToIso(closesAt);
+
       const res = await fetch(`/api/classes/${cls.id}/quizzes`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -200,6 +211,10 @@ export function ClassDetailClient({
           title,
           mode,
           timeLimitSec,
+          opensAt: newOpens,
+          closesAt: newCloses,
+          allowRetake: mode === "assessment" ? allowRetake : undefined,
+          maxAttempts: mode === "assessment" && allowRetake ? maxAttempts : undefined,
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -210,6 +225,10 @@ export function ClassDetailClient({
       setTitle("");
       setHours("");
       setMinutes("");
+      setOpensAt("");
+      setClosesAt("");
+      setAllowRetake(false);
+      setMaxAttempts(2);
       router.refresh();
     } catch {
       setError(tCommon("errorGeneric"));
@@ -454,9 +473,38 @@ export function ClassDetailClient({
                 <span aria-hidden className="pb-2.5 text-xs font-extrabold text-muted-foreground">{t("minutesShort")}</span>
               </div>
             </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+              <div className="flex items-center gap-1.5">
+                <Label htmlFor="quiz-opens-at" className="sr-only">
+                  {t("windowOpensLabel")}
+                </Label>
+                <Input
+                  id="quiz-opens-at"
+                  type="datetime-local"
+                  aria-label={t("windowOpensLabel")}
+                  value={opensAt}
+                  disabled={creating}
+                  onChange={(e) => setOpensAt(e.target.value)}
+                  className="w-56"
+                />
+                <span aria-hidden className="text-xs font-extrabold text-muted-foreground">–</span>
+                <Label htmlFor="quiz-closes-at" className="sr-only">
+                  {t("windowClosesLabel")}
+                </Label>
+                <Input
+                  id="quiz-closes-at"
+                  type="datetime-local"
+                  aria-label={t("windowClosesLabel")}
+                  value={closesAt}
+                  disabled={creating}
+                  onChange={(e) => setClosesAt(e.target.value)}
+                  className="w-56"
+                />
+              </div>
+            </div>
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <p id="quiz-create-time-helper" className="text-xs font-semibold text-muted-foreground">
-                {t("timeLimitHelperNone")}
+                {opensAt || closesAt ? t("windowHelperSet") : t("timeLimitHelperNone")}
               </p>
 
               <Button type="submit" disabled={creating || !title.trim()}>
@@ -470,6 +518,37 @@ export function ClassDetailClient({
                 )}
               </Button>
             </div>
+            {mode === "assessment" && (
+              <div className="flex flex-wrap items-center gap-4">
+                <label className="flex items-center gap-2.5 text-sm font-semibold text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={allowRetake}
+                    onChange={(e) => setAllowRetake(e.target.checked)}
+                    disabled={creating}
+                    className="size-4 accent-[var(--primary)]"
+                  />
+                  {t("retakeAllow")}
+                </label>
+                {allowRetake && (
+                  <div className="flex items-center gap-1.5">
+                    <Label htmlFor="quiz-max-attempts" className="text-xs font-extrabold text-foreground">
+                      {t("retakeMaxAttempts")}
+                    </Label>
+                    <select
+                      id="quiz-max-attempts"
+                      value={maxAttempts}
+                      onChange={(e) => setMaxAttempts(Math.trunc(Number(e.target.value)) || 1)}
+                      disabled={creating}
+                      className="rounded-lg border-[3px] border-border bg-card px-2 py-1 text-sm font-bold"
+                    >
+                      <option value={2}>2</option>
+                      <option value={3}>3</option>
+                    </select>
+                  </div>
+                )}
+              </div>
+            )}
             {error && (
               <p className="rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm font-bold text-destructive" role="alert">
                 {error}

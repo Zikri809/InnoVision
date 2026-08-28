@@ -37,5 +37,7 @@ test("error boundary 'Return home' navigates to /", async ({ page }) => {
     timeout: 20_000,
   });
   await page.getByRole("link", { name: "Return home", exact: true }).click();
-  await expect(page).toHaveURL(/\/$/);
+  // "/" is reachable but immediately hub-redirects an authenticated user
+  // (/ → /dashboard → role landing) — the middleware + dashboard chain.
+  await expect(page).toHaveURL(/\/(student|lecturer)\//, { timeout: 20_000 });
 });

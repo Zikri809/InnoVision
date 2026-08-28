@@ -26,7 +26,7 @@ function makeStub(opts: {
     from(table: string) {
       calls.push(table);
       return {
-        select(_cols?: string) {
+        select() {
           const eqs: string[] = [];
           const builder = {
             eq(col: string, val: unknown) {

@@ -38,6 +38,8 @@ const ANSWER_RATE = { limit: 120, windowMs: 60 * 1000 };
  *  - `session_not_active` → 409 `{ error: "session_not_active" }` (paused /
  *    flagged / completed all map here — single code)
  *  - `quiz_not_live` → 409 (lecturer closed quiz mid-session / student removed)
+ *  - `quiz_window_closed` → 409 (closes_at passed mid-session — QC-3; in-flight
+ *    students may still SUBMIT, but cannot answer further questions)
  *  - `time_expired` → 403 `{ error: "time_expired" }`
  *  - `already_answered` → 409 `{ error: "already_answered" }` (KEYLESS —
  *    assessment answers stay secrecy-safe; the RPC replays the stored result
@@ -97,6 +99,10 @@ export async function POST(request: Request, { params }: Params) {
   }
   if (payload?.error === "quiz_not_live") {
     return jsonError("quiz_not_live", undefined, 409);
+  }
+  // Availability window hard stop (QC-3) — schedule state, same 409 family.
+  if (payload?.error === "quiz_window_closed") {
+    return jsonError("quiz_window_closed", undefined, 409);
   }
   if (payload?.error === "time_expired") {
     return jsonError("time_expired", undefined, 403);

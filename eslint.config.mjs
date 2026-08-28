@@ -21,6 +21,9 @@ const eslintConfig = defineConfig([
     // `npm run vendor:mediapipe`, integrity-checked by `npm run verify:mediapipe`):
     "public/mediapipe/**",
     "public/models/**",
+    // Playwright test artifacts (auto-generated):
+    "playwright-report/**",
+    "test-results/**",
   ]),
 ]);
 

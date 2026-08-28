@@ -24,6 +24,8 @@ type QuizRow = {
   mode: "practice" | "assessment";
   status: "draft" | "live" | "closed";
   time_limit_sec: number | null;
+  allow_retake?: boolean | null;
+  max_attempts?: number | null;
   created_at: string;
   classes: { title: string } | null;
 };
@@ -77,6 +79,16 @@ export function StudentQuizzesClient({
 
       if (res.status === 404) {
         setError(tCommon("errorGeneric"));
+        return;
+      }
+
+      // QC-3 schedule states (enrolled callers legitimately learn them).
+      if (res.status === 409 && body.error === "quiz_not_open") {
+        setError(t("quizNotOpen"));
+        return;
+      }
+      if (res.status === 409 && body.error === "quiz_window_closed") {
+        setError(t("quizWindowClosed"));
         return;
       }
 
@@ -220,7 +232,9 @@ export function StudentQuizzesClient({
                       <span className="text-sm font-semibold text-muted-foreground">
                         {isPractice
                           ? t("unlimitedTries")
-                          : t("oneAttempt")}
+                          : q.allow_retake && (q.max_attempts ?? 1) > 1
+                            ? t("retakeAllowed", { count: q.max_attempts ?? 1 })
+                            : t("oneAttempt")}
                       </span>
                     )}
                     <Button

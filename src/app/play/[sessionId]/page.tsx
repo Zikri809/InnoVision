@@ -154,12 +154,24 @@ export default async function PlayPage({ params }: PageProps) {
     .eq("id", user.id)
     .maybeSingle();
 
+  // QC-2: a CLOSED+REVEALED quiz falls out of the live-only
+  // student_quiz_view — recover its metadata through the closed-revealed
+  // view (reveal-gated, barrier). Closed+unrevealed stays a truthful 404.
   const [quizRes, questionsRes, answersRes, faceChecksRes, profileRes] = await Promise.allSettled([
     supabase
       .from("student_quiz_view")
       .select("id, title, mode, status, time_limit_sec, results_revealed_at")
       .eq("id", s.quiz_id)
-      .maybeSingle(),
+      .maybeSingle()
+      .then(async (r) =>
+        r.data
+          ? r
+          : supabase
+              .from("student_closed_revealed_quiz_view")
+              .select("id, title, mode, status, time_limit_sec, results_revealed_at")
+              .eq("id", s.quiz_id)
+              .maybeSingle(),
+      ),
     supabase
       .from("student_question_view")
       .select("id, order_index, type, prompt, options, has_image, created_at")
@@ -223,6 +235,46 @@ export default async function PlayPage({ params }: PageProps) {
   // trusted, but this closes drift.
   if (s.mode !== quiz.mode) notFound();
 
+  // ── QC-2: completed sessions render their EndScreen BEFORE the questions
+  // guard. student_question_view is live-only (can_student_view_quiz), so a
+  // CLOSED quiz yields 0 rows even though the attempt completed and (for
+  // practice / closed+revealed assessments) the results are visible. The
+  // EndScreen is driven by `student_results` (no status term, 0028) — the
+  // breakdown rows carry their own truth; `total` falls back to the
+  // breakdown length when the question projection is empty.
+  if (s.status === "completed") {
+    // Practice always reveals; assessment only once results_revealed_at set.
+    const revealed = quiz.mode === "practice" || quiz.results_revealed_at != null;
+
+    // Server-side breakdown (student_results is security-definer; re-validates
+    // enrollment + reveal + own-session scope). Reveal-gated: hidden assessment
+    // returns error → no breakdown, no fabricated score.
+    let breakdown: ResultsBreakdownRow[] = [];
+    if (revealed) {
+      const { data: rpcRes, error: rpcErr } = await supabase.rpc("student_results", {
+        p_quiz_id: s.quiz_id,
+      });
+      if (!rpcErr) {
+        const r = rpcRes as { questions?: unknown[]; total?: unknown } | null;
+        breakdown = (r?.questions ?? []).map((q) => q as ResultsBreakdownRow);
+      }
+      // On RPC error fall through to the score-only EndScreen (never crash).
+    }
+
+    const total = questions.length > 0 ? questions.length : breakdown.length;
+
+    return (
+      <EndScreen
+        session={s}
+        quiz={quiz}
+        revealed={revealed}
+        score={revealed ? s.score : null}
+        total={total}
+        breakdown={revealed ? breakdown : []}
+      />
+    );
+  }
+
   // Degenerate guard: a live quiz always has ≥1 question (publish trigger),
   // but guard defensively to avoid a divide-by-zero in the client HUD.
   if (questions.length === 0) {
@@ -249,37 +301,6 @@ export default async function PlayPage({ params }: PageProps) {
     // eslint-disable-next-line react-hooks/purity
     serverNow: Date.now(),
   });
-
-  if (s.status === "completed") {
-    // Practice always reveals; assessment only once results_revealed_at set.
-    const revealed = quiz.mode === "practice" || quiz.results_revealed_at != null;
-
-    // Server-side breakdown (student_results is security-definer; re-validates
-    // enrollment + reveal + own-session scope). Reveal-gated: hidden assessment
-    // returns error → no breakdown, no fabricated score.
-    let breakdown: ResultsBreakdownRow[] = [];
-    if (revealed) {
-      const { data: rpcRes, error: rpcErr } = await supabase.rpc("student_results", {
-        p_quiz_id: s.quiz_id,
-      });
-      if (!rpcErr) {
-        const r = rpcRes as { questions?: unknown[] } | null;
-        breakdown = (r?.questions ?? []).map((q) => q as ResultsBreakdownRow);
-      }
-      // On RPC error fall through to the score-only EndScreen (never crash).
-    }
-
-    return (
-      <EndScreen
-        session={s}
-        quiz={quiz}
-        revealed={revealed}
-        score={revealed ? s.score : null}
-        total={questions.length}
-        breakdown={revealed ? breakdown : []}
-      />
-    );
-  }
 
   return (
     <PlayClient

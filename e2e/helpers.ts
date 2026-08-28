@@ -64,6 +64,9 @@ export async function registerUser(
     // resolved — so the retried registration of the SAME email can never
     // succeed ("already registered"). Fall back to signing in with the
     // shared E2E password; the landing assertion below stays authoritative.
+    // The proxy bounces authenticated users off /login → drop any session
+    // cookie a partial signup set before signing in.
+    await page.context().clearCookies();
     await page.goto("/login");
     await page.getByLabel(/Email/).fill(email);
     await page.getByLabel("Password", { exact: true }).fill(E2E_PASSWORD);
@@ -79,7 +82,9 @@ export async function registerUser(
  */
 export async function createClass(page: Page, title: string): Promise<string> {
   await page.getByLabel("Class title").fill(title);
-  await page.getByRole("button", { name: /create/i }).click();
+  // Strict match: a bare /create/i also hits the "Create a class" empty-state
+  // tile once it renders — strict-mode race under load (observed in e38).
+  await page.getByRole("button", { name: "Create class", exact: true }).click();
   await expect(page.getByText(title, { exact: true })).toBeVisible();
 
   const joinCode = await page
@@ -592,6 +597,27 @@ export async function revealQuiz(page: Page, classTitle: string, quizTitle: stri
 }
 
 /**
+ * QC-1: lecturer closes a LIVE quiz from the results dashboard. Opens the
+ * close dialog, confirms, and waits for the Close control to disappear
+ * (status flipped → terminal). Close is ONE-WAY (no re-open).
+ *
+ * Selector note: the dialog renders an X dismiss button whose sr-only label
+ * is `common.close` ("Close") — a bare /close/i .last() would hit the X, not
+ * the destructive confirm. Match the confirm's actual labels instead.
+ */
+export async function closeQuiz(page: Page, classTitle: string, quizTitle: string) {
+  await openResults(page, classTitle, quizTitle);
+  const closeBtn = page.getByRole("button", { name: /close quiz/i });
+  await expect(closeBtn).toBeVisible();
+  await closeBtn.click();
+  const dialog = page.getByRole("dialog");
+  const confirmBtn = dialog.getByRole("button", { name: /close quiz|close anyway/i });
+  await expect(confirmBtn).toBeEnabled();
+  await confirmBtn.click();
+  await expect(page.getByRole("button", { name: /close quiz/i })).toBeHidden({ timeout: 10_000 });
+}
+
+/**
  * Phase 8 service-role client for E2E seeding/cleanup. Two-gated seam:
  *  1. `process.env.NODE_ENV !== "production"` (weak gate — Playwright leaves it
  *     undefined, so it is NOT the real guard).
@@ -617,11 +643,12 @@ export function resolveServiceClient() {
 
 /**
  * Phase 8: deterministically mark an existing assessment session as abandoned
- * (E13b's D-student). MUST be an UPDATE (never INSERT — the partial unique
- * index `one_assessment_attempt` forbids a second assessment session for an
- * existing (quiz, student)). Returns the admin client so callers can reuse the
- * same connection for cleanup; returns null when the seam is unavailable (the
- * spec skips the abandoned sub-assertion — belt-and-braces).
+ * (E13b's D-student). MUST be an UPDATE (never INSERT — the 0032 partial
+ * unique index `one_active_assessment_attempt` forbids a second NON-completed
+ * assessment session for an existing (quiz, student)). Returns the admin
+ * client so callers can reuse the same connection for cleanup; returns null
+ * when the seam is unavailable (the spec skips the abandoned sub-assertion —
+ * belt-and-braces).
  */
 export async function staleActiveSession(
   admin: ReturnType<typeof resolveServiceClient> | null,

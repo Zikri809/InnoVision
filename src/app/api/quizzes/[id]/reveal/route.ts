@@ -20,10 +20,14 @@ const REVEAL_RATE = { limit: 10, windowMs: 60 * 1000 };
 /**
  * POST /api/quizzes/[id]/reveal — release assessment results to students.
  *
- * One-way + live-only (PLAN_REVEAL_RESULTS v4 §9/§10):
- *  - `status = 'live'` is REQUIRED (revealing a closed quiz would strand the
- *    class: student_quiz_view is live-only, so nothing could ever reach the
- *    released results).
+ * One-way; live OR closed (QC-2 closed-before-reveal recovery — the
+ * reveal_once_only trigger only guards CHANGES to a non-null timestamp, so
+ * first-time reveal on a closed quiz is trigger-legal):
+ *  - draft → 409 quiz_not_revealable (nothing to reveal into; students
+ *    can never reach a draft).
+ *  - closed + unrevealed → allowed (the recovery surface; student reachability
+ *    rides student_results/sealed views which have no status term, plus the
+ *    closed+revealed metadata view).
  *  - Idempotent: a second reveal is a 0-row no-op → 200 `{ already: true }`.
  *  - The DB trigger `quiz_reveal_once` is the backstop: any UPDATE that
  *    changes a non-null `results_revealed_at` raises `reveal_once_only`.
@@ -37,13 +41,13 @@ export async function POST(_request: Request, { params }: Params) {
   const owner = await requireQuizOwner(supabase, id);
   if (!owner.ok) return owner.response;
 
-  // Raise the route's rate limit inside the guard so anonymous callers are
-  // throttled before the profile read.
-  const rate = owner.userId ? rateLimit(`reveal:${owner.userId}`, REVEAL_RATE) : false;
-  if (!rate) return rateLimited("Too many requests. Try again in a minute.");
-
+  // CSRF BEFORE the rate limiter (close-route parity): a cross-origin probe
+  // must not burn the owner's reveal budget.
   const originError = checkSameOrigin(_request);
   if (originError) return originError;
+
+  const rate = owner.userId ? rateLimit(`reveal:${owner.userId}`, REVEAL_RATE) : false;
+  if (!rate) return rateLimited("Too many requests. Try again in a minute.");
 
   if (owner.quiz.mode !== "assessment") {
     return NextResponse.json(
@@ -51,25 +55,33 @@ export async function POST(_request: Request, { params }: Params) {
       { status: 409, headers: { "content-type": "application/json" } },
     );
   }
-  if (owner.quiz.status !== "live") {
+  if (owner.quiz.status === "draft") {
     return NextResponse.json(
-      { error: "quiz_not_live" },
+      { error: "quiz_not_revealable" },
       { status: 409, headers: { "content-type": "application/json" } },
     );
   }
 
-  // Guarded one-way-safe UPDATE (mirrors the auto-reveal flip in submit_session).
+  // Guarded one-way-safe UPDATE (mirrors the auto-reveal flip in
+  // submit_session). No status term: the `.is(null)` guard carries one-way
+  // idempotency; `quiz_reveal_once` remains the trigger backstop.
   const { data, error } = await supabase
     .from("quizzes")
     .update({ results_revealed_at: new Date().toISOString() })
     .eq("id", id)
     .is("results_revealed_at", null)
-    .eq("status", "live")
     .select("id, results_revealed_at")
     .maybeSingle();
 
   if (error) {
     console.error("reveal quiz error:", error);
+    if (error.message?.includes("reveal_once_only")) {
+      // Concurrent reveal won the race; the quiz IS revealed now → idempotent.
+      return NextResponse.json(
+        { revealed: true, already: true },
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
     return internalError("Could not reveal the results right now.");
   }
 

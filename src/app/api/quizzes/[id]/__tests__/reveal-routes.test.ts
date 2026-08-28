@@ -21,7 +21,7 @@ function jsonReq(body?: unknown, init?: RequestInit): Request {
 }
 
 function lecturerCtx(opts?: { mode?: string; status?: string; revealed?: boolean; autoReveal?: boolean }) {
-  const ctx = makeOwnerContext({ quizStatus: (opts?.status ?? "live") as "live" | "draft" });
+  const ctx = makeOwnerContext({ quizStatus: (opts?.status ?? "live") as "live" | "draft" | "closed" });
   const quizRow = ctx.client.tables["quizzes"]![0];
   quizRow.mode = opts?.mode ?? "assessment";
   quizRow.results_revealed_at = opts?.revealed ? "2026-01-01T00:00:00Z" : null;
@@ -62,14 +62,23 @@ it("reveals a live assessment → 200 { revealed: true }", async () => {
     expect((await res.json()).error).toBe("practice_always_revealed");
   });
 
-  it("rejects revealing a non-live quiz → 409 quiz_not_live", async () => {
-    lecturerCtx({ status: "closed" });
+  it("reveals a CLOSED quiz → 200 (QC-2 closed-before-reveal recovery)", async () => {
+    const ctx = lecturerCtx({ status: "closed" });
     const res = await revealRoute.POST(jsonReq(), { params: Promise.resolve({ id: QUIZ }) });
-    expect(res.status).toBe(409);
-    expect((await res.json()).error).toBe("quiz_not_live");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.revealed).toBe(true);
+    expect(ctx.client.tables["quizzes"]![0].results_revealed_at).toBeTruthy();
   });
 
-  it("reveals only when the quiz is live → sets results_revealed_at on the row", async () => {
+  it("rejects revealing a draft quiz → 409 quiz_not_revealable", async () => {
+    lecturerCtx({ status: "draft" });
+    const res = await revealRoute.POST(jsonReq(), { params: Promise.resolve({ id: QUIZ }) });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("quiz_not_revealable");
+  });
+
+  it("reveals while live → sets results_revealed_at on the row", async () => {
     const ctx = lecturerCtx();
     await revealRoute.POST(jsonReq(), { params: Promise.resolve({ id: QUIZ }) });
     expect(ctx.client.tables["quizzes"]![0].results_revealed_at).toBeTruthy();

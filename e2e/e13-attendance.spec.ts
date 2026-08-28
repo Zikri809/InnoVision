@@ -45,8 +45,8 @@ const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
  *    D's tab is CLOSED (so no periodic face check can re-touch
  *    `last_activity_at` — robot-touch limitation, plan §4) and only THEN
  *    `staleActiveSession` UPDATEs D's existing session to `last_activity_at =
- *    now − 3h` (deterministic abandoned — no INSERT collision with the
- *    one_assessment_attempt unique index).
+ *    now − 3h` (deterministic abandoned — no INSERT collision with the 0032
+ *    `one_active_assessment_attempt` unique index).
  * 6. Lecturer opens results: EXACTLY 4 rows — A completed (score), B completed
  *    (score), C in_progress, D abandoned. A's row shows a face-check summary;
  *    B's row shows the camera-unavailable marker; scores asserted;

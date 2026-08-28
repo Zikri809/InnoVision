@@ -36,6 +36,19 @@
 //          on the same session → {error:'session_not_active'}
 //   D47  — raw-anon PostgREST call to the RPCs → denied (execute revoked);
 //          anon SELECT on quiz_sessions/session_answers → 0 rows (RLS/grants)
+//   D48/D49/D50/D51 — results matrix, practice results, one-way reveal,
+//          auto-reveal (see sections below)
+//   D52  — retake spawn: attempt increments; default config byte-identical
+//          to legacy one-attempt (already_attempted + latest completed
+//          session_id); budget exhaustion; practice untouched.
+//   D53  — stale-paused sealing: passed window → stale session sealed
+//          completed (evidence preserved), spawn window-stopped; windowless
+//          quiz keeps normal already_attempted blocking.
+//   D54  — retake-aware auto-reveal: fresh completed student with budget
+//          remaining keeps the quiz unrevealed; final submit reveals.
+//   D55  — quiz_completed_all digest counts DISTINCT students: one student's
+//          two attempts don't fire it; the second distinct student does
+//          (exactly once — dedupe key holds).
 //
 // NOTE: D41 (quiz-delete guard) is deliberately NOT here — a Node Supabase
 // client cannot invoke Next.js route handlers, and at the DB layer the FK is
@@ -747,6 +760,197 @@ async function main() {
     record("D51 last submit → auto-reveal fires, score returned in same response",
       sub3.data?.score === 1 && s3State?.results_revealed_at != null,
       `score=${sub3.data?.score} revealed=${s3State?.results_revealed_at ?? "null"}`);
+  }
+
+  // ── D52: retake spawn — attempt increments, default config invisible ──
+  {
+    const quiz = await makeQuiz({ title: "D52 Retake", mode: "assessment" });
+    const qs = await addQuestions(quiz.id, QUESTION_TEMPLATE);
+    await publish(quiz.id);
+
+    // S1 completes attempt 1.
+    const s1a = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
+    assertNoError("D52 start attempt 1", s1a);
+    await clientS1.rpc("answer_question", {
+      p_session_id: s1a.data.session.id, p_question_id: qs[0].id, p_selected_index: qs[0].correct_index,
+    });
+    await clientS1.rpc("submit_session", { p_session_id: s1a.data.session.id });
+
+    // Default config (allow_retake=false, max_attempts=1): restart → already_attempted
+    // WITH the latest session_id (legacy 0008 shape — the client lands on the
+    // completed session's EndScreen; e5 pins the journey).
+    const blocked = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
+    record("D52 default config: completed attempt blocks restart (byte-identical legacy behavior)",
+      blocked.data?.error === "already_attempted" && blocked.data?.session_id === s1a.data.session.id,
+      JSON.stringify(blocked.data));
+
+    // Lecturer enables retakes live (outside the edit-freeze) with max 2 attempts.
+    const { error: retakeErr } = await clientA
+      .from("quizzes")
+      .update({ allow_retake: true, max_attempts: 2 })
+      .eq("id", quiz.id);
+    assertNoError("D52 enable retake on live quiz", { error: retakeErr });
+
+    // Attempt 2 spawns with attempt=2; attempt-1 row still exists (evidence preserved).
+    const s1b = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
+    record("D52 retake spawn → new session, attempt=2",
+      Boolean(s1b.data?.session) && s1b.data.session.attempt === 2 &&
+        s1b.data.session.id !== s1a.data.session.id,
+      JSON.stringify(s1b.data));
+    const allRows = await clientS1.from("quiz_sessions").select("id, attempt, status")
+      .eq("quiz_id", quiz.id).eq("student_id", studentS1.id).order("attempt");
+    record("D52 both attempts coexist (completed attempt-1 + active attempt-2)",
+      (allRows.data ?? []).length === 2 && allRows.data[0].attempt === 1 &&
+        allRows.data[0].status === "completed" && allRows.data[1].attempt === 2,
+      JSON.stringify(allRows.data ?? []));
+
+    // Concurrent second ACTIVE attempt rejected (one-active invariant).
+    const s1c = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
+    record("D52 active attempt-2 blocks a third concurrent start (resume-or-error)",
+      s1c.data?.error === "already_attempted" && s1c.data?.session_id === s1b.data.session.id,
+      JSON.stringify(s1c.data));
+
+    // Budget exhausted: complete attempt 2 → third start rejected WITH the
+    // latest completed session id (legacy shape — EndScreen landing).
+    await clientS1.rpc("submit_session", { p_session_id: s1b.data.session.id });
+    const exhausted = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
+    record("D52 budget exhausted (2 of 2 used) → already_attempted, latest completed session_id",
+      exhausted.data?.error === "already_attempted" &&
+        (exhausted.data?.session_id === s1a.data.session.id ||
+         exhausted.data?.session_id === s1b.data.session.id),
+      JSON.stringify(exhausted.data));
+
+    // Practice quizzes are untouched by the retake machinery.
+    const pQuiz = await makeQuiz({ title: "D52 Practice Untouched", mode: "practice" });
+    await addQuestions(pQuiz.id, QUESTION_TEMPLATE);
+    await publish(pQuiz.id);
+    const p1 = await clientS1.rpc("start_quiz_session", { p_quiz_id: pQuiz.id });
+    const p2 = await clientS1.rpc("start_quiz_session", { p_quiz_id: pQuiz.id });
+    record("D52 practice rejoin unchanged (same session id, attempt=1)",
+      p1.data?.session?.id === p2.data?.session?.id && p2.data.session.attempt === 1,
+      JSON.stringify(p2.data));
+    void qs;
+  }
+
+  // ── D53: stale-paused sealing — passed window preserves evidence ──
+  {
+    const quiz = await makeQuiz({ title: "D53 Stale Seal", mode: "assessment" });
+    await addQuestions(quiz.id, QUESTION_TEMPLATE);
+    await publish(quiz.id);
+
+    // S1 starts attempt 1, then the window passes while the session is active.
+    const s1a = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
+    assertNoError("D53 start attempt 1", s1a);
+    await clientA.from("quizzes").update({ closes_at: new Date(Date.now() - 60_000).toISOString() }).eq("id", quiz.id);
+
+    // Restart attempt: the stale session is sealed completed (scored as-is,
+    // evidence preserved — unconditional, no budget requirement) and the
+    // spawn is window-stopped.
+    const s1b = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
+    record("D53 stale active session from a PASSED window → sealed, spawn window-stopped",
+      s1b.data?.error === "quiz_window_closed",
+      JSON.stringify(s1b.data));
+    const rows = await clientS1.from("quiz_sessions").select("id, attempt, status, submitted_at")
+      .eq("quiz_id", quiz.id).eq("student_id", studentS1.id).order("attempt");
+    record("D53 sealed attempt-1 marked completed (never deleted — evidence preserved)",
+      (rows.data ?? []).length === 1 && rows.data[0].status === "completed" &&
+        rows.data[0].submitted_at != null,
+      JSON.stringify(rows.data ?? []));
+
+    // No-budget case behaves identically (sealing is unconditional).
+    const quiz2 = await makeQuiz({ title: "D53 No Budget", mode: "assessment" });
+    await addQuestions(quiz2.id, QUESTION_TEMPLATE);
+    await publish(quiz2.id);
+    const s3a = await clientS3.rpc("start_quiz_session", { p_quiz_id: quiz2.id });
+    assertNoError("D53 no-budget start", s3a);
+    await clientA.from("quizzes").update({ closes_at: new Date(Date.now() - 60_000).toISOString() }).eq("id", quiz2.id);
+    const s3b = await clientS3.rpc("start_quiz_session", { p_quiz_id: quiz2.id });
+    record("D53 no retake budget: stale session sealed identically (window-stopped, not stranded)",
+      s3b.data?.error === "quiz_window_closed",
+      JSON.stringify(s3b.data));
+
+    // Without a passed window, an active session blocks normally (no sealing).
+    const quiz3 = await makeQuiz({ title: "D53 Windowless", mode: "assessment" });
+    await addQuestions(quiz3.id, QUESTION_TEMPLATE);
+    await publish(quiz3.id);
+    const s1c = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz3.id });
+    assertNoError("D53 windowless start", s1c);
+    const s1d = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz3.id });
+    record("D53 windowless quiz: active session blocks normally (no seal)",
+      s1d.data?.error === "already_attempted" && s1d.data?.session_id === s1c.data.session.id,
+      JSON.stringify(s1d.data));
+  }
+
+  // ── D54: retake-aware auto-reveal (QC-4 pre-flight decision 1) ──
+  {
+    const quiz = await makeQuiz({ title: "D54 Retake Reveal", mode: "assessment" });
+    await addQuestions(quiz.id, QUESTION_TEMPLATE);
+    await publish(quiz.id);
+    await clientA.from("quizzes").update({ auto_reveal_on_complete: true }).eq("id", quiz.id);
+    await clientA.from("quizzes").update({ allow_retake: true, max_attempts: 2 }).eq("id", quiz.id);
+
+    // S1 completes attempt 1 of an allowed 2 → auto-reveal must NOT fire.
+    const s1a = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
+    assertNoError("D54 start attempt 1", s1a);
+    const sub1 = await clientS1.rpc("submit_session", { p_session_id: s1a.data.session.id });
+    const after1 = (await clientA.from("quizzes").select("results_revealed_at").eq("id", quiz.id)).data?.[0];
+    record("D54 fresh completed student with retake budget remaining → NOT revealed",
+      sub1.data?.score === null && after1?.results_revealed_at == null,
+      `score=${sub1.data?.score} revealed=${after1?.results_revealed_at ?? "null"}`);
+
+    // S3 (no retake interest, single completion) — S1 still holds budget, so no reveal.
+    const s3a = await clientS3.rpc("start_quiz_session", { p_quiz_id: quiz.id });
+    assertNoError("D54 S3 start", s3a);
+    await clientS3.rpc("submit_session", { p_session_id: s3a.data.session.id });
+    const afterS3 = (await clientA.from("quizzes").select("results_revealed_at").eq("id", quiz.id)).data?.[0];
+    record("D54 S3 completion alone does not reveal (S1 budget outstanding)",
+      afterS3?.results_revealed_at == null,
+      `revealed=${afterS3?.results_revealed_at ?? "null"}`);
+
+    // S1 completes their final attempt → budget exhausted everywhere → reveal fires.
+    const s1b = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
+    assertNoError("D54 start attempt 2", s1b);
+    await clientS1.rpc("submit_session", { p_session_id: s1b.data.session.id });
+    const after2 = (await clientA.from("quizzes").select("results_revealed_at").eq("id", quiz.id)).data?.[0];
+    record("D54 budget exhausted on final submit → auto-reveal fires",
+      after2?.results_revealed_at != null,
+      `revealed=${after2?.results_revealed_at ?? "null"}`);
+  }
+
+  // ── D55: quiz_completed_all digest counts DISTINCT students (QC-4) ──
+  {
+    const quiz = await makeQuiz({ title: "D55 Digest Distinct", mode: "assessment" });
+    await addQuestions(quiz.id, QUESTION_TEMPLATE);
+    await publish(quiz.id);
+    // Exactly 2 enrolled students in this harness (S1 + S3). Enable retakes
+    // (max 3) so S1's second attempt alone CANNOT satisfy the inequality.
+    await clientA.from("quizzes").update({ allow_retake: true, max_attempts: 3 }).eq("id", quiz.id);
+
+    // S1 completes TWO attempts (a session-row count of 2 would have fired
+    // the 0022 digest under the old count(*) against enrollment=2).
+    const s1a = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
+    assertNoError("D55 S1 attempt 1", s1a);
+    await clientS1.rpc("submit_session", { p_session_id: s1a.data.session.id });
+    const s1b = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
+    assertNoError("D55 S1 attempt 2", s1b);
+    await clientS1.rpc("submit_session", { p_session_id: s1b.data.session.id });
+
+    const digestAfterS1 = await clientA.from("notifications").select("id, dedupe_key")
+      .eq("type", "quiz_completed_all").like("dedupe_key", `quiz_completed_all:${quiz.id}%`);
+    record("D55 two attempts by ONE student do NOT fire the digest (distinct-student count)",
+      (digestAfterS1.data ?? []).length === 0,
+      JSON.stringify(digestAfterS1.data ?? []));
+
+    // S3 completes once → distinct students = 2 = enrollment → digest fires once.
+    const s3a = await clientS3.rpc("start_quiz_session", { p_quiz_id: quiz.id });
+    assertNoError("D55 S3 attempt 1", s3a);
+    await clientS3.rpc("submit_session", { p_session_id: s3a.data.session.id });
+    const digestFinal = await clientA.from("notifications").select("id, dedupe_key")
+      .eq("type", "quiz_completed_all").like("dedupe_key", `quiz_completed_all:${quiz.id}%`);
+    record("D55 second DISTINCT student completes → digest fires exactly once",
+      (digestFinal.data ?? []).length === 1 &&
+        digestFinal.data[0].dedupe_key === `quiz_completed_all:${quiz.id}`,
+      JSON.stringify(digestFinal.data ?? []));
   }
 
   // ── Summary ──────────────────────────────────────────────────

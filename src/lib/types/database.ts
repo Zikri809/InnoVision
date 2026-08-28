@@ -430,6 +430,13 @@ export type Database = {
             foreignKeyName: "questions_quiz_id_fkey"
             columns: ["quiz_id"]
             isOneToOne: false
+            referencedRelation: "student_closed_revealed_quiz_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "questions_quiz_id_fkey"
+            columns: ["quiz_id"]
+            isOneToOne: false
             referencedRelation: "student_quiz_view"
             referencedColumns: ["id"]
           },
@@ -437,6 +444,7 @@ export type Database = {
       }
       quiz_sessions: {
         Row: {
+          attempt: number
           face_exempt: boolean
           face_fail_streak: number
           face_unavailable_at: string | null
@@ -454,6 +462,7 @@ export type Database = {
           verify_nonce: string
         }
         Insert: {
+          attempt?: number
           face_exempt?: boolean
           face_fail_streak?: number
           face_unavailable_at?: string | null
@@ -471,6 +480,7 @@ export type Database = {
           verify_nonce?: string
         }
         Update: {
+          attempt?: number
           face_exempt?: boolean
           face_fail_streak?: number
           face_unavailable_at?: string | null
@@ -499,6 +509,13 @@ export type Database = {
             foreignKeyName: "quiz_sessions_quiz_id_fkey"
             columns: ["quiz_id"]
             isOneToOne: false
+            referencedRelation: "student_closed_revealed_quiz_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quiz_sessions_quiz_id_fkey"
+            columns: ["quiz_id"]
+            isOneToOne: false
             referencedRelation: "student_quiz_view"
             referencedColumns: ["id"]
           },
@@ -513,12 +530,16 @@ export type Database = {
       }
       quizzes: {
         Row: {
+          allow_retake: boolean
           auto_reveal_on_complete: boolean
           class_id: string
+          closes_at: string | null
           created_at: string
           created_by: string
           id: string
+          max_attempts: number
           mode: Database["public"]["Enums"]["quiz_mode"]
+          opens_at: string | null
           results_revealed_at: string | null
           source_file_url: string | null
           source_text: string | null
@@ -528,12 +549,16 @@ export type Database = {
           title: string
         }
         Insert: {
+          allow_retake?: boolean
           auto_reveal_on_complete?: boolean
           class_id: string
+          closes_at?: string | null
           created_at?: string
           created_by: string
           id?: string
+          max_attempts?: number
           mode?: Database["public"]["Enums"]["quiz_mode"]
+          opens_at?: string | null
           results_revealed_at?: string | null
           source_file_url?: string | null
           source_text?: string | null
@@ -543,12 +568,16 @@ export type Database = {
           title: string
         }
         Update: {
+          allow_retake?: boolean
           auto_reveal_on_complete?: boolean
           class_id?: string
+          closes_at?: string | null
           created_at?: string
           created_by?: string
           id?: string
+          max_attempts?: number
           mode?: Database["public"]["Enums"]["quiz_mode"]
+          opens_at?: string | null
           results_revealed_at?: string | null
           source_file_url?: string | null
           source_text?: string | null
@@ -867,6 +896,7 @@ export type Database = {
       }
       lecturer_session_view: {
         Row: {
+          attempt: number | null
           face_exempt: boolean | null
           face_fail_streak: number | null
           face_unavailable_at: string | null
@@ -882,6 +912,7 @@ export type Database = {
           submitted_at: string | null
         }
         Insert: {
+          attempt?: number | null
           face_exempt?: boolean | null
           face_fail_streak?: number | null
           face_unavailable_at?: string | null
@@ -897,6 +928,7 @@ export type Database = {
           submitted_at?: string | null
         }
         Update: {
+          attempt?: number | null
           face_exempt?: boolean | null
           face_fail_streak?: number | null
           face_unavailable_at?: string | null
@@ -917,6 +949,13 @@ export type Database = {
             columns: ["quiz_id"]
             isOneToOne: false
             referencedRelation: "quizzes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quiz_sessions_quiz_id_fkey"
+            columns: ["quiz_id"]
+            isOneToOne: false
+            referencedRelation: "student_closed_revealed_quiz_view"
             referencedColumns: ["id"]
           },
           {
@@ -1000,6 +1039,36 @@ export type Database = {
         }
         Relationships: []
       }
+      student_closed_revealed_quiz_view: {
+        Row: {
+          class_id: string | null
+          closes_at: string | null
+          created_at: string | null
+          id: string | null
+          mode: Database["public"]["Enums"]["quiz_mode"] | null
+          opens_at: string | null
+          results_revealed_at: string | null
+          status: Database["public"]["Enums"]["quiz_status"] | null
+          time_limit_sec: number | null
+          title: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quizzes_class_id_fkey"
+            columns: ["class_id"]
+            isOneToOne: false
+            referencedRelation: "classes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quizzes_class_id_fkey"
+            columns: ["class_id"]
+            isOneToOne: false
+            referencedRelation: "student_class_view"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       student_question_view: {
         Row: {
           created_at: string | null
@@ -1037,6 +1106,13 @@ export type Database = {
             columns: ["quiz_id"]
             isOneToOne: false
             referencedRelation: "quizzes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "questions_quiz_id_fkey"
+            columns: ["quiz_id"]
+            isOneToOne: false
+            referencedRelation: "student_closed_revealed_quiz_view"
             referencedColumns: ["id"]
           },
           {
@@ -1091,10 +1167,14 @@ export type Database = {
       }
       student_quiz_view: {
         Row: {
+          allow_retake: boolean | null
           class_id: string | null
+          closes_at: string | null
           created_at: string | null
           id: string | null
+          max_attempts: number | null
           mode: Database["public"]["Enums"]["quiz_mode"] | null
+          opens_at: string | null
           results_revealed_at: string | null
           status: Database["public"]["Enums"]["quiz_status"] | null
           time_limit_sec: number | null
@@ -1151,6 +1231,7 @@ export type Database = {
       }
       student_session_view: {
         Row: {
+          attempt: number | null
           face_exempt: boolean | null
           face_fail_streak: number | null
           face_unavailable_at: string | null
@@ -1166,6 +1247,7 @@ export type Database = {
           verify_nonce: string | null
         }
         Insert: {
+          attempt?: number | null
           face_exempt?: boolean | null
           face_fail_streak?: number | null
           face_unavailable_at?: string | null
@@ -1181,6 +1263,7 @@ export type Database = {
           verify_nonce?: string | null
         }
         Update: {
+          attempt?: number | null
           face_exempt?: boolean | null
           face_fail_streak?: number | null
           face_unavailable_at?: string | null
@@ -1201,6 +1284,13 @@ export type Database = {
             columns: ["quiz_id"]
             isOneToOne: false
             referencedRelation: "quizzes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quiz_sessions_quiz_id_fkey"
+            columns: ["quiz_id"]
+            isOneToOne: false
+            referencedRelation: "student_closed_revealed_quiz_view"
             referencedColumns: ["id"]
           },
           {
@@ -1326,6 +1416,7 @@ export type Database = {
       prune_expired_data: { Args: never; Returns: Json }
       prune_expired_incident_clips: { Args: never; Returns: Json }
       prune_expired_notifications: { Args: never; Returns: Json }
+      quiz_autoclose: { Args: never; Returns: number }
       record_face_check: {
         Args: {
           p_frames: string[]
@@ -1419,6 +1510,7 @@ export type Database = {
         | "incident_clip_recorded"
         | "face_unavailable_reported"
         | "face_enrollment_held"
+        | "quiz_closed"
       question_type: "mcq" | "true_false"
       quiz_mode: "practice" | "assessment"
       quiz_status: "draft" | "live" | "closed"
@@ -1568,6 +1660,7 @@ export const Constants = {
         "incident_clip_recorded",
         "face_unavailable_reported",
         "face_enrollment_held",
+        "quiz_closed",
       ],
       question_type: ["mcq", "true_false"],
       quiz_mode: ["practice", "assessment"],
