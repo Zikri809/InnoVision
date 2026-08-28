@@ -58,6 +58,13 @@ export default defineConfig({
         // step. Raised for the harness only — production default is 10.
         SIGNUP_RATE_LIMIT: "1000",
         INVITE_RATE_LIMIT: "1000",
+        // Same class of flake for the reset path: e34 fires several
+        // resetPasswordForEmail calls (incl. per-IP budget) within one window
+        // and retries in CI. Raised for the harness only — production
+        // defaults stay 5/min per email and 10/min per IP.
+        RESET_RATE_LIMIT: "1000",
+        RESET_IP_RATE_LIMIT: "1000",
+        RESET_CONFIRM_RATE_LIMIT: "1000",
         AI_BASE_URL: `http://127.0.0.1:${MOCK_AI_PORT}/v1`,
         AI_API_KEY: "test-key",
         AI_MODEL: "gpt-4o-mini",

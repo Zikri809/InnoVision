@@ -42,7 +42,14 @@ describe("updateSession — middleware redirect matrix", () => {
   it("lets anonymous users through public routes unchanged", async () => {
     mockGetUser.mockResolvedValue({ data: { user: null } });
 
-    for (const path of ["/", "/login", "/register", "/auth/callback"]) {
+    for (const path of [
+      "/",
+      "/login",
+      "/register",
+      "/auth/callback",
+      "/forgot-password",
+      "/reset-password/confirm",
+    ]) {
       const res = await updateSession(nextReq(path));
       expect(res.status).toBe(200);
     }
@@ -51,11 +58,23 @@ describe("updateSession — middleware redirect matrix", () => {
   it("redirects authenticated users away from auth pages to /dashboard", async () => {
     mockGetUser.mockResolvedValue({ data: { user: { id: "u1" } } });
 
-    for (const path of ["/login", "/register"]) {
+    for (const path of [
+      "/login",
+      "/register",
+      "/forgot-password",
+      "/reset-password",
+    ]) {
       const res = await updateSession(nextReq(path));
       expect(res.status).toBe(307);
       expect(new URL(res.headers.get("location")!).pathname).toBe("/dashboard");
     }
+  });
+
+  it("lets an authenticated recovery session reach /reset-password/confirm", async () => {
+    mockGetUser.mockResolvedValue({ data: { user: { id: "u1" } } });
+
+    const res = await updateSession(nextReq("/reset-password/confirm"));
+    expect(res.status).toBe(200);
   });
 
   it("treats nested public subpaths as public (/auth/callback/x)", async () => {
@@ -63,6 +82,23 @@ describe("updateSession — middleware redirect matrix", () => {
 
     const res = await updateSession(nextReq("/auth/callback/exchange"));
     expect(res.status).toBe(200);
+  });
+
+  it("treats nested subpaths of the reset routes as public", async () => {
+    mockGetUser.mockResolvedValue({ data: { user: null } });
+
+    for (const path of ["/forgot-password/x", "/reset-password/x"]) {
+      const res = await updateSession(nextReq(path));
+      expect(res.status).toBe(200);
+    }
+  });
+
+  it('does NOT treat similarly-prefixed paths as public ("/forgot-passwordx")', async () => {
+    mockGetUser.mockResolvedValue({ data: { user: null } });
+
+    const res = await updateSession(nextReq("/forgot-passwordx"));
+    expect(res.status).toBe(307);
+    expect(new URL(res.headers.get("location")!).pathname).toBe("/login");
   });
 
   it('does NOT treat similarly-prefixed paths as public ("/loginx")', async () => {

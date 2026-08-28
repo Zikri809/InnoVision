@@ -70,7 +70,8 @@
     "signupFailed": "Could not create the account. Check your details and try again.",
     "promotionFailed": "Account created but role promotion failed. Contact support.",
     "consentFailed": "Account created but consent could not be recorded. Contact support.",
-    "loginFailed": "Invalid email or password."
+    "loginFailed": "Invalid email or password.",
+    "resetFailed": "Could not update the password. The reset link may have expired — request a new one."
   },
   "nav": {
     "brand": "InnoVision",
@@ -181,7 +182,21 @@
     "creatingAccountBtn": "Creating account…",
     "haveAccount": "Already have an account?",
     "loginLink": "Sign in",
-    "checkEmailMessage": "Account created! Please check your email to confirm your account before signing in."
+    "checkEmailMessage": "Account created! Please check your email to confirm your account before signing in.",
+    "forgotLink": "Forgot password?",
+    "forgotTitle": "Reset your password",
+    "forgotSubtitle": "Enter the email you registered with and we'll send you a reset link.",
+    "forgotSubmit": "Send reset link",
+    "forgotSending": "Sending…",
+    "forgotEmailSent": "If that email is registered, a reset link is on its way. Check your inbox (and spam folder).",
+    "backToLogin": "Back to sign in",
+    "resetTitle": "Choose a new password",
+    "resetSubtitle": "Enter a new password for your account.",
+    "resetNewPassword": "New password",
+    "resetConfirmPassword": "Confirm new password",
+    "resetSubmit": "Save new password",
+    "resetSaving": "Saving…",
+    "resetMismatch": "Passwords do not match."
   },
   "lecturer": {
     "classes": {

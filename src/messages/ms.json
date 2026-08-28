@@ -70,7 +70,8 @@
     "signupFailed": "Akaun tidak dapat dicipta. Semak butiran anda dan cuba lagi.",
     "promotionFailed": "Akaun dicipta tetapi kenaikan peranan gagal. Hubungi sokongan.",
     "consentFailed": "Akaun dicipta tetapi persetujuan tidak dapat direkodkan. Hubungi sokongan.",
-    "loginFailed": "E-mel atau kata laluan tidak sah."
+    "loginFailed": "E-mel atau kata laluan tidak sah.",
+    "resetFailed": "Kata laluan tidak dapat dikemas kini. Pautan tetapan semula mungkin telah tamat — minta yang baharu."
   },
   "nav": {
     "brand": "InnoVision",
@@ -181,7 +182,21 @@
     "creatingAccountBtn": "Sedang mencipta akaun…",
     "haveAccount": "Sudah mempunyai akaun?",
     "loginLink": "Log masuk",
-    "checkEmailMessage": "Akaun telah dicipta! Sila semak e-mel anda untuk mengesahkan akaun sebelum log masuk."
+    "checkEmailMessage": "Akaun telah dicipta! Sila semak e-mel anda untuk mengesahkan akaun sebelum log masuk.",
+    "forgotLink": "Lupa kata laluan?",
+    "forgotTitle": "Tetapkan semula kata laluan",
+    "forgotSubtitle": "Masukkan e-mel yang anda daftarkan dan kami akan hantar pautan tetapan semula.",
+    "forgotSubmit": "Hantar pautan tetapan semula",
+    "forgotSending": "Menghantar…",
+    "forgotEmailSent": "Jika e-mel tersebut didaftarkan, pautan tetapan semula sedang dihantar. Sila semak peti masuk anda (termasuk folder spam).",
+    "backToLogin": "Kembali ke log masuk",
+    "resetTitle": "Pilih kata laluan baharu",
+    "resetSubtitle": "Masukkan kata laluan baharu untuk akaun anda.",
+    "resetNewPassword": "Kata laluan baharu",
+    "resetConfirmPassword": "Sahkan kata laluan baharu",
+    "resetSubmit": "Simpan kata laluan baharu",
+    "resetSaving": "Menyimpan…",
+    "resetMismatch": "Kata laluan tidak sepadan."
   },
   "lecturer": {
     "classes": {
