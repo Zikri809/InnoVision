@@ -13,6 +13,33 @@
 
 ## AX-1 · Ship dark mode toggle (HIGH — work already 90% present)
 
+> **Pre-flight reconciled 2026-08-29 @ 5f6b1da:** Evidence verified. `.dark {}`
+> tokens at globals.css:103–139 confirmed intact; layout.tsx:35 carries
+> `colorScheme: "light dark"` with NO class-applying provider (contradiction
+> still real). CHANGES SINCE AUDIT: (a) globals.css:145–151 now sets
+> `color-scheme: light` on `html` and `dark` on `html.dark` — CSS `color-scheme`
+> overrides the viewport meta, so once the class flips, native widgets follow
+> correctly and the viewport `colorScheme` becomes harmless belt-and-braces;
+> (b) viewport `themeColor` already ships both light/dark media entries
+> (layout.tsx:31–34) — NOTE (corrected by gap review): CSS `color-scheme`
+> and the `themeColor` meta drive DIFFERENT surfaces (native widgets vs
+> browser chrome bar), so a user forcing dark on a light-OS device still
+> sees a light browser bar; a one-line `meta[name=theme-color]` sync inside
+> `applyTheme` can close that later (deferred); (c) CSP is still Report-Only with
+> `script-src … 'unsafe-inline'` (next.config.ts:22) so the inline pre-hydration
+> script is safe today; add its hash to next.config.ts before any CSP
+> enforcement (noted in that file's own migration comment). Design refined:
+> CSS-native island (NO next-themes dep) — pure helpers in
+> `src/lib/theme/theme.ts` (storage key `innovision.theme`; cycle
+> light→dark→system; system resolves via matchMedia; `applyTheme` toggles
+> `.dark` on `document.documentElement`), inline pre-hydration script in
+> layout `<head>`, toggle button beside LanguageToggle in AppUserMenu
+> (app-user-menu.tsx:204). Auth/landing surfaces render LanguageToggle directly
+> and get the pre-hydration script (no flash) but no toggle in v1 — toggle lives
+> in the signed-in shell only. Tests: Node unit tests for the pure resolver
+> (`src/lib/theme/theme.test.ts` — resolution matrix, storage fallbacks); E2E
+> visual smoke optional per original sketch.
+
 **Problem:** Complete `.dark {}` token set exists (globals.css:103–139) plus
 `dark:` variants throughout components; NOTHING ever applies the class
 (layout.tsx:43–46 has no theme provider). Worse: `colorScheme: "light dark"`
@@ -36,6 +63,18 @@ contradictory rendering RIGHT NOW.
 ---
 
 ## AX-2 · Primary contrast token fix (HIGH, tiny)
+
+> **Pre-flight reconciled 2026-08-29 @ 5f6b1da:** Evidence verified —
+> `--primary: #f97316` with `--primary-foreground: #ffffff` at
+> globals.css:71–73; dark mode (globals.css:111–112) already correct
+> (#2a170c on #fb923c). NEW FINDING: `--sidebar-primary-foreground: #ffffff`
+> (globals.css:96) has the identical white-on-orange failure — fixed in the
+> same token pass. Grep confirms ZERO hardcoded `text-white`-on-`bg-primary`
+> bypasses; all 22 `text-primary-foreground` usages flow through the token, so
+> a single-file edit is complete. Dark-mode `--primary-foreground` untouched.
+> Contrast assertion lands as a pure-luminance unit test
+> (`src/lib/theme/contrast.test.ts`) computing WCAG ratios from the token
+> literals — extends the labels.test.ts AAA-pattern precedent (U-M20).
 
 **Problem:** White on orange-500 (#f97316) ≈ 2.8:1 fails WCAG AA everywhere
 bg-primary renders (button variant ui/button.tsx:14, score numerals, nav
@@ -141,7 +180,12 @@ All changes must leave `npm run check:i18n` green.
 
 <!-- Required before ANY item above is implemented. See roadmap README Step 1. -->
 
-- (none yet)
+- 2026-08-29: AX-1 + AX-2 reconciled against 5f6b1da; no migrations involved
+  (CSS/component/unit-test surface only); noted `color-scheme` CSS rules now
+  exist in globals.css:145–151 (audit-era contradiction partially self-healed
+  once `.dark` class flips), themeColor already dual-media, CSP still
+  Report-Only w/ 'unsafe-inline', `--sidebar-primary-foreground` added to AX-2
+  scope, zero hardcoded text-white-on-bg-primary bypasses found.
 
 ## Implementation log
 

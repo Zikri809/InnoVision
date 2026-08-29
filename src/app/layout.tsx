@@ -4,6 +4,7 @@ import { Fredoka, Nunito } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
 import { Toaster } from "@/components/ui/toaster";
+import { THEME_INIT_SCRIPT } from "@/lib/theme/theme";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 
@@ -43,7 +44,15 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
     <html
       lang={locale}
       className={cn("h-full", "antialiased", fredoka.variable, nunito.variable)}
+      suppressHydrationWarning
     >
+      <head>
+        {/* Pre-hydration theme boot (AX-1): applies the stored/system `.dark`
+            class before first paint so there is no flash-of-light. Script
+            source lives in src/lib/theme/theme.ts (single CSP-hash surface;
+            CSP is Report-Only today — hash before enforcing). */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body className="min-h-full flex flex-col font-sans">
         <NextIntlClientProvider messages={messages} locale={locale}>
           {children}
@@ -53,4 +62,3 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
     </html>
   );
 }
-

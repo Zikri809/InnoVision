@@ -25,6 +25,7 @@ import {
   UserRound,
 } from "lucide-react";
 import { LanguageToggle } from "./language-toggle";
+import { ThemeToggle } from "./theme-toggle";
 import { clearQuestionImageCache } from "@/lib/media/use-question-image";
 
 const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
@@ -202,6 +203,7 @@ export function AppUserMenu({
   return (
     <div className="flex items-center gap-2">
       <LanguageToggle />
+      <ThemeToggle />
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogTrigger

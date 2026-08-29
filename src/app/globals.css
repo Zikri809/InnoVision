@@ -70,7 +70,7 @@
   --popover: #ffffff;
   --popover-foreground: #7c2d12;
   --primary: #f97316;                /* playful orange */
-  --primary-foreground: #ffffff;
+  --primary-foreground: #431407;     /* deep brown on orange — WCAG AA+ (7:1); white failed at 2.8:1 (AX-2) */
   --primary-deep: #c2410c;           /* orange 3D base / shadow edge */
   --secondary: #fb923c;              /* soft orange */
   --secondary-foreground: #7c2d12;
@@ -93,7 +93,7 @@
   --sidebar: #fff7ed;
   --sidebar-foreground: #7c2d12;
   --sidebar-primary: #f97316;
-  --sidebar-primary-foreground: #ffffff;
+  --sidebar-primary-foreground: #431407; /* AX-2: same white-on-orange failure as --primary-foreground */
   --sidebar-accent: #ffedd5;
   --sidebar-accent-foreground: #7c2d12;
   --sidebar-border: #fed7aa;

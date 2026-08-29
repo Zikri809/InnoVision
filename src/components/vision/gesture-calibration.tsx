@@ -66,8 +66,8 @@ export function GestureCalibration({
               <span
                 className={`inline-flex items-center gap-1.5 rounded-full border-[2px] px-3 py-1 text-xs font-bold ${
                   lighting === "good"
-                    ? "border-emerald-400 bg-emerald-100 text-emerald-800"
-                    : "border-amber-400 bg-amber-100 text-amber-900"
+                    ? "border-emerald-400 bg-emerald-100 text-emerald-800 dark:border-emerald-700/50 dark:bg-emerald-500/15 dark:text-emerald-300"
+                    : "border-amber-400 bg-amber-100 text-amber-900 dark:border-amber-500/50 dark:bg-amber-500/15 dark:text-amber-300"
                 }`}
                 role="status"
               >
@@ -79,7 +79,7 @@ export function GestureCalibration({
         </div>
 
         {handDetected && lighting !== "good" && (
-          <div className="border-b border-amber-300 bg-amber-50 px-4 py-2 text-xs font-bold text-amber-900">
+          <div className="border-b border-amber-300 bg-amber-50 px-4 py-2 text-xs font-bold text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300">
             ⚠️ {t("lightingWarning")}
           </div>
         )}

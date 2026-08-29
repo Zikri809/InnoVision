@@ -56,14 +56,14 @@ export function FaceGate({
         </p>
 
         {remainingMs !== null && (
-          <p className="mt-4 inline-flex items-center gap-2 rounded-full border-[3px] border-amber-300 bg-amber-50 px-3.5 py-1.5 text-sm font-extrabold text-amber-800" role="status">
+          <p className="mt-4 inline-flex items-center gap-2 rounded-full border-[3px] border-amber-300 bg-amber-50 px-3.5 py-1.5 text-sm font-extrabold text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300" role="status">
             <Timer className="h-4 w-4" aria-hidden />
             {t("timeRemaining", { sec: Math.max(0, Math.ceil(remainingMs / 1000)) })}
           </p>
         )}
 
         {!consentGiven && (
-          <div className="mt-5 rounded-2xl border-[3px] border-border bg-orange-50/60 p-5">
+          <div className="mt-5 rounded-2xl border-[3px] border-border bg-orange-50/60 p-5 dark:bg-orange-500/10">
             <div className="flex items-center gap-2.5">
               <ShieldCheck className="h-5 w-5 text-primary" aria-hidden />
               <p className="font-heading text-base font-semibold">{t("consentRequired")}</p>
@@ -84,7 +84,7 @@ export function FaceGate({
         )}
 
         {!enrolled && consentGiven && (
-          <div className="mt-5 rounded-2xl border-[3px] border-border bg-orange-50/60 p-5">
+          <div className="mt-5 rounded-2xl border-[3px] border-border bg-orange-50/60 p-5 dark:bg-orange-500/10">
             <div className="flex items-center gap-2.5">
               <UserRound className="h-5 w-5 text-primary" aria-hidden />
               <p className="font-heading text-base font-semibold">{t("enrollRequired")}</p>
