@@ -129,7 +129,7 @@ Update as work proceeds (keep honest; this mirrors reality, not intention):
 | AUTH_IDENTITY | 🔶 partial — AU-1 shipped | — | AU-1 (2026-08-28) |
 | CLASS_MANAGEMENT | 🔲 planned | — | — |
 | INTEGRITY_OPS | 🔲 planned | — | — |
-| ACCESSIBILITY_PLATFORM | 🔶 partial — AX-1, AX-2 implemented (unreviewed/uncommitted) | — | AX-1 + AX-2 (2026-08-29) |
+| ACCESSIBILITY_PLATFORM | 🔶 partial — AX-1, AX-2 shipped | — | AX-1 + AX-2 (2026-08-29, 99a06a3) |
 
 > Partial states: implementation logs live inside each domain plan doc
 > (Pre-flight + Implementation log sections). A plan doc moves out (Step 3)
@@ -141,6 +141,6 @@ Update as work proceeds (keep honest; this mirrors reality, not intention):
 2. ~~QC-1 close quiz + QC-2 reveal recovery~~ ✅ (2026-08-28)
 3. ~~QC-3 availability windows~~ ✅ (2026-08-28)
 4. ~~RA-1 gradebook + RA-7 per-quiz results entry point~~ ✅ (2026-08-28, RA-7 shipped as SQ-2)
-5. AX-1 dark mode + AX-2 contrast (implemented 2026-08-29, pending review/commit)
+5. AX-1 dark mode + AX-2 contrast (shipped 2026-08-29, 99a06a3)
 6. IO-2 flagged-unlock notification + SQ-5 camera messaging
 7. Then depth: QT shuffling (cheap) → AP-1/AP-2 authoring → QT-1 multi-select → AU-2 SSO
