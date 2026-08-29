@@ -319,7 +319,8 @@
       "archivedBannerNotice": "This class is archived. It is preserved for audit and dispute resolution. Restore it to accept new student attempts or draft new quizzes.",
       "gradebookLink": "Gradebook",
       "shuffleQuestions": "Shuffle question & option order",
-      "shuffleQuestionsHelper": "Each student sees the questions and options in their own randomised order (locked once the quiz is published)."
+      "shuffleQuestionsHelper": "Each student sees the questions and options in their own randomised order (locked once the quiz is published).",
+      "duplicateBtn": "Duplicate"
     },
     "gradebook": {
       "title": "Gradebook",
@@ -399,7 +400,40 @@
       "noQuestionsSubtitle": "Add questions using the form on the left or generate from your course slides using AI.",
       "modeBadgeLabel": "Quiz mode: {mode}.",
       "titleMax": "Title must be at most {max} characters.",
-      "deleteQuestionConfirm": "Delete this question?"
+      "deleteQuestionConfirm": "Delete this question?",
+      "importQuestions": "Import questions",
+      "duplicateQuiz": "Duplicate",
+      "duplicateQuizAria": "Duplicate quiz {title}",
+      "import": {
+        "dialogTitle": "Bulk import questions",
+        "dialogSubtitle": "Paste pipe-separated questions, or load a file. {remaining} of 30 slots remaining.",
+        "pasteLabel": "Question list",
+        "pastePlaceholder": "What is 2+2? | 1 | 2 | 3 | 4 | *C\nThe Earth orbits the Sun | true",
+        "fileBtn": "Upload file",
+        "fileHint": ".txt/.csv files load as text.",
+        "remainingChip": "{remaining} remaining",
+        "previewTitle": "Preview ({count, plural, one {# question} other {# questions}})",
+        "noRowsYet": "No valid question rows yet.",
+        "problemTooManyRows": "Line {line}: batch limit reached — at most {max} questions can be imported.",
+        "problemTooFewOptions": "Line {line}: at least 2 options are required.",
+        "problemTooManyCells": "Line {line}: a '|' inside text is not supported — remove or replace it.",
+        "problemEmptyCell": "Line {line}: an empty option cell was found.",
+        "problemEmptyPrompt": "Line {line}: the question prompt is empty.",
+        "problemPromptTooLong": "Line {line}: the prompt exceeds {max} characters.",
+        "problemOptionTooLong": "Line {line}: an option exceeds {max} characters.",
+        "problemDuplicateOptions": "Line {line}: options must be distinct.",
+        "problemMissingAnswer": "Line {line}: no correct answer marked — add *A or *true.",
+        "problemBadAnswerMark": "Line {line}: the '*' answer mark is invalid.",
+        "problemAnswerOutOfRange": "Line {line}: the answer letter exceeds the number of options.",
+        "problemDoubleMark": "Line {line}: more than one answer is marked.",
+        "commitBtn": "Import {count, plural, one {# question} other {# questions}}",
+        "committingBtn": "Importing…",
+        "errCap": "This import exceeds the 30-question limit per quiz.",
+        "errRateLimited": "Too many imports. Try again later.",
+        "importedToast": "{count, plural, one {# question imported} other {# questions imported}}",
+        "quizFull": "This quiz already has 30 questions. Remove one before importing more.",
+        "fileTooLarge": "That file is too large (max 512 KB)."
+      }
     },
     "dialogs": {
       "editQuizTitle": "Edit quiz settings",
@@ -425,7 +459,20 @@
       "steeringPlaceholder": "e.g. Make options shorter, focus on definitions…",
       "regenBtn": "Regenerate with AI",
       "shuffleQuestions": "Shuffle question & option order",
-      "shuffleQuestionsHelper": "Each student gets a personally randomised order. Draft-only: it cannot change once the quiz is published."
+      "shuffleQuestionsHelper": "Each student gets a personally randomised order. Draft-only: it cannot change once the quiz is published.",
+      "duplicate": {
+        "dialogTitle": "Duplicate quiz",
+        "dialogSubtitle": "Create an editable draft copy of \"{title}\". Questions, settings, and images are copied; sessions and results are not.",
+        "destClassLabel": "Destination class",
+        "destClassPlaceholder": "Choose a class",
+        "destClassHelper": "The copy starts as a DRAFT in the selected class.",
+        "duplicateBtn": "Duplicate",
+        "duplicatingBtn": "Duplicating…",
+        "duplicatedToast": "Draft copy of \"{title}\" created.",
+        "openDraftAction": "Open draft",
+        "errArchived": "Quizzes cannot be duplicated into an archived class.",
+        "errRateLimited": "Too many duplicates. Try again later."
+      }
     },
     "results": {
       "backToQuizzes": "Back to class",

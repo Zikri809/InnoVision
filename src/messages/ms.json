@@ -319,7 +319,8 @@
       "archivedBannerNotice": "Kelas ini telah diarkibkan. Ia disimpan untuk audit dan penyelesaian pertikaian. Pulihkan kelas ini untuk menerima percubaan pelajar baharu atau mencipta kuiz baharu.",
       "gradebookLink": "Buku gred",
       "shuffleQuestions": "Rombak susunan soalan & pilihan",
-      "shuffleQuestionsHelper": "Setiap pelajar melihat soalan dan pilihan mengikut susunan rawak mereka sendiri (dikunci selepas kuiz diterbitkan)."
+      "shuffleQuestionsHelper": "Setiap pelajar melihat soalan dan pilihan mengikut susunan rawak mereka sendiri (dikunci selepas kuiz diterbitkan).",
+      "duplicateBtn": "Duplikasi"
     },
     "gradebook": {
       "title": "Buku gred",
@@ -399,7 +400,40 @@
       "noQuestionsSubtitle": "Tambah soalan menggunakan borang di sebelah kiri atau jana daripada nota kursus dengan AI.",
       "modeBadgeLabel": "Mod kuiz: {mode}.",
       "titleMax": "Tajuk mestilah paling banyak {max} aksara.",
-      "deleteQuestionConfirm": "Padam soalan ini?"
+      "deleteQuestionConfirm": "Padam soalan ini?",
+      "importQuestions": "Import soalan",
+      "duplicateQuiz": "Duplikasi",
+      "duplicateQuizAria": "Duplikasi kuiz {title}",
+      "import": {
+        "dialogTitle": "Import soalan secara pukal",
+        "dialogSubtitle": "Tampal soalan yang dipisahkan dengan aksara '|', atau muat naik fail. {remaining} daripada 30 slot lagi.",
+        "pasteLabel": "Senarai soalan",
+        "pastePlaceholder": "Apakah 2+2? | 1 | 2 | 3 | 4 | *C\nBumi mengorbit Matahari | benar",
+        "fileBtn": "Muat naik fail",
+        "fileHint": "Fail .txt/.csv dibaca sebagai teks.",
+        "remainingChip": "{remaining} lagi",
+        "previewTitle": "Pratonton ({count, plural, one {# soalan} other {# soalan}})",
+        "noRowsYet": "Tiada baris soalan yang sah lagi.",
+        "problemTooManyRows": "Baris {line}: had batch dicapai — paling banyak {max} soalan boleh diimport.",
+        "problemTooFewOptions": "Baris {line}: sekurang-kurangnya 2 pilihan diperlukan.",
+        "problemTooManyCells": "Baris {line}: aksara '|' dalam teks tidak disokong — buang atau gantikannya.",
+        "problemEmptyCell": "Baris {line}: pilihan kosong ditemui.",
+        "problemEmptyPrompt": "Baris {line}: soalan kosong.",
+        "problemPromptTooLong": "Baris {line}: soalan melebihi {max} aksara.",
+        "problemOptionTooLong": "Baris {line}: pilihan melebihi {max} aksara.",
+        "problemDuplicateOptions": "Baris {line}: pilihan mesti berbeza.",
+        "problemMissingAnswer": "Baris {line}: jawapan betul tidak ditanda — tambah *A atau *benar.",
+        "problemBadAnswerMark": "Baris {line}: tanda jawapan '*' tidak sah.",
+        "problemAnswerOutOfRange": "Baris {line}: huruf jawapan melebihi bilangan pilihan.",
+        "problemDoubleMark": "Baris {line}: lebih daripada satu jawapan ditandakan.",
+        "commitBtn": "Import {count, plural, one {# soalan} other {# soalan}}",
+        "committingBtn": "Mengimport…",
+        "errCap": "Import ini melebihi had 30 soalan bagi setiap kuiz.",
+        "errRateLimited": "Terlalu banyak import. Cuba lagi nanti.",
+        "importedToast": "{count, plural, one {# soalan diimport} other {# soalan diimport}}",
+        "quizFull": "Kuiz ini sudah mempunyai 30 soalan. Buang satu sebelum mengimport lagi.",
+        "fileTooLarge": "Fail itu terlalu besar (maksimum 512 KB)."
+      }
     },
     "dialogs": {
       "editQuizTitle": "Sunting tetapan kuiz",
@@ -425,7 +459,20 @@
       "steeringPlaceholder": "cth. Pendekkan pilihan jawapan, fokus pada takrifan…",
       "regenBtn": "Jana semula dengan AI",
       "shuffleQuestions": "Rombak susunan soalan & pilihan",
-      "shuffleQuestionsHelper": "Setiap pelajar mendapat susunan rawak mereka sendiri. Untuk draf sahaja: ia tidak boleh diubah selepas kuiz diterbitkan."
+      "shuffleQuestionsHelper": "Setiap pelajar mendapat susunan rawak mereka sendiri. Untuk draf sahaja: ia tidak boleh diubah selepas kuiz diterbitkan.",
+      "duplicate": {
+        "dialogTitle": "Duplikasi kuiz",
+        "dialogSubtitle": "Cipta salinan draf bagi \"{title}\". Soalan, tetapan dan imej disalin; sesi dan keputusan tidak.",
+        "destClassLabel": "Kelas destinasi",
+        "destClassPlaceholder": "Pilih kelas",
+        "destClassHelper": "Salinan bermula sebagai DRAF dalam kelas yang dipilih.",
+        "duplicateBtn": "Duplikasi",
+        "duplicatingBtn": "Menyalin…",
+        "duplicatedToast": "Salinan draf bagi \"{title}\" dicipta.",
+        "openDraftAction": "Buka draf",
+        "errArchived": "Kuiz tidak boleh diduplikasi ke dalam kelas yang diarkibkan.",
+        "errRateLimited": "Terlalu banyak duplikasi. Cuba lagi nanti."
+      }
     },
     "results": {
       "backToQuizzes": "Kembali ke kelas",

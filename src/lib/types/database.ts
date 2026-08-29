@@ -1386,6 +1386,10 @@ export type Database = {
       }
       backfill_notification_state: { Args: never; Returns: Json }
       can_student_view_quiz: { Args: { p_quiz_id: string }; Returns: boolean }
+      clone_quiz: {
+        Args: { p_dest_class_id: string; p_src_quiz_id: string }
+        Returns: string
+      }
       confirm_face_subject_deleted: { Args: never; Returns: Json }
       enroll_face: {
         Args: { p_duplicate_similarity: number; p_duplicate_subject: string }

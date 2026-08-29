@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { ArrowDown, ArrowLeft, ArrowUp, CalendarClock, Check, Image as ImageIcon, Pencil, Settings2, Timer, Trash2, Wand2, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, CalendarClock, Check, CopyPlus, Image as ImageIcon, ListPlus, Pencil, Settings2, Timer, Trash2, Wand2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -45,6 +45,8 @@ import { SourceTextPreview } from "@/components/extract/SourceTextPreview";
 import { EditQuestionDialog } from "@/components/quiz/edit-question-dialog";
 import { RegenerateQuestionDialog } from "@/components/quiz/regenerate-question-dialog";
 import { EditQuizDialog } from "@/components/quiz/edit-quiz-dialog";
+import { BulkImportDialog } from "@/components/quiz/bulk-import-dialog";
+import { DuplicateQuizDialog } from "@/components/quiz/duplicate-quiz-dialog";
 import { QuestionImageField } from "@/components/media/question-image-field";
 import type { OcrConfig } from "@/lib/extract/types";
 
@@ -98,12 +100,15 @@ export function QuizBuilderClient({
   quiz,
   questions,
   userId,
+  classes,
   unrevealedCompleted = 0,
   ocrConfig,
 }: {
   quiz: QuizInfo;
   questions: QuestionRow[];
   userId: string;
+  /** AP-2: owned, unarchived classes — duplicate destination options. */
+  classes: Array<{ id: string; title: string }>;
   /** QC-2: completed assessment sessions with hidden results (close-dialog warning). */
   unrevealedCompleted?: number;
   ocrConfig: OcrConfig;
@@ -238,6 +243,9 @@ export function QuizBuilderClient({
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [generateOpen, setGenerateOpen] = useState(false);
+  // AP-1/AP-2 authoring-productivity dialogs.
+  const [importOpen, setImportOpen] = useState(false);
+  const [duplicateOpen, setDuplicateOpen] = useState(false);
   const [reordering, setReordering] = useState(false);
 
   // Close flow (QC-1): confirm dialog + cool-down guard (reset-pattern
@@ -664,20 +672,43 @@ export function QuizBuilderClient({
                 </span>
               </div>
             </div>
-            {isDraft && (
+            {/* Action cluster: grouped right so the hero's justify-between
+                doesn't spread individual buttons across the row. */}
+            <div className="flex flex-wrap items-center gap-3">
+              {isDraft && (
+                <Button
+                  variant="outline"
+                  onClick={() => setGenerateOpen(true)}
+                >
+                  <Wand2 className="mr-1.5 size-4" />
+                  {t("generateFromFile")}
+                </Button>
+              )}
+              {isDraft && (
+                <Button
+                  variant="outline"
+                  onClick={() => setImportOpen(true)}
+                >
+                  <ListPlus className="mr-1.5 size-4" />
+                  {t("importQuestions")}
+                </Button>
+              )}
               <Button
                 variant="outline"
-                onClick={() => setGenerateOpen(true)}
+                onClick={() => setDuplicateOpen(true)}
+                aria-haspopup="dialog"
+                aria-expanded={duplicateOpen}
+                aria-label={t("duplicateQuizAria", { title: quiz.title })}
               >
-                <Wand2 className="mr-1.5 size-4" />
-                {t("generateFromFile")}
+                <CopyPlus className="mr-1.5 size-4" />
+                {t("duplicateQuiz")}
               </Button>
-            )}
-            {!isDraft && (
-              <Link href={`/lecturer/quizzes/${quiz.id}/results`}>
-                <Button variant="accent">{t("viewResults")}</Button>
-              </Link>
-            )}
+              {!isDraft && (
+                <Link href={`/lecturer/quizzes/${quiz.id}/results`}>
+                  <Button variant="accent">{t("viewResults")}</Button>
+                </Link>
+              )}
+            </div>
           </div>
         </div>
       </section>
@@ -709,6 +740,25 @@ export function QuizBuilderClient({
         open={generateOpen}
         onOpenChange={setGenerateOpen}
         hasQuestions={questions.length > 0}
+      />
+
+      <BulkImportDialog
+        quizId={quiz.id}
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        questionCount={questions.length}
+      />
+
+      <DuplicateQuizDialog
+        quizId={quiz.id}
+        quizTitle={quiz.title}
+        sourceClassId={quiz.class_id}
+        // Unarchived owned classes only — an archived source class is
+        // refused server-side, so it is never offered as a destination; the
+        // dialog defaults to the first available class in that case.
+        classes={classes}
+        open={duplicateOpen}
+        onOpenChange={setDuplicateOpen}
       />
 
       <EditQuestionDialog

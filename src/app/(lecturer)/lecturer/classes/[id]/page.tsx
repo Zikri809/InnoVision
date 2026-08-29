@@ -52,12 +52,22 @@ export default async function LecturerClassDetailPage({
   }
 
   // Quizzes in this class (owner sees all statuses — RLS scopes to own classes).
-  const { data: quizzes, error: quizzesError } = await supabase
-    .from("quizzes")
-    .select("id, title, mode, status, time_limit_sec, created_at")
-    .eq("class_id", id)
-    .order("created_at", { ascending: false })
-    .limit(200);
+  const [{ data: quizzes, error: quizzesError }, { data: ownedClasses, error: ownedClassesError }] =
+    await Promise.all([
+      supabase
+        .from("quizzes")
+        .select("id, class_id, title, mode, status, time_limit_sec, created_at")
+        .eq("class_id", id)
+        .order("created_at", { ascending: false })
+        .limit(200),
+      // AP-2: duplicate-destination options — every class this lecturer owns.
+      supabase
+        .from("classes")
+        .select("id, title")
+        .eq("lecturer_id", user.id)
+        .is("archived_at", null)
+        .order("created_at", { ascending: true }),
+    ]);
 
   if (quizzesError) {
     console.error("Quizzes fetch error:", quizzesError);
@@ -65,6 +75,17 @@ export default async function LecturerClassDetailPage({
       <LoadErrorPanel />
     );
   }
+  // Non-critical: the duplicate dialog degrades to the current class only.
+  if (ownedClassesError) {
+    console.error("Owned-classes fetch error:", ownedClassesError);
+  }
 
-  return <ClassDetailClient cls={cls} roster={roster} quizzes={quizzes ?? []} />;
+  return (
+    <ClassDetailClient
+      cls={cls}
+      roster={roster}
+      quizzes={quizzes ?? []}
+      ownedClasses={ownedClasses ?? []}
+    />
+  );
 }

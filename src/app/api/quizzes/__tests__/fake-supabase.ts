@@ -58,6 +58,18 @@ class FakeQueryBuilder {
     return this;
   }
 
+  /**
+   * PostgREST `not` — currently `is`/`neq` operators (the only route uses).
+   * Lockstep note: rows missing the key entirely behave as JS-undefined
+   * (matches SQL three-valued logic only when tests seed the column
+   * explicitly, e.g. image_path: null) — see the duplicate-route tests.
+   */
+  not(col: string, op: string, val: unknown): this {
+    if (op === "is") return this.neq(col, val);
+    if (op === "neq") return this.eq(col, val);
+    throw new Error(`fake-supabase: .not(${op}) not implemented`);
+  }
+
   /** PostgREST `in` — membership over a list of values. */
   in(col: string, values: unknown[]): this {
     this.filters.push({ col, val: values, list: true });
@@ -200,6 +212,15 @@ class FakeQueryBuilder {
     if (this.client.countError && this.countExact) {
       return { rows: [], error: { message: this.client.countError } };
     }
+    // Read-error seam (fail-closed SELECT arms, e.g. duplicate image phase).
+    if (
+      this.client.selectError &&
+      this.client.selectErrorTable === this.table &&
+      !this.op &&
+      !this.countExact
+    ) {
+      return { rows: [], error: { message: this.client.selectError } };
+    }
     const tableRows = (this.client.tables[this.table] ??= []);
 
     if (!this.op) {
@@ -248,9 +269,11 @@ export class FakeSupabase {
   /** When true, replace_quiz_questions returns an error (simulated). */
   rpcError: { message: string } | null = null;
   /**
-   * Test-only: when set, every `.update()`/`.delete()`/etc. on this table
+   * Test-only: when set, EVERY write op (insert/update/delete) on ANY table
    * returns the seeded error so the route's error-mapping branches can be
-   * exercised (e.g. trigger errors on UPDATE).
+   * exercised (e.g. trigger errors on UPDATE). The seam is GLOBAL, not
+   * per-table — a test that mixes successful writes with a seeded write
+   * failure cannot distinguish them.
    */
   updateError: string | null = null;
   /**
@@ -259,6 +282,14 @@ export class FakeSupabase {
    * be exercised (SELECTs otherwise pass through).
    */
   countError: string | null = null;
+  /**
+   * Test-only: when set, plain SELECT queries (no write op, no count) on
+   * `selectErrorTable` return this error — used to exercise read-failure
+   * arms like the duplicate route's fail-closed image-phase select. Table-
+   * scoped so earlier guard reads (profiles/quizzes/classes) still succeed.
+   */
+  selectError: string | null = null;
+  selectErrorTable: string | null = null;
 
   auth = {
     getUser: async () => ({ data: { user: this.user } }),
@@ -349,6 +380,9 @@ export class FakeSupabase {
       const quiz = (this.tables["quizzes"] ?? []).find((q) => q.id === quizId);
       const cls = quiz ? (this.tables["classes"] ?? []).find((c) => c.id === quiz.class_id) : undefined;
       return { data: cls?.lecturer_id === this.user?.id, error: null };
+    }
+    if (name === "clone_quiz") {
+      return this._cloneQuiz(args);
     }
     if (name === "resolve_question_image") {
       // Media visibility stub (0028): returns the seeded decision or an EMPTY
@@ -446,19 +480,83 @@ export class FakeSupabase {
           quizRow.sources = sourceEntry ? [...existingSources, sourceEntry] : existingSources;
         }
 
-        if (args?.p_source_text !== undefined) {
-          quizRow.source_text =
-            mode === "replace"
-              ? args.p_source_text
-              : quizRow.source_text
-                ? `${quizRow.source_text}\n\n--- [Additional Source Material] ---\n\n${args.p_source_text}`
-                : args.p_source_text;
+        // 0025:161-185 semantics: replace overwrites the source fields
+        // wholesale (nulls clear them); append concatenates only NON-EMPTY
+        // new text — an explicit NULL leaves existing text byte-identical.
+        if (mode === "replace") {
+          if (args?.p_source_text !== undefined) {
+            quizRow.source_text = args.p_source_text ?? null;
+          }
+        } else if (args?.p_source_text) {
+          quizRow.source_text = quizRow.source_text
+            ? `${quizRow.source_text}\n\n--- [Additional Source Material] ---\n\n${args.p_source_text}`
+            : args.p_source_text;
         }
       }
       return { data: rows, error: null };
     }
 
     return this.rpcResult;
+  }
+
+  /**
+   * clone_quiz — route-mapping stub in lockstep with migration 0035
+   * (AP-2). Ownership gates mirror the SQL order: source class ownership
+   * first (covers missing + foreign alike → not_quiz_owner), destination
+   * ownership (not_class_owner), archived destination (class_archived).
+   * The authoritative clone-fidelity checks live in scripts/verify-clone-quiz.mjs.
+   */
+  private _cloneQuiz(args?: Record<string, unknown>) {
+    // Test seam: an explicitly seeded rpcError/rpcResult overrides the stub
+    // (error-mapping branches without re-modeling the real RPC).
+    if (this.rpcError) return { data: null, error: this.rpcError };
+    if (this.rpcResult.data !== null || this.rpcResult.error !== null) return this.rpcResult;
+    const srcId = String(args?.p_src_quiz_id);
+    const destClassId = String(args?.p_dest_class_id);
+
+    const quizzes = (this.tables["quizzes"] ??= []);
+    const src = quizzes.find((q) => q.id === srcId);
+    const srcClass = src
+      ? (this.tables["classes"] ?? []).find((c) => c.id === src.class_id)
+      : undefined;
+    if (!src || srcClass?.lecturer_id !== this.user?.id) {
+      return { data: null, error: { message: "not_quiz_owner" } };
+    }
+
+    const destClass = (this.tables["classes"] ?? []).find((c) => c.id === destClassId);
+    if (!destClass || destClass.lecturer_id !== this.user?.id) {
+      return { data: null, error: { message: "not_class_owner" } };
+    }
+    if (destClass.archived_at) {
+      return { data: null, error: { message: "class_archived" } };
+    }
+
+    const newId = randomUuid();
+    // Title carries the " (copy)" suffix trimmed to the 200-char CHECK.
+    const baseTitle = String(src.title ?? "").trim();
+    const clone: Row = {
+      ...src,
+      id: newId,
+      class_id: destClassId,
+      created_by: this.user?.id,
+      title: `${baseTitle.slice(0, 200 - 7)} (copy)`,
+      status: "draft",
+      // Fresh-state fields: 0035 copies metadata but never linkage/session
+      // state, file provenance, windows, or reveal timestamps.
+      results_revealed_at: null,
+      opens_at: null,
+      closes_at: null,
+      source_file_url: null,
+      sources: [],
+      created_at: "2026-01-01T00:00:00Z",
+    };
+    quizzes.push(clone);
+
+    const questions = (this.tables["questions"] ??= []);
+    for (const q of questions.filter((q) => q.quiz_id === srcId)) {
+      questions.push({ ...q, id: randomUuid(), quiz_id: newId });
+    }
+    return { data: newId, error: null };
   }
 
   // ── session RPC stubs (route-mapping only; see header comment) ──

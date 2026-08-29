@@ -298,6 +298,12 @@ POST   /api/quizzes/[id]/questions   → RPC append_question
 PATCH  /api/quizzes/[id]/questions/[qid] → direct UPDATE (draft-only trigger backstop)
 DELETE /api/quizzes/[id]/questions/[qid]
 POST   /api/quizzes/[id]/reorder     → RPC reorder_questions (validates exact id set)
+POST   /api/quizzes/[id]/import-questions → RPC save_quiz_questions(p_mode:'append',
+       p_title/p_source_file_url/p_source_text := NULL so provenance is untouched).
+       Client parses pipe-separated text into rows (preview + atomic reject);
+       the route re-validates via QuestionInputSchema (Zod array 1..30, 512 KB
+       body cap), maps camelCase→snake_case rows, and relies on the RPC's
+       advisory-locked cap check (30) as the authority.
 ```
 
 Validation is duplicated *deliberately*: Zod schemas in
@@ -360,6 +366,12 @@ POST /api/quizzes/[id]/close     live→closed (one-way; trigger enforces;
                                  idempotent re-close → 200; draft → 409)
 POST /api/quizzes/[id]/reveal    results_revealed_at flip — live OR closed
                                  (QC-2; draft → 409 quiz_not_revealable)
+POST /api/quizzes/[id]/duplicate → RPC clone_quiz (AP-2; any source status —
+                                 destination is ALWAYS a fresh draft via the
+                                 quiz_status_transition trigger; destination
+                                 class must be owned + unarchived → 409
+                                 class_archived; the 30-question cap is
+                                 deliberately NOT enforced on a faithful copy)
 DELETE /api/quizzes/[id]         blocked 409 if any quiz_sessions exist
 ```
 
@@ -648,7 +660,15 @@ grants ≠ authorization). Writes ride the multipart API routes: declared
 content-length gate → magic-byte sniff (PNG/JPEG/WebP ≤5 MB) → admin-client
 upload `<uid>/<uuid>.<ext>` → guarded column UPDATE → best-effort old-object
 remove AFTER success (races leave swept orphans; `npm run media:cleanup`).
-Reads go through the SECURITY DEFINER RPC `resolve_question_image(question_id)`
+Quiz DUPLICATION (AP-2) replicates objects because image DELETE removes them
+(a sharing clone would break): `clone_quiz` copies `image_path` verbatim →
+the route then copies each object server-side (`storage.copy`, path shape
+re-validated first) and repoints the clone's column via the USER client →
+per-image failure NULLs the clone's path (fail-closed); objects copied just
+before a failed UPDATE are rolled back immediately. Until the phase lands the
+clone transiently shares the source's object (same-owner, benign — a missing
+object degrades to the sign route's clean 404). Reads go through the SECURITY
+DEFINER RPC `resolve_question_image(question_id)`
 — THE visibility boundary: class-owner any status / enrolled+live /
 enrolled+closed+reveal-allowed (archived classes excluded) for assessment
 questions; creator or shared-code-holder for practice questions. Everything
@@ -706,7 +726,7 @@ into `${uid}/${quizId}/…`.
 | Pure units | Vitest (`src/**/*.test.ts`) | scoring, timers, validation, gestures, liveness, merge logic, derive |
 | Route tests | Vitest + `fake-supabase.ts` (a fake that mimics RLS/RPC semantics and THROWS on unknown filters) | every API route's guard/CSRF/rate-limit/validation/error-mapping contracts |
 | AI boundary | MSW (`src/test/msw`) | mocked OpenAI-compatible endpoints |
-| Live-SQL harnesses | `npm run verify:*` (needs local supabase) | RLS policies, RPC state machines, caps, secrecy probes (e.g. `verify:student-quizzes` SQ-D1–D9, `verify:media` MEDIA-D1–D12, `verify:quizzes` QT3-D1–D6) |
+| Live-SQL harnesses | `npm run verify:*` (needs local supabase) | RLS policies, RPC state machines, caps, secrecy probes (e.g. `verify:student-quizzes` SQ-D1–D9, `verify:media` MEDIA-D1–D12, `verify:quizzes` QT3-D1–D6, `verify:clone` AP2-D1–D11) |
 | E2E | Playwright, chromium, dev-server + mock AI + CompreFace mock seam | full user journeys; `e16` is the integrity reference spec; specs skip loudly if `LECTURER_INVITE_CODE` unset |
 | Types/schema drift | `gen:types` + CI diff | database.ts vs migrated schema |
 | Copy drift | `check:i18n` | en/ms parity + referenced-key existence |

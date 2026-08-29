@@ -49,7 +49,10 @@ context/invariants; verify details against code.
 > Partial domain shipments that stay recorded inside their `roadmap/PLAN_R_*.md`
 > implementation logs (plan docs move out only when the whole domain ships):
 > AU-1 forgot/reset password (2026-08-28); RA-1 cross-quiz gradebook +
-> SQ-2 student results entry point (2026-08-28, no migration).
+> SQ-2 student results entry point (2026-08-28, no migration); SQ-5 camera
+> failure taxonomy + IO-1 unlock notification (2026-08-29, migration 0033);
+> QT-3 per-student shuffling (2026-08-29, migration 0034); AP-1 bulk import +
+> AP-2 quiz duplication (2026-08-29, migration 0035, `clone_quiz`).
 
 ## 📜 Superseded / snapshots (do NOT cite as current)
 
@@ -64,7 +67,7 @@ context/invariants; verify details against code.
 - **Stack**: Next.js (App Router) · Supabase (Postgres, Auth, Storage) ·
   MediaPipe tasks-vision (face landmarker + hand landmarker, vendored) ·
   self-hosted CompreFace (Docker) · optional GLM-OCR (vLLM).
-- **Migrations**: `supabase/migrations/0001…0032` — authoritative schema.
+- **Migrations**: `supabase/migrations/0001…0035` — authoritative schema.
   Regenerate types after schema changes: `npm run gen:types`.
 - **Face pipeline (current)**: enroll 3 angles → gate (blink + `'start'`
   verify) → periodic/question re-verification with **up-to-3-frame majority
@@ -99,6 +102,7 @@ context/invariants; verify details against code.
   npm run face:report     # threshold-tuning report over recorded face_checks
   npm run incident:cleanup # delete incident clips older than 30d (cron-able; no scheduler wired)
   npm run verify:sessions # …plus verify:classes/quizzes/ai/results/security
+  npm run verify:clone    # clone_quiz AP-2 probes (14 checks; ownership/archived/fidelity/cap-free)
   npm run check:i18n      # en <-> ms key parity
   npx playwright test     # E2E (needs LECTURER_INVITE_CODE in .env.local)
   ```

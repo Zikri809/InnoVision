@@ -67,6 +67,7 @@ export default async function QuizBuilderPage({
     { data: ownedClass, error: ownedClassError },
     { data: questions, error: questionsError },
     { count: completedUnrevealed, error: completedUnrevealedError },
+    { data: ownedClasses, error: ownedClassesError },
   ] = await Promise.all([
     supabase
       .from("classes")
@@ -88,6 +89,13 @@ export default async function QuizBuilderPage({
       .eq("quiz_id", id)
       .eq("mode", "assessment")
       .eq("status", "completed"),
+    // AP-2: duplicate-destination options — every class this lecturer owns.
+    supabase
+      .from("classes")
+      .select("id, title")
+      .eq("lecturer_id", user.id)
+      .is("archived_at", null)
+      .order("created_at", { ascending: true }),
   ]);
   // Distinguish a DB outage (503-style error panel) from genuinely-not-owned
   // (404). A transient error must not render as a not-found.
@@ -123,6 +131,10 @@ export default async function QuizBuilderPage({
       </div>
     );
   }
+  // Non-critical: the duplicate dialog degrades to the source's class only.
+  if (ownedClassesError) {
+    console.error("Owned-classes fetch error:", ownedClassesError);
+  }
 
   return (
     <QuizBuilderClient
@@ -145,6 +157,7 @@ export default async function QuizBuilderPage({
       }}
       questions={questions ?? []}
       userId={user.id}
+      classes={ownedClasses ?? []}
       unrevealedCompleted={
         quiz.status === "live" &&
         quiz.mode === "assessment" &&

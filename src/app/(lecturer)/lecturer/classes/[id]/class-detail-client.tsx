@@ -33,6 +33,7 @@ import {
 import {
   ArrowLeft,
   Copy,
+  CopyPlus,
   Archive,
   RotateCcw,
   Loader2,
@@ -42,6 +43,7 @@ import { windowLocalInputToIso } from "@/lib/format/window";
 import { HOURS_MAX, MINUTES_MAX, hmToSeconds } from "@/lib/quizzes/time-limit";
 import { TITLE_MAX } from "@/lib/quizzes/validation";
 import { MODE_CLASS, STATUS_CLASS, getModeLabel, getStatusLabel } from "@/lib/quizzes/labels";
+import { DuplicateQuizDialog } from "@/components/quiz/duplicate-quiz-dialog";
 import type { QuizMode } from "@/lib/types/aliases";
 
 type ClassInfo = {
@@ -60,6 +62,7 @@ type RosterEntry = {
 
 type QuizRow = {
   id: string;
+  class_id: string;
   title: string;
   mode: "practice" | "assessment";
   status: "draft" | "live" | "closed";
@@ -71,10 +74,13 @@ export function ClassDetailClient({
   cls,
   roster,
   quizzes,
+  ownedClasses,
 }: {
   cls: ClassInfo;
   roster: RosterEntry[];
   quizzes: QuizRow[];
+  /** AP-2: owned, unarchived classes — duplicate destination options. */
+  ownedClasses: Array<{ id: string; title: string }>;
 }) {
   const router = useRouter();
   const locale = useLocale();
@@ -105,6 +111,9 @@ export function ClassDetailClient({
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [restoreError, setRestoreError] = useState<string | null>(null);
+
+  // AP-2: quiz duplication from the class quiz list.
+  const [duplicateQuiz, setDuplicateQuiz] = useState<QuizRow | null>(null);
 
   // Ref lock guards against a fast double-click before React re-renders.
   const submitLock = useRef(false);
@@ -618,6 +627,17 @@ export function ClassDetailClient({
                           {t("resultsBtn")}
                         </Link>
                       )}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 rounded-full border-[3px] px-2.5"
+                        onClick={() => setDuplicateQuiz(q)}
+                        aria-haspopup="dialog"
+                        aria-label={`${t("duplicateBtn")} - ${q.title}`}
+                      >
+                        <CopyPlus className="size-4" aria-hidden="true" />
+                      </Button>
                     </div>
                   </div>
                 </li>
@@ -661,6 +681,19 @@ export function ClassDetailClient({
           )}
         </CardContent>
       </Card>
+
+      {/* ── AP-2 duplicate-quiz dialog ── */}
+      <DuplicateQuizDialog
+        quizId={duplicateQuiz?.id ?? ""}
+        quizTitle={duplicateQuiz?.title ?? ""}
+        sourceClassId={duplicateQuiz?.class_id ?? cls.id}
+        // Unarchived owned classes only (see duplicate-quiz-dialog).
+        classes={ownedClasses}
+        open={duplicateQuiz !== null}
+        onOpenChange={(open) => {
+          if (!open) setDuplicateQuiz(null);
+        }}
+      />
 
       {/* ── Archive class confirmation dialog ── */}
       <Dialog
