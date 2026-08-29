@@ -5,7 +5,6 @@ import {
   joinClass,
   createAssessmentAndPublish,
   createQuizWithQuestions,
-  openResults,
   revealQuiz,
   currentSessionId,
   completeQuiz,
@@ -163,7 +162,8 @@ test.describe("E39 — gradebook", () => {
     const lecturerPage = await lecturerCtx.newPage();
 
     await registerUser(lecturerPage, `lecturer-e39z-${TEST_TIMESTAMP}@innovision.test`, "lecturer", LECTURER_INVITE_CODE);
-    const joinCode = await createClass(lecturerPage, `${CLASS_TITLE} Z`);
+    // Return value unused here — the class just needs to exist.
+    await createClass(lecturerPage, `${CLASS_TITLE} Z`);
 
     // PRACTICE quiz (published) + assessment left as DRAFT (not published).
     await createQuizWithQuestions(lecturerPage, {

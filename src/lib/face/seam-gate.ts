@@ -18,3 +18,13 @@
 export function isFakeFaceSeamEnabled(): boolean {
   return process.env.NEXT_PUBLIC_E2E_FAKE_SEAM === "1";
 }
+
+/**
+ * Gate for the dev-only playground pages (/dev/error, /dev/bot). Same story as
+ * the fake seam above: they were gated on NODE_ENV === "development" and 404'd
+ * under the production-build E2E harness, killing the error-boundary specs.
+ * Reachable in dev OR under the harness flag; never in a real deployment.
+ */
+export function isDevPlaygroundEnabled(): boolean {
+  return process.env.NODE_ENV === "development" || isFakeFaceSeamEnabled();
+}

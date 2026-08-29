@@ -507,9 +507,11 @@ recovering → flagged/unavailable`. Tab-hide pauses the cadence and issues a
 catch-up verify on return (nothing recorded while hidden).
 
 **E2E mock seam**: fake tracker emits marker frames
-(`FAKE_FRAME_MATCH/MISMATCH`); when `COMPREFACE_MOCK_ENABLED === "1"` AND
-NODE_ENV ≠ production, `compreface-client.ts` returns canned responses —
-strict opt-in since migration 0024 remediation.
+(`FAKE_FRAME_MATCH/MISMATCH`); when `NEXT_PUBLIC_E2E_FAKE_SEAM === "1"` AND
+`COMPREFACE_MOCK_ENABLED === "1"`, `compreface-client.ts` returns canned responses —
+harness-only opt-in (`seam-gate.ts`), set only in `playwright.config.ts`'s
+webServer env. Replaced the earlier `NODE_ENV ≠ production` gate, which went
+dead when the suite switched to the production build (5f6b1da).
 
 ### 7.7 Gesture answering (hand tracking)
 

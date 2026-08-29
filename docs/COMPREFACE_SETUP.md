@@ -82,4 +82,4 @@ E2E and unit tests do NOT require a running CompreFace container. Set:
 COMPREFACE_MOCK_ENABLED=1
 ```
 
-The Next.js routes then short-circuit the CompreFace call when the request frame carries the `FAKE_FRAME_MATCH` / `FAKE_FRAME_MISMATCH` markers produced by the E2E fake tracker. This is guarded by `NODE_ENV !== "production"` AND `COMPREFACE_MOCK_ENABLED === "1"` — it cannot activate in a real deployment.
+The Next.js routes then short-circuit the CompreFace call when the request frame carries the `FAKE_FRAME_MATCH` / `FAKE_FRAME_MISMATCH` markers produced by the E2E fake tracker. This is guarded by `NEXT_PUBLIC_E2E_FAKE_SEAM === "1"` AND `COMPREFACE_MOCK_ENABLED === "1"` (see `src/lib/face/seam-gate.ts`) — both are set ONLY in `playwright.config.ts`'s webServer env, so it cannot activate in a real deployment. (The gate was originally `NODE_ENV !== "production"`; since 5f6b1da the E2E suite serves the production build, where NODE_ENV is `"production"` and that gate was dead — the explicit harness flag replaced it.)

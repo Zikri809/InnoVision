@@ -2,14 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { notFound } from "next/navigation";
+import { isDevPlaygroundEnabled } from "@/lib/face/seam-gate";
 
 /**
  * Dev-only trigger for the root error boundary (error.tsx). Exists so E2E can
  * exercise the boundary without a deliberate production crash surface.
- * 404 outside dev — same guard as the /dev/bot playground.
+ * 404 outside dev or the E2E harness — same guard as the /dev/bot playground.
  */
 export default function DevErrorPage() {
-  if (process.env.NODE_ENV !== "development") notFound();
+  if (!isDevPlaygroundEnabled()) notFound();
 
   const [armed, setArmed] = useState(false);
 

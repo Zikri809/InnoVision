@@ -22,8 +22,9 @@ import {
  *  4. Budget exhaustion: after the final allowed attempt, Start redirects
  *     to the completed EndScreen (legacy already_attempted + session_id
  *     contract, e5-pinned journey) — no new session spawns.
- *  5. Student list copy flips to "Up to N attempts — latest counts" while
- *     retakes are enabled.
+ *  5. The completed card keeps the awaiting chip with retakes enabled
+ *     (E40-pinned coexistence) — the retake copy on the list card belongs
+ *     to the not-yet-started state only.
  *
  * Service-role seam: reading attempt rows directly for the coexistence
  * assertion (the UI cannot enumerate a student's attempts).
@@ -110,13 +111,18 @@ test("retake journey: enable on live quiz → spawn → chip → budget exhausti
   await dialog.getByRole("button", { name: "Save changes" }).click();
   await expect(dialog).toBeHidden({ timeout: 10_000 });
 
-  // The student list copy flips to the retake wording.
-  await expect
-    .poll(async () => {
-      await student.goto("/student/quizzes");
-      return student.getByText(/up to 2 attempts/i).count();
-    })
-    .toBe(1);
+  // Student list still reflects completed attempt 1: the awaiting chip stays
+  // (pinned by E40 — the chip reflects attempt 1, the Start button reflects
+  // the resumable attempt 2) and no score-less View results link appears.
+  await student.goto("/student/quizzes");
+  await expect(
+    student
+      .getByRole("status")
+      .filter({ hasText: /awaiting results|menunggu keputusan/i }),
+  ).toHaveCount(1);
+  await expect(
+    student.getByRole("link", { name: /view results|lihat keputusan/i }),
+  ).toHaveCount(0);
 
   // ── 4. Retake spawns a NEW session (attempt 2), not the old EndScreen.
   await student.getByRole("button", { name: "Start" }).click();

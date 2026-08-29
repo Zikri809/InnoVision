@@ -31,47 +31,89 @@ export async function registerUser(
   await page.getByRole("radio", { name: roleLabel }).check();
 
   let matric: string | null = null;
-  if (role === "lecturer") {
-    await page.getByLabel("Lecturer invite code").fill(inviteCode);
-  } else {
-    // Matric (0027): REQUIRED for students. Derived from a cheap string HASH
-    // of the whole email so two accounts minted in the SAME run from the same
-    // timestamp base (e.g. `x-<stamp>@` creator/player pairs) never collide,
-    // while reruns of the same spec stay deterministic. Prefix "8" stays
-    // clear of the reserved 99xxxx range.
-    let h = 0;
-    for (let i = 0; i < email.length; i++) {
-      h = (h * 31 + email.charCodeAt(i)) % 100000;
-    }
-    matric = `8${String(h).padStart(5, "0")}`;
-    await page.getByLabel(/Matric number/i).fill(matric);
-  }
+  const landing =
+    role === "lecturer" ? /\/lecturer\/classes/ : /\/student\/classes/;
+  // The styled form-level error paragraph (role=alert). Next's route
+  // announcer also renders role=alert, hence the text filter.
+  const formAlert = page
+    .getByRole("alert")
+    .filter({ hasText: /could not create|matric number is already/i });
 
-  await page.getByRole("checkbox").check();
-  // The submit CTA was renamed "Create account" by the i18n pass — match
-  // either era.
-  await page.getByRole("button", { name: /create account|register/i }).click();
+  // Submit and wait for EITHER the role landing page or a rendered signup
+  // error — never the full 45s blind wait, which blew the 30s default test
+  // timeout before the recovery path could run when signup was rejected.
+  const submit = async (): Promise<"landing" | "error"> => {
+    await page
+      .getByRole("button", { name: /create account|register/i })
+      .click();
+    return Promise.race([
+      page
+        .waitForURL(landing, { timeout: 45_000 })
+        .then(() => "landing" as const)
+        .catch(() => "landing" as const),
+      formAlert
+        .waitFor({ state: "visible", timeout: 45_000 })
+        .then(() => "error" as const)
+        .catch(() => "error" as const),
+    ]);
+  };
 
-  // Wait for the role-based landing page (also settles the hydration race).
-  // 45s: a cold dev server compiles /register, the action round-trip AND the
-  // landing route on first touch — 30s proved too tight under 4-worker load.
-  const landing = role === "lecturer" ? /\/lecturer\/classes/ : /\/student\/classes/;
-  try {
-    await page.waitForURL(landing, { timeout: 45_000 });
-  } catch {
-    // Poisoned-retry recovery: a stalled prior attempt (dev-server cold
-    // compile, load spike) often created the account BEFORE this navigation
-    // resolved — so the retried registration of the SAME email can never
-    // succeed ("already registered"). Fall back to signing in with the
-    // shared E2E password; the landing assertion below stays authoritative.
-    // The proxy bounces authenticated users off /login → drop any session
-    // cookie a partial signup set before signing in.
+  // Poisoned-retry recovery: a prior attempt (this run's retry, or a
+  // duplicate-email serial spec) often created the account BEFORE this
+  // navigation resolved — the retried registration can never succeed
+  // ("already registered"). Fall back to signing in with the shared E2E
+  // password; the landing assertion below stays authoritative. The proxy
+  // bounces authenticated users off /login → drop any session cookie a
+  // partial signup set before signing in.
+  const recoverAndSignIn = async () => {
     await page.context().clearCookies();
     await page.goto("/login");
     await page.getByLabel(/Email/).fill(email);
     await page.getByLabel("Password", { exact: true }).fill(E2E_PASSWORD);
     await page.getByRole("button", { name: /sign in/i }).click();
     await page.waitForURL(landing, { timeout: 45_000 });
+  };
+
+  await page.getByRole("checkbox").check();
+
+  if (role === "lecturer") {
+    await page.getByLabel("Lecturer invite code").fill(inviteCode);
+    const outcome = await submit();
+    if (outcome === "error") await recoverAndSignIn();
+  } else {
+    // Matric (0027): REQUIRED for students. Derived from a cheap string HASH
+    // of the whole email so two accounts minted in the SAME run from the same
+    // timestamp base (e.g. `x-<stamp>@` creator/player pairs) never collide,
+    // while reruns of the same spec stay deterministic. The salt bumps on a
+    // "matric already registered" rejection — the helper DB is persistent, so
+    // a 5-digit space eventually collides with a row from an earlier run.
+    // Prefix "8" stays clear of the reserved 99xxxx range.
+    const matricFor = (salt: number): string => {
+      let h = 0;
+      const source = `${email}#${salt}`;
+      for (let i = 0; i < source.length; i++) {
+        h = (h * 31 + source.charCodeAt(i)) % 100000;
+      }
+      return `8${String(h).padStart(5, "0")}`;
+    };
+
+    let salt = 0;
+    for (;;) {
+      const candidate = matricFor(salt);
+      await page.getByLabel(/Matric number/i).fill(candidate);
+      const outcome = await submit();
+      if (outcome === "landing") {
+        matric = candidate;
+        break;
+      }
+      const alertText = (await formAlert.textContent().catch(() => "")) ?? "";
+      if (/matric number is already/i.test(alertText) && salt < 5) {
+        salt++;
+        continue;
+      }
+      await recoverAndSignIn();
+      break;
+    }
   }
   return { matric };
 }

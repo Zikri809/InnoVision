@@ -2,7 +2,6 @@ import { redirect, notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getClassRoster } from "@/lib/classes/roster";
 import { buildGradebookModel, GRADEBOOK_QUIZ_LIMIT } from "@/lib/results/gradebook";
-import { getTranslations } from "next-intl/server";
 import { ProfilePendingPanel, LoadErrorPanel } from "@/components/layout/load-state";
 import { GradebookClient } from "./gradebook-client";
 

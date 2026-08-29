@@ -247,6 +247,9 @@ export function StudentQuizzesClient({
                     ) : q.completedSessionId ? (
                       // SQ-2: completed + NOT revealed → status text, not a
                       // dead link (unrevealed EndScreen is score-less anyway).
+                      // Stays even with retakes enabled (pinned by E40): the
+                      // chip reflects completed attempt 1; the Start button
+                      // reflects the resumable attempt 2.
                       <span className="rounded-full border-[3px] border-border bg-muted px-3 py-1 text-xs font-extrabold text-muted-foreground" role="status">
                         {t("cardCompletedAwaiting")}
                       </span>
