@@ -75,7 +75,7 @@ jobs:
       - name: Phase 2 classes probes (D8/D12)
         run: npm run verify:classes
 
-      - name: Class archiving probes (D26b: archive/restore lifecycle)
+      - name: "Class archiving probes (D26b: archive/restore lifecycle)"
         run: npm run verify:class-archiving
 
       - name: Phase 3 quizzes probes (D5/D6/D19-D24)
@@ -96,10 +96,10 @@ jobs:
       - name: Phase SQ student-quiz probes (SQ-D1-D8)
         run: npm run verify:student-quizzes
 
-      - name: Media probes (MEDIA-D1-D10: storage deny-by-default, image visibility, save RPC)
+      - name: "Media probes (MEDIA-D1-D10: storage deny-by-default, image visibility, save RPC)"
         run: npm run verify:media
 
-      - name: Matric number probes (0027: trigger/uniqueness/RLS/roster)
+      - name: "Matric number probes (0027: trigger/uniqueness/RLS/roster)"
         run: npm run verify:matric
 
       - name: Build
