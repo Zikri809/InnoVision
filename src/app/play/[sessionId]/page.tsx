@@ -3,6 +3,14 @@ import { getTranslations } from "next-intl/server";
 import { createClient } from "@/lib/supabase/server";
 import { isUuid } from "@/lib/classes/roster";
 import { firstUnansweredIndex, remainingMs } from "@/lib/sessions/timer";
+import {
+  applyBreakdownShuffle,
+  applyQuestionShuffle,
+  optionScope,
+  QUESTION_ORDER_SCOPE,
+  shufflePlan,
+  toPresented,
+} from "@/lib/sessions/shuffle";
 import { PlayClient } from "@/components/quiz/play-client";
 import { EndScreen } from "@/components/quiz/end-screen";
 import type { FaceStatus } from "@/lib/face/types";
@@ -44,6 +52,7 @@ type QuizRow = {
   status: "draft" | "live" | "closed";
   time_limit_sec: number | null;
   results_revealed_at: string | null;
+  shuffle_questions: boolean | null;
 };
 
 type AnswerRow = {
@@ -160,7 +169,7 @@ export default async function PlayPage({ params }: PageProps) {
   const [quizRes, questionsRes, answersRes, faceChecksRes, profileRes] = await Promise.allSettled([
     supabase
       .from("student_quiz_view")
-      .select("id, title, mode, status, time_limit_sec, results_revealed_at")
+      .select("id, title, mode, status, time_limit_sec, results_revealed_at, shuffle_questions")
       .eq("id", s.quiz_id)
       .maybeSingle()
       .then(async (r) =>
@@ -168,7 +177,7 @@ export default async function PlayPage({ params }: PageProps) {
           ? r
           : supabase
               .from("student_closed_revealed_quiz_view")
-              .select("id, title, mode, status, time_limit_sec, results_revealed_at")
+              .select("id, title, mode, status, time_limit_sec, results_revealed_at, shuffle_questions")
               .eq("id", s.quiz_id)
               .maybeSingle(),
       ),
@@ -212,6 +221,16 @@ export default async function PlayPage({ params }: PageProps) {
   // casts narrow to the non-null shape the client expects (same workaround as
   // student-quizzes/page.tsx).
   const questions = (questionsRes.value.data ?? []) as QuestionRow[];
+
+  // ── QT-3: per-session shuffling. When the quiz opts in, BOTH the question
+  // order and each question's option order are permuted into presented space,
+  // deterministically derived from (sessionId, question id) — nothing is
+  // stored, so resume/multi-device reloads re-derive the identical order.
+  // The client translates presented→canonical indices before POSTing (the
+  // wire and session_answers stay canonical); review below is translated the
+  // other way so highlights match what the student saw.
+  const shuffled = quiz.shuffle_questions === true;
+  const presentedQuestions = shuffled ? applyQuestionShuffle(s.id, questions) : questions;
 
   // P7: seeding precedence (PLAN_PHASE7 §2) — completed → EndScreen;
   // flagged → 'flagged'; paused → 'paused'; faceExempt → 'exempt' (only when
@@ -257,6 +276,20 @@ export default async function PlayPage({ params }: PageProps) {
       if (!rpcErr) {
         const r = rpcRes as { questions?: unknown[]; total?: unknown } | null;
         breakdown = (r?.questions ?? []).map((q) => q as ResultsBreakdownRow);
+        if (shuffled && breakdown.length > 0) {
+          // QT-3: reorder rows + translate indices into presented space so the
+          // review matches the order the student answered in. On the QC-2
+          // closed+revealed path student_question_view is live-only → the
+          // question projection is empty, so derive the presented order from
+          // the breakdown rows themselves (canonical order via order_index).
+          const presentedIds =
+            presentedQuestions.length > 0
+              ? presentedQuestions.map((q) => q.id)
+              : shufflePlan(s.id, QUESTION_ORDER_SCOPE, breakdown.length).map(
+                  (i) => breakdown[i].question_id,
+                );
+          breakdown = applyBreakdownShuffle(s.id, presentedIds, breakdown);
+        }
       }
       // On RPC error fall through to the score-only EndScreen (never crash).
     }
@@ -287,10 +320,25 @@ export default async function PlayPage({ params }: PageProps) {
     );
   }
 
-  // Resume: server computes the first unanswered index.
+  // Resume: server computes the first unanswered index — in the student's
+  // PRESENTED order when shuffling is on (ID-keyed, so it survives the
+  // permutation; the presented position is what the HUD shows).
   const answeredRows = (answersRes.value.data ?? []) as AnswerRow[];
   const answeredIds = answeredRows.map((a) => a.question_id);
-  const initialIndex = firstUnansweredIndex(questions, answeredIds);
+  const initialIndex = firstUnansweredIndex(presentedQuestions, answeredIds);
+
+  // QT-3: stored selected_index values are canonical (the wire never carries
+  // presented indices); translate once here so the client renders the resume
+  // highlight against the presented options array.
+  const presentedAnswers = shuffled
+    ? answeredRows.map((a) => {
+        const q = presentedQuestions.find((x) => x.id === a.question_id);
+        if (!q) return a;
+        const plan = shufflePlan(s.id, optionScope(q.id), q.options.length);
+        const presented = toPresented(a.selected_index, plan);
+        return presented === null ? a : { ...a, selected_index: presented };
+      })
+    : answeredRows;
 
   const initialRemainingMs = remainingMs({
     startedAt: new Date(s.started_at).getTime(),
@@ -306,10 +354,11 @@ export default async function PlayPage({ params }: PageProps) {
     <PlayClient
       sessionId={s.id}
       quiz={{ title: quiz.title, mode: quiz.mode, timeLimitSec: quiz.time_limit_sec }}
-      questions={questions}
-      initialAnswers={answeredRows}
+      questions={presentedQuestions}
+      initialAnswers={presentedAnswers}
       initialIndex={initialIndex}
       initialRemainingMs={initialRemainingMs}
+      shuffled={shuffled}
       face={{
         enrolled,
         consentGiven,

@@ -43,7 +43,7 @@ export default async function QuizBuilderPage({
   // the explicit eq() on lecturer_id makes the not-found case unambiguous.
   const { data: quiz, error: quizError } = await supabase
     .from("quizzes")
-    .select("id, class_id, title, mode, status, time_limit_sec, opens_at, closes_at, allow_retake, max_attempts, results_revealed_at, created_at, source_file_url, source_text")
+    .select("id, class_id, title, mode, status, time_limit_sec, opens_at, closes_at, allow_retake, max_attempts, shuffle_questions, results_revealed_at, created_at, source_file_url, source_text")
     .eq("id", id)
     .maybeSingle();
 
@@ -138,6 +138,7 @@ export default async function QuizBuilderPage({
         closes_at: quiz.closes_at,
         allow_retake: quiz.allow_retake,
         max_attempts: quiz.max_attempts,
+        shuffle_questions: quiz.shuffle_questions,
         created_at: quiz.created_at,
         source_file_url: quiz.source_file_url,
         source_text: quiz.source_text,

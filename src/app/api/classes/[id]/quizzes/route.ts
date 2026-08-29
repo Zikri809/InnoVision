@@ -64,7 +64,7 @@ export async function POST(request: Request, { params }: Params) {
     return invalidBody(firstIssueMessage(parsed.error.issues, "Invalid quiz data."));
   }
 
-  const { title, mode, timeLimitSec, opensAt, closesAt, allowRetake, maxAttempts } = parsed.data;
+  const { title, mode, timeLimitSec, opensAt, closesAt, allowRetake, maxAttempts, shuffleQuestions } = parsed.data;
   const effectiveTimeLimitSec = mode === "practice" ? null : (timeLimitSec ?? null);
 
   const { data: quiz, error } = await supabase
@@ -79,9 +79,12 @@ export async function POST(request: Request, { params }: Params) {
       closes_at: closesAt,
       allow_retake: mode === "assessment" ? (allowRetake ?? false) : false,
       max_attempts: mode === "assessment" ? (maxAttempts ?? 1) : 1,
+      // QT-3 applies to BOTH play modes (unlike the retake config above) —
+      // shoulder-surfing protection matters in practice just as much.
+      shuffle_questions: shuffleQuestions ?? false,
       status: "draft",
     })
-    .select("id, class_id, title, mode, status, time_limit_sec, opens_at, closes_at, allow_retake, max_attempts, created_at")
+    .select("id, class_id, title, mode, status, time_limit_sec, opens_at, closes_at, allow_retake, max_attempts, shuffle_questions, created_at")
     .single();
 
   if (error) {

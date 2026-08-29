@@ -8,6 +8,7 @@ export interface QuizMetadataPatch {
   closesAt?: string | null;
   allowRetake?: boolean | null;
   maxAttempts?: number | null;
+  shuffleQuestions?: boolean | null;
 }
 
 export interface QuizUpdateColumns {
@@ -18,6 +19,7 @@ export interface QuizUpdateColumns {
   closes_at?: string | null;
   allow_retake?: boolean;
   max_attempts?: number;
+  shuffle_questions?: boolean;
 }
 
 /** The window fields a PATCH may carry while bypassing the draft-only lock. */
@@ -38,7 +40,8 @@ export function hasNonWindowFields(input: QuizMetadataPatch): boolean {
   return (
     input.title !== undefined ||
     input.mode !== undefined ||
-    input.timeLimitSec !== undefined
+    input.timeLimitSec !== undefined ||
+    input.shuffleQuestions !== undefined
   );
 }
 
@@ -53,6 +56,10 @@ export function hasNonWindowFields(input: QuizMetadataPatch): boolean {
  * INERT on practice quizzes (the RPC only reads them on the assessment
  * path), so no mode-based forcing is applied — mirroring the
  * `NULL is distinct from NULL` inertness proven for practice time_limit.
+ *
+ * shuffleQuestions (QT-3) is FROZEN metadata: it counts as a non-window
+ * field (hasNonWindowFields) so a non-draft PATCH carrying it hits the
+ * blanket 409 — the DB trigger quiz_not_draft_edit (0034) is the backstop.
  */
 export function buildQuizUpdates(
   input: QuizMetadataPatch,
@@ -69,6 +76,9 @@ export function buildQuizUpdates(
   }
   if (input.maxAttempts !== undefined && input.maxAttempts !== null) {
     updates.max_attempts = input.maxAttempts;
+  }
+  if (input.shuffleQuestions !== undefined && input.shuffleQuestions !== null) {
+    updates.shuffle_questions = input.shuffleQuestions;
   }
 
   const effectiveMode = input.mode ?? currentMode;

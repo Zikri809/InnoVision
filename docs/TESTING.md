@@ -128,6 +128,36 @@
 >   lecturers play but cannot author · SQ-D9 direct INSERT with `share_code`
 >   permission-denied (revoked-code hijack closed).
 
+### 2.8 Session shuffling (`lib/sessions/shuffle.ts`, QT-3)
+> **Status: SHIPPED (0034)** — deterministic per-session question/option
+> permutation, derived at read time (never stored). The RPC/wire stays
+> canonical; the client translates presented→canonical before POST and the
+> play page translates stored canonical indices into presented space for
+> resume + EndScreen review. Authoritative layer for the plan: the QT-3
+> section of `docs/roadmap/PLAN_R_QUESTION_TYPES.md`.
+>
+> - **Units (`shuffle.test.ts`, U-QT3-1..18):** golden-vector determinism
+>   (cross-process agreement), bijection, permutation-uniformity sweep,
+>   scope independence, presented↔canonical round-trips incl. null
+>   pass-through, envelope + breakdown transforms.
+> - **Route tests (QT3-1..5):** create defaults false / persists true for
+>   both modes; draft PATCH applies; shuffle-only PATCH is not an
+>   empty-payload 400; **live-quiz PATCH → 409** (frozen metadata,
+>   `hasNonWindowFields`).
+> - **Live-DB probes (`verify:quizzes`, QT3-D1–D6):** default false · draft
+>   flip allowed · live flip → `quiz_not_draft_edit` trigger error · flag
+>   exposed via `student_quiz_view` AND `student_closed_revealed_quiz_view` ·
+>   base-table RLS denial unchanged.
+> - **E2E (`e42-shuffle.spec.ts`, 3 tests):** (1) practice journey —
+>   positive ordering assertion (spec re-derives the plan from the session
+>   id and asserts the rendered order EQUALS it — a dead feature fails;
+>   plan-relative assertions make the legitimate identity permutation
+>   pass), reload determinism, answer-by-text full score,
+>   persisted-canonical service-role probe, breakdown rows asserted in the
+>   derived presented order; (2) resume — all-answered reload renders the
+>   presented slot of the canonical answer with aria-pressed; (3)
+>   assessment — keyless acks still persist canonical indices.
+
 ---
 
 ## 3. DB / RLS Tests (local Supabase)
@@ -315,6 +345,7 @@
 | E30 | **Notification bell (HIGH #1)** | `__INNOVISION_NOTIF_CONTROL__={pollMs:500}` seam (poll-state.ts:33-53); student joins → lecturer bell "Notifications, 1 unread"; desktop panel opened via trigger click then anchored on "Mark all as read" (the panel has no role) → row click navigates to `/lecturer/classes/<id>` + count decrements; publish → student bell increments → click-through → `/student/quizzes`; mark-all → count 0 + button disabled | bell counts poll/realtime deltas, rows deep-link correctly, mark-all clears the badge |
 | E31 | **i18n switch (HIGH #5)** | login toggle "Switch language" flips EN↔BM headings; authenticated toggle (shell chrome) flips "My Classes"→"Kelas Saya" and PERSISTS across goto + reload (cookie); raw-key sweep of `body.innerText` across ~6 core pages: no `segment.token` key leaks (email allowlisted) | language preference flips every surface and persists; zero raw i18n keys render |
 | E32 | **Share rotate + unshare (MEDIUM d+e)** | creator "New code"→"Confirm" arms/rotates the code (poll the readonly input — a bare not-toHaveValue reads the transient empty state); a fresh recipient loading the OLD link gets the same neutral screen; unshare mid-play: next answer POST → uniform 404 "unavailable" → question marked unavailable + advances → fatal screen; reload → same neutral screen | code rotation revokes old links uniformly; mid-run revoke degrades gracefully (404, no per-question reveal, fatal + neutral states) |
+| E42 | **Per-student shuffle (QT-3)** | lecturer creates an untimed practice quiz with "Shuffle question & option order" checked (3 questions, 4/5/4 options) → service-role probe `quizzes.shuffle_questions=true` → student starts, spec re-derives the session's plan from the sessionId (shared module import) and asserts the rendered first prompt + per-position option accessible names EQUAL the derived plan (also after a reload — determinism) → answers every question by its CORRECT option TEXT in the derived presented order → full score 3/3 → service-role probe: every persisted `session_answers.selected_index` equals the CANONICAL `correct_index` → EndScreen breakdown shows each prompt once with ✓ on the clicked option | presented order matches the derived plan; the wire stays canonical; review matches what the student saw |
 
 ### 5.1 E2E debugging playbook — lessons from the 2026-08-26 mass-failure repair
 
@@ -390,6 +421,7 @@ The critical guarantees the demo lives or dies by, and where each is proven:
 | AI route authZ + no-oracle | I20 extension, I-A5, I-A13, D35 |
 | Periodic verify cadence | I22 |
 | Consent gate | I1, E3b |
+| Per-session shuffle determinism + canonical-wire integrity (QT-3) | U-QT3-1..18, QT3-1..5, QT3-D1–D6, E42 |
 
 ---
 

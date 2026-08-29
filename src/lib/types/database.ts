@@ -541,6 +541,7 @@ export type Database = {
           mode: Database["public"]["Enums"]["quiz_mode"]
           opens_at: string | null
           results_revealed_at: string | null
+          shuffle_questions: boolean
           source_file_url: string | null
           source_text: string | null
           sources: Json
@@ -560,6 +561,7 @@ export type Database = {
           mode?: Database["public"]["Enums"]["quiz_mode"]
           opens_at?: string | null
           results_revealed_at?: string | null
+          shuffle_questions?: boolean
           source_file_url?: string | null
           source_text?: string | null
           sources?: Json
@@ -579,6 +581,7 @@ export type Database = {
           mode?: Database["public"]["Enums"]["quiz_mode"]
           opens_at?: string | null
           results_revealed_at?: string | null
+          shuffle_questions?: boolean
           source_file_url?: string | null
           source_text?: string | null
           sources?: Json
@@ -1048,6 +1051,7 @@ export type Database = {
           mode: Database["public"]["Enums"]["quiz_mode"] | null
           opens_at: string | null
           results_revealed_at: string | null
+          shuffle_questions: boolean | null
           status: Database["public"]["Enums"]["quiz_status"] | null
           time_limit_sec: number | null
           title: string | null
@@ -1176,6 +1180,7 @@ export type Database = {
           mode: Database["public"]["Enums"]["quiz_mode"] | null
           opens_at: string | null
           results_revealed_at: string | null
+          shuffle_questions: boolean | null
           status: Database["public"]["Enums"]["quiz_status"] | null
           time_limit_sec: number | null
           title: string | null

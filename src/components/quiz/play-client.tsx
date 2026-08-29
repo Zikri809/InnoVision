@@ -9,6 +9,7 @@ import { ProgressHud } from "@/components/quiz/progress-hud";
 import { GestureLayer } from "@/components/vision/gesture-layer";
 import { Button } from "@/components/ui/button";
 import { MAX_ANSWER_FINGERS } from "@/lib/gestures/constants";
+import { optionScope, shufflePlan, toCanonical, toPresented } from "@/lib/sessions/shuffle";
 import type { HoldProgress } from "@/lib/gestures/types";
 import { FaceVerifier } from "@/components/face/face-verifier";
 import { useFacePipeline, type FacePipelinePhase } from "@/components/face/use-face-pipeline";
@@ -69,11 +70,11 @@ const BLOCK_INPUT_PHASES: Phase[] = ["timeUp", "submitting", "submitted", "dead"
  * The quiz engine (click-first). Owns the answer flow, the UX-only countdown
  * timer, and submit.
  *
- * Robustness notes (PLAN_PHASE5 Â§2/Â§4):
+ * Robustness notes (PLAN_PHASE5 §2/§4):
  *  - `submitLock` guards against double-submits (released in `finally`).
  *  - The countdown is seeded server-side (`initialRemainingMs`) and decremented
  *    monotonically — never `Date.now()` re-reads, never paused mid-question,
- *    stopped at â‰¤0 or when untimed.
+ *    stopped at ≤0 or when untimed.
  *  - When the timer hits 0, `timeUp` blocks new answers, AWAITS any in-flight
  *    answer fetch (so the last answer isn't silently dropped), then submits.
  *  - A 403 `time_expired` from an awaited answer is treated as confirmation
@@ -87,6 +88,11 @@ const BLOCK_INPUT_PHASES: Phase[] = ["timeUp", "submitting", "submitted", "dead"
  * Resume: seeded answers carry only `selectedIndex`/`isCorrect` (no key —
  * the key is never stored on session_answers); questions answered in the
  * current page session get full practice feedback.
+ *
+ * QT-3 shuffling: when `shuffled` is set, the questions/options arrive in
+ * presented (session-seeded) space — outgoing answers are translated to
+ * canonical indices before POST, incoming canonical feedback indices are
+ * translated back. All other state stays presented-space.
  */
 export function PlayClient({
   sessionId,
@@ -95,6 +101,7 @@ export function PlayClient({
   initialIndex = 0,
   initialAnswers = [],
   initialRemainingMs = null,
+  shuffled = false,
   face,
 }: {
   sessionId: string;
@@ -103,6 +110,8 @@ export function PlayClient({
   initialIndex?: number;
   initialAnswers?: SeedAnswer[];
   initialRemainingMs?: number | null;
+  /** QT-3: the envelope arrived in presented (shuffled) space — indices must be translated. */
+  shuffled?: boolean;
   face?: {
     enrolled: boolean;
     consentGiven: boolean;
@@ -156,6 +165,14 @@ export function PlayClient({
   const isPractice = quiz.mode === "practice";
   const question = questions[Math.min(index, questions.length - 1)];
   const answered = answers[question?.id];
+
+  // QT-3: presented→canonical mapping for the current question's options.
+  // Recomputed from (sessionId, question id, count) via the shared pure module
+  // — identical to the permutation the server applied when building the
+  // envelope, by construction. null = shuffle off (identity).
+  function optionPlanFor(q: Question): number[] | null {
+    return shuffled ? shufflePlan(sessionId, optionScope(q.id), q.options.length) : null;
+  }
 
   // ── Face pipeline (Phase 7) ─────────────────────────────────────
   // Availability is evaluated BEFORE enrollment/consent (boot failure →
@@ -296,10 +313,15 @@ export function PlayClient({
 
     const promise = (async () => {
       try {
+        // QT-3: the student clicked/selected a PRESENTED slot; the wire (and
+        // session_answers) stay canonical, so translate before POST. The RPC
+        // keeps validating the canonical index against the real options.
+        const plan = optionPlanFor(question);
+        const wireIndex = plan ? (toCanonical(optionIndex, plan) ?? optionIndex) : optionIndex;
         const res = await fetch(`/api/sessions/${sessionId}/answer`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ questionId: question.id, selectedIndex: optionIndex }),
+          body: JSON.stringify({ questionId: question.id, selectedIndex: wireIndex }),
           signal: controller.signal,
         });
         // Strictly parse the body; a non-JSON 200 must NOT render "Incorrect"
@@ -435,6 +457,16 @@ export function PlayClient({
           return;
         }
 
+        // QT-3: practice feedback carries the CANONICAL correct index; the
+        // state space (and rendering) is presented — translate back.
+        const rawCorrect = body.correctIndex as number | undefined;
+        const presentedCorrect =
+          rawCorrect === undefined
+            ? undefined
+            : plan
+              ? (toPresented(rawCorrect, plan) ?? rawCorrect)
+              : rawCorrect;
+
         setAnswers((prev) => ({
           ...prev,
           [question.id]: {
@@ -442,7 +474,7 @@ export function PlayClient({
             isCorrect: isPractice
               ? Boolean(body.isCorrect)
               : false, // assessment: keyless ack — neutral "answered" state
-            ...(body.correctIndex !== undefined ? { correctIndex: body.correctIndex as number } : {}),
+            ...(presentedCorrect !== undefined ? { correctIndex: presentedCorrect } : {}),
             ...(body.explanation !== undefined ? { explanation: body.explanation as string } : {}),
           },
         }));

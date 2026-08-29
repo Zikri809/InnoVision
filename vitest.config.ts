@@ -76,6 +76,9 @@ export default defineConfig({
         // and excluded from the report entirely — no 0-threshold keys needed.
         "src/lib/sessions/timer.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/lib/sessions/validation.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        // QT-3: deterministic per-session shuffle (golden vectors + round-trip
+        // + transforms, U-QT3-1..18). QuestionRow types are shared.
+        "src/lib/sessions/shuffle.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         // P8: pure results derivation (Node-unit-tested, U-T4 + U-T4b/c/d).
         // constants.ts/types.ts have no meaningful executable surface (mirrors
         // the lib/face constants/types precedent — omitted from thresholds).

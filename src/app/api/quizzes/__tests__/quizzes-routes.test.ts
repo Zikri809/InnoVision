@@ -700,3 +700,62 @@ describe("Quiz PATCH route (I-M1..I-M10)", () => {
   });
 });
 
+
+// ─── QT-3: shuffleQuestions toggle plumbing ─────────────────────────────
+describe("QT-3 shuffleQuestions plumbing", () => {
+  it("QT3-1 create without the field defaults shuffle_questions to false", async () => {
+    ownerContext();
+    const { createQuiz } = await importHandlers();
+    const res = await createQuiz.POST(req({ title: "Plain Quiz" }), {
+      params: Promise.resolve({ id: CLASS_B }),
+    });
+    expect(res.status).toBe(201);
+    expect((await res.json()).quiz.shuffle_questions).toBe(false);
+  });
+
+  it("QT3-2 create with shuffleQuestions: true persists it for BOTH modes", async () => {
+    for (const mode of ["practice", "assessment"] as const) {
+      ownerContext();
+      const { createQuiz } = await importHandlers();
+      const res = await createQuiz.POST(
+        req({ title: `Shuffled ${mode}`, mode, shuffleQuestions: true }),
+        { params: Promise.resolve({ id: CLASS_B }) },
+      );
+      expect(res.status).toBe(201);
+      expect((await res.json()).quiz.shuffle_questions).toBe(true);
+    }
+  });
+
+  it("QT3-3 PATCH on a draft quiz applies shuffleQuestions and echoes the column", async () => {
+    ownerContext();
+    const { quizRoute } = await importHandlers();
+    const res = await quizRoute.PATCH(req({ shuffleQuestions: true }), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).quiz.shuffle_questions).toBe(true);
+    expect(currentClient().tables["quizzes"][0].shuffle_questions).toBe(true);
+  });
+
+  it("QT3-4 PATCH {shuffleQuestions} on a LIVE quiz → 409 (frozen metadata: hasNonWindowFields)", async () => {
+    // Route-level gate — must fire BEFORE the DB (the fake cannot emulate the
+    // 0034 trigger, so this test pins the route's classification).
+    ownerContext({ quizStatus: "live" });
+    const { quizRoute } = await importHandlers();
+    const res = await quizRoute.PATCH(req({ shuffleQuestions: true }), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("quiz_not_draft");
+  });
+
+  it("QT3-5 shuffle-only PATCH on a draft is not rejected as an empty payload", async () => {
+    ownerContext();
+    const { quizRoute } = await importHandlers();
+    const res = await quizRoute.PATCH(req({ shuffleQuestions: false }), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).quiz.shuffle_questions).toBe(false);
+  });
+});

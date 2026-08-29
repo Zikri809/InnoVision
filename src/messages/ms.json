@@ -317,7 +317,9 @@
       "restoreClassError": "Tidak dapat memulihkan kelas. Sila cuba lagi.",
       "isArchivedBadge": "Diarkibkan",
       "archivedBannerNotice": "Kelas ini telah diarkibkan. Ia disimpan untuk audit dan penyelesaian pertikaian. Pulihkan kelas ini untuk menerima percubaan pelajar baharu atau mencipta kuiz baharu.",
-      "gradebookLink": "Buku gred"
+      "gradebookLink": "Buku gred",
+      "shuffleQuestions": "Rombak susunan soalan & pilihan",
+      "shuffleQuestionsHelper": "Setiap pelajar melihat soalan dan pilihan mengikut susunan rawak mereka sendiri (dikunci selepas kuiz diterbitkan)."
     },
     "gradebook": {
       "title": "Buku gred",
@@ -421,7 +423,9 @@
       "currentQuestion": "Soalan semasa:",
       "steeringPrompt": "Arahan Tambahan AI (Pilihan)",
       "steeringPlaceholder": "cth. Pendekkan pilihan jawapan, fokus pada takrifan…",
-      "regenBtn": "Jana semula dengan AI"
+      "regenBtn": "Jana semula dengan AI",
+      "shuffleQuestions": "Rombak susunan soalan & pilihan",
+      "shuffleQuestionsHelper": "Setiap pelajar mendapat susunan rawak mereka sendiri. Untuk draf sahaja: ia tidak boleh diubah selepas kuiz diterbitkan."
     },
     "results": {
       "backToQuizzes": "Kembali ke kelas",

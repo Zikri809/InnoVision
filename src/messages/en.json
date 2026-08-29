@@ -317,7 +317,9 @@
       "restoreClassError": "Could not restore the class. Please try again.",
       "isArchivedBadge": "Archived",
       "archivedBannerNotice": "This class is archived. It is preserved for audit and dispute resolution. Restore it to accept new student attempts or draft new quizzes.",
-      "gradebookLink": "Gradebook"
+      "gradebookLink": "Gradebook",
+      "shuffleQuestions": "Shuffle question & option order",
+      "shuffleQuestionsHelper": "Each student sees the questions and options in their own randomised order (locked once the quiz is published)."
     },
     "gradebook": {
       "title": "Gradebook",
@@ -421,7 +423,9 @@
       "currentQuestion": "Current question:",
       "steeringPrompt": "AI Steering Prompt (Optional)",
       "steeringPlaceholder": "e.g. Make options shorter, focus on definitions…",
-      "regenBtn": "Regenerate with AI"
+      "regenBtn": "Regenerate with AI",
+      "shuffleQuestions": "Shuffle question & option order",
+      "shuffleQuestionsHelper": "Each student gets a personally randomised order. Draft-only: it cannot change once the quiz is published."
     },
     "results": {
       "backToQuizzes": "Back to class",

@@ -128,6 +128,8 @@ export async function createQuizWithQuestions(
     mode?: "practice" | "assessment";
     questions: QuestionInput[];
     publish?: boolean;
+    /** QT-3: check "Shuffle question & option order" before creating. */
+    shuffle?: boolean;
   },
 ) {
   // Open the class.
@@ -140,6 +142,9 @@ export async function createQuizWithQuestions(
   if (opts.mode === "assessment") {
     await page.getByLabel("Mode").click();
     await page.getByRole("option", { name: "Assessment" }).click();
+  }
+  if (opts.shuffle) {
+    await page.getByLabel(/shuffle question/i).check();
   }
   await page.getByRole("button", { name: /create quiz|new quiz/i }).click();
   await expect(page.getByText(opts.quizTitle, { exact: true })).toBeVisible();

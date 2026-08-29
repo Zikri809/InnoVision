@@ -85,6 +85,10 @@ function EditQuizForm({
     () => String(quiz.max_attempts ?? 1),
   );
 
+  // Per-student shuffling (QT-3). FROZEN metadata like title/mode/time limit
+  // — draft-only, hence the metadataLocked disable below.
+  const [shuffleQuestions, setShuffleQuestions] = useState<boolean>(quiz.shuffle_questions ?? false);
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submitLock = useRef(false);
@@ -203,6 +207,10 @@ function EditQuizForm({
       if (newMaxAttempts !== (quiz.max_attempts ?? 1)) payload.maxAttempts = newMaxAttempts;
     }
 
+    // Shuffle diff (QT-3): draft-only (frozen metadata); only sent when changed.
+    if (shuffleQuestions !== (quiz.shuffle_questions ?? false)) {
+      payload.shuffleQuestions = shuffleQuestions;
+    }
 
     if (Object.keys(payload).length === 0) {
       onClose();
@@ -485,6 +493,24 @@ function EditQuizForm({
               </p>
             </fieldset>
           )}
+
+          {/* Shuffling (QT-3): FROZEN metadata like title/mode — draft-only,
+              so the checkbox locks with metadataLocked (the route 409s and
+              the DB trigger backstops it anyway). */}
+          <fieldset className="space-y-2" disabled={saving}>
+            <label className="flex items-center gap-2.5 text-sm font-semibold text-foreground">
+              <input
+                id="edit-quiz-shuffle"
+                type="checkbox"
+                checked={shuffleQuestions}
+                onChange={(e) => setShuffleQuestions(e.target.checked)}
+                disabled={saving || metadataLocked}
+                className="size-4 accent-[var(--primary)]"
+              />
+              {t("shuffleQuestions")}
+            </label>
+            <p className="text-xs font-semibold text-muted-foreground">{t("shuffleQuestionsHelper")}</p>
+          </fieldset>
 
           {error && (
             <p

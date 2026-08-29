@@ -822,6 +822,82 @@ async function main() {
   record("D25 delete class with quizzes/questions succeeds", !delClassErr && delClass?.length === 1,
     delClassErr?.message ?? `deleted ${delClass?.length ?? 0}`);
 
+  // ── QT3-D*: per-student shuffle flag (migration 0034) ────────────────
+  // Fresh class/quiz: the D25 block above deleted clsA. The flag is draft-
+  // frozen (joins title/mode in quiz_not_draft_edit) and exposed to students
+  // ONLY via the two quiz-metadata barrier views.
+  const joinCode3 = makeJoinCode();
+  const { data: clsQ3, error: clsQ3Err } = await clientA
+    .from("classes")
+    .insert({ title: "QT3 Shuffle Class", lecturer_id: lecturerA.id, join_code: joinCode3 })
+    .select("id, join_code")
+    .single();
+  createdClassId = clsQ3?.id ?? createdClassId;
+  assertNoError("QT3 create class", { error: clsQ3Err });
+  const { error: joinErr3 } = await clientS1.rpc("join_class", { code: joinCode3 });
+  assertNoError("QT3 S1 joins QT3 class", { error: joinErr3 });
+
+  const { data: q3, error: q3Err } = await clientA
+    .from("quizzes")
+    .insert({ class_id: clsQ3.id, created_by: lecturerA.id, title: "QT3 Quiz", mode: "practice", status: "draft" })
+    .select("id, shuffle_questions")
+    .single();
+  createdQuizIds.push(q3?.id);
+  assertNoError("QT3 create quiz", { error: q3Err });
+  record("QT3-D1 new quiz defaults shuffle_questions to false", q3?.shuffle_questions === false,
+    `value: ${q3?.shuffle_questions}`);
+
+  const { data: q3Flip, error: q3FlipErr } = await clientA
+    .from("quizzes")
+    .update({ shuffle_questions: true })
+    .eq("id", q3.id)
+    .select("shuffle_questions")
+    .single();
+  record("QT3-D2 draft quiz flip allowed", !q3FlipErr && q3Flip?.shuffle_questions === true,
+    q3FlipErr?.message ?? "");
+
+  const { error: q3QuestionErr } = await clientA.from("questions").insert({
+    quiz_id: q3.id,
+    type: "mcq",
+    prompt: "QT3 probe question",
+    options: ["1", "2", "3", "4"],
+    correct_index: 0,
+    order_index: 0,
+  });
+  assertNoError("QT3 add question", { error: q3QuestionErr });
+  const { error: q3LiveErr } = await clientA.from("quizzes").update({ status: "live" }).eq("id", q3.id);
+  assertNoError("QT3 publish quiz", { error: q3LiveErr });
+
+  const { error: q3LiveFlipErr } = await clientA
+    .from("quizzes")
+    .update({ shuffle_questions: false })
+    .eq("id", q3.id);
+  record("QT3-D3 flip on live quiz → quiz_not_draft_edit trigger error", Boolean(q3LiveFlipErr),
+    q3LiveFlipErr?.message ?? "unexpectedly flipped shuffle on a live quiz");
+
+  const { data: q3S1View } = await clientS1
+    .from("student_quiz_view")
+    .select("id, shuffle_questions")
+    .eq("id", q3.id);
+  record("QT3-D4 student sees shuffle_questions via student_quiz_view",
+    (q3S1View ?? []).length === 1 && q3S1View[0].shuffle_questions === true,
+    JSON.stringify(q3S1View ?? []));
+
+  const { error: q3CloseErr } = await clientA.from("quizzes").update({ status: "closed" }).eq("id", q3.id);
+  assertNoError("QT3 close quiz", { error: q3CloseErr });
+
+  const { data: q3S1Closed } = await clientS1
+    .from("student_closed_revealed_quiz_view")
+    .select("id, shuffle_questions")
+    .eq("id", q3.id);
+  record("QT3-D5 student sees shuffle_questions via student_closed_revealed_quiz_view (practice always reveal-allowed)",
+    (q3S1Closed ?? []).length === 1 && q3S1Closed[0].shuffle_questions === true,
+    JSON.stringify(q3S1Closed ?? []));
+
+  const { data: q3S1Direct } = await clientS1.from("quizzes").select("id, shuffle_questions").eq("id", q3.id);
+  record("QT3-D6 student direct quizzes read still denied (RLS unchanged)",
+    (q3S1Direct ?? []).length === 0, `S1 sees ${(q3S1Direct ?? []).length} rows (expect 0)`);
+
   // ── Summary ──────────────────────────────────────────────────
   console.log("\n" + "=".repeat(60));
   const passed = results.filter((r) => r.pass).length;

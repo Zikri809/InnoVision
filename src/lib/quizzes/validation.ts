@@ -161,6 +161,13 @@ const QuizFieldsSchema = z.object({
     .max(MAX_ATTEMPTS_MAX, `Max attempts must be at most ${MAX_ATTEMPTS_MAX}.`)
     .nullable()
     .optional(),
+  /**
+   * QT-3 per-student shuffling (migration 0034). DRAFT-ONLY setting (the DB
+   * edit-freeze blocks flips on live/closed quizzes). Nullable+optional like
+   * allowRetake — a required boolean here would 400 every existing create
+   * payload that omits it.
+   */
+  shuffleQuestions: z.boolean().nullable().optional(),
 });
 
 /**

@@ -60,6 +60,7 @@ export type QuizInfo = {
   closes_at: string | null;
   allow_retake: boolean | null;
   max_attempts: number | null;
+  shuffle_questions: boolean | null;
   created_at: string;
   source_file_url: string | null;
   source_text: string | null;

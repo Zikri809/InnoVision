@@ -69,7 +69,7 @@ export async function PATCH(request: Request, { params }: Params) {
 
   // UpdateQuizSchema has NO defaults (see validation.ts), so an empty body
   // parses to {} and this guard is reachable — it is not dead code.
-  const { title, mode, timeLimitSec, opensAt, closesAt, allowRetake, maxAttempts } = parsed.data;
+  const { title, mode, timeLimitSec, opensAt, closesAt, allowRetake, maxAttempts, shuffleQuestions } = parsed.data;
   if (
     title === undefined &&
     mode === undefined &&
@@ -77,17 +77,19 @@ export async function PATCH(request: Request, { params }: Params) {
     opensAt === undefined &&
     closesAt === undefined &&
     allowRetake === undefined &&
-    maxAttempts === undefined
+    maxAttempts === undefined &&
+    shuffleQuestions === undefined
   ) {
     return invalidBody("No editable fields provided.");
   }
 
-  const patch = { title, mode, timeLimitSec, opensAt, closesAt, allowRetake, maxAttempts };
+  const patch = { title, mode, timeLimitSec, opensAt, closesAt, allowRetake, maxAttempts, shuffleQuestions };
 
   // Availability windows (QC-3) and retake config (QC-4) are LIVE-quiz
   // management: a payload carrying ONLY those fields bypasses the draft-only
-  // lock. Any non-window/retake field (title/mode/time limit) on a non-draft
-  // quiz keeps the blanket 409 (DB trigger quiz_not_draft_edit is the backstop).
+  // lock. Any non-window/retake field (title/mode/time limit/shuffle — QT-3
+  // is frozen metadata) on a non-draft quiz keeps the blanket 409 (DB trigger
+  // quiz_not_draft_edit is the backstop).
   const liveManageableOnly =
     (hasWindowFields(patch) || hasRetakeFields(patch)) && !hasNonWindowFields(patch);
   if (owner.quiz.status !== "draft" && !liveManageableOnly) return notDraft();
@@ -98,7 +100,7 @@ export async function PATCH(request: Request, { params }: Params) {
     .from("quizzes")
     .update(updates)
     .eq("id", id)
-    .select("id, class_id, title, mode, status, time_limit_sec, opens_at, closes_at, allow_retake, max_attempts, created_at")
+    .select("id, class_id, title, mode, status, time_limit_sec, opens_at, closes_at, allow_retake, max_attempts, shuffle_questions, created_at")
     .maybeSingle();
 
   if (error) {

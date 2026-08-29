@@ -125,7 +125,7 @@ Update as work proceeds (keep honest; this mirrors reality, not intention):
 | RESULTS_ANALYTICS | 🔶 partial — RA-1 shipped | — | RA-1 + RA-7 via SQ-2 (2026-08-28) |
 | STUDENT_QOL | 🔶 partial — SQ-2, SQ-5 shipped | — | SQ-2 (2026-08-28) · SQ-5 (2026-08-29, 8b542cf) |
 | AUTHORING_PRODUCTIVITY | 🔲 planned | — | — |
-| QUESTION_TYPES | 🔲 planned | — | — |
+| QUESTION_TYPES | 🔶 partial — QT-3 shipped | — | QT-3 (2026-08-29, 0034) |
 | AUTH_IDENTITY | 🔶 partial — AU-1 shipped | — | AU-1 (2026-08-28) |
 | CLASS_MANAGEMENT | 🔲 planned | — | — |
 | INTEGRITY_OPS | 🔶 partial — IO-1 shipped | — | IO-1 (2026-08-29, 8b542cf) |
@@ -143,4 +143,4 @@ Update as work proceeds (keep honest; this mirrors reality, not intention):
 4. ~~RA-1 gradebook + RA-7 per-quiz results entry point~~ ✅ (2026-08-28, RA-7 shipped as SQ-2)
 5. AX-1 dark mode + AX-2 contrast (shipped 2026-08-29, 99a06a3)
 6. ~~IO-1 flagged-unlock notification + SQ-5 camera messaging~~ ✅ (2026-08-29)
-7. Then depth: QT shuffling (cheap) → AP-1/AP-2 authoring → QT-1 multi-select → AU-2 SSO
+7. Then depth: ~~QT-3 shuffling (cheap)~~ ✅ (2026-08-29) → AP-1/AP-2 authoring → QT-1 multi-select → AU-2 SSO

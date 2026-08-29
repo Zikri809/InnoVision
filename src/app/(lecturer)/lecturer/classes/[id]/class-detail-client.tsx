@@ -92,6 +92,8 @@ export function ClassDetailClient({
   // Retake config (QC-4): assessment-only concept.
   const [allowRetake, setAllowRetake] = useState(false);
   const [maxAttempts, setMaxAttempts] = useState(2);
+  // QT-3: per-student question/option shuffling (applies to BOTH modes).
+  const [shuffleQuestions, setShuffleQuestions] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
@@ -215,6 +217,7 @@ export function ClassDetailClient({
           closesAt: newCloses,
           allowRetake: mode === "assessment" ? allowRetake : undefined,
           maxAttempts: mode === "assessment" && allowRetake ? maxAttempts : undefined,
+          shuffleQuestions,
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -229,6 +232,7 @@ export function ClassDetailClient({
       setClosesAt("");
       setAllowRetake(false);
       setMaxAttempts(2);
+      setShuffleQuestions(false);
       router.refresh();
     } catch {
       setError(tCommon("errorGeneric"));
@@ -557,6 +561,17 @@ export function ClassDetailClient({
                 )}
               </div>
             )}
+            <label className="flex items-center gap-2.5 text-sm font-semibold text-foreground">
+              <input
+                type="checkbox"
+                checked={shuffleQuestions}
+                onChange={(e) => setShuffleQuestions(e.target.checked)}
+                disabled={creating}
+                className="size-4 accent-[var(--primary)]"
+              />
+              {t("shuffleQuestions")}
+            </label>
+            <p className="text-xs font-semibold text-muted-foreground">{t("shuffleQuestionsHelper")}</p>
             {error && (
               <p className="rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm font-bold text-destructive" role="alert">
                 {error}

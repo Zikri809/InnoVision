@@ -184,7 +184,8 @@ profiles ──┬──< classes (lecturer_id, join_code unique, archived_at)
            │         └──< class_enrollments >── students (profiles)
            │         └──< quizzes (class_id, created_by, mode, status,
            │                  time_limit_sec, results_revealed_at,
-           │                  auto_reveal_on_complete, source_file_url…)
+           │                  auto_reveal_on_complete, shuffle_questions,
+           │                  source_file_url…)
            │                  └──< questions (order_index, type, options[],
            │                        correct_index, explanation)
            │                  └──< quiz_sessions (student_id, status, mode,
@@ -409,6 +410,25 @@ envelope + first question via `student_session_view` and hands off to
   - **assessment**: response is KEYLESS `{ok}` pre-reveal — the correct
     answer never crosses the wire until results are revealed
   - **practice**: response includes correctness + explanation immediately
+- **Per-student shuffling (QT-3, opt-in `quizzes.shuffle_questions`)**:
+  when on, the play page permutes the question array AND each question's
+  options into "presented" space, deterministically derived from
+  (sessionId, question id) by `src/lib/sessions/shuffle.ts` (FNV-1a →
+  mulberry32 → Fisher-Yates; pure integer ops, shared client + server).
+  Nothing is stored: resume/multi-device reloads re-derive the identical
+  order, and a retake (new session id) reshuffles. The client translates
+  presented→canonical indices BEFORE the POST, so the wire, RPC, and
+  `session_answers` stay canonical; stored canonical indices are translated
+  back for resume seeds and the EndScreen breakdown (lecturer surfaces and
+  exports stay canonical — one answer key across all students). The gesture
+  layer needs no changes (finger N selects presented slot N-1; translation
+  happens downstream). Presentation obfuscation, not a security boundary:
+  the RPC still validates and grades whatever canonical index arrives. The
+  flag is DRAFT-FROZEN (`quiz_not_draft_edit`) — the permutation is only
+  stable because question rows/options are draft-frozen too, and the
+  `"questions"` scope is positional (a future live-question editor would
+  desync the mapping). Student practice quizzes (no session row) are out
+  of scope.
 - **Pause sources (all server-mediated)**:
 
 | Source | Trigger | Effect |
@@ -684,7 +704,7 @@ into `${uid}/${quizId}/…`.
 | Pure units | Vitest (`src/**/*.test.ts`) | scoring, timers, validation, gestures, liveness, merge logic, derive |
 | Route tests | Vitest + `fake-supabase.ts` (a fake that mimics RLS/RPC semantics and THROWS on unknown filters) | every API route's guard/CSRF/rate-limit/validation/error-mapping contracts |
 | AI boundary | MSW (`src/test/msw`) | mocked OpenAI-compatible endpoints |
-| Live-SQL harnesses | `npm run verify:*` (needs local supabase) | RLS policies, RPC state machines, caps, secrecy probes (e.g. `verify:student-quizzes` SQ-D1–D9, `verify:media` MEDIA-D1–D12) |
+| Live-SQL harnesses | `npm run verify:*` (needs local supabase) | RLS policies, RPC state machines, caps, secrecy probes (e.g. `verify:student-quizzes` SQ-D1–D9, `verify:media` MEDIA-D1–D12, `verify:quizzes` QT3-D1–D6) |
 | E2E | Playwright, chromium, dev-server + mock AI + CompreFace mock seam | full user journeys; `e16` is the integrity reference spec; specs skip loudly if `LECTURER_INVITE_CODE` unset |
 | Types/schema drift | `gen:types` + CI diff | database.ts vs migrated schema |
 | Copy drift | `check:i18n` | en/ms parity + referenced-key existence |

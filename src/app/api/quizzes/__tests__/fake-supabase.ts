@@ -1290,6 +1290,7 @@ export function makeOwnerContext(opts?: {
     closes_at: null,
     allow_retake: false,
     max_attempts: 1,
+    shuffle_questions: false,
     source_file_url: null,
     source_text: null,
     sources: [],
