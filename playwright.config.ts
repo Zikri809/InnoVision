@@ -14,16 +14,15 @@ const MOCK_AI_PORT = process.env.MOCK_AI_PORT ?? "8787";
 
 export default defineConfig({
   testDir: "./e2e",
-  timeout: 120_000,
+  timeout: 30_000,
   expect: {
     timeout: 15_000,
   },
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 1,
-  // Capped locally: `next dev` compiles every route on demand and is the
-  // shared bottleneck — uncapped workers (cores/2 = 6 here) saturate it until
-  // even login navigations exceed 30s (mass registerUser waitForURL flakes).
+  // Capped locally: even the production server saturates with too many
+  // parallel workers on one DB (register storms hit the same auth tables).
   workers: process.env.CI ? 1 : 4,
   reporter: "html",
   use: {
@@ -38,7 +37,7 @@ export default defineConfig({
   ],
   webServer: [
     {
-      // Mock OpenAI-compatible endpoint so /api/ai/generate-quiz and
+      // Mock [OI]-compatible endpoint so /api/ai/generate-quiz and
       // /api/ai/regenerate-question never hit a real model in CI (TESTING §1).
       command: `node e2e/mock-ai-server.mjs`,
       url: `http://127.0.0.1:${MOCK_AI_PORT}/health`,
@@ -46,10 +45,17 @@ export default defineConfig({
       timeout: 30_000,
     },
     {
-      command: `npm run dev -- -p ${PORT}`,
+      // PRODUCTION server, never `next dev`: dev compiles every route on
+      // demand (per-navigation latency, unbounded memory, dev-only error
+      // overlays) and was the shared bottleneck of this suite. `next build`
+      // runs once up front; `next start` serves prebuilt routes at flat
+      // latency. PLAYWRIGHT_BUILD=0 reuses a warm .next to skip the rebuild.
+      command: process.env.PLAYWRIGHT_BUILD === "0"
+        ? `npm run start -- -p ${PORT}`
+        : `npm run build && npm run start -- -p ${PORT}`,
       url: BASE_URL,
       reuseExistingServer: !process.env.CI,
-      timeout: 60_000,
+      timeout: 300_000,
       env: {
         ...process.env,
         // The suite registers dozens of accounts from 127.0.0.1 inside a

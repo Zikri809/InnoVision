@@ -311,7 +311,32 @@
       "restoreClassRestoringBtn": "Restoring…",
       "restoreClassError": "Could not restore the class. Please try again.",
       "isArchivedBadge": "Archived",
-      "archivedBannerNotice": "This class is archived. It is preserved for audit and dispute resolution. Restore it to accept new student attempts or draft new quizzes."
+      "archivedBannerNotice": "This class is archived. It is preserved for audit and dispute resolution. Restore it to accept new student attempts or draft new quizzes.",
+      "gradebookLink": "Gradebook"
+    },
+    "gradebook": {
+      "title": "Gradebook",
+      "subtitle": "One row per student, one column per published assessment quiz. Practice quizzes and drafts are not included.",
+      "backToClass": "Back to class",
+      "exportButton": "Export Excel",
+      "exporting": "Exporting…",
+      "exportError": "Could not build the export right now.",
+      "colStudent": "Student",
+      "colMatric": "Matric",
+      "colCumulative": "Overall",
+      "footerAverage": "Class average",
+      "notAttempted": "—",
+      "unrevealed": "Not revealed to students",
+      "unrevealedShort": "unrevealed",
+      "quizCount": "{count, plural, =0 {No quizzes} one {# quiz} other {# quizzes}}",
+      "rosterCount": "{count, plural, =0 {No students} one {# student} other {# students}}",
+      "emptyNoQuizzesTitle": "No published quizzes yet",
+      "emptyNoQuizzesSubtitle": "Publish an assessment quiz in this class and it will appear as a gradebook column here.",
+      "emptyNoStudentsTitle": "No students enrolled",
+      "emptyNoStudentsSubtitle": "Share the class join code so students can enroll — their results will build the gradebook.",
+      "truncatedColumns": "Showing the first {limit} quizzes by creation date.",
+      "attemptSuffix": "attempt {n}",
+      "loadError": "Could not load the gradebook. Please try again."
     },
     "builder": {
       "backToClass": "Back to class",
@@ -484,6 +509,8 @@
       "startingBtn": "Starting…",
       "quizNotOpen": "This quiz isn't open yet — check the opening time.",
       "quizWindowClosed": "This quiz's window has closed — ask your lecturer about it.",
+      "cardCompletedAwaiting": "Completed · awaiting results",
+      "cardViewResults": "View results",
       "emptyTitle": "No quizzes available yet",
       "emptySubtitle": "Your lecturers haven't published any quizzes for your classes yet. Check back soon!"
     },

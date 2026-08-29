@@ -311,7 +311,32 @@
       "restoreClassRestoringBtn": "Sedang memulihkan…",
       "restoreClassError": "Tidak dapat memulihkan kelas. Sila cuba lagi.",
       "isArchivedBadge": "Diarkibkan",
-      "archivedBannerNotice": "Kelas ini telah diarkibkan. Ia disimpan untuk audit dan penyelesaian pertikaian. Pulihkan kelas ini untuk menerima percubaan pelajar baharu atau mencipta kuiz baharu."
+      "archivedBannerNotice": "Kelas ini telah diarkibkan. Ia disimpan untuk audit dan penyelesaian pertikaian. Pulihkan kelas ini untuk menerima percubaan pelajar baharu atau mencipta kuiz baharu.",
+      "gradebookLink": "Buku gred"
+    },
+    "gradebook": {
+      "title": "Buku gred",
+      "subtitle": "Satu baris setiap pelajar, satu lajur setiap kuiz penilaian yang diterbitkan. Kuiz latihan dan draf tidak termasuk.",
+      "backToClass": "Kembali ke kelas",
+      "exportButton": "Eksport Excel",
+      "exporting": "Sedang mengeksport…",
+      "exportError": "Tidak dapat membina eksport buat masa ini.",
+      "colStudent": "Pelajar",
+      "colMatric": "Matrik",
+      "colCumulative": "Keseluruhan",
+      "footerAverage": "Purata kelas",
+      "notAttempted": "—",
+      "unrevealed": "Belum didedahkan kepada pelajar",
+      "unrevealedShort": "belum didedahkan",
+      "quizCount": "{count, plural, =0 {Tiada kuiz} one {# kuiz} other {# kuiz}}",
+      "rosterCount": "{count, plural, =0 {Tiada pelajar} one {# pelajar} other {# pelajar}}",
+      "emptyNoQuizzesTitle": "Tiada kuiz diterbitkan lagi",
+      "emptyNoQuizzesSubtitle": "Terbitkan kuiz penilaian dalam kelas ini dan ia akan muncul sebagai lajur buku gred di sini.",
+      "emptyNoStudentsTitle": "Tiada pelajar berdaftar",
+      "emptyNoStudentsSubtitle": "Kongsi kod penyertaan kelas supaya pelajar boleh mendaftar — keputusan mereka akan membina buku gred.",
+      "truncatedColumns": "Menunjukkan {limit} kuiz pertama mengikut tarikh ciptaan.",
+      "attemptSuffix": "percubaan {n}",
+      "loadError": "Tidak dapat memuatkan buku gred. Sila cuba lagi."
     },
     "builder": {
       "backToClass": "Kembali ke kelas",
@@ -484,6 +509,8 @@
       "startingBtn": "Sedang memulakan.",
       "quizNotOpen": "Kuiz ini belum dibuka — sila semak masa pembukaan.",
       "quizWindowClosed": "Tetingkap kuiz ini telah ditutup — hubungi pensyarah anda.",
+      "cardCompletedAwaiting": "Selesai · menunggu keputusan",
+      "cardViewResults": "Lihat keputusan",
       "emptyTitle": "Belum ada kuiz tersedia",
       "emptySubtitle": "Pensyarah anda belum menerbitkan sebarang kuiz untuk kelas anda. Sila semak semula tidak lama lagi!"
     },

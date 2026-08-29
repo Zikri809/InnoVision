@@ -28,6 +28,10 @@ type QuizRow = {
   max_attempts?: number | null;
   created_at: string;
   classes: { title: string } | null;
+  /** SQ-2: latest COMPLETED session id for this quiz, or null. */
+  completedSessionId: string | null;
+  /** SQ-2: results_revealed_at set (auto-reveal or lecturer reveal). */
+  resultsRevealed: boolean;
 };
 
 export function StudentQuizzesClient({
@@ -228,6 +232,24 @@ export function StudentQuizzesClient({
                       <p className="text-sm font-bold text-muted-foreground" role="status">
                         {notice[q.id]}
                       </p>
+                    ) : q.completedSessionId && q.resultsRevealed ? (
+                      // SQ-2: completed + revealed → real link, accessible
+                      // name includes the quiz title (never identical "View
+                      // results" ×N for screen readers).
+                      <Link
+                        href={`/play/${q.completedSessionId}`}
+                        className="inline-flex items-center gap-1.5 rounded-full border-[3px] border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-extrabold text-emerald-800 transition-colors hover:bg-emerald-100"
+                        aria-label={`${t("cardViewResults")} - ${q.title}`}
+                      >
+                        <ScanFace className="h-3.5 w-3.5" aria-hidden />
+                        {t("cardViewResults")}
+                      </Link>
+                    ) : q.completedSessionId ? (
+                      // SQ-2: completed + NOT revealed → status text, not a
+                      // dead link (unrevealed EndScreen is score-less anyway).
+                      <span className="rounded-full border-[3px] border-border bg-muted px-3 py-1 text-xs font-extrabold text-muted-foreground" role="status">
+                        {t("cardCompletedAwaiting")}
+                      </span>
                     ) : (
                       <span className="text-sm font-semibold text-muted-foreground">
                         {isPractice

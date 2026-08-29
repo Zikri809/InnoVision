@@ -553,6 +553,22 @@ Once revealed: student sees score + per-question breakdown
 Reveal fires the `notify_results_revealed` trigger (completed-assessment
 sessions get one deduped notification).
 
+Cross-quiz aggregate (RA-1, 2026-08-28): `/lecturer/classes/[id]/gradebook`
+renders a student × quiz matrix from `lecturer_session_view` (representative
+session per (student, quiz) via `selectRepresentativeSessions`, feed order
+`started_at DESC, id DESC`); published-assessment columns only; cells show
+scores regardless of reveal state but unrevealed COLUMNS carry a marker;
+per-quiz averages + per-student cumulative %; same model drives
+`GET /api/classes/[id]/gradebook-export` (Summary + compact per-quiz sheets,
+10/min rate limit, class-owner guard). Pure model: `src/lib/results/gradebook.ts`.
+
+Student results entry point (SQ-2, 2026-08-28): the quiz list
+(`/student/quizzes`) joins the student's completed `student_session_view`
+rows + `results_revealed_at` so completed+revealed cards link
+"View results" → `/play/{sessionId}` (EndScreen), completed+unrevealed cards
+show an "awaiting results" status chip (no link). Flagged sessions render no
+chip (intentional divergence from the gradebook, which shows their scores).
+
 ### 7.10 Notifications
 
 Write path is entirely trigger-driven (migration 0022) — application code

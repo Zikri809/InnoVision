@@ -1,6 +1,36 @@
 import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
+import { readFileSync } from "node:fs";
+
+// ── Guard: E2E must run against the production build, never `next dev` ──
+// `next dev` compiles routes on demand and was the shared bottleneck of the
+// Playwright suite (per-navigation latency, worker saturation, dev-only error
+// overlays). Enforced at lint level so no agent/driver can silently regress
+// playwright.config.ts to a dev server. See the config's webServer comment.
+function assertProdE2EWebServer() {
+  const raw = readFileSync(new URL("./playwright.config.ts", import.meta.url), "utf8");
+  // Strip line comments so prose mentioning "next dev" can't trip the check;
+  // then inspect every string/template literal (commands may be ternaries
+  // spanning lines, so anchor on strings, not on `command:`).
+  const code = raw
+    .split("\n")
+    .map((line) => line.replace(/(^|\s)\/\/.*$/, "$1"))
+    .join("\n");
+  const strings = [...code.matchAll(/[`'"]([^`'"]*)[`'"]/g)].map((m) => m[1]);
+  for (const s of strings) {
+    if (/(^|\s|&&|\|)next\s+dev(\s|$)|npm\s+run\s+dev(\s|$)/.test(s)) {
+      throw new Error(
+        "playwright.config.ts starts a dev server for E2E (string: \"" + s +
+          "\"). The suite MUST run against the production build " +
+          "(`npm run build && npm run start`) — dev's on-demand compilation " +
+          "is the shared bottleneck and produces dev-only behavior. Update " +
+          "the config, not this guard.",
+      );
+    }
+  }
+}
+assertProdE2EWebServer();
 
 const eslintConfig = defineConfig([
   ...nextVitals,

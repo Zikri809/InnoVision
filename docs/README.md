@@ -46,6 +46,11 @@ context/invariants; verify details against code.
 | PLAN_REVEAL_RESULTS.md | One-way results reveal |
 | PLAN_CLOSE_AND_SCHEDULE.md | Quiz close + closed-reveal recovery + availability windows + retakes (QC-1..QC-4, migrations 0030–0032) |
 
+> Partial domain shipments that stay recorded inside their `roadmap/PLAN_R_*.md`
+> implementation logs (plan docs move out only when the whole domain ships):
+> AU-1 forgot/reset password (2026-08-28); RA-1 cross-quiz gradebook +
+> SQ-2 student results entry point (2026-08-28, no migration).
+
 ## 📜 Superseded / snapshots (do NOT cite as current)
 
 | Doc | Why |

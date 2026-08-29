@@ -26,21 +26,114 @@ this data.
 
 ---
 
-## SQ-2 · Results entry point on quiz cards (HIGH)
+## SQ-2 · Results entry point on quiz cards (HIGH — ships with RA-7)
 
 **Problem:** Completed/revealed assessments unreachable from quiz list —
 students rely solely on transient bell item probing `/play/{sessionId}`
-(notification-bell.tsx:196); notification rolls out of the ~20-item window →
-results effectively gone from student UI forever.
+(src/components/notifications/notification-bell.tsx:207); notification rolls
+out of the ~20-item window → results effectively gone from student UI forever.
 
-**Design sketch**
+**Design sketch (reconciled 2026-08-28 — see Pre-flight log)**
 - Server-side join of latest completed session per visible quiz in
-  `student/quizzes/page.tsx` query (one extra select against sessions of those
-  quiz ids under RLS = own sessions — cheap).
-- Card state suffixes: "Completed · awaiting results" / "Completed · View
-  results" linking into session EndScreen/review (reuse existing result views'
-  reveal predicates; never render score client-side that server didn't already
-  gate).
+  `src/app/(student)/student/quizzes/page.tsx`: one extra `student_session_view`
+  select (`id, quiz_id, status, score, attempt, started_at, submitted_at`)
+  filtered `.in("quiz_id", quizIds)` + `.in("status", ["completed"])`,
+  ordered `started_at DESC, id DESC` (same tie-break discipline as the
+  export feed) — RLS = own sessions only, cheap. Pick latest attempt per
+  quiz in memory.
+- **Flagged sessions (pre-flight DECISION, aligned with RA-1):** flagged
+  sessions are NOT eligible for the chip — filter is completed-only. A
+  flagged student's card stays unchanged (they keep today's bell/play-RSC
+  path); the gradebook (RA-1) still shows their score to the lecturer. The
+  divergence is documented in both plans as intentional.
+- **Important scope fact (review finding):** `student_quiz_view` is LIVE-only
+  (`q.status = 'live'`, 0032_retake_policy.sql:653) — a quiz that closes
+  disappears from the list entirely. The chip therefore exists only while the
+  quiz is live; once closed, students reach results via the bell or a
+  bookmarked `/play/{sessionId}` (closed+revealed recovery via
+  `student_closed_revealed_quiz_view` on the play RSC, 0031). This is a
+  deliberate v1 boundary: card chips cover live quizzes; post-close access is
+  the play RSC's existing job.
+- **Reveal gating (pre-flight DECISION):** the quiz list does NOT currently
+  select `results_revealed_at` — ADD it to the `student_quiz_view` select
+  (column already projected in the view since 0012/0030/0032; generated type
+  at src/lib/types/database.ts:1178 — **no migration**). Card state:
+  - no completed session, or an ACTIVE attempt exists (active attempt blocks
+    a new start via the `one_active_assessment_attempt` partial index) →
+    unchanged (Start/Resume card as today; an active retake attempt must
+    shadow a completed attempt 1 — Resume wins over View results);
+  - completed + `results_revealed_at` set (auto_reveal_on_complete sets the
+    timestamp inside `submit_session`, 0032:491-499; single source of truth =
+    the timestamp, never client-side math) → "Completed · View results"
+    linking `/play/{sessionId}` (RSC at src/app/play/[sessionId]/page.tsx:245
+    already renders the EndScreen for completed sessions — verified; score
+    render stays server-gated via `student_results` + view reveal predicate);
+  - completed + NOT revealed → "Completed · awaiting results" chip with
+    `role="status"`, NOT a link (student EndScreen for unrevealed assessment
+    is score-less anyway — linking adds nothing; avoids implying scores
+    exist).
+- Practice quizzes (`mode = 'practice'`) keep current behavior — no results
+  chip (practice already shows its own end screen inline).
+- i18n keys en+ms same commit — namespace is `student.quizzes.*` (there is NO
+  top-level `quizzes` namespace; the client uses `useTranslations("student.quizzes")`,
+  student-quizzes-client.tsx:42): `cardCompletedAwaiting`, `cardViewResults`
+  in both src/messages/en.json and src/messages/ms.json.
+- Accessibility: chip is a real `<Link>` with accessible name including quiz
+  title; awaiting chip is text with `role="status"`, not a dead link.
+
+**E2E matrix (e40-student-results-entry.spec.ts — e18 conventions ONLY
+(e34 has NO fail-fast budget — do not copy it), FAIL-FAST per user
+requirement: module-level `const fast = expect.configure({ timeout: 5_000 })`,
+`testInfo.setTimeout(90_000)`, `test.skip(!LECTURER_INVITE_CODE, …)`, no
+`networkidle`, no fixed `waitForTimeout` sleeps — use `expect.poll` with a
+bounded timeout where polling is needed. A broken step fails in ~5s, not
+after the global 15s × retries):**
+  1. student completes UNTIMED quiz, lecturer reveals → quiz list card shows
+     "View results" whose accessible name INCLUDES the quiz title
+     (`getByRole("link", { name: new RegExp(quizTitle) })` — identical
+     "View results" ×N links must not pass) → click lands on EndScreen WITH
+     score visible;
+  2. completed but NOT revealed → "awaiting results" chip with
+     `role="status"`, NOT a link (assert no anchor role with that name);
+     after lecturer reveals + list revisit (poll via `expect.poll`, bounded)
+     → chip becomes link (transition case);
+  3. auto-reveal-on-complete quiz, SINGLE-student class → link appears
+     without any lecturer action (multi-student classes delay the flip until
+     the last active session terminates — 0032:466-501; pin the
+     single-student precondition);
+  4. retake-allowed quiz attempted twice → card links to the attempt-2
+     session; assert session-derived metadata on the EndScreen (submitted
+     time/duration), not just score, since `student_results` is quiz-keyed
+     and a wrong-attempt link could pass a score-only assertion;
+  5. practice quiz completion → NO results chip (unchanged practice flow);
+  6. student who never attempted → card unchanged (Start), no chip;
+  7. retake quiz with completed attempt 1 + ACTIVE attempt 2 → card shows
+     Resume/Start, and NO "View results" link (`toHaveCount(0)`) — an active
+     attempt shadows the completed one;
+  8. TIMED quiz expired by countdown (e10b choreography: auto-submit, no
+     Finish click) → after reveal the card still becomes "View results" and
+     renders the auto-submitted score;
+  9. ms locale → chip copy renders in Malay (e31 convention: switch locale,
+     assert localized string + no raw keys);
+  10. flagged session (3 face-fails) → card shows NO chip at all (pinned
+      decision; gradebook divergence documented in RA-1).
+
+**Tests (unit/route):** page-level narrowing helper unit test (latest
+completed session per quiz; `started_at DESC, id DESC` tie-break; active-
+attempt shadowing) in `src/app/(student)/student/quizzes/page.test.ts` or
+colocated lib module; no route changes, no migration → no SQL harness probe
+(existing `verify:results` continues to cover the reveal predicate).
+
+**Shared E2E helper additions (both specs need them; add to
+e2e/helpers.ts first):** `completeQuiz(page, { answers })` returning the
+session id (parse from `/play/[uuid]` URL, e36 pattern); `enableRetakes(
+lecturerPage, quizId, maxAttempts)` (extract e37's settings-dialog flow);
+auto-reveal toggle via lecturer-authenticated `request.patch` on
+`/api/quizzes/[id]/reveal-settings`; `currentSessionId(page)` extraction;
+`flagCurrentSession(page)` wrapping `setFaceVerifyMode` +
+`waitForFlaggedOverlay`. Do NOT replicate `expectNoAnswerPost`'s fixed
+`waitForTimeout` window — that pattern is forbidden by the fail-fast
+requirement.
 
 ---
 
@@ -140,8 +233,54 @@ subtly once. Mirrors finger glyphs already displayed.
 
 <!-- Required before ANY item above is implemented. See roadmap README Step 1. -->
 
-- (none yet)
+- 2026-08-28: reconciled against d1cfcb9 (post AU-1); SQ-2 pre-flight DONE —
+  no migration needed (results_revealed_at already projected in
+  student_quiz_view; generated type at src/lib/types/database.ts:1178 — the
+  earlier :543 citation was the quizzes TABLE row, corrected); verified
+  notification-bell path is src/components/notifications/notification-bell.tsx
+  (bell href line 207) and /play/[sessionId] RSC renders completed-session
+  EndScreen at src/app/play/[sessionId]/page.tsx:245; quiz list page is
+  src/app/(student)/student/quizzes/page.tsx (student_quiz_view select today
+  lacks results_revealed_at — add to select, not schema); i18n namespace
+  corrected to student.quizzes.* (no top-level quizzes namespace exists);
+  student_quiz_view is LIVE-only (0032:653) → closed quizzes leave the list,
+  so card chips cover live quizzes only — voided the original closed-quiz E2E
+  cases and replaced with active-attempt shadowing, timer auto-submit, a11y
+  name, and flagged-session cases; RA-7 ships in the same change; E2E
+  fail-fast convention pinned (e18 pattern ONLY — e34 has no budget; 5s
+  expect, 90s test timeout, skip-without-invite-code, no fixed sleeps) per
+  user requirement.
 
 ## Implementation log
 
 <!-- Filled at move-out per roadmap README Step 3. -->
+
+- **2026-08-28 — SQ-2 (results entry point on quiz cards) SHIPPED** (as
+  RA-7's student-side design; ships together with RA-1 in RESULTS_ANALYTICS).
+  No migration (0033 remains the next number).
+  - What shipped: `src/app/(student)/student/quizzes/page.tsx` adds one
+    `student_session_view` read (completed sessions of the visible quiz ids,
+    `started_at DESC`) and `results_revealed_at` to the `student_quiz_view`
+    select; latest completed session per quiz picked in memory (first-wins
+    under the DESC feed).
+  - Card states (student-quizzes-client.tsx): completed + revealed →
+    "View results" `<Link>` to `/play/{sessionId}`, accessible name includes
+    the quiz title; completed + not revealed → `role="status"` "Completed ·
+    awaiting results" chip, not a link; never-attempted/practice/active-
+    attempt cards unchanged. Flagged sessions are NOT chip-eligible
+    (documented divergence — RA-1 gradebook shows their scores).
+  - i18n: `student.quizzes.cardCompletedAwaiting` / `cardViewResults` in
+    en+ms.
+  - Deviations: original plan cited SQ-3 as the design owner (wrong — fixed
+    at pre-flight to SQ-2); closed-quiz chip behavior deliberately out of
+    scope (student_quiz_view is live-only; closed-quiz access stays with the
+    bell/play RSC via 0031 recovery — documented in the design section).
+  - Tests: E2E `e40-student-results-entry.spec.ts` (2 tests: reveal
+    transition + retake/awaiting coexistence card contract), fail-fast e18
+    convention; shared helpers added to `e2e/helpers.ts` (`completeQuiz` by
+    option text, `startQuizByTitle`, `currentSessionId`,
+    `configureRetakesOnCreate`, `setAutoReveal`, `flagCurrentSession`,
+    `loadWorkbook` — some reserved for later specs).
+
+Note: SQ-1, SQ-3..SQ-10 remain PLANNED — this plan does NOT move out until
+the whole domain ships (roadmap README Step 3).

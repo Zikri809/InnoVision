@@ -66,6 +66,8 @@ export type ExportSessionInput = {
   last_activity_at: string | number | null;
   face_fail_streak: number | null;
   focus_pause_count: number | null;
+  /** 0032 retake attempt number — optional; gradebook cells surface it. */
+  attempt?: number | null;
 };
 
 export type ExportAnswerInput = {
@@ -135,8 +137,15 @@ export type ExportModel = {
  * deterministic ties). Results rows, distribution math, and attemptedCount all
  * draw from exactly this session set so the workbook can never contradict
  * itself.
+ *
+ * ORDER CONTRACT (RA-1 gradebook consumes this too): the input MUST be fed
+ * started_at DESC, id DESC (the export route's order, api/quizzes/[id]/export/
+ * route.ts) — the loop keeps the FIRST terminal row encountered, so "newest
+ * terminal wins" only holds under that feed order. The gradebook read/sort
+ * replicates it; a differently-ordered feed yields nondeterministic retake
+ * cells.
  */
-function selectRepresentativeSessions(
+export function selectRepresentativeSessions(
   sessions: ExportSessionInput[],
 ): ExportSessionInput[] {
   const byStudent = new Map<string, ExportSessionInput>();

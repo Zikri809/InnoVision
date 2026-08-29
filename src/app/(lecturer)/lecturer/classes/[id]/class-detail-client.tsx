@@ -356,7 +356,15 @@ export function ClassDetailClient({
 
       <Card>
         <CardHeader>
-          <CardTitle>{t("classQuizzes")}</CardTitle>
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle>{t("classQuizzes")}</CardTitle>
+            <Link
+              href={`/lecturer/classes/${cls.id}/gradebook`}
+              className="text-xs font-bold text-primary hover:underline"
+            >
+              {t("gradebookLink")}
+            </Link>
+          </div>
           <CardDescription>
             {t("quizCount", { count: quizzes.length })}
           </CardDescription>

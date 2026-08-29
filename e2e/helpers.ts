@@ -1,4 +1,4 @@
-import { type Page } from "@playwright/test";
+import { type APIRequestContext, type Page } from "@playwright/test";
 import { expect } from "@playwright/test";
 import { fakeHandTrackerInit } from "./fake-hand-tracker";
 import { fakeFaceInit } from "./fake-face-tracker";
@@ -660,5 +660,102 @@ export async function staleActiveSession(
     .update({ last_activity_at: lastActivityAt, status: "active" })
     .eq("id", sessionId);
   return error ? null : sessionId;
+}
+
+// ── RA-1 / SQ-2 shared helpers (e39/e40) ────────────────────────────────
+
+/**
+ * Complete the CURRENT quiz in the play UI: answer every question, then
+ * Finish. Each `answers[i]` is the option TEXT to click (option buttons'
+ * accessible names are "<letter> <text>", e.g. "B 4" — e18/e13 convention:
+
+ * match by unique option text, never by letter or index). Assumes the page
+ * is on /play/[sessionId] with the first question rendered. Returns the
+ * session id parsed from the URL. Fail-fast: every await uses the spec's
+ * `fast` budget — no fixed sleeps.
+ */
+export async function completeQuiz(
+  page: Page,
+  answers: string[],
+  labels: { next: string; finish: string },
+) {
+  const sessionId = currentSessionId(page);
+  for (let i = 0; i < answers.length; i++) {
+    await page.getByRole("button", { name: answers[i] }).click();
+    if (i < answers.length - 1) {
+      await page.getByRole("button", { name: labels.next, exact: true }).click();
+    } else {
+      await page.getByRole("button", { name: labels.finish, exact: true }).click();
+    }
+  }
+  return sessionId;
+}
+
+/**
+ * Start a SPECIFIC quiz from the student quiz list by scoping to its card
+ * (quizzes render created_at DESC, so a bare .first() is whatever is
+ * newest — never rely on ordering).
+ */
+export async function startQuizByTitle(page: Page, quizTitle: string) {
+  await page
+    .locator("li")
+    .filter({ hasText: quizTitle })
+    .getByRole("button", { name: "Start", exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/play\/[0-9a-f-]+/);
+}
+
+/**
+ * Parse the /play/[uuid] session id from the page's current URL (e36/e37
+ * pattern, extracted so specs stop re-inlining the regex).
+ */
+export function currentSessionId(page: Page): string {
+  const match = /\/play\/([0-9a-f-]{36})/i.exec(page.url());
+  if (!match) throw new Error(`currentSessionId: not on a /play/[uuid] URL — ${page.url()}`);
+  return match[1];
+}
+
+/**
+ * Enable retakes via the class-detail quiz-creation form — QC-4 config is a
+ * CREATION-time setting (class-detail-client.tsx), not a builder dialog.
+ * Call BEFORE clicking create: checks "Allow retake" and picks the attempts
+ * count on the class page's quiz form.
+ */
+export async function configureRetakesOnCreate(page: Page, maxAttempts: number) {
+  await page.getByLabel(/allow retake/i).check();
+  await page.getByLabel(/max attempts/i).selectOption(String(maxAttempts));
+}
+
+/**
+ * Turn on auto-reveal-on-complete for a quiz via the reveal-settings API from
+ * the lecturer's AUTHENTICATED context (no UI dependency). e40 case 3.
+ */
+export async function setAutoReveal(request: APIRequestContext, quizId: string) {
+  const res = await request.patch(`/api/quizzes/${quizId}/reveal-settings`, {
+    data: { auto_reveal_on_complete: true },
+  });
+  if (!res.ok()) {
+    throw new Error(`setAutoReveal failed: ${res.status()} ${await res.text()}`);
+  }
+}
+
+/**
+ * Flag the CURRENT in-progress session by driving 3 face-check mismatches
+ * (wraps setFaceVerifyMode + waitForFlaggedOverlay). Requires the fake face
+ * tracker to be installed and an assessment in progress.
+ */
+export async function flagCurrentSession(page: Page) {
+  await setFaceVerifyMode(page, "mismatch");
+  await waitForFlaggedOverlay(page);
+}
+
+/**
+ * Parse an xlsx buffer/Path into an ExcelJS workbook (e18 pattern, extracted).
+ */
+export async function loadWorkbook(path: string) {
+  const { default: ExcelJS } = await import("exceljs");
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.readFile(path);
+  return wb;
 }
 

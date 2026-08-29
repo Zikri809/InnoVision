@@ -122,21 +122,25 @@ Update as work proceeds (keep honest; this mirrors reality, not intention):
 | Plan | State | Shipped as | Log |
 |---|---|---|---|
 | QUIZ_LIFECYCLE | ✅ shipped | [../PLAN_CLOSE_AND_SCHEDULE.md](../PLAN_CLOSE_AND_SCHEDULE.md) | QC-1..QC-4 (2026-08-28) |
-| RESULTS_ANALYTICS | 🔲 planned | — | — |
+| RESULTS_ANALYTICS | 🔶 partial — RA-1 shipped | — | RA-1 + RA-7 via SQ-2 (2026-08-28) |
+| STUDENT_QOL | 🔶 partial — SQ-2 shipped | — | SQ-2 (2026-08-28) |
 | AUTHORING_PRODUCTIVITY | 🔲 planned | — | — |
 | QUESTION_TYPES | 🔲 planned | — | — |
-| STUDENT_QOL | 🔲 planned | — | — |
-| AUTH_IDENTITY | 🔲 planned | — | — |
+| AUTH_IDENTITY | 🔶 partial — AU-1 shipped | — | AU-1 (2026-08-28) |
 | CLASS_MANAGEMENT | 🔲 planned | — | — |
 | INTEGRITY_OPS | 🔲 planned | — | — |
 | ACCESSIBILITY_PLATFORM | 🔲 planned | — | — |
 
+> Partial states: implementation logs live inside each domain plan doc
+> (Pre-flight + Implementation log sections). A plan doc moves out (Step 3)
+> only when its whole domain ships.
+
 ## Suggested sequencing (by leverage ÷ cost, audit recommendation)
 
-1. AU-1 forgot password (half-day, unblocks real users immediately)
-2. QC-1 close quiz + QC-2 reveal recovery (trust landmines, small-medium)
-3. QC-3 availability windows (unlocks SQ deadline chips + IO reminders)
-4. RA-1 gradebook + RA-7 per-quiz results entry point
+1. ~~AU-1 forgot password~~ ✅ (2026-08-28)
+2. ~~QC-1 close quiz + QC-2 reveal recovery~~ ✅ (2026-08-28)
+3. ~~QC-3 availability windows~~ ✅ (2026-08-28)
+4. ~~RA-1 gradebook + RA-7 per-quiz results entry point~~ ✅ (2026-08-28, RA-7 shipped as SQ-2)
 5. AX-1 dark mode + AX-2 contrast (wiring nearly free, tokens exist)
 6. IO-2 flagged-unlock notification + SQ-5 camera messaging
 7. Then depth: QT shuffling (cheap) → AP-1/AP-2 authoring → QT-1 multi-select → AU-2 SSO
