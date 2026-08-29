@@ -619,8 +619,8 @@ export async function closeQuiz(page: Page, classTitle: string, quizTitle: strin
 
 /**
  * Phase 8 service-role client for E2E seeding/cleanup. Two-gated seam:
- *  1. `process.env.NODE_ENV !== "production"` (weak gate — Playwright leaves it
- *     undefined, so it is NOT the real guard).
+ *  1. Node-context only (Playwright spec files run in Node, never in the
+ *     browser — NOT a security gate by itself).
  *  2. Equality check that the service URL host is in the explicit allow-list
  *     `{127.0.0.1, localhost}` (NOT a substring match). This is the real gate.
  * App code never references this; only E2E specs do.

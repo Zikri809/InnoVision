@@ -5,6 +5,7 @@ import {
   releaseCameraStream,
   _resetCameraState,
   _cameraRefcount,
+  CameraFailureError,
 } from "./camera";
 
 /**
@@ -141,6 +142,63 @@ describe("camera.ts refcount/generation", () => {
     expect(resolveStream(token)).toBe(shared);
     releaseCameraStream(token);
     expect(shared.getTracks()[0].stopped).toBe(true);
+  });
+
+  it("SQ-5: a getUserMedia rejection surfaces as CameraFailureError with the classified cause", async () => {
+    setGetUserMedia(() =>
+      Promise.reject(new DOMException("denied", "NotAllowedError")),
+    );
+    const err: CameraFailureError = await acquireCameraStream().then(
+      () => {
+        throw new Error("expected rejection");
+      },
+      (e: unknown) => e as CameraFailureError,
+    );
+    expect(err).toBeInstanceOf(CameraFailureError);
+    expect(err.failure).toBe("permission");
+  });
+
+  it("SQ-5: a non-DOMException rejection classifies as 'unknown' (honest fallback)", async () => {
+    setGetUserMedia(() => Promise.reject(new Error("weird")));
+    const err: CameraFailureError = await acquireCameraStream().then(
+      () => {
+        throw new Error("expected rejection");
+      },
+      (e: unknown) => e as CameraFailureError,
+    );
+    expect(err.failure).toBe("unknown");
+  });
+
+  it("SQ-5: no mediaDevices in an INSECURE context → 'security'; secure → 'unsupported'", async () => {
+    // Node env has no real `window` — the camera module reads
+    // `window.isSecureContext` only when mediaDevices is absent, so stub it.
+    const nav = navigator as unknown as { mediaDevices?: unknown };
+    const hadDevices = "mediaDevices" in nav;
+    const prevDevices = nav.mediaDevices;
+    try {
+      delete (nav as { mediaDevices?: unknown }).mediaDevices;
+      vi.stubGlobal("window", { isSecureContext: false });
+      const errSec: CameraFailureError = await acquireCameraStream().then(
+        () => {
+          throw new Error("expected rejection");
+        },
+        (e: unknown) => e as CameraFailureError,
+      );
+      expect(errSec.failure).toBe("security");
+
+      // Secure context without the API → plain unsupported.
+      vi.stubGlobal("window", { isSecureContext: true });
+      const errUns: CameraFailureError = await acquireCameraStream().then(
+        () => {
+          throw new Error("expected rejection");
+        },
+        (e: unknown) => e as CameraFailureError,
+      );
+      expect(errUns.failure).toBe("unsupported");
+    } finally {
+      vi.unstubAllGlobals();
+      if (hadDevices) nav.mediaDevices = prevDevices;
+    }
   });
 
   it("StrictMode: a disposed first acquire's release cannot kill the coalesced second acquire", async () => {

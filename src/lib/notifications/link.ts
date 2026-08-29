@@ -5,13 +5,14 @@ import type { NotificationType } from "./types";
  * link_url column — routes stay in code, not in historical rows).
  *
  * List-page targets never probe. Entity targets whose destination can 404
- * after source deletion (quizzes are deletable while unattempted) carry a
- * probe so the caller can intercept the miss (toast/redirect/mark-read).
+ * after source deletion (quizzes are deletable while unattempted; sessions
+ * are reset-cascadeable) carry a probe so the caller can intercept the miss
+ * (toast/redirect/mark-read).
  */
 export interface ResolvedLink {
   href: string;
   /** RLS-scoped existence check to run before navigating. */
-  probe?: { table: "quizzes"; id: string };
+  probe?: { table: "quizzes" | "quiz_sessions"; id: string };
   /**
    * `results_revealed` fallback chain: try to resolve the caller's own
    * completed session for this quiz → /play/[sessionId], else href.
@@ -29,6 +30,7 @@ export function resolveNotificationLink(
 ): ResolvedLink {
   const quizId = str(payload.quiz_id);
   const classId = str(payload.class_id);
+  const sessionId = str(payload.session_id);
 
   switch (type) {
     // Student list pages — always valid, no probe.
@@ -41,6 +43,16 @@ export function resolveNotificationLink(
         href: "/student/quizzes",
         resolveSessionQuizId: quizId,
       };
+    // IO-1: the student is told their flagged attempt is unlocked — land
+    // them back IN the attempt (probe first: the session may have been
+    // reset since; RLS own-sessions makes the probe self-scoping).
+    case "session_unlocked":
+      return sessionId
+        ? {
+            href: `/play/${sessionId}`,
+            probe: { table: "quiz_sessions", id: sessionId },
+          }
+        : { href: "/student/quizzes" };
     case "removed_from_class":
     case "class_archived":
       return { href: "/student/classes" };

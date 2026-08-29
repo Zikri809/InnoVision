@@ -6,6 +6,7 @@ import { PeriodicCadence, shouldScheduleFaceCheck } from "@/lib/face/cadence";
 import { resolveVerifyOutcome } from "@/lib/face/outcome";
 import { recoverFlow, recoveryLanding } from "@/lib/face/recovery";
 import { getFakeFaceControl } from "@/lib/face/fake-seam";
+import { isFakeFaceSeamEnabled } from "@/lib/face/seam-gate";
 import {
   FOCUS_BLUR_DEBOUNCE_MS,
   FLAGGED_POLL_MS,
@@ -326,7 +327,7 @@ export function useFacePipeline(props: FacePipelineProps) {
     if (disposedRef.current || hiddenRef.current || isTerminalRef.current) return;
     // E2E seam: `setFacePeriodic({minMs,maxMs})` overrides the bounds at
     // construction (keeps `cadence.ts` pure/env-free; makes E12 deterministic).
-    const periodic = process.env.NODE_ENV === "production" ? undefined : getFakePeriodicOverride();
+    const periodic = isFakeFaceSeamEnabled() ? getFakePeriodicOverride() : undefined;
     const cadence = new PeriodicCadence({
       minMs: periodic?.minMs ?? PERIODIC_MIN_MS,
       maxMs: periodic?.maxMs ?? PERIODIC_MAX_MS,

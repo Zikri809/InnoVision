@@ -164,6 +164,34 @@ doesn't exist.
 
 ## SQ-5 · Camera-permission differentiated errors (MEDIUM — pairs with AX-7)
 
+> **Pre-flight reconciled 2026-08-29 @ 99a06a3:** Evidence verified with
+> corrections. (a) AX-7's taxonomy UTIL lands in THIS batch (shared kernel —
+> implemented here, AX-7 doc references it): new pure
+> `classifyCameraFailure(err): CameraFailure` in `src/lib/vision/camera.ts`
+> covering NotAllowedError (permission), NotFoundError/OverconstrainedError
+> (no device), NotReadableError (device busy), SecurityError (insecure
+> context), plus absence of `navigator.mediaDevices` — file today throws
+> undifferentiated English strings (camera.ts:113). Pure + Node-testable;
+> camera.test.ts's injected-navigator pattern extends directly. (b) PLUMBING
+> correction: the plan cites `use-face-tracker.ts:196–230`, but boot-failure
+> funneling actually happens via `onUnavailable` callbacks (lines :87, :120,
+> :143, :158, :190, :228) which drop the error object — the util needs a
+> thread: camera.ts throws typed `CameraFailureError`, use-face-tracker
+> captures the LAST failure reason into a `failureReason` return field
+> (defaulting to "unknown" for health-probe/timeout paths, which are NOT
+> camera-permission failures and must NOT claim they are). (c) ENROLL SURFACE:
+> plan said "enroll page" — actual file is
+> `src/app/(student)/student/face/enroll/face-enroll-client.tsx`; generic
+> panel at :421–432 (`statusUnavailable` + retry) gains a classified variant
+> with per-cause copy + browser-settings hint (NotAllowedError) and a
+> "raise hand / continue click-first" reassurance. (d) ASSESSMENT SURFACE:
+> faint chip confirmed at face-verifier.tsx:73–84 (`offlineChip`) — replaced
+> with a clearer degraded banner (non-blocking, role=status, dismissible
+> details) naming the cause; the face-unavailable REPORT to the lecturer
+> (`/api/sessions/[id]/face-unavailable`, play-client.tsx:226–234) is
+> UNCHANGED — classification is student-facing copy only, no RPC/payload
+> changes. (e) All copy en/ms in the same commit.
+
 **Problem:** All tracker boot failures collapse to generic unavailable
 (`use-face-tracker.ts:196–230`, enroll equivalent); browser-API rejection
 names discarded. Blocked-camera students retry forever.
@@ -233,6 +261,11 @@ subtly once. Mirrors finger glyphs already displayed.
 
 <!-- Required before ANY item above is implemented. See roadmap README Step 1. -->
 
+- 2026-08-29: SQ-5 reconciled against 99a06a3; no migration needed; scope
+  refined per the reconciled block above (taxonomy util lands here as the
+  AX-7 shared kernel; onUnavailable error-drop plumbing corrected; surfaces
+  pinned to face-enroll-client.tsx:421 and face-verifier.tsx:73; lecturer
+  face-unavailable report intentionally UNCHANGED).
 - 2026-08-28: reconciled against d1cfcb9 (post AU-1); SQ-2 pre-flight DONE —
   no migration needed (results_revealed_at already projected in
   student_quiz_view; generated type at src/lib/types/database.ts:1178 — the

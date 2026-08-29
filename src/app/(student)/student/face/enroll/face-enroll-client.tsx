@@ -47,7 +47,7 @@ export function FaceEnrollClient({
   // Camera boots ONLY after biometric consent — the webcam light must never
   // turn on while the consent card is still pending. Revoking consent flips
   // `enabled` back to false and the hook's cleanup releases the stream.
-  const { videoRef, trackerRef, available, booting, start } = useFaceTracker({
+  const { videoRef, trackerRef, available, booting, failureReason, start } = useFaceTracker({
     enabled: consent,
   });
 
@@ -422,8 +422,28 @@ export function FaceEnrollClient({
         <div className="rounded-[28px] border-[3px] border-border bg-card p-8 shadow-[var(--shadow-clay)]">
           <h2 className="font-heading text-xl font-semibold">{t("enrollTitle")}</h2>
           <p className="mt-2 text-sm font-semibold text-muted-foreground">
-            {t("statusUnavailable")}
+            {t(`cameraFailure.${failureReason}.body`)}
           </p>
+          {failureReason === "permission" && (
+            <p className="mt-3 rounded-2xl border-[3px] border-border bg-muted/60 px-4 py-3 text-sm font-semibold text-muted-foreground">
+              {t("cameraFailure.permission.hint")}
+            </p>
+          )}
+          {failureReason === "no_device" && (
+            <p className="mt-3 rounded-2xl border-[3px] border-border bg-muted/60 px-4 py-3 text-sm font-semibold text-muted-foreground">
+              {t("cameraFailure.no_device.hint")}
+            </p>
+          )}
+          {failureReason === "device_busy" && (
+            <p className="mt-3 rounded-2xl border-[3px] border-border bg-muted/60 px-4 py-3 text-sm font-semibold text-muted-foreground">
+              {t("cameraFailure.device_busy.hint")}
+            </p>
+          )}
+          {failureReason === "security" && (
+            <p className="mt-3 rounded-2xl border-[3px] border-border bg-muted/60 px-4 py-3 text-sm font-semibold text-muted-foreground">
+              {t("cameraFailure.security.hint")}
+            </p>
+          )}
           <div className="mt-5">
             <Button variant="outline" size="lg" onClick={start}>
               {tCommon("retry")}

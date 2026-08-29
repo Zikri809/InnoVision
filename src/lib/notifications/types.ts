@@ -17,6 +17,7 @@ export const NOTIFICATION_TYPES = [
   "face_unavailable_reported",
   "face_enrollment_held",
   "quiz_closed",
+  "session_unlocked",
 ] as const;
 
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
@@ -29,6 +30,7 @@ export const PINNED_TYPES: ReadonlySet<NotificationType> = new Set([
   "session_flagged",
   "face_unavailable_reported",
   "face_enrollment_held",
+  "session_unlocked",
 ]);
 
 /** Grouped per entity in the UI ("12 new submissions"); never pinned. */

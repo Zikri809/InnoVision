@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { FaceTracker } from "@/lib/face/face-tracker";
 import { getFakeFaceTracker } from "@/lib/face/fake-seam";
+import { isFakeFaceSeamEnabled } from "@/lib/face/seam-gate";
 import { FACE_BOOT_TIMEOUT_MS } from "@/lib/face/constants";
+import { classifyCameraFailure, type CameraFailure } from "@/lib/vision/camera";
 import type { IFaceTracker } from "@/lib/face/types";
 
 /**
@@ -47,6 +49,14 @@ export function useFaceTracker(opts?: {
   // not flash the "unavailable" panel before the deferred boot setBooting(true)
   // microtask runs (M4 cosmetic). The boot effect flips it to false either way.
   const [booting, setBooting] = useState(enabled);
+  // SQ-5: cause of the last boot failure, for differentiated student copy.
+  // "unknown" is the honest default — boot timeouts and health-probe failures
+  // are NOT camera-permission problems and must never claim to be. Camera-
+  // rejections arrive as CameraFailureError and keep their specific cause.
+  const [failureReason, setFailureReason] = useState<CameraFailure>("unknown");
+  const noteFailure = useCallback((err: unknown) => {
+    setFailureReason(classifyCameraFailure(err));
+  }, []);
 
   const start = useCallback(() => {
     if (!enabled) return;
@@ -73,7 +83,7 @@ export function useFaceTracker(opts?: {
     }
 
     // Fake seam first (non-prod), else the real boot raced against the timeout.
-    const fake = process.env.NODE_ENV === "production" ? undefined : getFakeFaceTracker();
+    const fake = isFakeFaceSeamEnabled() ? getFakeFaceTracker() : undefined;
     if (fake) {
       trackerRef.current = fake;
       try {
@@ -117,6 +127,7 @@ export function useFaceTracker(opts?: {
         if (bootId === bootIdRef.current && !disposedRef.current) {
           setBooting(false);
           setAvailable(false);
+          setFailureReason("unknown"); // no camera call was attempted yet
           onUnavailableRef.current?.();
         }
         return;
@@ -153,6 +164,9 @@ export function useFaceTracker(opts?: {
         tracker.stop();
         if (bootId === bootIdRef.current && !disposedRef.current) {
           console.error("[face-boot] timed out after", FACE_BOOT_TIMEOUT_MS, "ms");
+          // A timeout is NOT a camera-permission failure — clear any reason a
+          // prior boot left behind so the panel never shows stale copy.
+          setFailureReason("unknown");
           setBooting(false);
           setAvailable(false);
           onUnavailableRef.current?.();
@@ -185,6 +199,8 @@ export function useFaceTracker(opts?: {
         if (!healthy) {
           console.info("[face-boot] health check was not healthy -> unavailable");
           tracker.stop();
+          // Backend outage, NOT a camera problem — clear any stale reason.
+          setFailureReason("unknown");
           setBooting(false);
           setAvailable(false);
           onUnavailableRef.current?.();
@@ -197,6 +213,7 @@ export function useFaceTracker(opts?: {
         clearTimeout(timeout);
         tracker.stop();
         console.error("[face-boot] primary boot failed, attempting fallback retry:", err);
+        noteFailure(err);
 
         // Transient camera/wasm lock fallback retry
         if (bootId === bootIdRef.current && !disposedRef.current && !timedOut) {
@@ -231,7 +248,7 @@ export function useFaceTracker(opts?: {
     }
 
     void bootWithRetry();
-  }, [enabled]);
+  }, [enabled, noteFailure]);
 
   useEffect(() => {
     start();
@@ -244,5 +261,5 @@ export function useFaceTracker(opts?: {
     };
   }, [enabled, start]);
 
-  return { videoRef, trackerRef, available, booting, start };
+  return { videoRef, trackerRef, available, booting, failureReason, start };
 }

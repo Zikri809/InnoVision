@@ -79,6 +79,11 @@ export default defineConfig({
         COMPREFACE_BASE_URL: "http://localhost:8000",
         COMPREFACE_API_KEY: "test-key",
         COMPREFACE_MOCK_ENABLED: "1",
+        // Fake tracker seams (face + hand). The suite serves the PRODUCTION
+        // build where NODE_ENV-based seam gating is dead — the seams need an
+        // explicit harness-only opt-in that survives the build (src/lib/face/
+        // seam-gate.ts). NEVER set this outside the Playwright harness.
+        NEXT_PUBLIC_E2E_FAKE_SEAM: "1",
       },
     },
   ],

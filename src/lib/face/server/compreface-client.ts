@@ -10,13 +10,14 @@ import "server-only";
  * `COMPREFACE_API_KEY` are read here (server-only env, never shipped to the
  * browser).
  *
- * Mock mode (L15): when `NODE_ENV !== 'production'` AND
+ * Mock mode: when `NEXT_PUBLIC_E2E_FAKE_SEAM === '1'` (the Playwright-harness
+ * seam flag — see src/lib/face/seam-gate.ts) AND
  * `COMPREFACE_MOCK_ENABLED === '1'`, the client inspects the frame string for
  * the E2E marker substrings (`FAKE_FRAME_MATCH` / `FAKE_FRAME_MISMATCH`) and
- * returns canned responses WITHOUT calling Docker. Mock mode is STRICT OPT-IN:
- * without the explicit flag the client always talks to Docker, so a staging /
- * dev deployment reachable by students can never be silently bypassed via a
- * marker frame.
+ * returns canned responses WITHOUT calling Docker. Mock mode is STRICT OPT-IN
+ * via BOTH flags: without them the client always talks to Docker, so a
+ * staging / dev deployment reachable by students can never be silently
+ * bypassed via a marker frame.
  *
  * All methods return typed objects; network/HTTP errors map to
  * `{ error: 'compreface_unavailable' }` so routes can 503 without leaking
@@ -67,8 +68,14 @@ export function selfSimilarity(
 const COMPREFACE_TIMEOUT_MS = 5000;
 
 function isMockMode(): boolean {
+  // Since 5f6b1da the E2E suite runs the PRODUCTION build (`npm run build &&
+  // npm run start`), where NODE_ENV is "production" and the old gate was
+  // dead — every mock-branching path silently fell through to the live
+  // CompreFace client. The harness opt-in (playwright.config.ts webServer
+  // env → seam-gate.ts) now carries the E2E-only privilege; production
+  // deployments never set it, so the default-off posture is unchanged.
   return (
-    process.env.NODE_ENV !== "production" &&
+    process.env.NEXT_PUBLIC_E2E_FAKE_SEAM === "1" &&
     process.env.COMPREFACE_MOCK_ENABLED === "1"
   );
 }

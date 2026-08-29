@@ -11,6 +11,7 @@ import {
   RiCheckDoubleLine,
   RiCheckboxCircleLine,
   RiLockLine,
+  RiLockUnlockLine,
   RiLiveLine,
   RiLogoutBoxRLine,
   RiNotification3Line,
@@ -59,6 +60,7 @@ const TYPE_ICONS: Record<NotificationType, React.ComponentType<{ className?: str
   face_unavailable_reported: RiCameraOffLine,
   face_enrollment_held: RiUserSearchLine,
   quiz_closed: RiLockLine,
+  session_unlocked: RiLockUnlockLine,
 };
 
 /** Assessments get the exam-paper icon; practice keeps the live dot. */

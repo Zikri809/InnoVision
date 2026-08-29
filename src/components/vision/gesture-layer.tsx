@@ -16,6 +16,7 @@ import {
   WARN_AFTER_MS,
 } from "@/lib/gestures/constants";
 import { getFakeHandTracker } from "@/lib/gestures/fake-seam";
+import { isFakeFaceSeamEnabled } from "@/lib/face/seam-gate";
 import { HandLandmarkerTracker } from "@/lib/gestures/hand-tracker";
 import type { HandFrame, HoldProgress, IHandTracker } from "@/lib/gestures/types";
 import type { FaceStatus } from "@/lib/face/types";
@@ -279,7 +280,7 @@ export function GestureLayer({
     timedOutRef.current = false;
     const bootId = ++bootIdRef.current;
 
-    const fake = process.env.NODE_ENV === "production" ? undefined : getFakeHandTracker();
+    const fake = isFakeFaceSeamEnabled() ? getFakeHandTracker() : undefined;
 
     if (fake) {
       trackerRef.current = fake;

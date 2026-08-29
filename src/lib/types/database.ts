@@ -1511,6 +1511,7 @@ export type Database = {
         | "face_unavailable_reported"
         | "face_enrollment_held"
         | "quiz_closed"
+        | "session_unlocked"
       question_type: "mcq" | "true_false"
       quiz_mode: "practice" | "assessment"
       quiz_status: "draft" | "live" | "closed"
@@ -1661,6 +1662,7 @@ export const Constants = {
         "face_unavailable_reported",
         "face_enrollment_held",
         "quiz_closed",
+        "session_unlocked",
       ],
       question_type: ["mcq", "true_false"],
       quiz_mode: ["practice", "assessment"],

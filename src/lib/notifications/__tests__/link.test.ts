@@ -57,4 +57,21 @@ describe("resolveNotificationLink", () => {
       expect(link.href.startsWith("/")).toBe(true);
     }
   });
+
+  it("session_unlocked deep-links into the attempt with a session probe (IO-1)", () => {
+    const link = resolveNotificationLink("session_unlocked", {
+      ...payload,
+      session_id: "s-9",
+    });
+    expect(link.href).toBe("/play/s-9");
+    expect(link.probe).toEqual({ table: "quiz_sessions", id: "s-9" });
+  });
+
+  it("session_unlocked without a session_id payload falls back to the list page", () => {
+    // Defensive: the RPC always builds session_id, but a historical/manual
+    // row must never resolve to /play/undefined.
+    expect(resolveNotificationLink("session_unlocked", payload)).toEqual({
+      href: "/student/quizzes",
+    });
+  });
 });

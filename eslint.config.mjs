@@ -15,7 +15,10 @@ function assertProdE2EWebServer() {
   // spanning lines, so anchor on strings, not on `command:`).
   const code = raw
     .split("\n")
-    .map((line) => line.replace(/(^|\s)\/\/.*$/, "$1"))
+    // Normalize CRLF first (Windows checkouts): `.` never matches `\r`, so
+    // `\/\/.*$` would silently fail to strip comments and prose mentioning
+    // "next dev" inside a comment would trip the check.
+    .map((line) => line.replace(/\r$/, "").replace(/(^|\s)\/\/.*$/, "$1"))
     .join("\n");
   const strings = [...code.matchAll(/[`'"]([^`'"]*)[`'"]/g)].map((m) => m[1]);
   for (const s of strings) {

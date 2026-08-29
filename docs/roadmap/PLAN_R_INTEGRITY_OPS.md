@@ -12,6 +12,40 @@
 
 ## IO-1 · Flagged-session student comms (HIGH, small — highest QoL-per-line in roadmap)
 
+> **Pre-flight reconciled 2026-08-29 @ 99a06a3 (corrected by review):** RPC
+> `unlock_session` — LIVE baseline is **0021_integrity_audit_fixes.sql:126**
+> (R2), NOT 0009:609 (0021 superseded it with the paused-time crediting branch
+> `started_at += clock_timestamp() - paused_at` + `paused_at = null` +
+> `focus_pause_count = 0` reset — the timer-honesty behavior the plan's point
+> (d) credits). Migration **0033** therefore rebases on 0021 and adds ONLY the
+> notification insert; the initial draft's 0009-based rewrite was caught by
+> review and fixed before commit. Flagged poll 8s confirmed
+> (use-face-pipeline.ts:206, poll GETs `/api/sessions/[id]`); notification
+> machinery 0022 (enum whitelist, dedupe
+> `unique nulls not distinct (recipient_id, dedupe_key)`, typed client maps
+> `src/lib/notifications/{types,copy,link}.ts` + U3 i18n-coverage test that
+> auto-enforces copy for every enum value). CHANGES/REFINEMENTS: (a) migration
+> **0033**: `ALTER TYPE notification_type ADD VALUE 'session_unlocked'` +
+> `create or replace unlock_session` inserting the notification
+> (recipient = session's student; payload `{session_id, quiz_id, quiz_title}`;
+> dedupe `session_unlocked:<session_id>:<rotated nonce>` — nonce is fresh per
+> unlock, so each flag→unlock cycle notifies once while accidental double-fire
+> stays idempotent); follow 0022 house rules (on-conflict do nothing, no
+> auth.uid() in recipient), with ONE documented deviation: a narrowed-then-
+> catch-all exception handler around the best-effort insert (raise warning,
+> never fails the unlock — the poll is the consistency backbone); (b) client:
+> add `session_unlocked` to
+> NOTIFICATION_TYPES + PINNED_TYPES + NOTIF_COPY + icon map; link resolution
+> deep-links `/play/<session_id>` with a NEW `probe.quiz_sessions` branch
+> (existing probe machinery is quizzes-only — extend `ResolvedLink.probe` to a
+> union; bell's probe effect gains the quiz_sessions select; RLS own-sessions
+> makes it self-scoping); (c) flagged wait ticker: transition-detected in
+> face-verifier.tsx (flagged overlay at :133–150) — a ref records when status
+> flips into `flagged` from anything else; minute ticker renders visually-only
+> (aria-live off), no pipeline changes needed; (d) timer honesty: paused-time
+> crediting lives in the 0021 unlock branch and is preserved by 0033 — e16
+> unaffected.
+
 **Problem:** Flagged = opaque indefinite waiting: manual "Check Again" polling
 8s (`use-face-pipeline.ts startFlaggedPoll`), zero notification when unlocked,
 elapsed-wait invisible.
@@ -144,7 +178,12 @@ here only for domain completeness. No separate design.
 
 <!-- Required before ANY item above is implemented. See roadmap README Step 1. -->
 
-- (none yet)
+- 2026-08-29: IO-1 reconciled against 99a06a3; migration will be **0033**
+  (enum add-value + unlock_session rewrite; no table changes); noted
+  notifications client maps are enum-exhaustive (types.ts/copy.ts/link.ts +
+  U3 test) so the new type must touch all four; probe union extension needed
+  for quiz_sessions deep links; IO-2..IO-7 remain unverified (not in this
+  batch).
 
 ## Implementation log
 

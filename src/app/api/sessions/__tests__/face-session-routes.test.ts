@@ -48,11 +48,14 @@ const LECTURER_ID = "00000000-0000-4000-8000-00000000000a";
 beforeAll(() => {
   // The consent-revoke path calls the (module-real) CompreFace client; opt in
   // to its E2E mock so deleteSubject succeeds without Docker — mirroring
-  // face-routes.test.ts. Mock mode is strict opt-in since 0024 remediation.
+  // face-routes.test.ts. Mock mode is strict opt-in: the harness seam flag
+  // (seam-gate.ts) + the mock flag, exactly like the Playwright webServer env.
+  process.env.NEXT_PUBLIC_E2E_FAKE_SEAM = "1";
   process.env.COMPREFACE_MOCK_ENABLED = "1";
 });
 
 afterAll(() => {
+  delete process.env.NEXT_PUBLIC_E2E_FAKE_SEAM;
   delete process.env.COMPREFACE_MOCK_ENABLED;
 });
 

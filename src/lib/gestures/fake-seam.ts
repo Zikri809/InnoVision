@@ -5,9 +5,10 @@ import type { IHandTracker, FakeHandControl } from "./types";
  *
  * This module is PURE — it reads `globalThis` globals and shape-validates
  * `start`/`stop`/`sequence`/`frame` only. There is deliberately NO
- * `process.env` here: the `NODE_ENV !== "production"` gate lives in the
- * GestureLayer boot effect, so this module stays trivially importable in Node
- * unit tests and the component never sees a raw `(window as any)` cast.
+ * `process.env` here: the harness seam-flag gate (`lib/face/seam-gate.ts`)
+ * lives in the GestureLayer boot effect, so this module stays trivially
+ * importable in Node unit tests and the component never sees a raw
+ * `(window as any)` cast.
  *
  * SECURITY: the globals are read-only and only affect the student's own
  * client-side gesture input (a student could already click/`fetch`). The

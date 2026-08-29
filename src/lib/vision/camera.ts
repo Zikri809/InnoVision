@@ -31,6 +31,58 @@ type CameraState = {
   stream: MediaStream | null;
 };
 
+/**
+ * SQ-5 / AX-7 shared kernel: typed camera-failure taxonomy. getUserMedia
+ * rejection names (NotAllowedError etc.) were previously discarded and every
+ * boot failure collapsed to a generic "unavailable" — blocked-camera students
+ * retried forever with no actionable copy.
+ *
+ * `security` (insecure context) is derived from `window.isSecureContext` since
+ * browsers surface it inconsistently; "unknown" is the honest fallback for
+ * boot timeouts / health-probe failures, which are NOT camera-permission
+ * problems and must never claim to be.
+ */
+export type CameraFailure =
+  | "permission" // NotAllowedError — user/site denied; fixable in browser settings
+  | "no_device" // NotFoundError / OverconstrainedError — nothing to grant
+  | "device_busy" // NotReadableError — OS-level lock (another app)
+  | "security" // insecure context (http:// non-localhost)
+  | "unsupported" // no navigator.mediaDevices.getUserMedia at all
+  | "unknown";
+
+export class CameraFailureError extends Error {
+  readonly failure: CameraFailure;
+  constructor(failure: CameraFailure, message: string) {
+    super(message);
+    this.name = "CameraFailureError";
+    this.failure = failure;
+  }
+}
+
+export function classifyCameraFailure(err: unknown): CameraFailure {
+  if (err instanceof CameraFailureError) return err.failure;
+  const name =
+    typeof err === "object" && err !== null && "name" in err
+      ? String((err as { name: unknown }).name)
+      : "";
+  switch (name) {
+    case "NotAllowedError":
+    case "PermissionDeniedError":
+      return "permission";
+    case "NotFoundError":
+    case "DevicesNotFoundError":
+    case "OverconstrainedError":
+      return "no_device";
+    case "NotReadableError":
+    case "TrackStartError":
+      return "device_busy";
+    case "SecurityError":
+      return "security";
+    default:
+      return "unknown";
+  }
+}
+
 let state: CameraState = {
   inFlight: null,
   refcount: 0,
@@ -110,19 +162,40 @@ export async function acquireCameraStream(): Promise<number> {
 
 async function acquireMediaStream(): Promise<MediaStream> {
   if (!navigator.mediaDevices?.getUserMedia) {
-    throw new Error("This browser does not support webcam access.");
+    // Insecure contexts (plain http://, non-localhost) EXPOSE no mediaDevices
+    // at all — prefer the actionable security diagnosis when it applies.
+    if (typeof window !== "undefined" && window.isSecureContext === false) {
+      throw new CameraFailureError(
+        "security",
+        "Camera requires a secure (https) connection.",
+      );
+    }
+    throw new CameraFailureError(
+      "unsupported",
+      "This browser does not support webcam access.",
+    );
   }
   console.debug("[camera] getUserMedia start");
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: false,
-    video: {
-      facingMode: "user",
-      width: { max: 640, ideal: 640 },
-      height: { max: 480, ideal: 480 },
-    },
-  });
-  console.debug("[camera] getUserMedia resolved, active=", stream.active);
-  return stream;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        facingMode: "user",
+        width: { max: 640, ideal: 640 },
+        height: { max: 480, ideal: 480 },
+      },
+    });
+    console.debug("[camera] getUserMedia resolved, active=", stream.active);
+    return stream;
+  } catch (err) {
+    // Re-throw WITH the classification attached so callers upstream (tracker
+    // boot, enroll page) can render cause-specific copy instead of a generic
+    // unavailable panel.
+    throw new CameraFailureError(
+      classifyCameraFailure(err),
+      err instanceof Error ? err.message : "Camera access failed.",
+    );
+  }
 }
 
 /** Resolve the opaque token to the shared `MediaStream`. */

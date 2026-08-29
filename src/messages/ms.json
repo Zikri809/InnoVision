@@ -545,6 +545,31 @@
       "pendingBody": "Kami mengesan kemungkinan wajah pendua. Pensyarah anda akan menyemak pendaftaran tidak lama lagi.",
       "statusFailed": "Pemeriksaan gagal — sila cuba lagi.",
       "statusUnavailable": "Pengesahan wajah tidak tersedia buat masa ini. Sila cuba lagi nanti.",
+      "cameraFailure": {
+        "permission": {
+          "body": "Akses kamera disekat, jadi pendaftaran wajah tidak dapat dijalankan.",
+          "hint": "Klik ikon kunci/kamera dalam bar alamat pelayar anda dan benarkan kamera untuk laman ini, kemudian cuba lagi."
+        },
+        "no_device": {
+          "body": "Tiada kamera ditemui pada peranti ini.",
+          "hint": "Sambungkan kamera web (atau aktifkan kamera terbina dalam) dan pastikan ia tidak dilumpuhkan dalam tetapan sistem, kemudian cuba lagi."
+        },
+        "device_busy": {
+          "body": "Kamera sedang digunakan oleh aplikasi lain buat masa ini.",
+          "hint": "Tutup aplikasi atau tab pelayar lain yang menggunakan kamera (panggilan video, tab kuiz lain), kemudian cuba lagi."
+        },
+        "security": {
+          "body": "Kamera memerlukan sambungan selamat (https).",
+          "hint": "Buka halaman ini menggunakan alamat https:// (atau localhost) dan cuba lagi."
+        },
+        "unsupported": {
+          "body": "Pelayar ini tidak menyokong akses kamera.",
+          "hint": "Cuba versi terkini Chrome, Edge, Firefox, atau Safari."
+        },
+        "unknown": {
+          "body": "Pengesahan wajah tidak tersedia buat masa ini. Sila cuba lagi nanti."
+        }
+      },
       "cameraOffHint": "Kamera anda kekal dimatikan sehingga anda memberi kebenaran di bawah.",
       "startCaptureBtn": "Mula rakam",
       "tryAgainBtn": "Cuba lagi",
@@ -667,8 +692,11 @@
     "recoverBtn": "Kelipkan mata untuk pulih",
     "flaggedTitle": "Penilaian ditandakan",
     "flaggedBody": "Sistem kami mengesan ketidakpadanan wajah berulang kali. Pensyarah mesti menyemak dan membuka kunci penilaian anda sebelum anda boleh meneruskan.",
+    "flaggedWaitMinutes": "{count, plural, =0 {Menunggu semakan…} =1 {Menunggu semakan… 1 minit setakat ini.} other {Menunggu semakan… # minit setakat ini.}}",
     "checkAgainBtn": "Semak semula",
     "offlineChip": "Pemeriksaan wajah tidak tersedia — kamera atau model luar talian",
+    "degradedTitle": "Pemeriksaan wajah dimatikan — jawapan anda tetap dikira",
+    "degradedBody": "Pemeriksaan kamera tidak dapat dijalankan, jadi anda boleh terus menjawab dengan mengetik. Sila angkat tangan dan beritahu pengawas supaya ia dicatat — anda juga boleh cuba semakannya selepas kuiz.",
     "focusLostTitle": "Anda keluar dari tetingkap peperiksaan",
     "focusLostBody": "Peperiksaan anda dijeda kerana aplikasi atau tetingkap lain mengambil fokus. Klik di bawah untuk kembali.",
     "focusLostBtn": "Kembali ke peperiksaan"
@@ -851,6 +879,10 @@
       "quiz_closed": {
         "title": "Kuiz ditutup",
         "body": "\"{quizTitle}\" kini ditutup. Jika anda belum selesai, hubungi pensyarah anda."
+      },
+      "session_unlocked": {
+        "title": "Anda boleh teruskan",
+        "body": "Pensyarah anda menyemak percubaan anda pada \"{quizTitle}\" dan membukanya. Ketik untuk teruskan."
       }
     },
     "digest": {

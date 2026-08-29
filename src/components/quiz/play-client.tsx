@@ -16,6 +16,7 @@ import { useFaceTracker } from "@/components/face/use-face-tracker";
 import { useIntegrityAdvisories } from "@/components/face/use-integrity-advisories";
 import { useIncidentRecorder } from "@/components/face/use-incident-recorder";
 import { getFakeFaceTracker } from "@/lib/face/fake-seam";
+import { isFakeFaceSeamEnabled } from "@/lib/face/seam-gate";
 import type { FaceStatus } from "@/lib/face/types";
 
 
@@ -212,7 +213,7 @@ export function PlayClient({
   // Skipped under the E2E fake seam — headless runs must not exercise a real
   // getUserMedia/MediaRecorder path the fake tracker doesn't cover.
   const isFakeFace =
-    process.env.NODE_ENV !== "production" && getFakeFaceTracker() != null;
+    isFakeFaceSeamEnabled() && getFakeFaceTracker() != null;
   useIncidentRecorder({
     sessionId,
     enabled: quiz.mode === "assessment" && Boolean(face) && !isFakeFace,

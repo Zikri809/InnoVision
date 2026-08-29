@@ -44,6 +44,7 @@ export const NOTIF_COPY: Record<
   face_unavailable_reported: { titleKey: "items.face_unavailable_reported.title", bodyKey: "items.face_unavailable_reported.body" },
   face_enrollment_held: { titleKey: "items.face_enrollment_held.title", bodyKey: "items.face_enrollment_held.body" },
   quiz_closed: { titleKey: "items.quiz_closed.title", bodyKey: "items.quiz_closed.body" },
+  session_unlocked: { titleKey: "items.session_unlocked.title", bodyKey: "items.session_unlocked.body" },
 };
 
 export const DIGEST_COPY_KEYS = [

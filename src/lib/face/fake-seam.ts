@@ -6,8 +6,8 @@ import type { IFaceTracker, FakeFaceControl } from "./types";
  *
  * This module is PURE — it reads `globalThis` globals and shape-validates
  * `start`/`stop`/`captureFrame`/`waitForBlink` and the control surface
- * only. There is deliberately NO `process.env` here: the `NODE_ENV !==
- * "production"` gate lives in the face-tracker boot effect, so this module
+ * only. There is deliberately NO `process.env` here: the seam gate lives in
+ * the face-tracker boot effect (`isFakeFaceSeamEnabled()`), so this module
  * stays trivially importable in Node unit tests and the component never sees a
  * raw `(window as any)` cast.
  *

@@ -545,6 +545,31 @@
       "pendingBody": "We spotted a possible duplicate. Your lecturer will review your enrollment shortly.",
       "statusFailed": "Capture failed — please try again.",
       "statusUnavailable": "Face verification is unavailable right now. Please try again later.",
+      "cameraFailure": {
+        "permission": {
+          "body": "Camera access was blocked, so face enrollment can't run.",
+          "hint": "Click the lock/camera icon in your browser's address bar and allow camera for this site, then retry."
+        },
+        "no_device": {
+          "body": "No camera was found on this device.",
+          "hint": "Connect a webcam (or enable the built-in one) and make sure it isn't disabled in system settings, then retry."
+        },
+        "device_busy": {
+          "body": "The camera is being used by another app right now.",
+          "hint": "Close other apps or browser tabs using the camera (video calls, other quiz tabs), then retry."
+        },
+        "security": {
+          "body": "The camera needs a secure (https) connection.",
+          "hint": "Open this page using an https:// address (or localhost) and retry."
+        },
+        "unsupported": {
+          "body": "This browser doesn't support camera access.",
+          "hint": "Try a current version of Chrome, Edge, Firefox, or Safari."
+        },
+        "unknown": {
+          "body": "Face verification is unavailable right now. Please try again later."
+        }
+      },
       "cameraOffHint": "Your camera stays off until you give consent below.",
       "startCaptureBtn": "Start capture",
       "tryAgainBtn": "Try again",
@@ -667,8 +692,11 @@
     "recoverBtn": "Blink to recover",
     "flaggedTitle": "Assessment flagged",
     "flaggedBody": "Our system detected repeated face mismatches. A lecturer must review and unlock your assessment before you can continue.",
+    "flaggedWaitMinutes": "{count, plural, =0 {Waiting for review…} =1 {Waiting for review… 1 minute so far.} other {Waiting for review… # minutes so far.}}",
     "checkAgainBtn": "Check again",
     "offlineChip": "Face check unavailable — camera or models offline",
+    "degradedTitle": "Face checks are off — your answers still count",
+    "degradedBody": "The camera check couldn't run, so you can keep answering by tapping. Please raise your hand and tell the invigilator so they can note it — you can also retry the check after the quiz.",
     "focusLostTitle": "You left the exam window",
     "focusLostBody": "Your exam was paused because another app or window took focus. Click below to return — this window will come back to the front.",
     "focusLostBtn": "Return to the exam"
@@ -851,6 +879,10 @@
       "quiz_closed": {
         "title": "Quiz closed",
         "body": "\"{quizTitle}\" is now closed. If you haven't finished, check with your lecturer."
+      },
+      "session_unlocked": {
+        "title": "You can continue",
+        "body": "Your lecturer reviewed your attempt on \"{quizTitle}\" and unlocked it. Tap to continue."
       }
     },
     "digest": {
