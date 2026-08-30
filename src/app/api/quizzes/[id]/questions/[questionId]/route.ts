@@ -79,24 +79,28 @@ export async function PATCH(request: Request, { params }: Params) {
     return invalidBody(firstIssueMessage(parsed.error.issues, "Invalid question data."));
   }
 
-  const { type, prompt, options, correctIndex, explanation } = parsed.data;
+  const { type, prompt, options, correctIndex, correctIndices, explanation } = parsed.data;
 
   // Normalize "" → NULL to match append_question's NULLIF behavior, so both
   // write paths store the same representation for a cleared explanation.
   const explanationValue = explanation ? explanation : null;
 
+  // Multi-select rows (QT-1) carry the answer key in correctIndices and null
+  // the scalar; single-answer types are the reverse. Zod's superRefine
+  // enforces the strictly-symmetric shape.
   const { data: question, error } = await supabase
     .from("questions")
     .update({
       type,
       prompt,
       options,
-      correct_index: correctIndex,
+      correct_index: correctIndex ?? null,
+      correct_indices: correctIndices ?? null,
       explanation: explanationValue,
     })
     .eq("id", questionId)
     .eq("quiz_id", id)
-    .select("id, quiz_id, order_index, type, prompt, options, correct_index, explanation, created_at")
+    .select("id, quiz_id, order_index, type, prompt, options, correct_index, correct_indices, explanation, created_at")
     // maybeSingle (not single): a concurrent DELETE between the pre-check and
     // this UPDATE must surface as a clean 404, not a PGRST116 → 503.
     .maybeSingle();
@@ -107,7 +111,10 @@ export async function PATCH(request: Request, { params }: Params) {
     // and the UPDATE; the DB trigger then raises questions_locked_quiz_not_draft.
     // Map that to a clean 409 business rule, not a 503 outage.
     if (error.message?.includes("questions_locked_quiz_not_draft")) return notDraft();
-    if (error.message?.includes("violates check constraint")) {
+    if (
+      error.message?.includes("violates check constraint") ||
+      error.message?.includes("invalid_correct_indices")
+    ) {
       return invalidBody("The question data is invalid. Check options are distinct and within limits.");
     }
     return internalError("Could not update the question right now.");

@@ -23,6 +23,7 @@ function baseInput(overrides: Partial<BuildExportInput> = {}): BuildExportInput 
         prompt: "What is photosynthesis?",
         options: ["Respiration", "Light into sugar", "Water cycle"],
         correct_index: 1,
+        correct_indices: null,
         explanation: null,
       },
       {
@@ -32,6 +33,7 @@ function baseInput(overrides: Partial<BuildExportInput> = {}): BuildExportInput 
         prompt: "The sun is a star.",
         options: ["True", "False"],
         correct_index: 0,
+        correct_indices: null,
         explanation: "Yes.",
       },
     ],
@@ -399,6 +401,7 @@ describe("safeText (formula-injection choke point)", () => {
           prompt: "=HYPERLINK(evil)",
           options: ["-ok", "@dde"],
           correct_index: 0,
+          correct_indices: null,
           explanation: "+formula",
         },
       ],
@@ -427,5 +430,100 @@ describe("optionLetter", () => {
     expect(optionLetter(0)).toBe("A");
     expect(optionLetter(4)).toBe("E");
     expect(optionLetter(9)).not.toMatch(/^[A-Z]$/);
+  });
+});
+
+
+describe("QT-1 — multi-select export cells + distribution", () => {
+  const multiInput = (answers: BuildExportInput["answers"]): BuildExportInput =>
+    baseInput({
+      questions: [
+        {
+          id: "qm",
+          order_index: 0,
+          type: "multi_select",
+          prompt: "Which are prime?",
+          options: ["2", "3", "4", "5"],
+          correct_index: null,
+          correct_indices: [0, 1, 3],
+          explanation: null,
+        },
+        {
+          id: "q1",
+          order_index: 1,
+          type: "mcq",
+          prompt: "Scalar question",
+          options: ["A", "B"],
+          correct_index: 0,
+          correct_indices: null,
+          explanation: null,
+        },
+      ],
+      sessions: [
+        {
+          id: "sess-1",
+          student_id: "stu-1",
+          status: "completed",
+          score: 2,
+          started_at: new Date(NOW - HOUR).toISOString(),
+          submitted_at: new Date(NOW).toISOString(),
+          last_activity_at: NOW,
+          face_fail_streak: 0,
+          focus_pause_count: 0,
+        },
+      ],
+      answers,
+    });
+
+  it("U-QT1-E1 answered multi cell uses joined letters + joined texts", () => {
+    const model = buildExportModel(
+      multiInput([
+        { session_id: "sess-1", question_id: "qm", selected_index: null, selected_indices: [3, 0], is_correct: true },
+        { session_id: "sess-1", question_id: "q1", selected_index: 0, is_correct: true },
+      ]),
+    );
+    // Canonical set arrives sorted; letters joined "," and texts " / ".
+    const ali = model.students.find((s) => s.studentId === "stu-1")!;
+    expect(ali.answers[0]).toBe("A,D — 2 / 5");
+    expect(ali.answers[1]).toBe("A — A");
+  });
+
+  it("U-QT1-E2 an unanswered multi row (empty set / null) stays null", () => {
+    const model = buildExportModel(
+      multiInput([
+        { session_id: "sess-1", question_id: "q1", selected_index: 0, is_correct: true },
+      ]),
+    );
+    const ali = model.students.find((s) => s.studentId === "stu-1")!;
+    expect(ali.answers[0]).toBeNull();
+    expect(ali.answerCorrect[0]).toBeNull();
+  });
+
+  it("U-QT1-E3 out-of-bounds elements degrade to letters-only (never crash)", () => {
+    const model = buildExportModel(
+      multiInput([
+        { session_id: "sess-1", question_id: "qm", selected_index: null, selected_indices: [0, 99], is_correct: false },
+        { session_id: "sess-1", question_id: "q1", selected_index: 1, is_correct: false },
+      ]),
+    );
+    const ali = model.students.find((s) => s.studentId === "stu-1")!;
+    expect(ali.answers[0]).toBe("A,#100");
+    expect(ali.answers[1]).toBe("B — B");
+  });
+
+  it("U-QT1-E4 distribution counts EACH selection; attempt counted once", () => {
+    const model = buildExportModel(
+      multiInput([
+        { session_id: "sess-1", question_id: "qm", selected_index: null, selected_indices: [0, 2], is_correct: false },
+        { session_id: "sess-1", question_id: "q1", selected_index: 1, is_correct: false },
+      ]),
+    );
+    const dist = model.distribution[0];
+    expect(dist[0].chosenCount).toBe(1);
+    expect(dist[2].chosenCount).toBe(1);
+    expect(dist[1].chosenCount).toBe(0);
+    // One answered attempt → each chosen option at 100%.
+    expect(dist[0].chosenPercent).toBe(100);
+    expect(dist[2].chosenPercent).toBe(100);
   });
 });

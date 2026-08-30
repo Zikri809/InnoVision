@@ -133,6 +133,13 @@ export function EndScreen({
           <ol className="space-y-3">
             {breakdown.map((b) => {
               const isCorrect = b.is_correct === true;
+              // QT-1: multi rows carry their selections/key as SETS
+              // (selected_index is ALWAYS null on them — presence of the set
+              // decides "answered", never the scalar).
+              const isMulti = b.type === "multi_select";
+              const selectedSet = isMulti ? (b.selected_indices ?? []) : [];
+              const correctSet = isMulti ? (b.correct_indices ?? []) : [];
+              const answered = isMulti ? selectedSet.length > 0 : b.selected_index != null;
               return (
                 <li
                   key={b.question_id}
@@ -149,12 +156,12 @@ export function EndScreen({
                       className={`shrink-0 rounded-full border-2 px-2.5 py-0.5 text-[11px] font-extrabold uppercase tracking-wide ${
                         isCorrect
                           ? "border-emerald-300 dark:border-emerald-700/60 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300"
-                          : b.selected_index == null
+                          : !answered
                             ? "border-border bg-muted text-muted-foreground"
                             : "border-destructive/30 bg-destructive/10 text-destructive"
                       }`}
                     >
-                      {b.selected_index == null ? "—" : isCorrect ? "✓" : "✗"}
+                      {!answered ? "—" : isCorrect ? "✓" : "✗"}
                     </span>
                   </div>
                   {b.has_image && (
@@ -164,8 +171,8 @@ export function EndScreen({
                   )}
                   <ul className="space-y-2 px-5 pb-5">
                     {b.options.map((opt, i) => {
-                      const selected = i === b.selected_index;
-                      const correct = i === b.correct_index;
+                      const selected = isMulti ? selectedSet.includes(i) : i === b.selected_index;
+                      const correct = isMulti ? correctSet.includes(i) : i === b.correct_index;
                       return (
                         <li
                           key={i}

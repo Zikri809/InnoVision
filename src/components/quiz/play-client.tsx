@@ -24,7 +24,7 @@ import type { FaceStatus } from "@/lib/face/types";
 type Question = {
   id: string;
   order_index: number;
-  type: "mcq" | "true_false";
+  type: "mcq" | "true_false" | "multi_select";
   prompt: string;
   options: string[];
   has_image?: boolean;
@@ -39,14 +39,21 @@ type Quiz = {
 
 type SeedAnswer = {
   question_id: string;
-  selected_index: number;
+  selected_index: number | null;
+  /** QT-1: multi-select rows carry the canonical selection set instead. */
+  selected_indices: number[] | null;
   is_correct: boolean | null;
 };
 
 export type AnswerState = {
-  selectedIndex: number;
+  /** Single-answer selection (presented space). Absent on multi questions. */
+  selectedIndex?: number;
+  /** QT-1: the committed multi-selection (presented space). */
+  selectedIndices?: number[];
   isCorrect: boolean;
   correctIndex?: number;
+  /** QT-1: the correct SET for multi feedback (presented space). */
+  correctIndices?: number[];
   explanation?: string;
   /** True when feedback came from a resume seed (no key/explanation). */
   seeded?: boolean;
@@ -103,6 +110,7 @@ export function PlayClient({
   initialRemainingMs = null,
   shuffled = false,
   face,
+  hasMultiQuestions = false,
 }: {
   sessionId: string;
   quiz: Quiz;
@@ -112,6 +120,9 @@ export function PlayClient({
   initialRemainingMs?: number | null;
   /** QT-3: the envelope arrived in presented (shuffled) space — indices must be translated. */
   shuffled?: boolean;
+  /** QT-1: the quiz contains at least one multi-select question — the
+   * gesture calibration panel shows its toggle/commit practice module. */
+  hasMultiQuestions?: boolean;
   face?: {
     enrolled: boolean;
     consentGiven: boolean;
@@ -131,7 +142,15 @@ export function PlayClient({
     const seed: Record<string, AnswerState> = {};
     for (const a of initialAnswers) {
       seed[a.question_id] = {
-        selectedIndex: a.selected_index,
+        // QT-1: multi rows seed the presented SET (the server already
+        // translated it); single rows seed the presented scalar. A row with
+        // BOTH keys null (unreachable via the RPC) renders answered with no
+        // highlight — never a fabricated option 0.
+        ...(a.selected_indices
+          ? { selectedIndices: a.selected_indices }
+          : a.selected_index != null
+            ? { selectedIndex: a.selected_index }
+            : {}),
         isCorrect: a.is_correct === true,
         seeded: true,
       };
@@ -165,6 +184,28 @@ export function PlayClient({
   const isPractice = quiz.mode === "practice";
   const question = questions[Math.min(index, questions.length - 1)];
   const answered = answers[question?.id];
+
+  // A11y: the answered option/Confirm unmounts as feedback mounts — move
+  // focus to Next/Finish so keyboard + SR users keep their anchor (the
+  // feedback chip itself is a plain span; the focus move is the announcement).
+  const nextButtonRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (phase === "feedback") nextButtonRef.current?.focus();
+  }, [phase]);
+  // QT-1: in-progress multi-selections, keyed by question id (presented
+  // space; committed by the Confirm button via answer()). Keying removes any
+  // reset-on-navigation effect: a fresh question simply has no entry, and a
+  // stale entry for an answered question is ignored at the read site.
+  const [pendingByQuestion, setPendingByQuestion] = useState<Record<string, number[]>>({});
+  const pendingMulti = answers[question?.id] ? [] : (pendingByQuestion[question?.id] ?? []);
+  function setPendingMulti(next: number[] | ((prev: number[]) => number[])) {
+    if (!question) return;
+    setPendingByQuestion((prev) => {
+      const cur = prev[question.id] ?? [];
+      const value = typeof next === "function" ? next(cur) : next;
+      return { ...prev, [question.id]: value };
+    });
+  }
 
   // QT-3: presented→canonical mapping for the current question's options.
   // Recomputed from (sessionId, question id, count) via the shared pure module
@@ -299,29 +340,51 @@ export function PlayClient({
     // Ignore clicks on already-answered questions while in question phase
     // (resume) — they must advance via Next instead.
     if (answers[question.id]) return;
+    // QT-1: multi-select questions TOGGLE membership in the pending set;
+    // the answer commits when the student hits Confirm.
+    if (question.type === "multi_select") {
+      setPendingMulti((prev) =>
+        prev.includes(optionIndex)
+          ? prev.filter((i) => i !== optionIndex)
+          : [...prev, optionIndex],
+      );
+      return;
+    }
     void answer(optionIndex);
   }
 
-  async function answer(optionIndex: number) {
+  async function answer(selection: number | number[]) {
     if (submitLock.current) return;
     submitLock.current = true;
     setPhaseAndRef("locked");
     setError(null);
+
+    const isMulti = Array.isArray(selection);
+    const scalar = isMulti ? undefined : (selection as number);
+    const set = isMulti ? (selection as number[]) : undefined;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
     const promise = (async () => {
       try {
-        // QT-3: the student clicked/selected a PRESENTED slot; the wire (and
+        // QT-3: the student clicked/selected PRESENTED slots; the wire (and
         // session_answers) stay canonical, so translate before POST. The RPC
-        // keeps validating the canonical index against the real options.
+        // keeps validating each canonical index against the real options.
+        // QT-1: multi sets are normalized (sorted+distinct) client-side to
+        // mirror the RPC's canonical form.
         const plan = optionPlanFor(question);
-        const wireIndex = plan ? (toCanonical(optionIndex, plan) ?? optionIndex) : optionIndex;
+        const wire = isMulti
+          ? [...new Set(set!.map((i) => (plan ? (toCanonical(i, plan) ?? i) : i)))].sort((a, b) => a - b)
+          : (plan ? (toCanonical(scalar!, plan) ?? scalar!) : scalar!);
         const res = await fetch(`/api/sessions/${sessionId}/answer`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ questionId: question.id, selectedIndex: wireIndex }),
+          body: JSON.stringify(
+            isMulti
+              ? { questionId: question.id, selectedIndices: wire }
+              : { questionId: question.id, selectedIndex: wire },
+          ),
           signal: controller.signal,
         });
         // Strictly parse the body; a non-JSON 200 must NOT render "Incorrect"
@@ -345,15 +408,16 @@ export function PlayClient({
 
         if (res.status === 409 && body.error === "already_answered") {
           // Assessment re-answer (e.g. resume racing an in-flight answer):
-          // render answered state from the selected index only — the replay
+          // render answered state from the selection only — the replay
           // carries NO correctness pre-reveal (keyless, PLAN v4 §4).
           setAnswers((prev) => ({
             ...prev,
             [question.id]: {
-              selectedIndex: optionIndex,
+              ...(isMulti ? { selectedIndices: set } : { selectedIndex: scalar }),
               isCorrect: isPractice ? Boolean(body.isCorrect) : false,
             },
           }));
+          setPendingMulti([]);
           setPhaseAndRef("feedback");
           return;
         }
@@ -457,8 +521,8 @@ export function PlayClient({
           return;
         }
 
-        // QT-3: practice feedback carries the CANONICAL correct index; the
-        // state space (and rendering) is presented — translate back.
+        // QT-3: practice feedback carries the CANONICAL correct index/indices;
+        // the state space (and rendering) is presented — translate back.
         const rawCorrect = body.correctIndex as number | undefined;
         const presentedCorrect =
           rawCorrect === undefined
@@ -466,18 +530,25 @@ export function PlayClient({
             : plan
               ? (toPresented(rawCorrect, plan) ?? rawCorrect)
               : rawCorrect;
+        // QT-1: the correct SET for multi rows, element-wise.
+        const rawCorrectSet = body.correctIndices as number[] | undefined;
+        const presentedCorrectSet = Array.isArray(rawCorrectSet)
+          ? rawCorrectSet.map((i) => (plan ? (toPresented(i, plan) ?? i) : i))
+          : undefined;
 
         setAnswers((prev) => ({
           ...prev,
           [question.id]: {
-            selectedIndex: optionIndex,
+            ...(isMulti ? { selectedIndices: set } : { selectedIndex: scalar }),
             isCorrect: isPractice
               ? Boolean(body.isCorrect)
               : false, // assessment: keyless ack — neutral "answered" state
             ...(presentedCorrect !== undefined ? { correctIndex: presentedCorrect } : {}),
+            ...(presentedCorrectSet ? { correctIndices: presentedCorrectSet } : {}),
             ...(body.explanation !== undefined ? { explanation: body.explanation as string } : {}),
           },
         }));
+        setPendingMulti([]);
         setPhaseAndRef("feedback");
       } catch (err) {
         // Abort/network error → surface a retry (endpoints are idempotent).
@@ -744,6 +815,8 @@ export function PlayClient({
           questionId={question.id}
           armed={phase === "question" && !answered}
           nextArmed={phase === "feedback"}
+          answerMode={question.type === "multi_select" ? "multi" : "single"}
+          hasMultiQuestions={hasMultiQuestions}
           blockInput={BLOCK_INPUT_PHASES.includes(phase) || faceStatus === "paused" || faceStatus === "recovering" || faceStatus === "flagged"}
           sessionPaused={faceStatus === "paused" || faceStatus === "recovering" || faceStatus === "flagged"}
           faceStatus={faceStatus}
@@ -751,6 +824,18 @@ export function PlayClient({
             void pipeline.handLossPause();
           }}
           onSelect={(i) => selectOption(i)}
+          onToggleSelect={(i) => selectOption(i)}
+          onCommit={() => {
+            // Palm-commit mirrors the Confirm button (disabled at zero → a
+            // notice instead of a silent no-op).
+            if (submitLock.current || !question || answers[question.id]) return;
+            if (pendingMulti.length === 0) {
+              setNotice(t("multiSelectFirst"));
+              return;
+            }
+            setNotice(null);
+            void answer([...pendingMulti]);
+          }}
           onNext={() => goNext()}
           onHoldProgress={setHoldProgress}
           onStatusChange={(s) => setGestureActive(s === "active")}
@@ -801,9 +886,34 @@ export function PlayClient({
               disabled={phase !== "question"}
               holdProgress={holdProgress}
               onSelect={selectOption}
+              pendingMulti={pendingMulti}
             />
 
             <div className="flex min-h-12 items-center justify-end">
+              {phase === "question" && question.type === "multi_select" && !answered && (
+                <>
+                  {/* Live count of the pending selection (SR users otherwise
+                      only hear each toggle's own pressed state). */}
+                  <span className="sr-only" aria-live="polite">
+                    {t("multiSelectedCount", { count: pendingMulti.length })}
+                  </span>
+                  {/* Palm-commit hint (QT-1 gesture amendment): holds toggle
+                      options, an open palm commits — always visible while
+                      gesture-active so the affordance is discoverable. */}
+                  {gestureActive && (
+                    <span className="mr-3 text-sm font-bold text-muted-foreground" role="status">
+                      {t("multiPalmCommitHint")}
+                    </span>
+                  )}
+                  <Button
+                    size="lg"
+                    disabled={pendingMulti.length === 0}
+                    onClick={() => void answer([...pendingMulti])}
+                  >
+                    {t("multiConfirm")}
+                  </Button>
+                </>
+              )}
               {phase === "feedback" && (
                 <div className="flex items-center gap-3">
                   {gestureActive && question.options.length < MAX_ANSWER_FINGERS && (
@@ -811,7 +921,11 @@ export function PlayClient({
                       {t("feedback.orHold")}
                     </span>
                   )}
-                  <Button size="lg" onClick={goNext}>
+                  <Button
+                    size="lg"
+                    onClick={goNext}
+                    ref={nextButtonRef}
+                  >
                     {index + 1 >= questions.length ? t("feedback.finish") : t("feedback.next")}
                   </Button>
                 </div>

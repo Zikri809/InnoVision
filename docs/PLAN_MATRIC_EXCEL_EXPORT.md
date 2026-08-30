@@ -20,7 +20,7 @@ Two features, one migration (**0027** — [FIX] 0026 already exists:
    choices, plus an answer-key sheet and per-option choice-distribution sheet.
 
 **Non-goals**: lecturer "staff number", CSV export (can be added later from the
-same model), multi-select questions, bulk admin import of matrics.
+same model), bulk admin import of matrics (multi-select questions shipped 2026-08-30, QT-1: multi rows export joined letters + ' / '-joined texts — see the QT-1 plan record).
 
 **[FIX] Matric lifecycle decision** (was "SQL-only edits"): students may correct
 their own matric once via the profile modal (server action, normalized +
@@ -202,7 +202,10 @@ CVE-2024-22363 history, styling gaps).
   blank names render via the dashboard's "Student"/"Pelajar" label.
 - Per-question cell: option letter + text (`B — Photosynthesis`) verbatim from
   the authored options (true_false renders whatever the lecturer typed);
-  unanswered `—`.
+  unanswered `—`. QT-1 (2026-08-30) multi-select rows: joined letters + " — " +
+  texts joined " / " (`A,C — Photosynthesis / Respiration`); the Questions &
+  Key sheet's Correct Answer column carries joined letters (`A,C`), and each
+  multi selection counts in the Choice Distribution sheet.
 - **[FIX] Sanitizer choke point**: every string cell passes ONE `safeText()`
   (leading `= + - @ TAB CR` → `'` prefix) applied UNCONDITIONALLY to all cells
   (title banners, class line, explanations included — classification-based

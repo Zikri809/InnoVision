@@ -113,7 +113,17 @@ export interface ShufflableBreakdownRow {
   order_index: number;
   options: string[];
   selected_index: number | null;
-  correct_index: number;
+  correct_index: number | null;
+  /** QT-1 multi-select rows: canonical sets, translated element-wise. */
+  selected_indices?: number[] | null;
+  correct_indices?: number[] | null;
+}
+
+/** Translate an index SET element-by-element (null passthrough per element). */
+function translateSet(indices: number[] | null | undefined, plan: ShufflePlan, mode: "toPresented" | "toCanonical"): number[] | null {
+  if (indices == null) return null;
+  const fn = mode === "toPresented" ? toPresented : toCanonical;
+  return indices.map((i) => fn(i, plan) ?? i);
 }
 
 /**
@@ -129,7 +139,9 @@ export interface ShufflableBreakdownRow {
  * question projection) keep canonical order at the end, untranslated — the
  * closed+revealed review path passes presented ids derived from the rows
  * themselves, so normal calls never hit this branch. A null selected_index
- * (unanswered row) stays null.
+ * (unanswered row) stays null. QT-1 multi rows carry `selected_indices` /
+ * `correct_indices` sets, translated element-wise with the same null
+ * passthrough.
  */
 export function applyBreakdownShuffle<T extends ShufflableBreakdownRow>(
   sessionId: string,
@@ -150,6 +162,8 @@ export function applyBreakdownShuffle<T extends ShufflableBreakdownRow>(
       options: plan.map((oi) => row.options[oi]),
       selected_index: toPresented(row.selected_index, plan),
       correct_index: toPresented(row.correct_index, plan) ?? row.correct_index,
+      selected_indices: translateSet(row.selected_indices, plan, "toPresented"),
+      correct_indices: translateSet(row.correct_indices, plan, "toPresented"),
     });
   });
 

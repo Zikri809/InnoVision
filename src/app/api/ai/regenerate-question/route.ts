@@ -85,7 +85,7 @@ export async function POST(request: Request, context?: { params?: Promise<{ id?:
   // 2. Fetch the question user-scoped (RLS: lecturer-of-quiz only).
   const { data: questionRow, error: qErr } = await supabase
     .from("questions")
-    .select("id, quiz_id, order_index, type, prompt, options, correct_index, explanation")
+    .select("id, quiz_id, order_index, type, prompt, options, correct_index, correct_indices, explanation")
     .eq("id", questionId)
     .maybeSingle();
 
@@ -132,10 +132,11 @@ async function handleRegenerate(ctx: {
     id: string;
     quiz_id: string;
     order_index: number;
-    type: "mcq" | "true_false";
+    type: "mcq" | "true_false" | "multi_select";
     prompt: string;
     options: string[];
-    correct_index: number;
+    correct_index: number | null;
+    correct_indices: number[] | null;
     explanation: string | null;
   };
   instruction?: string;
@@ -145,7 +146,7 @@ async function handleRegenerate(ctx: {
   // Load siblings for coherence (excluding the target).
   const { data: siblingRows, error: sibErr } = await supabase
     .from("questions")
-    .select("id, quiz_id, order_index, type, prompt, options, correct_index, explanation")
+    .select("id, quiz_id, order_index, type, prompt, options, correct_index, correct_indices, explanation")
     .eq("quiz_id", questionRow.quiz_id)
     .neq("id", questionId)
     .order("order_index", { ascending: true });
@@ -155,13 +156,24 @@ async function handleRegenerate(ctx: {
     return internalError("Could not load the question list right now.");
   }
 
-  const toAi = (r: typeof questionRow): AiQuestion => ({
-    type: r.type,
-    prompt: r.prompt,
-    options: r.options,
-    correct_index: r.correct_index,
-    explanation: r.explanation ?? undefined,
-  });
+  const toAi = (r: typeof questionRow): AiQuestion =>
+    r.type === "multi_select"
+      ? {
+          type: r.type,
+          prompt: r.prompt,
+          options: r.options,
+          // The correct SET must flow into the AI context so a keep-SAME-type
+          // regen can preserve it (QT-1).
+          correct_indices: r.correct_indices ?? [],
+          explanation: r.explanation ?? undefined,
+        }
+      : {
+          type: r.type,
+          prompt: r.prompt,
+          options: r.options,
+          correct_index: r.correct_index ?? 0,
+          explanation: r.explanation ?? undefined,
+        };
   const target = toAi(questionRow);
   const siblings = (siblingRows ?? []).map(toAi);
 
@@ -193,9 +205,15 @@ async function handleRegenerate(ctx: {
     );
   }
 
-  // Normalize options + remap correct_index before writing (U-A8/I-A8).
+  // Normalize options + remap the answer key before writing (U-A8/I-A8).
+  // Multi-select (QT-1) remaps the sorted+distinct correct SET; a vanished
+  // correct option (duplicate collapse) fails the regen cleanly.
   const q = result.question;
-  const normalized = normalizeOptions(q.options, q.correct_index);
+  const isMulti = q.type === "multi_select";
+  const normalized = normalizeOptions(
+    q.options,
+    isMulti ? (q.correct_indices as number[]) : (q.correct_index as number),
+  );
   if (!normalized) {
     return unprocessable("The regenerated question lost its correct answer. Try again.", "invalid_ai_output");
   }
@@ -207,19 +225,24 @@ async function handleRegenerate(ctx: {
       type: q.type,
       prompt: q.prompt,
       options: normalized.options,
-      correct_index: normalized.correct_index,
+      correct_index: isMulti ? null : (normalized.correct_index ?? null),
+      correct_indices: isMulti ? (normalized.correct_indices ?? null) : null,
       explanation: q.explanation ?? null,
     })
     .eq("id", questionId)
     .eq("quiz_id", questionRow.quiz_id)
-    .select("id, quiz_id, order_index, type, prompt, options, correct_index, explanation")
+    .select("id, quiz_id, order_index, type, prompt, options, correct_index, correct_indices, explanation")
     .single();
 
   if (updErr) {
     const msg = updErr.message ?? "";
     console.error("Regenerate update error:", updErr);
     if (msg.includes("questions_locked_quiz_not_draft")) return notDraft();
-    if (msg.includes("violates check constraint") || msg.includes("duplicate_options")) {
+    if (
+      msg.includes("violates check constraint") ||
+      msg.includes("duplicate_options") ||
+      msg.includes("invalid_correct_indices")
+    ) {
       return unprocessable("The regenerated question failed validation. Try again.", "invalid_ai_output");
     }
     return internalError("Could not save the regenerated question right now.");

@@ -9,7 +9,7 @@ import type { HoldProgress } from "@/lib/gestures/types";
 type Question = {
   id: string;
   order_index: number;
-  type: "mcq" | "true_false";
+  type: "mcq" | "true_false" | "multi_select";
   prompt: string;
   options: string[];
   has_image?: boolean;
@@ -23,6 +23,7 @@ export function QuestionCard({
   disabled,
   holdProgress,
   onSelect,
+  pendingMulti = [],
 }: {
   question: Question;
   answer: AnswerState | undefined;
@@ -30,13 +31,16 @@ export function QuestionCard({
   disabled: boolean;
   holdProgress?: HoldProgress | null;
   onSelect: (index: number) => void;
+  /** QT-1: the in-progress multi-selection (presented space) before Confirm. */
+  pendingMulti?: number[];
 }) {
   const locale = useLocale();
   const t = useTranslations("play");
   const tCommon = useTranslations("common");
   const letters = ["A", "B", "C", "D", "E"];
+  const isMulti = question.type === "multi_select";
 
-  function formatOptionText(text: string, type: "mcq" | "true_false"): string {
+  function formatOptionText(text: string, type: "mcq" | "true_false" | "multi_select"): string {
     if (type === "true_false") {
       const lower = text.trim().toLowerCase();
       if (lower === "true" || lower === "betul") {
@@ -53,7 +57,13 @@ export function QuestionCard({
     <section aria-labelledby="question-prompt">
       <div className="mb-3 flex items-center justify-between gap-3">
         <span className="rounded-full border-[3px] border-border bg-card px-3.5 py-1 text-xs font-extrabold text-muted-foreground">
-          {question.type === "mcq" ? tCommon("mcq") : tCommon("trueFalse")}
+          {/* 3-way map (QT-1): the old `=== "mcq" ? : trueFalse` ternary would
+          mislabel multi_select as True/False via its else-fallthrough. */}
+          {question.type === "mcq"
+            ? tCommon("mcq")
+            : question.type === "multi_select"
+              ? tCommon("multiSelect")
+              : tCommon("trueFalse")}
         </span>
         {answer && (
           <span
@@ -82,13 +92,28 @@ export function QuestionCard({
         <QuestionImage key={question.id} questionId={question.id} prompt={question.prompt} />
       )}
 
+      {isMulti && !answer && (
+        <p className="mb-4 rounded-2xl border-[3px] border-accent/30 bg-blue-50 px-4 py-2.5 text-sm font-bold text-accent" role="note">
+          {t("multiHint")}
+        </p>
+      )}
+
       <ul className="space-y-3">
         {question.options.map((opt, i) => {
-          const selected = answer?.selectedIndex === i;
+          // QT-1: multi questions select a SET (in-progress = pendingMulti,
+          // committed = answer.selectedIndices); singles keep the scalar.
+          const selected = answer
+            ? isMulti
+              ? (answer.selectedIndices?.includes(i) ?? false)
+              : answer.selectedIndex === i
+            : pendingMulti.includes(i);
           const showCorrect = mode === "practice" && answer && !answer.seeded;
-          const isCorrectOption = showCorrect && answer.correctIndex === i;
+          const isCorrectOption = showCorrect &&
+            (isMulti
+              ? (answer?.correctIndices?.includes(i) ?? false)
+              : answer?.correctIndex === i);
           const isWrongSelection =
-            showCorrect && selected && answer.correctIndex !== i && !answer.isCorrect;
+            showCorrect && selected && !isCorrectOption && !answer.isCorrect;
           const optionProgress =
             holdProgress && holdProgress.finger === i + 1 ? holdProgress.progress : 0;
           return (

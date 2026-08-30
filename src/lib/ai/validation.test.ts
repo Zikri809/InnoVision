@@ -125,3 +125,32 @@ describe("normalizePath — POSIX path normalizer", () => {
     expect(normalizePath("a/b/")).toBe("a/b");
   });
 });
+
+
+describe("QT-1 — allowMultiSelect flag plumbing", () => {
+  it("U-QT1-V1 GenerateQuizSchema defaults allowMultiSelect to false", () => {
+    const r = GenerateQuizSchema.safeParse({
+      quizId: "00000000-0000-4000-8000-00000000000c",
+      sourcePath: "00000000-0000-4000-8000-00000000000a/00000000-0000-4000-8000-00000000000c/notes.pdf",
+    });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.allowMultiSelect).toBe(false);
+  });
+
+  it("U-QT1-V2 GenerateQuizSchema accepts allowMultiSelect: true", () => {
+    const r = GenerateQuizSchema.safeParse({
+      quizId: "00000000-0000-4000-8000-00000000000c",
+      allowMultiSelect: true,
+    });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.allowMultiSelect).toBe(true);
+  });
+
+  it("U-QT1-V3 GenerateStudentQuizSchema is strict — the flag is not leakable", () => {
+    const r = GenerateStudentQuizSchema.safeParse({
+      extractedText: "notes",
+      allowMultiSelect: true,
+    });
+    expect(r.success).toBe(false);
+  });
+});

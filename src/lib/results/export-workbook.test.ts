@@ -61,6 +61,7 @@ function input(): BuildExportInput {
         prompt: "Pick one",
         options: ["Alpha", "Beta"],
         correct_index: 1,
+        correct_indices: null,
         explanation: "Because.",
       },
     ],
@@ -166,5 +167,73 @@ describe("buildWorkbook (smoke)", () => {
     expect(String(results.getCell(5, 1).value)).toContain("Truncated");
     // Row 6 holds the first student's serial number.
     expect(results.getCell(6, 1).value).toBe(1);
+  });
+
+  // QT1: the workbook multi arms (key-sheet set ✓ marks, joined-letter
+  // Correct Answer cell, per-set distribution ✓) — the scalar fixture above
+  // only ever exercises the scalar arms, and branch coverage cannot tell the
+  // difference (the file's gate is 70% and passed without this test).
+  it("QT1: multi rows mark the full key set and join letters in key/distribution/results cells", async () => {
+    const raw = input();
+    raw.questions = [
+      {
+        id: "qm",
+        order_index: 0,
+        type: "multi_select",
+        prompt: "Pick a set",
+        options: ["Alpha", "Beta", "Gamma", "Delta"],
+        correct_index: null,
+        correct_indices: [0, 2],
+        explanation: "Because.",
+      },
+      {
+        id: "q1",
+        order_index: 1,
+        type: "mcq",
+        prompt: "Pick one",
+        options: ["Alpha", "Beta"],
+        correct_index: 1,
+        correct_indices: null,
+        explanation: null,
+      },
+    ];
+    raw.sessions = [{ ...raw.sessions[0], score: 2 }];
+    raw.answers = [
+      // Stored order [2, 0] — the cell must render the CANONICAL sorted set.
+      { session_id: "sess", question_id: "qm", selected_index: null, selected_indices: [2, 0], is_correct: true },
+      { session_id: "sess", question_id: "q1", selected_index: 1, is_correct: true },
+    ];
+    const buffer = await buildWorkbook(buildExportModel(raw), labels);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buffer as unknown as ArrayBuffer);
+
+    // Results: joined letters "," + " — " + joined texts " / " (Q cells start
+    // at col 13 in assessment mode).
+    const results = wb.getWorksheet("Results")!;
+    expect(results.getCell(5, 13).value).toBe("A,C — Alpha / Gamma");
+    expect(results.getCell(5, 14).value).toBe("B — Beta");
+
+    // Questions & Key: BOTH correct options carry ✓, the wrong ones do not,
+    // and the Correct Answer column carries the joined letters "A,C" while
+    // the scalar row keeps its single letter.
+    const key = wb.getWorksheet("Questions & Key")!;
+    expect(String(key.getCell(3, 4).value)).toContain("✓"); // Alpha (A)
+    expect(String(key.getCell(3, 6).value)).toContain("✓"); // Gamma (C)
+    expect(String(key.getCell(3, 5).value)).not.toContain("✓"); // Beta
+    expect(String(key.getCell(3, 7).value)).not.toContain("✓"); // Delta
+    expect(key.getCell(3, 9).value).toBe("A,C");
+    expect(key.getCell(4, 9).value).toBe("B");
+
+    // Choice Distribution: ✓ on every key option of the multi row (rows 3-6 =
+    // options A-D) and each selection counted exactly once; the scalar's key
+    // (row 8 = option B) keeps its single ✓.
+    const dist = wb.getWorksheet("Choice Distribution")!;
+    expect(dist.getCell(3, 5).value).toBe("✓");
+    expect(dist.getCell(4, 5).value).not.toBe("✓");
+    expect(dist.getCell(5, 5).value).toBe("✓");
+    expect(dist.getCell(6, 5).value).not.toBe("✓");
+    expect(dist.getCell(3, 6).value).toBe(1); // Alpha chosen once
+    expect(dist.getCell(5, 6).value).toBe(1); // Gamma chosen once
+    expect(dist.getCell(8, 5).value).toBe("✓");
   });
 });

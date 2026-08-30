@@ -77,7 +77,7 @@ export default async function QuizBuilderPage({
       .maybeSingle(),
     supabase
       .from("questions")
-      .select("id, quiz_id, order_index, type, prompt, options, correct_index, explanation, image_path")
+      .select("id, quiz_id, order_index, type, prompt, options, correct_index, correct_indices, explanation, image_path")
       .eq("quiz_id", id)
       .order("order_index", { ascending: true })
       .order("created_at", { ascending: true }),

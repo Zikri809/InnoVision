@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireStudentQuizOwner } from "@/lib/student-quizzes/guards";
 import { isUuid } from "@/lib/classes/roster";
-import { QuestionInputSchema } from "@/lib/quizzes/validation";
+import { StudentQuestionInputSchema } from "@/lib/quizzes/validation";
 import { rateLimit } from "@/lib/classes/rate-limit";
 import {
   checkSameOrigin,
@@ -55,12 +55,20 @@ export async function POST(request: Request, { params }: Params) {
     return invalidJson();
   }
 
-  const parsed = QuestionInputSchema.safeParse(body);
+  // Strict single-answer schema: multi-select is lecturer-quiz only (the
+  // student_quiz_questions table carries a CHECK rejecting the type) — the
+  // boundary 400s here instead of dying in the RPC as an unmapped 500.
+  const parsed = StudentQuestionInputSchema.safeParse(body);
   if (!parsed.success) {
     return invalidBody(firstIssueMessage(parsed.error.issues, "Invalid question data."));
   }
 
   const { type, prompt, options, correctIndex, explanation } = parsed.data;
+  // The strict single-answer schema guarantees a scalar key (multi_select is
+  // rejected above); this guard narrows the optional Zod type.
+  if (correctIndex === undefined) {
+    return invalidBody("Select a correct answer.");
+  }
 
   const { data: question, error } = await supabase.rpc("append_student_question", {
     p_quiz_id: id,

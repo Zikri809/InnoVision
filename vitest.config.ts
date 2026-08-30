@@ -79,6 +79,12 @@ export default defineConfig({
         // QT-3: deterministic per-session shuffle (golden vectors + round-trip
         // + transforms, U-QT3-1..18). QuestionRow types are shared.
         "src/lib/sessions/shuffle.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        // QT-1: the export model / workbook assembly / import grammar are
+        // Node-pure and multi-select touched all three — gate them like the
+        // other lib-bar files so the multi-cell and grammar tests are forced.
+        "src/lib/results/export.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        "src/lib/results/export-workbook.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        "src/lib/quizzes/import-parser.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         // P8: pure results derivation (Node-unit-tested, U-T4 + U-T4b/c/d).
         // constants.ts/types.ts have no meaningful executable surface (mirrors
         // the lib/face constants/types precedent — omitted from thresholds).

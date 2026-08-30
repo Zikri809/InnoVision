@@ -52,7 +52,9 @@ context/invariants; verify details against code.
 > SQ-2 student results entry point (2026-08-28, no migration); SQ-5 camera
 > failure taxonomy + IO-1 unlock notification (2026-08-29, migration 0033);
 > QT-3 per-student shuffling (2026-08-29, migration 0034); AP-1 bulk import +
-> AP-2 quiz duplication (2026-08-29, migration 0035, `clone_quiz`).
+> AP-2 quiz duplication (2026-08-29, migration 0035, `clone_quiz`); QT-1
+> multi-select questions with gesture toggle/commit answering (2026-08-30,
+> migrations 0036+0037).
 
 ## 📜 Superseded / snapshots (do NOT cite as current)
 

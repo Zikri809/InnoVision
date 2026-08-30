@@ -953,6 +953,184 @@ async function main() {
       JSON.stringify(digestFinal.data ?? []));
   }
 
+  // ── QT1: multi-select grading, storage, secrecy (0036/0037) ─────
+  {
+    // One practice quiz, one multi question PER grading case (practice
+    // upserts would otherwise overwrite the same row between cases).
+    const quiz = await makeQuiz({ title: "QT1 Multi", mode: "practice" });
+    const qs = await addQuestions(quiz.id, [
+      { type: "multi_select", prompt: "exact-set case", options: ["2", "3", "4", "5"], correct_index: null, correct_indices: [0, 1, 3], explanation: "2, 3, 5." },
+      { type: "multi_select", prompt: "wrong-set case", options: ["a", "b", "c"], correct_index: null, correct_indices: [0, 1] },
+      { type: "multi_select", prompt: "subset case", options: ["a", "b", "c"], correct_index: null, correct_indices: [0, 1, 2] },
+      { type: "multi_select", prompt: "superset case", options: ["a", "b", "c"], correct_index: null, correct_indices: [0, 1] },
+      { type: "multi_select", prompt: "full-set case", options: ["a", "b"], correct_index: null, correct_indices: [0, 1] },
+    ]);
+    await publish(quiz.id);
+    const s1 = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
+    const qtSession = s1.data.session.id;
+
+    const answer = (qid, set, extra = {}) =>
+      clientS1.rpc("answer_question", {
+        p_session_id: qtSession, p_question_id: qid, p_selected_indices: set, ...extra,
+      });
+
+    const exact = await answer(qs[0].id, [3, 0, 1]); // order-insensitive
+    const wrong = await answer(qs[1].id, [0, 2]);
+    const subset = await answer(qs[2].id, [0, 1]);
+    const superset = await answer(qs[3].id, [0, 1, 2]);
+    const fullSet = await answer(qs[4].id, [0, 1]);
+
+    record("QT1-D3 practice multi: exact set (order-insensitive) → correct + set echo",
+      exact.data?.is_correct === true &&
+        JSON.stringify(exact.data?.correct_indices) === JSON.stringify([0, 1, 3]) &&
+        exact.data?.correct_index === null &&
+        exact.data?.explanation === "2, 3, 5.",
+      JSON.stringify(exact.data));
+    record("QT1-D3 wrong set → false",
+      wrong.data?.is_correct === false && wrong.data?.correct_index === null,
+      JSON.stringify(wrong.data));
+    record("QT1-D3 subset → false (all-or-nothing, no partial credit)",
+      subset.data?.is_correct === false, JSON.stringify(subset.data));
+    record("QT1-D3 superset → false",
+      superset.data?.is_correct === false, JSON.stringify(superset.data));
+    record("QT1-D3 full set (all options correct) → true",
+      fullSet.data?.is_correct === true, JSON.stringify(fullSet.data));
+
+    // QT1-D4: validation matrix (errors do not consume the answer slot).
+    const eQuiz = await makeQuiz({ title: "QT1 Multi Errors", mode: "practice" });
+    const eqs = await addQuestions(eQuiz.id, [
+      { type: "multi_select", prompt: "bounds case", options: ["a", "b", "c"], correct_index: null, correct_indices: [0, 1] },
+      { type: "mcq", prompt: "scalar case", options: ["a", "b"], correct_index: 0 },
+    ]);
+    await publish(eQuiz.id);
+    const es1 = await clientS1.rpc("start_quiz_session", { p_quiz_id: eQuiz.id });
+    const eSession = es1.data.session.id;
+    const mq = eqs[0].id;
+    const scalarQ = eqs[1].id;
+    const tryAnswer = (args) => clientS1.rpc("answer_question", { p_session_id: eSession, ...args });
+
+    const oob = await tryAnswer({ p_question_id: mq, p_selected_indices: [0, 9] });
+    const empty = await tryAnswer({ p_question_id: mq, p_selected_indices: [] });
+    const nullElem = await tryAnswer({ p_question_id: mq, p_selected_indices: [1, null] });
+    const both = await tryAnswer({ p_question_id: mq, p_selected_index: 0, p_selected_indices: [0] });
+    const setOnScalar = await tryAnswer({ p_question_id: scalarQ, p_selected_indices: [0] });
+    const scalarOnMulti = await tryAnswer({ p_question_id: mq, p_selected_index: 0 });
+
+    record("QT1-D4 OOB element → invalid_selected_indices",
+      oob.data?.error === "invalid_selected_indices", JSON.stringify(oob.data));
+    record("QT1-D4 empty set → invalid_selected_indices",
+      empty.data?.error === "invalid_selected_indices", JSON.stringify(empty.data));
+    record("QT1-D4 SQL NULL element → invalid_selected_indices ('{1,NULL}' trap)",
+      nullElem.data?.error === "invalid_selected_indices", JSON.stringify(nullElem.data));
+    record("QT1-D4 scalar AND set together → invalid_selected_indices",
+      both.data?.error === "invalid_selected_indices", JSON.stringify(both.data));
+    record("QT1-D4 set submitted for a scalar question → invalid_selected_indices",
+      setOnScalar.data?.error === "invalid_selected_indices", JSON.stringify(setOnScalar.data));
+    record("QT1-D4 scalar submitted for a multi question → invalid_selected_indices",
+      scalarOnMulti.data?.error === "invalid_selected_indices", JSON.stringify(scalarOnMulti.data));
+
+    // QT1-D5: assessment keyless ack + stored canonical set + key via lecturer view.
+    const aQuiz = await makeQuiz({ title: "QT1 Multi Assessment", mode: "assessment" });
+    const aqs = await addQuestions(aQuiz.id, [
+      { type: "multi_select", prompt: "assessment multi", options: ["p", "q", "r"], correct_index: null, correct_indices: [0, 2] },
+    ]);
+    await publish(aQuiz.id);
+    const as1 = await clientS1.rpc("start_quiz_session", { p_quiz_id: aQuiz.id });
+    const aSession = as1.data.session.id;
+    const ack = await clientS1.rpc("answer_question", {
+      p_session_id: aSession, p_question_id: aqs[0].id, p_selected_indices: [2, 0],
+    });
+    const lectRow = await clientA
+      .from("lecturer_answers_view")
+      .select("selected_index, selected_indices, is_correct")
+      .eq("session_id", aSession)
+      .maybeSingle();
+    record("QT1-D5 assessment multi: keyless ack + stored canonical set via lecturer_answers_view",
+      ack.data?.recorded === true && !("is_correct" in (ack.data ?? {})) &&
+        lectRow.data?.selected_index === null &&
+        JSON.stringify(lectRow.data?.selected_indices) === JSON.stringify([0, 2]) &&
+        lectRow.data?.is_correct === true,
+      `ack=${JSON.stringify(ack.data)} row=${JSON.stringify(lectRow.data)}`);
+
+    // QT1-D5b: re-answer of an assessment multi question → keyless
+    // already_answered (no is_correct / correct_indices leak) and the
+    // FIRST answer stays stored.
+    const replay = await clientS1.rpc("answer_question", {
+      p_session_id: aSession, p_question_id: aqs[0].id, p_selected_indices: [1],
+    });
+    const lectRow2 = await clientA
+      .from("lecturer_answers_view")
+      .select("selected_indices, is_correct")
+      .eq("session_id", aSession)
+      .maybeSingle();
+    record("QT1-D5b assessment multi re-answer → keyless already_answered, first answer intact",
+      replay.data?.error === "already_answered" &&
+        !("is_correct" in (replay.data ?? {})) &&
+        !("correct_indices" in (replay.data ?? {})) &&
+        JSON.stringify(lectRow2.data?.selected_indices) === JSON.stringify([0, 2]) &&
+        lectRow2.data?.is_correct === true,
+      `replay=${JSON.stringify(replay.data)} row=${JSON.stringify(lectRow2.data)}`);
+
+    // QT1-D5c: a 6-element set (direct-RPC adversarial path — Zod cannot
+    // be relied on) → invalid_selected_indices; a 3-named-arg call (the
+    // historical call shape) still resolves through the new signature.
+    const six = await clientS1.rpc("answer_question", {
+      p_session_id: aSession, p_question_id: aqs[0].id,
+      p_selected_indices: [0, 1, 2, 3, 4, 5],
+    });
+    const legacyShape = await clientS1.rpc("answer_question", {
+      p_session_id: aSession, p_question_id: aqs[0].id, p_selected_index: 0,
+    });
+    record("QT1-D5c 6-element set rejected; legacy 3-arg call shape resolves (to the multi branch here)",
+      six.data?.error === "invalid_selected_indices" &&
+        legacyShape.data?.error === "invalid_selected_indices",
+      `six=${JSON.stringify(six.data)} legacy=${JSON.stringify(legacyShape.data)}`);
+
+    // QT1-D6: practice upsert overwrites BOTH key columns.
+    await clientS1.rpc("answer_question", {
+      p_session_id: qtSession, p_question_id: qs[1].id, p_selected_indices: [0],
+    });
+    const up2 = await clientS1.rpc("answer_question", {
+      p_session_id: qtSession, p_question_id: qs[1].id, p_selected_indices: [0, 1],
+    });
+    const upRow = await clientS1
+      .from("student_answers_view")
+      .select("selected_index, selected_indices, is_correct")
+      .eq("session_id", qtSession)
+      .eq("question_id", qs[1].id)
+      .maybeSingle();
+    record("QT1-D6 practice re-answer upserts the set (no stale scalar)",
+      up2.data?.is_correct === true &&
+        upRow.data?.selected_index === null &&
+        JSON.stringify(upRow.data?.selected_indices) === JSON.stringify([0, 1]),
+      `row=${JSON.stringify(upRow.data)}`);
+
+    // QT1-D8a: student_question_view select(*) omits BOTH key columns on a
+    // multi-question quiz (extends D42).
+    const starMulti = await clientS1
+      .from("student_question_view")
+      .select("*")
+      .eq("quiz_id", quiz.id);
+    record("QT1-D8a select(*) on student_question_view → no correct_index/correct_indices keys",
+      Array.isArray(starMulti.data) && starMulti.data.length > 0 &&
+        !("correct_index" in starMulti.data[0]) &&
+        !("correct_indices" in starMulti.data[0]) &&
+        !("explanation" in starMulti.data[0]),
+      `keys=${Array.isArray(starMulti.data) && starMulti.data.length ? Object.keys(starMulti.data[0]).join(",") : "?"}`);
+
+    // QT1-D7: student_results rows carry the set keys (practice auto-reveals).
+    await clientS1.rpc("submit_session", { p_session_id: qtSession });
+    const results = await clientS1.rpc("student_results", { p_quiz_id: quiz.id });
+    const rows = results.data?.questions ?? [];
+    const multiRow = rows.find((r) => r.question_id === qs[0].id);
+    const canonicalSet = JSON.stringify([0, 1, 3]);
+    record("QT1-D7 student_results: correct_indices + selected_indices arrays present",
+      Array.isArray(multiRow?.correct_indices) &&
+        JSON.stringify(multiRow.correct_indices) === canonicalSet &&
+        JSON.stringify([...(multiRow.selected_indices ?? [])].sort((a, b) => a - b)) === canonicalSet,
+      JSON.stringify(multiRow ? [multiRow.correct_indices, multiRow.selected_indices] : multiRow));
+  }
+
   // ── Summary ──────────────────────────────────────────────────
   console.log("\n" + "=".repeat(60));
   const passed = results.filter((r) => r.pass).length;

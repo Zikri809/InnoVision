@@ -21,7 +21,7 @@ one migration review:
 | [PLAN_R_AUTHORING_PRODUCTIVITY.md](PLAN_R_AUTHORING_PRODUCTIVITY.md) | Bulk import, duplication, question banks | AP-* |
 | [PLAN_R_QUESTION_TYPES.md](PLAN_R_QUESTION_TYPES.md) | Multi-select, short answer, per-student shuffling | QT-* |
 | [PLAN_R_STUDENT_QOL.md](PLAN_R_STUDENT_QOL.md) | Student journey friction, onboarding, failure states | SQ-* |
-| [PLAN_R_AUTH_IDENTITY.md](PLAN_R_AUTH_IDENTITY.md) | Forgot password, SSO institutional login | AU-* |
+| [PLAN_R_AUTH_IDENTITY.md](PLAN_R_AUTH_IDENTITY.md) | Forgot password, Microsoft institutional SSO (uni-domain filtered) | AU-* |
 | [PLAN_R_CLASS_MANAGEMENT.md](PLAN_R_CLASS_MANAGEMENT.md) | Roster ops, co-teaching, announcements | CM-* |
 | [PLAN_R_INTEGRITY_OPS.md](PLAN_R_INTEGRITY_OPS.md) | Flagged/unlock flow, enrollment review, retention, quotas | IO-* |
 | [PLAN_R_ACCESSIBILITY_PLATFORM.md](PLAN_R_ACCESSIBILITY_PLATFORM.md) | Dark mode, contrast, a11y, mobile, vision payload, i18n hygiene | AX-* |
@@ -125,7 +125,7 @@ Update as work proceeds (keep honest; this mirrors reality, not intention):
 | RESULTS_ANALYTICS | 🔶 partial — RA-1 shipped | — | RA-1 + RA-7 via SQ-2 (2026-08-28) |
 | STUDENT_QOL | 🔶 partial — SQ-2, SQ-5 shipped | — | SQ-2 (2026-08-28) · SQ-5 (2026-08-29, 8b542cf) |
 | AUTHORING_PRODUCTIVITY | 🔶 partial — AP-1, AP-2 shipped | — | AP-1 + AP-2 (2026-08-29, 0035) · AP-3 parked |
-| QUESTION_TYPES | 🔶 partial — QT-3 shipped | — | QT-3 (2026-08-29, 0034) |
+| QUESTION_TYPES | 🔶 partial — QT-1, QT-3 shipped | — | QT-3 (2026-08-29, 0034) · QT-1 (2026-08-30, 0036+0037) |
 | AUTH_IDENTITY | 🔶 partial — AU-1 shipped | — | AU-1 (2026-08-28) |
 | CLASS_MANAGEMENT | 🔲 planned | — | — |
 | INTEGRITY_OPS | 🔶 partial — IO-1 shipped | — | IO-1 (2026-08-29, 8b542cf) |
@@ -143,4 +143,26 @@ Update as work proceeds (keep honest; this mirrors reality, not intention):
 4. ~~RA-1 gradebook + RA-7 per-quiz results entry point~~ ✅ (2026-08-28, RA-7 shipped as SQ-2)
 5. AX-1 dark mode + AX-2 contrast (shipped 2026-08-29, 99a06a3)
 6. ~~IO-1 flagged-unlock notification + SQ-5 camera messaging~~ ✅ (2026-08-29)
-7. Then depth: ~~QT-3 shuffling (cheap)~~ ✅ (2026-08-29) → ~~AP-1/AP-2 authoring~~ ✅ (2026-08-29) → QT-1 multi-select → AU-2 SSO
+7. Then depth: ~~QT-3 shuffling (cheap)~~ ✅ (2026-08-29) → ~~AP-1/AP-2 authoring~~ ✅ (2026-08-29) → ~~QT-1 multi-select~~ ✅ (2026-08-30)
+
+8. Current runner list (re-ranked 2026-08-30 by ROI ÷ effort, post-QT-1;
+   user confirmed the AU-2 scope — Microsoft institutional login,
+   university-domain filtered):
+
+   1. **SQ-3** practice Try Again fix + the pre-existing
+      all-answered-resume dead-end (both surfaced during the QT-1 audit;
+      smallest effort, two real student-facing bugs)
+   2. **SQ-1** deadline chips on student quiz cards (QC-3 columns already
+      shipped — pure read-side UI, biggest student-visible win)
+   3. **SQ-4** class-card drill-down filter (small honesty fix; pairs with
+      SQ-1 in one PR)
+   4. **AX-3** timer/phase screen-reader announcements (small, high a11y
+      value)
+   5. **RA-2** item analysis on the results dashboard (the export model
+      already exists and is now multi-select-aware — rendering it inline
+      is mostly UI)
+   6. **AU-2** Microsoft institutional SSO with university-domain
+      allowlist (e.g. `@xxxuni.edu.my`), personal Microsoft accounts
+      rejected pre-profile-creation — scope pinned in
+      PLAN_R_AUTH_IDENTITY.md; strategic, medium surface, now explicitly
+      on the runner list rather than an afterthought

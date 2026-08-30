@@ -1,7 +1,8 @@
 import { stripBidiControls, OPTION_MAX, PROMPT_MAX } from "./validation";
 
 /**
- * Bulk-import line parser (AP-1, PLAN_R_AUTHORING_PRODUCTIVITY).
+ * Bulk-import line parser (AP-1, PLAN_R_AUTHORING_PRODUCTIVITY; QT-1
+ * multi-select extension).
  *
  * Grammar — one question per non-empty line, pipe-separated, forgiving:
  *   prompt | optA | optB | [optC] [optD] [optE] | *correctLetter
@@ -11,6 +12,15 @@ import { stripBidiControls, OPTION_MAX, PROMPT_MAX } from "./validation";
  * true/false word (true/false/t/f/benar/salah, case-insensitive, with or
  * without the asterisk) builds a `true_false` row with canonical
  * True/False options — `prompt | true`.
+ *
+ * QT-1 multi-select: TWO OR MORE `*`-marked option cells build a
+ * `multi_select` row (letter-form marks `*B) text` map by LETTER, bare
+ * position marks by position; the set is emitted sorted+distinct to match
+ * the DB's canonical form). A single mark stays `mcq` exactly as before —
+ * previously-valid input never changes meaning. The old
+ * `markCount > 1 → doubleMark` failure is replaced by this rule;
+ * `doubleMark` survives only for the trailing-letter-cell + marked-option
+ * mix.
  *
  * Deliberately NOT supported: `|` inside text (no escaping — extra cells
  * surface as a distinct per-row problem, not a silent shift), comma-CSV
@@ -33,6 +43,7 @@ export type ImportProblemCode =
   | "missingAnswer"
   | "badAnswerMark"
   | "answerOutOfRange"
+  | "multiTooManyOptions"
   | "doubleMark";
 
 export interface ImportProblem {
@@ -45,10 +56,13 @@ export interface ImportProblem {
 
 export interface ParsedImportRow {
   line: number;
-  type: "mcq" | "true_false";
+  type: "mcq" | "true_false" | "multi_select";
   prompt: string;
   options: string[];
-  correctIndex: number;
+  /** Single-answer key (mcq / true_false rows). */
+  correctIndex?: number;
+  /** Sorted+distinct answer-key set (multi_select rows only). */
+  correctIndices?: number[];
 }
 
 export interface ImportParseResult {
@@ -220,10 +234,6 @@ export function parseImportText(text: string, maxRows = 30): ImportParseResult {
       fail("doubleMark");
       return;
     }
-    if (markCount > 1) {
-      fail("doubleMark");
-      return;
-    }
 
     if (optionCells.length < 2) {
       fail("tooFewOptions");
@@ -236,6 +246,46 @@ export function parseImportText(text: string, maxRows = 30): ImportParseResult {
     }
     if (marked.some((m) => m.text === "")) {
       fail("emptyCell");
+      return;
+    }
+
+    // QT-1: ≥2 marked options ⇒ multi_select (letter-form marks map by
+    // LETTER, bare position marks by position; sorted+distinct canonical
+    // set — duplicate letter marks like `*A) x | *A) y` collapse to one
+    // member, tolerating sloppy input the way the dedupe rules do).
+    // One mark ⇒ mcq exactly as before.
+    const markedIndices = marked
+      .map((m, i) => (m.marked ? (m.letterIndex !== null ? m.letterIndex : i) : -1))
+      .filter((i) => i >= 0);
+    const isMulti = answer.kind !== "letter" && markedIndices.length > 1;
+
+    if (isMulti) {
+      // Gesture amendment: multi questions cap at 4 options (palm-commit
+      // reserves five fingers) — mirrors MULTI_SELECT_OPTIONS_MAX.
+      if (optionCells.length > 4) {
+        fail("multiTooManyOptions", { max: 4 });
+        return;
+      }
+      const correctIndices = [...new Set(markedIndices)].sort((a, b) => a - b);
+      if (correctIndices.some((i) => i < 0 || i >= optionCells.length)) {
+        fail("answerOutOfRange");
+        return;
+      }
+      const options = marked.map((m) => m.text);
+      if (new Set(options.map((o) => o.toLowerCase())).size !== options.length) {
+        fail("duplicateOptions");
+        return;
+      }
+      const row: ParsedImportRow = {
+        line,
+        type: "multi_select",
+        prompt,
+        options,
+        correctIndices,
+      };
+      if (validateLengths(row, fail)) {
+        rows.push(row);
+      }
       return;
     }
 

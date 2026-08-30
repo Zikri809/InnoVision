@@ -82,3 +82,34 @@ describe("applyOptionDraftOp — move", () => {
     expect(applyOptionDraftOp(s, { kind: "move", from: 0, to: 9 })).toBe(s);
   });
 });
+
+
+describe("QT-1 — set-aware correctIndices ops", () => {
+  it("remove filters the removed index and shifts higher members down", () => {
+    const s: OptionDraftState = { options: ["A", "B", "C", "D"], correctIndices: [0, 2] };
+    const next = applyOptionDraftOp(s, { kind: "remove", index: 1 });
+    expect(next.options).toEqual(["A", "C", "D"]);
+    expect(next.correctIndices).toEqual([0, 1]);
+  });
+
+  it("remove of a marked member just drops it (stays sorted+distinct)", () => {
+    const s: OptionDraftState = { options: ["A", "B", "C"], correctIndices: [0, 2] };
+    const next = applyOptionDraftOp(s, { kind: "remove", index: 2 });
+    expect(next.correctIndices).toEqual([0]);
+  });
+
+  it("move re-maps every set member through the permutation", () => {
+    const s: OptionDraftState = { options: ["A", "B", "C", "D"], correctIndices: [0, 2] };
+    const next = applyOptionDraftOp(s, { kind: "move", from: 0, to: 3 });
+    expect(next.options).toEqual(["B", "C", "D", "A"]);
+    // A (was 0) lands at 3; C (was 2) shifts down to 1.
+    expect(next.correctIndices).toEqual([1, 3]);
+  });
+
+  it("single-answer ops are untouched (no correctIndices key)", () => {
+    const s = state(["A", "B", "C"], 1);
+    const next = applyOptionDraftOp(s, { kind: "remove", index: 0 });
+    expect(next.correctIndex).toBe(0);
+    expect("correctIndices" in next).toBe(false);
+  });
+});

@@ -72,19 +72,23 @@ export type QuestionRow = {
   id: string;
   quiz_id: string;
   order_index: number;
-  type: "mcq" | "true_false";
+  type: "mcq" | "true_false" | "multi_select";
   prompt: string;
   options: string[];
-  correct_index: number;
+  correct_index: number | null;
+  correct_indices?: number[] | null;
   explanation: string | null;
   image_path?: string | null;
 };
 
 type QuestionDraft = {
-  type: "mcq" | "true_false";
+  type: "mcq" | "true_false" | "multi_select";
   prompt: string;
   options: string[];
-  correctIndex: number;
+  /** Single-answer key (mcq / true_false). Absent on multi drafts. */
+  correctIndex?: number;
+  /** QT-1: sorted+distinct multi answer key. Absent on single-answer drafts. */
+  correctIndices?: number[];
   explanation: string;
 };
 
@@ -259,10 +263,15 @@ export function QuizBuilderClient({
   // Option-array mutations ride the SHARED pure reducers
   // (lib/quizzes/question-draft.ts) so the answer key follows its option on
   // remove/move — the old inline copies drifted (deleting an option ABOVE the
-  // key left correctIndex pointing at the wrong option).
+  // key left correctIndex pointing at the wrong option). QT-1: multi drafts
+  // carry the set-valued key through the same reducer.
   function applyOptions(draft: QuestionDraft, op: OptionDraftOp): QuestionDraft {
     const next = applyOptionDraftOp(
-      { options: draft.options, correctIndex: draft.correctIndex },
+      {
+        options: draft.options,
+        correctIndex: draft.correctIndex,
+        correctIndices: draft.correctIndices,
+      },
       op,
     );
     return { ...draft, ...next };
@@ -306,7 +315,10 @@ export function QuizBuilderClient({
       type: draft.type,
       prompt: draft.prompt,
       options: draft.options,
-      correctIndex: draft.correctIndex,
+      // QT-1: strictly one-of by type — multi carries the sorted set and no
+      // scalar, singles the reverse (QuestionInputSchema enforces both ways).
+      correctIndex: draft.type === "multi_select" ? undefined : draft.correctIndex,
+      correctIndices: draft.type === "multi_select" ? draft.correctIndices : undefined,
       explanation: draft.explanation,
     };
 
@@ -838,52 +850,123 @@ export function QuizBuilderClient({
                   <Select
                     value={draft.type}
                     onValueChange={(v) => {
-                      const type = v as "mcq" | "true_false";
-                      setDraft((d) =>
-                        type === "true_false"
-                          ? {
-                              ...d,
-                              type,
-                              options: defaultTrueFalseOptions,
-                              correctIndex: 0,
-                            }
-                          : { ...d, type, options: d.options.length >= 2 ? d.options : ["", ""] },
-                      );
+                      const type = v as "mcq" | "true_false" | "multi_select";
+                      setDraft((d) => {
+                        if (type === "true_false") {
+                          return {
+                            ...d,
+                            type,
+                            options: defaultTrueFalseOptions,
+                            correctIndex: 0,
+                            correctIndices: undefined,
+                          };
+                        }
+                        if (type === "multi_select") {
+                          // QT-1 gesture amendment: multi questions cap at 4
+                          // options (palm-commit reserves five fingers) — a
+                          // 5-option draft cannot switch; ask the lecturer to
+                          // remove one option first.
+                          if (d.options.length > 4) {
+                            setError(t("multiOptionCap"));
+                            return d;
+                          }
+                          // Seed the set from the current single mark so
+                          // the lecturer's answer choice survives the switch.
+                          const seed = d.correctIndex ?? 0;
+                          return {
+                            ...d,
+                            type,
+                            options: d.options.length >= 2 ? d.options : ["", ""],
+                            correctIndex: undefined,
+                            correctIndices: [Math.min(seed, Math.max(d.options.length - 1, 0))],
+                          };
+                        }
+                        return {
+                          ...d,
+                          type,
+                          options: d.options.length >= 2 ? d.options : ["", ""],
+                          correctIndex: d.correctIndices?.[0] ?? 0,
+                          correctIndices: undefined,
+                        };
+                      });
                     }}
                   >
                     <SelectTrigger id="q-type" className="w-full sm:w-auto sm:min-w-[11rem]">
                       <SelectValue placeholder={t("questionTypeLabel")}>
-                        {(v) => (v === "true_false" ? tCommon("trueFalse") : tCommon("mcq"))}
+                        {(v) =>
+                          v === "true_false"
+                            ? tCommon("trueFalse")
+                            : v === "multi_select"
+                              ? tCommon("multiSelect")
+                              : tCommon("mcq")
+                        }
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="mcq">{tCommon("mcq")}</SelectItem>
                       <SelectItem value="true_false">{tCommon("trueFalse")}</SelectItem>
+                      <SelectItem value="multi_select">{tCommon("multiSelect")}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-1">
-                  <Label htmlFor="q-correct">{t("correctAnswerLabel")}</Label>
-                  <Select
-                    value={String(draft.correctIndex + 1)}
-                    onValueChange={(v) =>
-                      setDraft((d) => ({ ...d, correctIndex: Number(v) - 1 }))
-                    }
-                  >
-                    <SelectTrigger id="q-correct" className="w-full sm:w-auto sm:min-w-[10rem]">
-                      <SelectValue placeholder={t("correctAnswerLabel")}>
-                        {(v) => (v ? `${t("optionLabel", { index: v })}` : t("correctAnswerLabel"))}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {draft.options.map((_, i) => (
-                        <SelectItem key={i} value={String(i + 1)}>
-                          {t("optionLabel", { index: i + 1 })}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                {draft.type === "multi_select" ? (
+                  // QT-1: a dropdown cannot multi-select — the correct ANSWERS
+                  // are a toggle-button group (aria-pressed per option).
+                  <div className="space-y-1" role="group" aria-label={t("correctAnswersLabel")}>
+                    <Label>{t("correctAnswersLabel")}</Label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {draft.options.map((_, i) => {
+                        const on = draft.correctIndices?.includes(i) ?? false;
+                        return (
+                          <button
+                            key={i}
+                            type="button"
+                            aria-pressed={on}
+                            onClick={() =>
+                              setDraft((d) => {
+                                const cur = d.correctIndices ?? [];
+                                const next = cur.includes(i)
+                                  ? cur.filter((x) => x !== i)
+                                  : [...cur, i].sort((a, b) => a - b);
+                                return { ...d, correctIndices: next };
+                              })
+                            }
+                            className={`rounded-full border-[2px] px-3 py-1 text-xs font-extrabold transition-colors ${
+                              on
+                                ? "border-emerald-500 bg-emerald-100 dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-200"
+                                : "border-border bg-muted/60 text-muted-foreground hover:border-emerald-300"
+                            }`}
+                          >
+                            {t("optionLabel", { index: i + 1 })}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    <Label htmlFor="q-correct">{t("correctAnswerLabel")}</Label>
+                    <Select
+                      value={String((draft.correctIndex ?? 0) + 1)}
+                      onValueChange={(v) =>
+                        setDraft((d) => ({ ...d, correctIndex: Number(v) - 1 }))
+                      }
+                    >
+                      <SelectTrigger id="q-correct" className="w-full sm:w-auto sm:min-w-[10rem]">
+                        <SelectValue placeholder={t("correctAnswerLabel")}>
+                          {(v) => (v ? `${t("optionLabel", { index: v })}` : t("correctAnswerLabel"))}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {draft.options.map((_, i) => (
+                          <SelectItem key={i} value={String(i + 1)}>
+                            {t("optionLabel", { index: i + 1 })}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-1">
@@ -915,7 +998,9 @@ export function QuizBuilderClient({
                   <div key={i} className="flex items-center gap-2">
                     <span
                       className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl font-heading text-xs font-extrabold transition-colors shadow-xs ${
-                        draft.correctIndex === i
+                        (draft.type === "multi_select"
+                          ? (draft.correctIndices?.includes(i) ?? false)
+                          : draft.correctIndex === i)
                           ? "border-[2px] border-emerald-500 bg-emerald-100 dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-200"
                           : "border-[2px] border-border bg-muted/60 text-muted-foreground"
                       }`}
@@ -931,7 +1016,7 @@ export function QuizBuilderClient({
                       disabled={draft.type === "true_false"}
                       className="flex-1"
                     />
-                    {draft.type === "mcq" && (
+                    {draft.type !== "true_false" && (
                       <>
                         {draft.options.length > 1 && (
                           <div className="flex items-center gap-0.5">
@@ -973,6 +1058,18 @@ export function QuizBuilderClient({
                   </div>
                 ))}
                 {draft.type === "mcq" && draft.options.length < 5 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={addOption}
+                  >
+                    {t("addOptionBtn")}
+                  </Button>
+                )}
+                {draft.type === "multi_select" && draft.options.length < 4 && (
+                  // QT-1 gesture amendment: multi questions cap at 4 options
+                  // (palm-commit reserves five fingers).
                   <Button
                     type="button"
                     variant="outline"
@@ -1050,7 +1147,11 @@ export function QuizBuilderClient({
                     <div className="flex items-center gap-2">
                       <span className="font-heading text-sm font-semibold text-muted-foreground">{idx + 1}.</span>
                       <span className="rounded-full border-[3px] border-border bg-muted px-2.5 py-0.5 text-xs font-extrabold text-foreground">
-                        {q.type === "mcq" ? tCommon("mcq") : tCommon("trueFalse")}
+                        {q.type === "mcq"
+                          ? tCommon("mcq")
+                          : q.type === "multi_select"
+                            ? tCommon("multiSelect")
+                            : tCommon("trueFalse")}
                       </span>
                       {hasImageFor(q.id) && (
                         <span className="inline-flex items-center gap-1 rounded-full border-[3px] border-border bg-muted px-2.5 py-0.5 text-xs font-extrabold text-foreground">
@@ -1059,7 +1160,9 @@ export function QuizBuilderClient({
                         </span>
                       )}
                       <span className="text-xs font-bold text-muted-foreground">
-                        {t("correctAnswerLabel")}: {t("optionLabel", { index: q.correct_index + 1 })}
+                        {q.type === "multi_select"
+                          ? `${t("correctAnswersLabel")}: ${(q.correct_indices ?? []).map((i) => t("optionLabel", { index: i + 1 })).join(", ") || "—"}`
+                          : `${t("correctAnswerLabel")}: ${t("optionLabel", { index: (q.correct_index ?? 0) + 1 })}`}
                       </span>
                     </div>
                     <p className="mt-1.5 font-heading text-base font-semibold">{q.prompt}</p>

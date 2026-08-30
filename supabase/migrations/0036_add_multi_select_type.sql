@@ -1,0 +1,31 @@
+-- ═══════════════════════════════════════════════════════════════════════
+-- 0036 — question_type enum gains 'multi_select' (QT-1, PLAN_R_QUESTION_TYPES)
+--
+-- SPLIT MIGRATION (enum growth only, deliberately nothing else). Postgres
+-- allows ALTER TYPE ... ADD VALUE inside a transaction, but the new value
+-- cannot be USED in that same transaction ("unsafe use of new value" —
+-- including parse-time coercion inside a CHECK literal). Supabase runs
+-- each migration file in a single transaction and 0037's CHECKs, guard
+-- trigger, and RPC branches all reference the literal 'multi_select', so
+-- the enum growth ships alone here and every consumer of the new value
+-- ships in 0037.
+--
+-- Intermediate-commit rule: a commit of 0036 + regenerated database.ts is
+-- green on its own — the widened enum breaks no consumer (all
+-- client/player type unions are local literals; DB writes flow through
+-- Zod-narrowed values).
+--
+-- Deploy order: migrations MUST land before the code swap (the only order
+-- repo tooling produces). The reverse window degrades to clean authoring
+-- errors only: at 0036-only the rebuilt 0037 RPC signatures do not exist
+-- yet (PGRST202 on multi authoring), the scalar answer path is untouched,
+-- and no multi row can exist to answer.
+--
+-- Scope guard: the STUDENT-authored domain (student_quiz_questions, 0023)
+-- is deliberately OUT of multi-select v1 — 0037 pins that with a CHECK on
+-- the student table so the exclusion is enforced by the DB, not convention.
+--
+-- Depends on: 0004 (question_type enum).
+-- ═══════════════════════════════════════════════════════════════════════
+
+alter type public.question_type add value if not exists 'multi_select';

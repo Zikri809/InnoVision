@@ -48,6 +48,7 @@ const stamp = Date.now();
 const results = [];
 const createdUsers = [];
 let createdClassId = null;
+const touchedClassIds = [];
 let createdQuizIds = [];
 
 function record(name, pass, detail = "") {
@@ -121,6 +122,7 @@ async function main() {
     .select("id, title, join_code")
     .single();
   createdClassId = clsA?.id ?? null;
+  touchedClassIds.push(clsA?.id);
   record("A creates own class", !createErr && clsA?.id, createErr?.message ?? "");
 
   // ── S1 enrolls via the join RPC (only enrollment path) ────────
@@ -833,6 +835,7 @@ async function main() {
     .select("id, join_code")
     .single();
   createdClassId = clsQ3?.id ?? createdClassId;
+  touchedClassIds.push(clsQ3?.id);
   assertNoError("QT3 create class", { error: clsQ3Err });
   const { error: joinErr3 } = await clientS1.rpc("join_class", { code: joinCode3 });
   assertNoError("QT3 S1 joins QT3 class", { error: joinErr3 });
@@ -898,6 +901,162 @@ async function main() {
   record("QT3-D6 student direct quizzes read still denied (RLS unchanged)",
     (q3S1Direct ?? []).length === 0, `S1 sees ${(q3S1Direct ?? []).length} rows (expect 0)`);
 
+  // ── QT1: multi-select authoring + guard trigger (0036/0037) ─────
+  {
+    // Fresh class (QT3 precedent): earlier probes may have consumed clsA's
+    // state; the authoring probes only need an owned draft quiz.
+    const qtJoin = makeJoinCode();
+    const { data: clsQt, error: clsQtErr } = await clientA
+      .from("classes")
+      .insert({ title: "QT1 Class", lecturer_id: lecturerA.id, join_code: qtJoin })
+      .select("id")
+      .single();
+    assertNoError("create QT1 class", { error: clsQtErr });
+    touchedClassIds.push(clsQt.id);
+    const { data: qtQuiz, error: qtQuizErr } = await clientA
+      .from("quizzes")
+      .insert({ class_id: clsQt.id, created_by: lecturerA.id, title: "QT1 Authoring", status: "draft", mode: "practice" })
+      .select("id")
+      .single();
+    assertNoError("create QT1 quiz", { error: qtQuizErr });
+    createdQuizIds.push(qtQuiz.id);
+
+    // QT1-D2: append_question carries the sorted set; the scalar is nulled.
+    const { data: multiQ, error: multiErr } = await clientA.rpc("append_question", {
+      p_quiz_id: qtQuiz.id,
+      p_type: "multi_select",
+      p_prompt: "Which are prime?",
+      p_options: ["2", "3", "4", "5"],
+      p_correct_index: null,
+      p_correct_indices: [3, 1, 0],
+      p_explanation: "",
+    });
+    const stored = multiQ
+      ? await admin.from("questions").select("correct_index, correct_indices").eq("id", multiQ.id).single()
+      : { data: null };
+    record("QT1-D2 append_question stores the NORMALIZED set (sorted) and nulls the scalar",
+      !multiErr && stored.data?.correct_index === null &&
+        JSON.stringify(stored.data?.correct_indices) === JSON.stringify([0, 1, 3]),
+      `${multiErr?.message ?? ""} row=${JSON.stringify(stored.data)}`);
+
+    // QT1-D1: the guard trigger rejects every invalid key shape.
+    const rejectCase = async (name, options, correctIndex, correctIndices) => {
+      const { error } = await clientA.rpc("append_question", {
+        p_quiz_id: qtQuiz.id,
+        p_type: "multi_select",
+        p_prompt: `invalid: ${name}`,
+        p_options: options,
+        p_correct_index: correctIndex,
+        p_correct_indices: correctIndices,
+        p_explanation: "",
+      });
+      record(`QT1-D1 ${name} → invalid_correct_indices`,
+        Boolean(error) && error.message.includes("invalid_correct_indices"),
+        error?.message ?? "unexpectedly accepted");
+    };
+    // Duplicate / unsorted RPC input is NORMALIZED to the canonical form
+    // (same posture as save_quiz_questions), not rejected.
+    const { data: normQ, error: normErr } = await clientA.rpc("append_question", {
+      p_quiz_id: qtQuiz.id,
+      p_type: "multi_select",
+      p_prompt: "normalization case",
+      p_options: ["a", "b", "c"],
+      p_correct_index: null,
+      p_correct_indices: [2, 0, 2],
+      p_explanation: "",
+    });
+    // QT1-D2c: a JSON-null `correct_indices` key (what a naive route payload
+    // emits — jsonb null is NOT SQL null) must NOT reject a scalar row; the
+    // RPC treats jsonb null as absent (0037 hardening). This pins the bulk
+    // import path against the fake-supabase blind spot (QT-1 audit B1).
+    {
+      const { error: nullKeyErr } = await clientA.rpc("save_quiz_questions", {
+        p_quiz_id: qtQuiz.id,
+        p_title: null,
+        p_source_file_url: null,
+        p_source_text: null,
+        p_mode: "append",
+        p_questions: [
+          { type: "mcq", prompt: "JSON-null key row", options: ["a", "b"], correct_index: 1, correct_indices: null },
+        ],
+      });
+      const storedRow = await admin
+        .from("questions")
+        .select("correct_index, correct_indices")
+        .eq("quiz_id", qtQuiz.id)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      record("QT1-D2c save_quiz_questions treats a JSON-null correct_indices key as absent",
+        !nullKeyErr &&
+          storedRow.data?.[0]?.correct_index === 1 &&
+          storedRow.data?.[0]?.correct_indices === null,
+        `${nullKeyErr?.message ?? ""} row=${JSON.stringify(storedRow.data?.[0])}`);
+
+      // QT1-D2d: the MULTI happy path through save_quiz_questions (bulk
+      // import + opt-in AI write here) — a jsonb-string element and a JSON
+      // null element must both reject cleanly, and a valid multi row must
+      // store the normalized set (round-3 audit B1: the null/numeric
+      // element check ran a text-vs-jsonb comparison and 503'd EVERY multi
+      // row; nothing else exercises this function with a multi row on real
+      // Postgres).
+      const { error: multiBadErr } = await clientA.rpc("save_quiz_questions", {
+        p_quiz_id: qtQuiz.id,
+        p_title: null,
+        p_source_file_url: null,
+        p_source_text: null,
+        p_mode: "append",
+        p_questions: [
+          { type: "multi_select", prompt: "string element", options: ["a", "b"], correct_indices: ["1"] },
+        ],
+      });
+      const { data: multiOk, error: multiOkErr } = await clientA.rpc("save_quiz_questions", {
+        p_quiz_id: qtQuiz.id,
+        p_title: null,
+        p_source_file_url: null,
+        p_source_text: null,
+        p_mode: "append",
+        p_questions: [
+          { type: "multi_select", prompt: "multi via import RPC", options: ["a", "b", "c"], correct_indices: [2, 0] },
+        ],
+      });
+      const multiStored = await admin
+        .from("questions")
+        .select("correct_index, correct_indices, type")
+        .eq("quiz_id", qtQuiz.id)
+        .eq("type", "multi_select")
+        .order("created_at", { ascending: false })
+        .limit(1);
+      record("QT1-D2d save_quiz_questions multi row: string element rejected, valid set stored normalized",
+        Boolean(multiBadErr) && !multiOkErr &&
+          multiStored.data?.[0]?.correct_index === null &&
+          JSON.stringify(multiStored.data?.[0]?.correct_indices) === JSON.stringify([0, 2]),
+        `bad=${multiBadErr?.message ?? "ACCEPTED"} ok=${multiOkErr?.message ?? "ok"} row=${JSON.stringify(multiStored.data?.[0])}`);
+    }
+
+    record("QT1-D2b append_question normalizes duplicate/unsorted input",
+      !normErr && JSON.stringify(normQ?.correct_indices) === JSON.stringify([0, 2]) &&
+        normQ?.correct_index === null,
+      `${normErr?.message ?? ""} set=${JSON.stringify(normQ?.correct_indices)}`);
+    void rejectCase;
+    await rejectCase("out-of-bounds element", ["a", "b", "c"], null, [0, 9]);
+    await rejectCase("scalar set on a multi row", ["a", "b", "c"], 0, [0, 1]);
+    await rejectCase("missing set", ["a", "b", "c"], null, null);
+    {
+      const { error } = await clientA.rpc("append_question", {
+        p_quiz_id: qtQuiz.id,
+        p_type: "mcq",
+        p_prompt: "invalid: set on scalar row",
+        p_options: ["a", "b", "c"],
+        p_correct_index: 0,
+        p_correct_indices: [0, 1],
+        p_explanation: "",
+      });
+      record("QT1-D1 set on a scalar row → invalid_correct_indices",
+        Boolean(error) && error.message.includes("invalid_correct_indices"),
+        error?.message ?? "unexpectedly accepted");
+    }
+  }
+
   // ── Summary ──────────────────────────────────────────────────
   console.log("\n" + "=".repeat(60));
   const passed = results.filter((r) => r.pass).length;
@@ -910,8 +1069,9 @@ async function cleanup() {
     for (const qid of createdQuizIds) {
       if (qid) await admin.from("quizzes").delete().eq("id", qid);
     }
-    if (createdClassId) {
-      await admin.from("classes").delete().eq("id", createdClassId);
+    createdClassId = null;
+    for (const cid of touchedClassIds) {
+      if (cid) await admin.from("classes").delete().eq("id", cid);
     }
     for (const uid of createdUsers) {
       await admin.auth.admin.deleteUser(uid);

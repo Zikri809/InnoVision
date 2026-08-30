@@ -442,3 +442,39 @@ describe("play routes — any authenticated user (D-SQ6)", () => {
     expect(last).toBe(429);
   });
 });
+
+
+describe("QT-1 — student domain rejects multi_select (v1 scope)", () => {
+  it("QT1-9 POST question with a multi body → 400 (not an RPC 500)", async () => {
+    const ctx = makeStudentQuizContext();
+    fakeHolder.current = ctx.client;
+    const { questions } = await importAll();
+    const p = { params: Promise.resolve({ id: ctx.quizId }) };
+    const res = await questions.POST(
+      req({
+        type: "multi_select",
+        prompt: "Which are prime?",
+        options: ["2", "3", "4", "5"],
+        correctIndices: [0, 1, 3],
+      }),
+      p,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("QT1-10 PATCH question with a multi body → 400", async () => {
+    const ctx = makeStudentQuizContext();
+    fakeHolder.current = ctx.client;
+    const { questionRoute } = await importAll();
+    const res = await questionRoute.PATCH(
+      req({
+        type: "multi_select",
+        prompt: "Which are prime?",
+        options: ["2", "3", "4", "5"],
+        correctIndices: [0, 1],
+      }),
+      { params: Promise.resolve({ id: ctx.quizId, questionId: ctx.q1 }) },
+    );
+    expect(res.status).toBe(400);
+  });
+});

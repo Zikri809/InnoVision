@@ -52,8 +52,51 @@ describe("U-S3 — negative / non-integer selectedIndex rejected", () => {
     ).toBe(false);
   });
 
-  it("rejects a missing selectedIndex", () => {
+  it("rejects a missing answer field (neither selectedIndex nor selectedIndices)", () => {
     expect(AnswerSchema.safeParse({ questionId: QUESTION_ID }).success).toBe(false);
+  });
+});
+
+describe("U-QT1 — AnswerSchema one-of (multi-select)", () => {
+  it("accepts a valid selectedIndices set", () => {
+    expect(
+      AnswerSchema.safeParse({ questionId: QUESTION_ID, selectedIndices: [0, 2] }).success,
+    ).toBe(true);
+  });
+
+  it("rejects BOTH fields present (exactly-one rule)", () => {
+    expect(
+      AnswerSchema.safeParse({ questionId: QUESTION_ID, selectedIndex: 0, selectedIndices: [1] })
+        .success,
+    ).toBe(false);
+  });
+
+  it("rejects an empty set", () => {
+    expect(
+      AnswerSchema.safeParse({ questionId: QUESTION_ID, selectedIndices: [] }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a set larger than 5 (options cap)", () => {
+    expect(
+      AnswerSchema.safeParse({
+        questionId: QUESTION_ID,
+        selectedIndices: [0, 1, 2, 3, 4, 5],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects negative / non-integer / int4-overflow elements", () => {
+    expect(
+      AnswerSchema.safeParse({ questionId: QUESTION_ID, selectedIndices: [-1] }).success,
+    ).toBe(false);
+    expect(
+      AnswerSchema.safeParse({ questionId: QUESTION_ID, selectedIndices: [1.5] }).success,
+    ).toBe(false);
+    expect(
+      AnswerSchema.safeParse({ questionId: QUESTION_ID, selectedIndices: [2_147_483_648] })
+        .success,
+    ).toBe(false);
   });
 });
 

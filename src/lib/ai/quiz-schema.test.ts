@@ -199,3 +199,103 @@ describe("AiQuestionSchema length bounds", () => {
     expect(AiQuizSchema.safeParse(bad).success).toBe(false);
   });
 });
+
+
+describe("QT-1 — multi-select AI contract", () => {
+  const multiQuestion = {
+    type: "multi_select" as const,
+    prompt: "Which of these are mammals?",
+    options: ["Dolphin", "Shark", "Bat", "Trout"],
+    correct_indices: [0, 2],
+  };
+
+  it("U-QT1-A1 accepts a valid multi_select question", () => {
+    const quiz: AiQuiz = {
+      title: "Biology",
+      questions: [
+        { type: "mcq", prompt: "What is 2+2?", options: ["3", "4"], correct_index: 1 },
+        { type: "true_false", prompt: "Sun is hot.", options: ["True", "False"], correct_index: 0 },
+        multiQuestion,
+      ],
+    };
+    expect(AiQuizSchema.safeParse(quiz).success).toBe(true);
+  });
+
+  it("U-QT1-A2 rejects multi_select carrying a scalar correct_index (one-of)", () => {
+    const quiz: AiQuiz = {
+      title: "Biology",
+      questions: [
+        { type: "mcq", prompt: "What is 2+2?", options: ["3", "4"], correct_index: 1 },
+        { type: "true_false", prompt: "Sun is hot.", options: ["True", "False"], correct_index: 0 },
+        { ...multiQuestion, correct_index: 0 },
+      ],
+    };
+    expect(AiQuizSchema.safeParse(quiz).success).toBe(false);
+  });
+
+  it("U-QT1-A3 rejects multi_select with an out-of-bounds element", () => {
+    const quiz: AiQuiz = {
+      title: "Biology",
+      questions: [
+        { type: "mcq", prompt: "What is 2+2?", options: ["3", "4"], correct_index: 1 },
+        { type: "true_false", prompt: "Sun is hot.", options: ["True", "False"], correct_index: 0 },
+        { ...multiQuestion, correct_indices: [0, 9] },
+      ],
+    };
+    expect(AiQuizSchema.safeParse(quiz).success).toBe(false);
+  });
+
+  it("U-QT1-A3b multi_select with 5 options is rejected (gesture palm-commit cap)", () => {
+    const quiz: AiQuiz = {
+      title: "Biology",
+      questions: [
+        { type: "mcq", prompt: "What is 2+2?", options: ["3", "4"], correct_index: 1 },
+        { type: "true_false", prompt: "Sun is hot.", options: ["True", "False"], correct_index: 0 },
+        { ...multiQuestion, options: ["A", "B", "C", "D", "E"], correct_indices: [0, 1] },
+      ],
+    };
+    expect(AiQuizSchema.safeParse(quiz).success).toBe(false);
+  });
+
+  it("U-QT1-A4 normalizeOptions remaps the set through dedupe (sorted+distinct)", () => {
+    const res = normalizeOptions([" B ", "b", "A"], [2, 0]);
+    expect(res).toEqual({ options: ["B", "A"], correct_indices: [0, 1] });
+  });
+
+  it("U-QT1-A5 duplicate collapse keeps ONE remapped member (deliberate merge-to-one); a vanished index nulls", () => {
+    // Both marked indices point at the SAME deduped option — the remap keeps
+    // one member (DB-legal: the trigger requires cardinality >= 1; mirrors
+    // the scalar remap precedent). A truly vanished index nulls → retry.
+    expect(normalizeOptions(["B", "b", "A"], [0, 1])).toEqual({
+      options: ["B", "A"],
+      correct_indices: [0],
+    });
+    expect(normalizeOptions(["B"], [0, 1])).toBeNull();
+  });
+
+  it("U-QT1-A6 non-multi normalize return stays key-identical (no correct_indices key)", () => {
+    const res = normalizeOptions(["A", "b"], 1);
+    expect(res).toEqual({ options: ["A", "b"], correct_index: 1 });
+    expect("correct_indices" in (res as object)).toBe(false);
+  });
+
+  it("U-QT1-A7 aiQuizToRows emits correct_index:null + correct_indices for multi rows", () => {
+    const quiz: AiQuiz = {
+      title: "Biology",
+      questions: [
+        { type: "mcq", prompt: "What is 2+2?", options: ["3", "4"], correct_index: 1 },
+        { type: "true_false", prompt: "Sun is hot.", options: ["True", "False"], correct_index: 0 },
+        multiQuestion,
+      ],
+    };
+    const rows = aiQuizToRows(quiz);
+    expect(rows[2]).toEqual({
+      type: "multi_select",
+      prompt: "Which of these are mammals?",
+      options: ["Dolphin", "Shark", "Bat", "Trout"],
+      correct_index: null,
+      correct_indices: [0, 2],
+      explanation: null,
+    });
+  });
+});

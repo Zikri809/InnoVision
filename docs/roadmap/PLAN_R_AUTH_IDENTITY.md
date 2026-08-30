@@ -55,15 +55,54 @@ for hosted mode.
 
 ---
 
-## AU-2 · SSO/OAuth institutional login (MED-HIGH, strategic; schedule after AU-1)
+## AU-2 · SSO/OAuth institutional login — Microsoft (Entra ID / Office 365
+## school tenant), uni-domain-filtered (MED-HIGH, strategic; schedule after
+## AU-1)
 
 **Problem:** Email+password only. University deployments expect campus SSO;
 matric hard-binding happens at signup with no external identity anchor.
+The USER DECISION (2026-08-30) pins the provider and the trust boundary:
+Microsoft institutional login (the tenant students/lecturers already have
+for Office 365/Outlook), NOT Google/other providers, and filtered to
+university email domains (e.g. `@xxxuni.edu.my`) — a personal
+`@outlook.com`/`@hotmail.com` Microsoft account must be REJECTED with a
+clear "use your university account" message even though it authenticates
+fine against the same Microsoft tenant flow.
 
 **Design sketch**
-- Provider wiring in Supabase Auth (SAML/OIDC — config-side mostly);
-  `/auth/callback` extended for provider callbacks (VERIFY existing PKCE
-  handling covers this shape at pre-flight).
+- Provider wiring in Supabase Auth: Azure/Entra ID (OIDC) — config-side
+  mostly (tenant ID + client secret + redirect). Force the tenant-specific
+  authority (`/organizations` or the exact tenant GUID) rather than
+  `common`, so personal Microsoft accounts never even reach the
+  university-tenant consent screen; the domain filter is the SECOND layer.
+- Domain allowlist: a single config value (env/Supabase Auth config, e.g.
+  `INSTITUTIONAL_EMAIL_DOMAINS=xxxuni.edu.my`) checked post-callback on the
+  identity token's `email` claim: case-insensitive exact-suffix match of
+  the LAST `@` segment. Multi-domain unis supported by a comma list. A
+  non-matching domain → sign the user out cleanly + "use your university
+  account" error screen (NO session created — do not create-then-reject;
+  reject BEFORE the profile trigger can fire).
+- First-login gate for OAuth users: no password registration happens, so
+  `handle_new_user` fires on first successful callback. Role stays
+  'student' (anti-escalation unchanged); promotion stays via
+  LECTURER_INVITE_CODE post-first-login (unchanged mechanics).
+- Matric capture for OAuth users: registration UI captured matric for
+  password users; OAuth users need a first-login supplementary step
+  (profile row created by trigger without matric → gate student surfaces
+  requiring matric presence behind a one-time capture screen mirroring
+  0027 validation/uniqueness).
+- Register-page account linking risk: SAME EMAIL existing (a password
+  account with the same uni email) → defer linking, show clear conflict
+  message rather than auto-merge (no surprise merges).
+- CSP/headers unaffected; `sanitizeRedirect` continues guarding post-login
+  redirects.
+
+**Tests:** fake-provider harness for callback flows (id-token claim→profile
+mapping), DOMAIN-FILTER matrix (matching domain → session; personal
+@outlook.com/@hotmail.com/@gmail.com → rejected, no profile row; case/
+subdomain traps `@sub.xxxuni.edu.my` — decide allow vs reject at
+pre-flight), conflict matrix tests (same-email pre-existing password
+account), matric capture gate E2E.
 - Profile bootstrap: `handle_new_user` trigger currently FORCES role='student'
   (anti-escalation) — SSO arrival keeps that default; promotion stays via
   LECTURER_INVITE_CODE path post-first-login (unchanged mechanics, now
@@ -87,6 +126,13 @@ matric capture gate E2E.
 
 <!-- Required before ANY item above is implemented. See roadmap README Step 1. -->
 
+- 2026-08-30 (AU-2 scope note, pre-reconciliation): user pinned the
+  provider + trust boundary — Microsoft institutional login with a
+  university-domain allowlist (e.g. `@xxxuni.edu.my`); personal Microsoft
+  accounts rejected pre-profile-creation. Design sketch updated; the
+  full Step-1 codebase reconciliation (callback PKCE shape, Supabase
+  Azure provider config, domain-filter insertion point) happens before
+  implementation as usual.
 - 2026-08-28: reconciled AU-1 against commit 9c8e484; no migration needed
   (auth-only change); corrected callback param name to `redirect` (route.ts:13),
   password min length to 6 (register.ts:77), rate-limiter import to

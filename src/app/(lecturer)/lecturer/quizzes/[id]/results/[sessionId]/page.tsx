@@ -21,6 +21,8 @@ type SessionInfo = {
 type AnswerRow = {
   question_id: string;
   selected_index: number | null;
+  /** QT-1: multi-select rows carry the canonical selection set instead. */
+  selected_indices: number[] | null;
   is_correct: boolean;
   answered_at: string | null;
 };
@@ -119,7 +121,7 @@ export default async function SessionDetailPage({
 
   const { data: answers, error: answersError } = await supabase
     .from("lecturer_answers_view")
-    .select("question_id, selected_index, is_correct, answered_at")
+    .select("question_id, selected_index, selected_indices, is_correct, answered_at")
     .eq("session_id", sessionId);
   if (answersError) {
     console.error("Session answers fetch error:", answersError);

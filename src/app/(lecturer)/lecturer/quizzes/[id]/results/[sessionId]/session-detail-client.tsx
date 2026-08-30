@@ -25,6 +25,8 @@ type QuestionRow = {
 type AnswerRow = {
   question_id: string;
   selected_index: number | null;
+  /** QT-1: multi-select rows carry the canonical selection set instead. */
+  selected_indices: number[] | null;
   is_correct: boolean;
   answered_at: string | null;
 };
@@ -161,7 +163,14 @@ export function SessionDetailClient({
                     </div>
                     <ul className="space-y-2 px-5 pb-5">
                       {q.options.map((opt, i) => {
-                        const selected = a != null && i === a.selected_index;
+                        // QT-1: multi questions may select SEVERAL options —
+                        // every committed selection gets the highlight (the
+                        // ✓/✗ pill still carries the single is_correct).
+                        const selected =
+                          a != null &&
+                          (q.type === "multi_select"
+                            ? (a.selected_indices?.includes(i) ?? false)
+                            : i === a.selected_index);
                         return (
                           <li
                             key={i}

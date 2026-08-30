@@ -123,7 +123,7 @@ export async function GET(_request: Request, { params }: Params) {
     getClassRoster(supabase, owner.quiz.class_id),
     supabase
       .from("questions")
-      .select("id, order_index, type, prompt, options, correct_index, explanation")
+      .select("id, order_index, type, prompt, options, correct_index, correct_indices, explanation")
       .eq("quiz_id", id)
       .order("order_index", { ascending: true }),
   ]);
@@ -144,6 +144,7 @@ export async function GET(_request: Request, { params }: Params) {
     session_id: string;
     question_id: string;
     selected_index: number | null;
+    selected_indices: number[] | null;
     is_correct: boolean;
   };
   const { data: answerRows, error: answersError } =
@@ -151,7 +152,7 @@ export async function GET(_request: Request, { params }: Params) {
       ? { data: [] as AnswerRow[], error: null as null }
       : await supabase
           .from("lecturer_answers_view")
-          .select("session_id, question_id, selected_index, is_correct")
+          .select("session_id, question_id, selected_index, selected_indices, is_correct")
           .in("session_id", sessionIds)
           .limit(ANSWERS_LIMIT);
 

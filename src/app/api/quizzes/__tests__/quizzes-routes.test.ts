@@ -759,3 +759,66 @@ describe("QT-3 shuffleQuestions plumbing", () => {
     expect((await res.json()).quiz.shuffle_questions).toBe(false);
   });
 });
+
+
+describe("QT-1 — multi-select question authoring", () => {
+  it("QT1-11 POST multi question → 201 with correct_index null + set carried", async () => {
+    ownerContext();
+    const { questions } = await importHandlers();
+    const res = await questions.POST(
+      req({
+        type: "multi_select",
+        prompt: "Which are prime?",
+        options: ["2", "3", "4", "5"],
+        correctIndices: [0, 1, 3],
+      }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.question.correct_index).toBeNull();
+    expect(body.question.correct_indices).toEqual([0, 1, 3]);
+  });
+
+  it("QT1-12 PATCH question to multi → row carries the set and null scalar", async () => {
+    ownerContext({
+      questions: [
+        { id: QUESTION_D, quiz_id: QUIZ_C, order_index: 0, type: "mcq", prompt: "Old", options: ["a", "b"], correct_index: 0, explanation: null },
+      ],
+    });
+    const { questionRoute } = await importHandlers();
+    const res = await questionRoute.PATCH(
+      req({
+        type: "multi_select",
+        prompt: "Which are prime?",
+        options: ["2", "3", "4", "5"],
+        correctIndices: [0, 2],
+      }),
+      { params: Promise.resolve({ id: QUIZ_C, questionId: QUESTION_D }) },
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.question.correct_index).toBeNull();
+    expect(body.question.correct_indices).toEqual([0, 2]);
+  });
+
+  it("QT1-13 PATCH mixing scalar + set → 400 (strict one-of)", async () => {
+    ownerContext({
+      questions: [
+        { id: QUESTION_D, quiz_id: QUIZ_C, order_index: 0, type: "mcq", prompt: "Old", options: ["a", "b"], correct_index: 0, explanation: null },
+      ],
+    });
+    const { questionRoute } = await importHandlers();
+    const res = await questionRoute.PATCH(
+      req({
+        type: "multi_select",
+        prompt: "Which are prime?",
+        options: ["2", "3"],
+        correctIndex: 0,
+        correctIndices: [0],
+      }),
+      { params: Promise.resolve({ id: QUIZ_C, questionId: QUESTION_D }) },
+    );
+    expect(res.status).toBe(400);
+  });
+});

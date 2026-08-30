@@ -186,15 +186,18 @@ profiles ──┬──< classes (lecturer_id, join_code unique, archived_at)
            │                  time_limit_sec, results_revealed_at,
            │                  auto_reveal_on_complete, shuffle_questions,
            │                  source_file_url…)
-           │                  └──< questions (order_index, type, options[],
-           │                        correct_index, explanation)
+           │                  └──< questions (order_index, type
+           │                        [mcq|true_false|multi_select], options[],
+           │                        correct_index (null on multi),
+           │                        correct_indices (multi only), explanation)
            │                  └──< quiz_sessions (student_id, status, mode,
            │                        verify_nonce uuid, face_fail_streak,
            │                        focus_pause_count, paused_at, score,
            │                        face_exempt, started_at/submitted_at…)
            │                        ├──< session_answers (unique(session_id,
            │                        │    question_id), selected_index,
-           │                        │    is_correct)   ← column-revoked
+           │                        │    selected_indices (multi only),
+           │                        │    is_correct)   ← is_correct column-revoked
            │                        ├──< face_checks (similarities[], matched,
            │                        │    trigger, frame_hash — frames NEVER stored)
            │                        ├──< session_advisories (adv_type, count)
@@ -422,6 +425,21 @@ envelope + first question via `student_session_view` and hands off to
   - **assessment**: response is KEYLESS `{ok}` pre-reveal — the correct
     answer never crosses the wire until results are revealed
   - **practice**: response includes correctness + explanation immediately
+- **Multi-select questions (QT-1, `type = 'multi_select'`)**: the answer
+  key is `questions.correct_indices` (sorted+distinct int[], the scalar
+  `correct_index` is NULL on multi rows); students submit
+  `selectedIndices` (1..5 elements, each validated against THIS question's
+  options, SQL NULLs rejected explicitly) which the RPC normalizes to
+  sorted+distinct before grading as exact-set equality and storing in
+  `session_answers.selected_indices` (scalar stays NULL). Grading is
+  all-or-nothing — `is_correct` semantics are unchanged, so
+  submit_session/scoring/gradebook structure is untouched. Multi rows are
+  answered by taps (toggle + Confirm button) OR gestures (holding N
+  fingers toggles presented option N, an open palm commits the set; a
+  latch re-arms only after the pose changes, and the 4-option cap
+  `questions_multi_option_cap` guarantees five fingers is never an option
+  pose). Student-authored quizzes are v1-out-of-scope and BLOCKED by a
+  CHECK on `student_quiz_questions`.
 - **Per-student shuffling (QT-3, opt-in `quizzes.shuffle_questions`)**:
   when on, the play page permutes the question array AND each question's
   options into "presented" space, deterministically derived from
@@ -726,8 +744,8 @@ into `${uid}/${quizId}/…`.
 | Pure units | Vitest (`src/**/*.test.ts`) | scoring, timers, validation, gestures, liveness, merge logic, derive |
 | Route tests | Vitest + `fake-supabase.ts` (a fake that mimics RLS/RPC semantics and THROWS on unknown filters) | every API route's guard/CSRF/rate-limit/validation/error-mapping contracts |
 | AI boundary | MSW (`src/test/msw`) | mocked OpenAI-compatible endpoints |
-| Live-SQL harnesses | `npm run verify:*` (needs local supabase) | RLS policies, RPC state machines, caps, secrecy probes (e.g. `verify:student-quizzes` SQ-D1–D9, `verify:media` MEDIA-D1–D12, `verify:quizzes` QT3-D1–D6, `verify:clone` AP2-D1–D11) |
-| E2E | Playwright, chromium, dev-server + mock AI + CompreFace mock seam | full user journeys; `e16` is the integrity reference spec; specs skip loudly if `LECTURER_INVITE_CODE` unset |
+| Live-SQL harnesses | `npm run verify:*` (needs local supabase) | RLS policies, RPC state machines, caps, secrecy probes (e.g. `verify:student-quizzes` SQ-D1–D9 + QT1-D8b/D10, `verify:media` MEDIA-D1–D12, `verify:quizzes` QT3-D1–D6 + QT1-D1/D2, `verify:sessions` D42–D55 + QT1-D3–D8a/D7, `verify:clone` AP2-D1–D11 + QT1-D9) |
+| E2E | Playwright, chromium, dev-server + mock AI + CompreFace mock seam | full user journeys; `e16` is the integrity reference spec; specs skip loudly if `LECTURER_INVITE_CODE` unset; `e45` covers the multi-select journey (authoring, practice set-feedback, resume, keyless assessment + canonical-set probe, gesture-disabled contract) |
 | Types/schema drift | `gen:types` + CI diff | database.ts vs migrated schema |
 | Copy drift | `check:i18n` | en/ms parity + referenced-key existence |
 

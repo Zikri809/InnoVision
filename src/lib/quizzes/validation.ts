@@ -9,9 +9,16 @@ import { z } from "zod";
  *  - Phase 4 (AI generation) which will reuse the same question shape
  *    (PLAN §2 `AiQuizSchema` is a superset of `QuestionInputSchema`).
  *
- * Deliberate rules (locked in PLAN_PHASE3 §2):
+ * Deliberate rules (locked in PLAN_PHASE3 §2; QT-1 multi-select added):
  *  - `mcq`: 2–5 distinct, trimmed options.
  *  - `true_false`: exactly 2 options (1 finger = true, 2 = false).
+ *  - `multi_select` (QT-1): 2–4 distinct options (gesture amendment —
+ *    palm-commit reserves five fingers); the answer key is
+ *    `correctIndices` — 1..options.length indices, each < options.length,
+ *    sorted ascending + distinct (mirrors the questions_correct_indices_guard
+ *    trigger, 0037). `correctIndex` must be ABSENT for multi and
+ *    `correctIndices` ABSENT otherwise (strictly symmetric so no mapping
+ *    site silently drops a field).
  *  - `correctIndex` must be < options.length (a selected answer must exist).
  *  - lengths mirror the DB CHECK constraints (title ≤ 200, prompt ≤ 2000,
  *    option ≤ 500, explanation ≤ 2000).
@@ -25,6 +32,12 @@ export const EXPLANATION_MAX = 2000;
 export const MCQ_OPTIONS_MIN = 2;
 export const MCQ_OPTIONS_MAX = 5;
 export const TRUE_FALSE_OPTIONS = 2;
+/**
+ * QT-1 gesture amendment: multi-select questions cap at FOUR options —
+ * five fingers is reserved for palm-commit, so a fifth option pose cannot
+ * exist. Mirrors the questions_multi_option_cap DB CHECK (0037).
+ */
+export const MULTI_SELECT_OPTIONS_MAX = 4;
 
 // Invisible/bidi control characters that could visually reorder or hide text
 // (bidi marks/embeds/isolates, zero-width chars, soft hyphen, word joiner).
@@ -52,7 +65,7 @@ export const TIME_LIMIT_MAX_SEC = 7200; // 2 hours (120 minutes)
 /** A single question as sent from the client (camelCase on the wire). */
 export const QuestionInputSchema = z
   .object({
-    type: z.enum(["mcq", "true_false"]),
+    type: z.enum(["mcq", "true_false", "multi_select"]),
     prompt: z
       .string()
       .trim()
@@ -68,7 +81,25 @@ export const QuestionInputSchema = z
       )
       .min(MCQ_OPTIONS_MIN, "A question needs at least 2 options.")
       .max(MCQ_OPTIONS_MAX, "A question can have at most 5 options."),
-    correctIndex: z.number().int().min(0, "Select a correct answer."),
+    correctIndex: z
+      .number()
+      .int()
+      .min(0, "Select a correct answer.")
+      .max(2_147_483_647)
+      .optional(),
+    // QT-1 multi-select answer key. Element ceiling = PG int4 (the column is
+    // int[]); cardinality mirrors the answer-set cap in AnswerSchema.
+    correctIndices: z
+      .array(
+        z
+          .number()
+          .int()
+          .min(0, "Correct answers must reference existing options.")
+          .max(2_147_483_647),
+      )
+      .min(1, "Select at least one correct answer.")
+      .max(MCQ_OPTIONS_MAX, `A question can have at most ${MCQ_OPTIONS_MAX} correct answers.`)
+      .optional(),
     explanation: z
       .string()
       .trim()
@@ -77,12 +108,69 @@ export const QuestionInputSchema = z
       .nullable(),
   })
   .superRefine((q, ctx) => {
-    if (q.correctIndex >= q.options.length) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["correctIndex"],
-        message: "The correct answer must reference an existing option.",
-      });
+    if (q.type === "multi_select") {
+      if (q.options.length > MULTI_SELECT_OPTIONS_MAX) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["options"],
+          message: `Multi-select questions support at most ${MULTI_SELECT_OPTIONS_MAX} options.`,
+        });
+      }
+      if (q.correctIndex !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["correctIndex"],
+          message:
+            "Multi-select questions use correctIndices; send correctIndex only for single-answer types.",
+        });
+      }
+      if (q.correctIndices === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["correctIndices"],
+          message: "Select at least one correct answer.",
+        });
+      } else {
+        if (q.correctIndices.some((i) => i >= q.options.length)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["correctIndices"],
+            message: "The correct answers must reference existing options.",
+          });
+        }
+        for (let k = 1; k < q.correctIndices.length; k += 1) {
+          if (q.correctIndices[k] <= q.correctIndices[k - 1]) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ["correctIndices"],
+              message: "The correct answers must be distinct.",
+            });
+            break;
+          }
+        }
+      }
+    } else {
+      if (q.correctIndices !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["correctIndices"],
+          message:
+            "correctIndices is only valid for multi-select questions.",
+        });
+      }
+      if (q.correctIndex === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["correctIndex"],
+          message: "Select a correct answer.",
+        });
+      } else if (q.correctIndex >= q.options.length) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["correctIndex"],
+          message: "The correct answer must reference an existing option.",
+        });
+      }
     }
     if (q.type === "true_false" && q.options.length !== TRUE_FALSE_OPTIONS) {
       ctx.addIssue({
@@ -102,6 +190,22 @@ export const QuestionInputSchema = z
   });
 
 export type QuestionInput = z.infer<typeof QuestionInputSchema>;
+
+/**
+ * Strict single-answer variant for the STUDENT-authored quiz routes (v1
+ * scope: multi-select is lecturer-quiz only — the student_quiz_questions
+ * table carries a CHECK rejecting the type, so the boundary rejects it
+ * here with a clean 400 instead of an unmapped DB error).
+ */
+export const StudentQuestionInputSchema = QuestionInputSchema.superRefine((q, ctx) => {
+  if (q.type === "multi_select") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["type"],
+      message: "Multi-select questions are not supported on student quizzes.",
+    });
+  }
+});
 
 /**
  * Availability-window bounds for a quiz. Both endpoints are optional

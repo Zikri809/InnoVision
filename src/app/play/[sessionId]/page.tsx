@@ -22,7 +22,7 @@ type PageProps = { params: Promise<{ sessionId: string }> };
 type QuestionRow = {
   id: string;
   order_index: number;
-  type: "mcq" | "true_false";
+  type: "mcq" | "true_false" | "multi_select";
   prompt: string;
   options: string[];
   has_image: boolean;
@@ -57,21 +57,25 @@ type QuizRow = {
 
 type AnswerRow = {
   question_id: string;
-  selected_index: number;
+  selected_index: number | null;
   /** Nullable: assessment pre-reveal hides correctness (student_answers_view). */
   is_correct: boolean | null;
+  /** QT-1: multi-select rows carry the canonical selection set instead. */
+  selected_indices: number[] | null;
 };
 
 /** One per-question result row from `student_results` (score + breakdown). */
 export type ResultsBreakdownRow = {
   question_id: string;
   order_index: number;
-  type: "mcq" | "true_false";
+  type: "mcq" | "true_false" | "multi_select";
   prompt: string;
   options: string[];
   selected_index: number | null;
+  selected_indices: number[] | null;
   is_correct: boolean | null;
-  correct_index: number;
+  correct_index: number | null;
+  correct_indices: number[] | null;
   explanation: string | null;
   has_image?: boolean;
 };
@@ -147,7 +151,7 @@ export default async function PlayPage({ params }: PageProps) {
       ? Promise.resolve({ data: [] as AnswerRow[], error: null })
       : supabase
           .from("student_answers_view")
-          .select("question_id, selected_index, is_correct")
+          .select("question_id, selected_index, selected_indices, is_correct")
           .eq("session_id", sessionId);
 
   // P7: `exists(face_checks)` → hasFaceChecks (the assessment gate is NOT
@@ -327,16 +331,20 @@ export default async function PlayPage({ params }: PageProps) {
   const answeredIds = answeredRows.map((a) => a.question_id);
   const initialIndex = firstUnansweredIndex(presentedQuestions, answeredIds);
 
-  // QT-3: stored selected_index values are canonical (the wire never carries
-  // presented indices); translate once here so the client renders the resume
-  // highlight against the presented options array.
+  // QT-3: stored selected_index/selected_indices values are canonical (the
+  // wire never carries presented indices); translate once here so the client
+  // renders the resume highlight against the presented options array.
+  // QT-1: multi rows translate their set element-wise.
   const presentedAnswers = shuffled
     ? answeredRows.map((a) => {
         const q = presentedQuestions.find((x) => x.id === a.question_id);
         if (!q) return a;
         const plan = shufflePlan(s.id, optionScope(q.id), q.options.length);
         const presented = toPresented(a.selected_index, plan);
-        return presented === null ? a : { ...a, selected_index: presented };
+        const presentedSet = a.selected_indices
+          ? a.selected_indices.map((i) => toPresented(i, plan) ?? i)
+          : null;
+        return { ...a, selected_index: presented, selected_indices: presentedSet };
       })
     : answeredRows;
 
@@ -359,6 +367,7 @@ export default async function PlayPage({ params }: PageProps) {
       initialIndex={initialIndex}
       initialRemainingMs={initialRemainingMs}
       shuffled={shuffled}
+      hasMultiQuestions={presentedQuestions.some((q) => q.type === "multi_select")}
       face={{
         enrolled,
         consentGiven,

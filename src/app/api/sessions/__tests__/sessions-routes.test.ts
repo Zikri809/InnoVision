@@ -963,3 +963,95 @@ describe("Session route defensive branches (not_student / not_authenticated / un
     expect(JSON.stringify(body)).not.toContain("unexpected");
   });
 });
+
+
+describe("QT1 — multi-select answers", () => {
+  const MULTI_Q = "00000000-0000-4000-8000-000000000010";
+
+  function playMultiContext(mode: "practice" | "assessment" = "practice") {
+    const ctx = playContext();
+    ctx.client.seedQuestion({
+      id: MULTI_Q,
+      quiz_id: QUIZ_C,
+      order_index: 3,
+      type: "multi_select",
+      prompt: "Q4",
+      options: ["p", "q", "r", "s"],
+      correct_index: null,
+      correct_indices: [0, 2],
+      explanation: null,
+    });
+    ctx.client.seedSession({
+      id: "00000000-0000-4000-8000-0000000000aa",
+      quiz_id: QUIZ_C,
+      student_id: STUDENT_ID,
+      mode,
+      status: "active",
+    });
+    return ctx;
+  }
+
+  it("QT1-1 practice exact set (order-insensitive) → mapped correctIndices", async () => {
+    playMultiContext();
+    const res = await answer.POST(
+      req({ questionId: MULTI_Q, selectedIndices: [2, 0] }),
+      { params: Promise.resolve({ id: "00000000-0000-4000-8000-0000000000aa" }) },
+    );
+    expect(res.status).toBe(200);
+    // mapAnswerPayload: correct_index:null passes through; correct_indices re-keyed.
+    expect(await res.json()).toEqual({
+      isCorrect: true,
+      correctIndex: null,
+      correctIndices: [0, 2],
+    });
+  });
+
+  it("QT1-2 wrong set → isCorrect false with the key echoed", async () => {
+    playMultiContext();
+    const res = await answer.POST(
+      req({ questionId: MULTI_Q, selectedIndices: [0, 1] }),
+      { params: Promise.resolve({ id: "00000000-0000-4000-8000-0000000000aa" }) },
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()).isCorrect).toBe(false);
+  });
+
+  it("QT1-3 OOB element → RPC invalid_selected_indices → 400", async () => {
+    playMultiContext();
+    const res = await answer.POST(
+      req({ questionId: MULTI_Q, selectedIndices: [0, 9] }),
+      { params: Promise.resolve({ id: "00000000-0000-4000-8000-0000000000aa" }) },
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("invalid_selected_indices");
+  });
+
+  it("QT1-4 both answer fields → 400 (Zod exactly-one)", async () => {
+    playMultiContext();
+    const res = await answer.POST(
+      req({ questionId: MULTI_Q, selectedIndex: 0, selectedIndices: [0] }),
+      { params: Promise.resolve({ id: "00000000-0000-4000-8000-0000000000aa" }) },
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("invalid_body");
+  });
+
+  it("QT1-5 empty set → 400 (Zod min(1))", async () => {
+    playMultiContext();
+    const res = await answer.POST(
+      req({ questionId: MULTI_Q, selectedIndices: [] }),
+      { params: Promise.resolve({ id: "00000000-0000-4000-8000-0000000000aa" }) },
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("QT1-6 assessment multi answer → keyless recorded ack", async () => {
+    playMultiContext("assessment");
+    const res = await answer.POST(
+      req({ questionId: MULTI_Q, selectedIndices: [0, 2] }),
+      { params: Promise.resolve({ id: "00000000-0000-4000-8000-0000000000aa" }) },
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ recorded: true });
+  });
+});

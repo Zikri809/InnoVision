@@ -158,6 +158,50 @@
 >   presented slot of the canonical answer with aria-pressed; (3)
 >   assessment — keyless acks still persist canonical indices.
 
+### 2.9 Multi-select questions (`type = 'multi_select'`, QT-1)
+> **Status: SHIPPED (0036 + 0037)** — the answer key is
+> `questions.correct_indices` (sorted+distinct; `correct_index` NULL on
+> multi rows); students submit `selectedIndices`, the RPC normalizes
+> (sorted+distinct, SQL-NULL elements rejected) and grades as exact-set
+> equality; `is_correct` semantics unchanged. Student-authored quizzes are
+> v1-out-of-scope and blocked by a CHECK on `student_quiz_questions`.
+> Authoritative layer for the plan: the QT-1 section of
+> `docs/roadmap/PLAN_R_QUESTION_TYPES.md`.
+>
+> - **Units:** `validation.test.ts` U-QT1-1..7 (strict one-of by type,
+>   bounds, sorted+distinct), `sessions/validation.test.ts` U-QT1 one-of
+>   answer shape, `quiz-schema.test.ts` U-QT1-A1..A7 (AI contract +
+>   normalization collapse→null + row shape), `quiz-prompt.test.ts`
+>   U-QT1-P1..P5 (default prompt byte-identical, opt-in steering, retry
+>   gate, regenerate), `shuffle.test.ts` U-QT3-19..20 (set translation),
+>   `export.test.ts` U-QT1-E1..E4 (cell contract, distribution),
+>   `question-draft.test.ts` set-aware ops, `import-parser.test.ts`
+>   multi-mark grammar.
+> - **Route tests (QT1-1..13):** answer-route set mapping + error map +
+>   one-of Zod; questions create/PATCH multi rows; import multi rows;
+>   student routes reject multi with 400; AI flag plumbing.
+> - **Live-DB probes (QT1-D1–D10 across `verify:quizzes`/`verify:sessions`/
+>   `verify:student-quizzes`/`verify:clone`):** exact-set grading matrix
+>   (order-insensitive, subset/superset false, full set true) · OOB/
+>   NULL-element/empty/cross-shape → `invalid_selected_indices` · assessment
+>   keyless ack + canonical stored set via `lecturer_answers_view` ·
+>   practice upsert overwrite · `student_results` set arrays · barrier-view
+>   key omission (both question views) · authoring guard trigger · clone
+>   fidelity · student-domain CHECK.
+> - **Calibration practice module (2026-08-30):** when the quiz contains
+>   multi questions, the gesture calibration panel renders an interactive
+>   4-option practice card (holds toggle on, palm flips the committed chip);
+>   calibration-local state only — regression canary is E8 (drives the
+>   unchanged Continue flow) + E45.
+> - **E2E (`e45-multi-select.spec.ts`, 5 tests):** (1) authoring via the
+>   "Correct answers" toggle group + edit-dialog persistence; (2) practice
+>   set journey (toggle → Confirm → set feedback → resume aria-pressed on
+>   BOTH persisted slots); (3) assessment keyless acks + deterministic
+>   service-role probe of the stored canonical set; (4) gesture
+>   toggle/commit contract (holds toggle presented options on/off with a
+>   pose-change re-arm gate, palm POSTs the sorted canonical set,
+>   palm-next advances in feedback).
+
 ---
 
 ## 3. DB / RLS Tests (local Supabase)
@@ -422,6 +466,7 @@ The critical guarantees the demo lives or dies by, and where each is proven:
 | Periodic verify cadence | I22 |
 | Consent gate | I1, E3b |
 | Per-session shuffle determinism + canonical-wire integrity (QT-3) | U-QT3-1..18, QT3-1..5, QT3-D1–D6, E42 |
+| Multi-select exact-set grading, canonical storage, secrecy, authoring (QT-1) | U-QT1-1..7 (validation), U-S-QT1 (answer one-of), U-QT1-A1..A7 + U-QT1-P1..P5 (AI), U-QT3-19..20 (breakdown sets), U-QT1-E1..E4 (export) + multi workbook fixture, U-AP1-9b/9c (import grammar), QT1-1..13 (route tests), QT1-D1–D10 (verify probes), E45 |
 
 ---
 

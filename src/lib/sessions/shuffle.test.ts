@@ -206,3 +206,60 @@ describe("applyBreakdownShuffle", () => {
     expect(b.order_index).toBe(1); // unknown rows keep canonical data
   });
 });
+
+
+describe("QT-1 — multi-select breakdown translation", () => {
+  it("U-QT3-19 translates selected/correct SETS element-wise (null passthrough)", () => {
+    const sessionId = "sess-multi-1";
+    const rows = [
+      {
+        question_id: "m1",
+        order_index: 0,
+        options: ["a", "b", "c", "d"],
+        selected_index: null,
+        correct_index: null,
+        selected_indices: [0, 2],
+        correct_indices: [1, 3],
+      },
+      {
+        // unanswered multi row: both sets null → stay null
+        question_id: "m2",
+        order_index: 1,
+        options: ["w", "x"],
+        selected_index: null,
+        correct_index: null,
+        selected_indices: null,
+        correct_indices: null,
+      },
+    ];
+    const out = applyBreakdownShuffle(sessionId, ["m1", "m2"], rows);
+    const plan = shufflePlan(sessionId, optionScope("m1"), 4);
+    const expectedSel = [0, 2].map((i) => toPresented(i, plan) ?? i);
+    const expectedCor = [1, 3].map((i) => toPresented(i, plan) ?? i);
+    expect(out[0].selected_indices).toEqual(expectedSel);
+    expect(out[0].correct_indices).toEqual(expectedCor);
+    // Canonical scalar keys stay null on multi rows.
+    expect(out[0].selected_index).toBeNull();
+    expect(out[1].selected_indices).toBeNull();
+    expect(out[1].correct_indices).toBeNull();
+  });
+
+  it("U-QT3-20 multi options are permuted exactly like the scalar path", () => {
+    const sessionId = "sess-multi-2";
+    const rows = [
+      {
+        question_id: "m9",
+        order_index: 0,
+        options: ["a", "b", "c"],
+        selected_index: null,
+        correct_index: null,
+        selected_indices: [1],
+        correct_indices: [0, 1],
+      },
+    ];
+    const out = applyBreakdownShuffle(sessionId, ["m9"], rows);
+    const plan = shufflePlan(sessionId, optionScope("m9"), 3);
+    expect(out[0].options).toEqual(plan.map((oi) => rows[0].options[oi]));
+    expect(out[0].selected_indices).toEqual([toPresented(1, plan) ?? 1]);
+  });
+});

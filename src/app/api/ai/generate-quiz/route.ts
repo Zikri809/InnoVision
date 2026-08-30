@@ -158,6 +158,7 @@ async function handleGenerate(
     mode = "replace",
     difficulty = "mixed",
     formatDistribution = "mixed",
+    allowMultiSelect = false,
     steeringPrompt,
     language = "auto",
   } = body;
@@ -290,6 +291,7 @@ async function handleGenerate(
     language,
     difficulty,
     formatDistribution,
+    allowMultiSelect,
     steeringPrompt,
     deadlineMs,
   });
@@ -373,7 +375,9 @@ async function handleGenerate(
       msg.includes("duplicate_options") ||
       msg.includes("empty_option") ||
       msg.includes("option_too_long") ||
-      msg.includes("explanation_too_long")
+      msg.includes("explanation_too_long") ||
+      msg.includes("invalid_question_fields") ||
+      msg.includes("invalid_correct_indices")
     ) {
       return unprocessable(
         "The AI produced questions that failed validation. Try again.",

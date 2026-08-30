@@ -383,7 +383,8 @@ export type Database = {
       }
       questions: {
         Row: {
-          correct_index: number
+          correct_index: number | null
+          correct_indices: number[] | null
           created_at: string
           explanation: string | null
           id: string
@@ -395,7 +396,8 @@ export type Database = {
           type: Database["public"]["Enums"]["question_type"]
         }
         Insert: {
-          correct_index: number
+          correct_index?: number | null
+          correct_indices?: number[] | null
           created_at?: string
           explanation?: string | null
           id?: string
@@ -407,7 +409,8 @@ export type Database = {
           type: Database["public"]["Enums"]["question_type"]
         }
         Update: {
-          correct_index?: number
+          correct_index?: number | null
+          correct_indices?: number[] | null
           created_at?: string
           explanation?: string | null
           id?: string
@@ -669,6 +672,7 @@ export type Database = {
           is_correct: boolean
           question_id: string
           selected_index: number | null
+          selected_indices: number[] | null
           session_id: string
         }
         Insert: {
@@ -677,6 +681,7 @@ export type Database = {
           is_correct: boolean
           question_id: string
           selected_index?: number | null
+          selected_indices?: number[] | null
           session_id: string
         }
         Update: {
@@ -685,6 +690,7 @@ export type Database = {
           is_correct?: boolean
           question_id?: string
           selected_index?: number | null
+          selected_indices?: number[] | null
           session_id?: string
         }
         Relationships: [
@@ -819,6 +825,7 @@ export type Database = {
           is_correct: boolean | null
           question_id: string | null
           selected_index: number | null
+          selected_indices: number[] | null
           session_id: string | null
         }
         Relationships: [
@@ -984,6 +991,7 @@ export type Database = {
           is_correct: boolean | null
           question_id: string | null
           selected_index: number | null
+          selected_indices: number[] | null
           session_id: string | null
         }
         Relationships: [
@@ -1319,7 +1327,8 @@ export type Database = {
       answer_question: {
         Args: {
           p_question_id: string
-          p_selected_index: number
+          p_selected_index?: number
+          p_selected_indices?: number[]
           p_session_id: string
         }
         Returns: Json
@@ -1330,15 +1339,17 @@ export type Database = {
       }
       append_question: {
         Args: {
-          p_correct_index: number
-          p_explanation: string
+          p_correct_index?: number
+          p_correct_indices?: number[]
+          p_explanation?: string
           p_options: string[]
           p_prompt: string
           p_quiz_id: string
           p_type: Database["public"]["Enums"]["question_type"]
         }
         Returns: {
-          correct_index: number
+          correct_index: number | null
+          correct_indices: number[] | null
           created_at: string
           explanation: string | null
           id: string
@@ -1521,7 +1532,7 @@ export type Database = {
         | "face_enrollment_held"
         | "quiz_closed"
         | "session_unlocked"
-      question_type: "mcq" | "true_false"
+      question_type: "mcq" | "true_false" | "multi_select"
       quiz_mode: "practice" | "assessment"
       quiz_status: "draft" | "live" | "closed"
       session_status: "active" | "paused" | "flagged" | "completed"
@@ -1673,7 +1684,7 @@ export const Constants = {
         "quiz_closed",
         "session_unlocked",
       ],
-      question_type: ["mcq", "true_false"],
+      question_type: ["mcq", "true_false", "multi_select"],
       quiz_mode: ["practice", "assessment"],
       quiz_status: ["draft", "live", "closed"],
       session_status: ["active", "paused", "flagged", "completed"],

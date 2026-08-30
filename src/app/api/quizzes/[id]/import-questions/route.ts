@@ -37,7 +37,8 @@ interface ImportRow {
   type: string;
   prompt: string;
   options: string[];
-  correct_index: number;
+  correct_index?: number;
+  correct_indices?: number[];
   explanation: string | null;
 }
 
@@ -121,13 +122,19 @@ export async function POST(request: Request, { params }: Params) {
   }
 
   // camelCase wire → snake_case jsonb rows. save_quiz_questions reads
-  // `correct_index` (0025:120) and raises invalid_question_fields on the
-  // camelCase shape — the aiQuizToRows mapping is load-bearing here too.
+  // `correct_index`/`correct_indices` (0025 + 0037) and raises
+  // invalid_question_fields on the camelCase shape — the aiQuizToRows
+  // mapping is load-bearing here too. Multi-select rows (QT-1) carry the
+  // set and OMIT the scalar; single-answer types are the reverse. The
+  // absent keys are OMITTED (not JSON null): a jsonb `null` is NOT SQL NULL,
+  // so `(v_q -> 'correct_indices') is not null` in 0037 would reject every
+  // scalar row — mirror aiQuizToRows' undefined-drops-the-key behavior.
   const rows: ImportRow[] = parsed.data.questions.map((q) => ({
     type: q.type,
     prompt: q.prompt,
     options: q.options,
-    correct_index: q.correctIndex,
+    ...(q.correctIndex !== undefined ? { correct_index: q.correctIndex } : {}),
+    ...(q.correctIndices !== undefined ? { correct_indices: q.correctIndices } : {}),
     explanation: q.explanation ?? null,
   }));
 
@@ -165,7 +172,9 @@ export async function POST(request: Request, { params }: Params) {
       msg.includes("duplicate_options") ||
       msg.includes("empty_option") ||
       msg.includes("option_too_long") ||
-      msg.includes("explanation_too_long")
+      msg.includes("explanation_too_long") ||
+      msg.includes("invalid_question_fields") ||
+      msg.includes("invalid_correct_indices")
     ) {
       return invalidBody(
         "The imported questions failed validation. Check options are distinct and within limits.",

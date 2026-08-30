@@ -157,6 +157,36 @@ async function main() {
       !("explanation" in v0),
   );
 
+  // ── QT1: student-domain scope guard + player-view omission ──────
+  {
+    // QT1-D10: the student authoring RPC cannot create a multi row (CHECK).
+    const { error: multiErr } = await A.rpc("append_student_question", {
+      p_quiz_id: quiz.id,
+      p_type: "multi_select",
+      p_prompt: "Which are prime?",
+      p_options: ["2", "3", "4", "5"],
+      p_correct_index: 0,
+      p_explanation: "",
+    });
+    record("QT1-D10 append_student_question with multi_select type rejected by CHECK",
+      Boolean(multiErr) && /student_quiz_questions_no_multi_select|check constraint/i.test(multiErr.message),
+      multiErr?.message ?? "unexpectedly accepted");
+
+    // QT1-D8b: the shared-practice player view omits BOTH key columns
+    // (extends SQ-D3b; probe via select(*)).
+    const { data: playerRows } = await B
+      .from("student_quiz_player_question_view")
+      .select("*")
+      .eq("quiz_id", quiz.id);
+    record("QT1-D8b select(*) on student_quiz_player_question_view → no correct_index/correct_indices keys",
+      Array.isArray(playerRows) && playerRows.length > 0 &&
+        !("correct_index" in playerRows[0]) &&
+        !("correct_indices" in playerRows[0]) &&
+        !("explanation" in playerRows[0]),
+      `keys=${Array.isArray(playerRows) && playerRows.length ? Object.keys(playerRows[0]).join(",") : "?"}`);
+  }
+
+
   // ── SQ-D4: grading RPC semantics ─────────────────────────────────
   const { data: right } = await B.rpc("answer_student_question", {
     p_question_id: q.id,

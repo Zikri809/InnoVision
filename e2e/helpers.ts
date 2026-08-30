@@ -148,10 +148,12 @@ export async function joinClass(page: Page, joinCode: string, classTitle: string
 }
 
 type QuestionInput = {
-  type?: "mcq" | "true_false";
+  type?: "mcq" | "true_false" | "multi_select";
   prompt: string;
   options: string[];
   correctIndex?: number;
+  /** QT-1: multi-select answer key (sorted+distinct canonical set). */
+  correctIndices?: number[];
   explanation?: string;
 };
 
@@ -200,6 +202,10 @@ export async function createQuizWithQuestions(
       await page.getByLabel("Type").click();
       await page.getByRole("option", { name: "True / False" }).click();
     }
+    if (q.type === "multi_select") {
+      await page.getByLabel("Type").click();
+      await page.getByRole("option", { name: "Multi-select" }).click();
+    }
     await page.getByRole("textbox", { name: "Question prompt" }).fill(q.prompt);
 
     // Fill options 1..N, adding extra option inputs as needed. True/False
@@ -213,8 +219,21 @@ export async function createQuizWithQuestions(
       }
     }
 
-    // Set the correct answer (defaults to option 1).
-    if (q.correctIndex !== undefined && q.correctIndex !== 0 && q.type !== "true_false") {
+    if (q.type === "multi_select") {
+      // QT-1: correct ANSWERS are a toggle-button group ("Correct answers");
+      // switching to multi seeds Option 1 as marked, so toggle to the exact
+      // target set.
+      const target = q.correctIndices ?? [];
+      const group = page.getByRole("group", { name: "Correct answers" });
+      for (let i = 0; i < q.options.length; i++) {
+        const toggle = group.getByRole("button", { name: `Option ${i + 1}` });
+        const pressed = (await toggle.getAttribute("aria-pressed")) === "true";
+        if (target.includes(i) !== pressed) {
+          await toggle.click();
+        }
+      }
+    } else if (q.correctIndex !== undefined && q.correctIndex !== 0 && q.type !== "true_false") {
+      // Set the correct answer (defaults to option 1).
       await page.getByLabel("Correct answer").click();
       await page.getByRole("option", { name: String(q.correctIndex + 1) }).click();
     }

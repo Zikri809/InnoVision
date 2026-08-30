@@ -53,7 +53,8 @@
     "errorTitle": "Sesuatu tidak kena",
     "errorBody": "Ralat tidak dijangka berlaku. Sila cuba lagi atau kembali ke laman utama.",
     "notFoundTitle": "Halaman tidak ditemui",
-    "notFoundBody": "Halaman atau kuiz yang anda cari tidak wujud atau telah dipindahkan."
+    "notFoundBody": "Halaman atau kuiz yang anda cari tidak wujud atau telah dipindahkan.",
+    "multiSelect": "Jawapan Pelbagai"
   },
   "authErrors": {
     "invalidEmail": "Sila masukkan alamat e-mel yang sah.",
@@ -432,8 +433,11 @@
         "errRateLimited": "Terlalu banyak import. Cuba lagi nanti.",
         "importedToast": "{count, plural, one {# soalan diimport} other {# soalan diimport}}",
         "quizFull": "Kuiz ini sudah mempunyai 30 soalan. Buang satu sebelum mengimport lagi.",
-        "fileTooLarge": "Fail itu terlalu besar (maksimum 512 KB)."
-      }
+        "fileTooLarge": "Fail itu terlalu besar (maksimum 512 KB).",
+        "problemMultiTooManyOptions": "Baris {line}: soalan pelbagai pilihan menyokong paling banyak {max} pilihan."
+      },
+      "correctAnswersLabel": "Jawapan betul",
+      "multiOptionCap": "Soalan pelbagai pilihan menyokong paling banyak 4 pilihan. Buang satu pilihan dahulu."
     },
     "dialogs": {
       "editQuizTitle": "Sunting tetapan kuiz",
@@ -697,7 +701,12 @@
       "submitTimeout": "Permintaan penghantaran tamat masa. Sila hantar sekali lagi.",
       "submitError": "Ralat rangkaian semasa menghantar kuiz. Sila hantar sekali lagi.",
       "noQuestions": "Kuiz ini belum mempunyai soalan lagi. Sila cuba lagi kemudian."
-    }
+    },
+    "multiConfirm": "Sahkan jawapan",
+    "multiHint": "Pelbagai pilihan: pilih semua jawapan yang betul, kemudian sahkan.",
+    "multiSelectedCount": "{count, plural, one {# pilihan dipilih} other {# pilihan dipilih}}",
+    "multiPalmCommitHint": "atau tahan ✋ untuk sahkan",
+    "multiSelectFirst": "Pilih sekurang-kurangnya satu pilihan sebelum mengesahkan."
   },
   "vision": {
     "keepHandVisible": "Pastikan tangan anda kelihatan untuk menjawab",
@@ -718,7 +727,15 @@
     "lightingGood": "Pencahayaan: Baik ✓",
     "lightingTooDark": "Terlalu gelap — tambah pencahayaan",
     "lightingTooBright": "Terlalu terang — elakkan silau",
-    "lightingWarning": "Pencahayaan yang kurang baik boleh menjejaskan ketepatan pengesanan jari."
+    "lightingWarning": "Pencahayaan yang kurang baik boleh menjejaskan ketepatan pengesanan jari.",
+    "multiPracticeTitle": "Latihan: soalan pelbagai pilihan",
+    "multiPracticeSubtitle": "Kuiz ini mempunyai soalan dengan lebih daripada satu jawapan betul. Tahan 1–4 jari untuk menghidupkan pilihan, kemudian tunjukkan tapak tangan terbuka untuk mengesahkan.",
+    "multiPracticeOption": "Pilihan {index}",
+    "multiPracticeIdle": "Cubalah: tahan 1, 2, 3 atau 4 jari untuk menghidupkan pilihan di atas.",
+    "multiPracticeHolding": "{count, plural, =1 {1 pilihan} other {# pilihan}} dihidupkan — tunjukkan tapak tangan terbuka ✋ untuk mengesahkan.",
+    "multiPracticeCommitted": "Disahkan {count, plural, =1 {1 pilihan} other {# pilihan}}! Tahan jari yang lain untuk mencuba lagi, kemudian tapak tangan untuk mengesahkan.",
+    "multiPracticeSuccess": "Bagus — beginilah cara menjawab.",
+    "multiPracticeCleared": "Tangan hilang — tahan jari semula."
   },
   "face": {
     "gateTitle": "Pengesahan wajah",

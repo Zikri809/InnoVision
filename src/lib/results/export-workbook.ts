@@ -219,9 +219,19 @@ export async function buildWorkbook(
 
   model.questions.forEach((q, i) => {
     const row = key.getRow(3 + i);
+    // QT-1: multi rows mark EVERY correct option and the Correct Answer
+    // column carries the joined letters ("A,C").
     const optionCols = [0, 1, 2, 3, 4].map((oi) =>
       q.options[oi] != null
-        ? `${q.options[oi]}${oi === q.correctIndex ? " ✓" : ""}`
+        ? `${q.options[oi]}${
+            q.correctIndices
+              ? q.correctIndices.includes(oi)
+                ? " ✓"
+                : ""
+              : oi === q.correctIndex
+                ? " ✓"
+                : ""
+          }`
         : "",
     );
     row.values = [
@@ -229,7 +239,9 @@ export async function buildWorkbook(
       q.type,
       q.prompt,
       ...optionCols,
-      optionLetter(q.correctIndex),
+      q.correctIndices
+        ? q.correctIndices.map((i) => optionLetter(i)).join(",")
+        : optionLetter(q.correctIndex ?? 0),
       q.explanation ?? "",
       stats[i].timesAnswered,
       stats[i].timesCorrect,
@@ -267,7 +279,13 @@ export async function buildWorkbook(
         q.prompt,
         optionLetter(d.optionIndex),
         q.options[d.optionIndex] ?? "",
-        d.optionIndex === q.correctIndex ? "✓" : "",
+        q.correctIndices
+          ? q.correctIndices.includes(d.optionIndex)
+            ? "✓"
+            : ""
+          : d.optionIndex === q.correctIndex
+            ? "✓"
+            : "",
         d.chosenCount,
         d.chosenPercent / 100,
       ];

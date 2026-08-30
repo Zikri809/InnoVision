@@ -51,7 +51,10 @@ export type ExportQuestion = {
   prompt: string;
   type: string;
   options: string[];
-  correctIndex: number;
+  /** Scalar key (single-answer types); null on multi_select rows (QT-1). */
+  correctIndex: number | null;
+  /** QT-1: sorted+distinct correct set — null on single-answer types. */
+  correctIndices: number[] | null;
   explanation: string | null;
 };
 
@@ -74,6 +77,8 @@ export type ExportAnswerInput = {
   session_id: string;
   question_id: string;
   selected_index: number | null;
+  /** QT-1: multi-select rows carry the canonical selection set instead. */
+  selected_indices?: number[] | null;
   is_correct: boolean;
 };
 
@@ -176,7 +181,8 @@ export type BuildExportInput = {
     type: string;
     prompt: string;
     options: string[] | null;
-    correct_index: number;
+    correct_index: number | null;
+    correct_indices: number[] | null;
     explanation: string | null;
   }[];
   roster: ExportRosterInput[];
@@ -198,6 +204,7 @@ export function buildExportModel(input: BuildExportInput): ExportModel {
       type: q.type,
       options: (q.options ?? []).map((o) => safeText(o)),
       correctIndex: q.correct_index,
+      correctIndices: q.correct_indices,
       explanation: q.explanation ? safeText(q.explanation) : null,
     }));
 
@@ -257,14 +264,36 @@ export function buildExportModel(input: BuildExportInput): ExportModel {
     const answerCorrect: (boolean | null)[] = [];
     for (const q of questions) {
       const a = answersByKey.get(`${session.id}:${q.id}`);
-      if (!a || a.selected_index === null) {
+      // QT-1: multi rows are "answered" when the selection SET is present —
+      // their selected_index is ALWAYS null. Cell contract: joined letters +
+      // " — " + selected texts joined " / " (e.g. "A,C — X / Y"). The set is
+      // sorted defensively (the RPC stores it canonical; a hostile/foreign
+      // writer must not scramble the cell).
+      const multiSelected =
+        q.type === "multi_select"
+          ? [...(a?.selected_indices ?? [])].sort((x, y) => x - y)
+          : null;
+      const isMultiAnswered = multiSelected != null && multiSelected.length > 0;
+      if (!a || (!isMultiAnswered && a.selected_index === null)) {
         answers.push(null);
         answerCorrect.push(null);
         continue;
       }
-      const text = q.options[a.selected_index];
+      if (isMultiAnswered) {
+        const inBounds = multiSelected.every((i) => i >= 0 && i < q.options.length);
+        const texts = multiSelected.map((i) => q.options[i]);
+        const letters = multiSelected.map((i) => optionLetter(i)).join(",");
+        answers.push(
+          inBounds && texts.every((t) => t != null)
+            ? `${letters} — ${texts.join(" / ")}`
+            : letters,
+        );
+        answerCorrect.push(a.is_correct);
+        continue;
+      }
+      const text = q.options[a.selected_index!];
       answers.push(
-        text != null ? `${optionLetter(a.selected_index)} — ${text}` : optionLetter(a.selected_index),
+        text != null ? `${optionLetter(a.selected_index!)} — ${text}` : optionLetter(a.selected_index!),
       );
       answerCorrect.push(a.is_correct);
     }
@@ -308,13 +337,29 @@ export function buildExportModel(input: BuildExportInput): ExportModel {
 
   // Choice distribution over ANSWERED attempts of the REPRESENTATIVE sessions
   // only — never over raw sessions, so the numbers always match the visible
-  // rows above.
+  // rows above. QT-1: multi rows count EACH selected option (an attempt still
+  // adds 1 to answeredCount, so per-option percentages stay out of 100).
   const distribution: OptionDistribution[][] = questions.map((q) => {
-    const counts = new Array<number>(Math.max(q.options.length, q.correctIndex + 1)).fill(0);
+    const keyBound = Math.max(
+      q.correctIndex ?? -1,
+      ...(q.correctIndices ?? []),
+    );
+    const counts = new Array<number>(Math.max(q.options.length, keyBound + 1)).fill(0);
     let answeredCount = 0;
     for (const s of selectedSessions) {
       const a = answersByKey.get(`${s.id}:${q.id}`);
-      if (!a || a.selected_index === null) continue;
+      if (!a) continue;
+      if (q.type === "multi_select") {
+        const sel = a.selected_indices ?? [];
+        if (sel.length === 0) continue;
+        for (const i of sel) {
+          if (i < 0 || i >= counts.length) continue;
+          counts[i] += 1;
+        }
+        answeredCount += 1;
+        continue;
+      }
+      if (a.selected_index === null) continue;
       if (a.selected_index < 0 || a.selected_index >= counts.length) continue;
       counts[a.selected_index] += 1;
       answeredCount += 1;

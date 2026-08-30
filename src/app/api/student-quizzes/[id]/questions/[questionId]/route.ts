@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireStudentQuizOwner } from "@/lib/student-quizzes/guards";
 import { isUuid } from "@/lib/classes/roster";
-import { QuestionInputSchema } from "@/lib/quizzes/validation";
+import { StudentQuestionInputSchema } from "@/lib/quizzes/validation";
 import { rateLimit } from "@/lib/classes/rate-limit";
 import {
   checkSameOrigin,
@@ -55,7 +55,10 @@ export async function PATCH(request: Request, { params }: Params) {
     return invalidJson();
   }
 
-  const parsed = QuestionInputSchema.safeParse(body);
+  // Strict single-answer schema: multi-select is lecturer-quiz only (the
+  // student_quiz_questions table carries a CHECK rejecting the type) — the
+  // boundary 400s here instead of dying on the direct UPDATE as a 500.
+  const parsed = StudentQuestionInputSchema.safeParse(body);
   if (!parsed.success) {
     return invalidBody(firstIssueMessage(parsed.error.issues, "Invalid question data."));
   }

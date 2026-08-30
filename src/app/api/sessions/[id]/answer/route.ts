@@ -5,6 +5,7 @@ import { isUuid } from "@/lib/classes/roster";
 import { rateLimit } from "@/lib/classes/rate-limit";
 import { AnswerSchema } from "@/lib/sessions/validation";
 import {
+  checkBodyLimit,
   checkSameOrigin,
   firstIssueMessage,
   forbidden,
@@ -44,11 +45,12 @@ const ANSWER_RATE = { limit: 120, windowMs: 60 * 1000 };
  *  - `already_answered` → 409 `{ error: "already_answered" }` (KEYLESS —
  *    assessment answers stay secrecy-safe; the RPC replays the stored result
  *    for practice)
- *  - `invalid_question` / `invalid_selected_index` → 400
+ *  - `invalid_question` / `invalid_selected_index` /
+ *    `invalid_selected_indices` (QT-1) → 400
  *  - transport error → 503
  *  - success → 200 with the RPC payload passed through after mechanical
  *    key mapping (is_correct→isCorrect; practice adds correct_index→
- *    correctIndex, explanation).
+ *    correctIndex, correct_indices→correctIndices (QT-1), explanation).
  */
 export async function POST(request: Request, { params }: Params) {
   const supabase = await createClient();
@@ -66,6 +68,11 @@ export async function POST(request: Request, { params }: Params) {
     return rateLimited("Too many answers. Try again in a minute.");
   }
 
+  // Body cap: selectedIndices is Zod-capped at 5 elements, but a huge JSON
+  // body would be parsed BEFORE Zod sees it (sibling-route convention).
+  const sizeError = checkBodyLimit(request);
+  if (sizeError) return sizeError;
+
   let body: unknown;
   try {
     body = await request.json();
@@ -78,10 +85,14 @@ export async function POST(request: Request, { params }: Params) {
     return invalidBody(firstIssueMessage(parsed.error.issues, "Invalid answer payload."));
   }
 
+  // Exactly one answer field is present (Zod one-of). supabase-js drops
+  // `undefined` keys, and both 0037 RPC params default to null — so the
+  // absent side resolves to NULL at the RPC (old 3-arg overload dropped).
   const { data, error } = await supabase.rpc("answer_question", {
     p_session_id: id,
     p_question_id: parsed.data.questionId,
     p_selected_index: parsed.data.selectedIndex,
+    p_selected_indices: parsed.data.selectedIndices,
   });
 
   if (error) {
@@ -115,7 +126,11 @@ export async function POST(request: Request, { params }: Params) {
       { status: 409, headers: { "content-type": "application/json" } },
     );
   }
-  if (payload?.error === "invalid_question" || payload?.error === "invalid_selected_index") {
+  if (
+    payload?.error === "invalid_question" ||
+    payload?.error === "invalid_selected_index" ||
+    payload?.error === "invalid_selected_indices"
+  ) {
     return jsonError(String(payload.error), undefined, 400);
   }
 
@@ -146,6 +161,10 @@ function mapAnswerPayload(payload: Record<string, unknown>): Record<string, unkn
   if ("is_correct" in payload) out.isCorrect = payload.is_correct;
   if ("recorded" in payload) out.recorded = payload.recorded === true;
   if ("correct_index" in payload) out.correctIndex = payload.correct_index;
+  // QT-1: multi-select practice feedback carries the correct SET (the scalar
+  // key arrives as null for multi rows — mapped verbatim so the client's
+  // highlight logic can branch on it).
+  if ("correct_indices" in payload) out.correctIndices = payload.correct_indices;
   if ("explanation" in payload && payload.explanation != null) {
     out.explanation = payload.explanation;
   }

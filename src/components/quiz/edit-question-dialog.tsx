@@ -32,10 +32,13 @@ import { QuestionImageField } from "@/components/media/question-image-field";
 import type { QuestionRow } from "@/app/(lecturer)/lecturer/quizzes/[id]/builder/quiz-builder-client";
 
 type QuestionDraft = {
-  type: "mcq" | "true_false";
+  type: "mcq" | "true_false" | "multi_select";
   prompt: string;
   options: string[];
-  correctIndex: number;
+  /** Single-answer key (mcq / true_false). Absent on multi drafts. */
+  correctIndex?: number;
+  /** QT-1: sorted+distinct multi answer key. Absent on single-answer drafts. */
+  correctIndices?: number[];
   explanation: string;
 };
 
@@ -87,7 +90,10 @@ function EditQuestionForm({
     type: question.type,
     prompt: question.prompt,
     options: [...question.options],
-    correctIndex: question.correct_index,
+    // QT-1: multi rows seed the set; singles the scalar (strictly one-of).
+    ...(question.type === "multi_select"
+      ? { correctIndices: [...(question.correct_indices ?? [])] }
+      : { correctIndex: question.correct_index ?? 0 }),
     explanation: question.explanation ?? "",
   }));
   const [saving, setSaving] = useState(false);
@@ -159,7 +165,11 @@ function EditQuestionForm({
   // its option on remove/move; no drifted inline copies.
   function applyOptions(draft: QuestionDraft, op: OptionDraftOp): QuestionDraft {
     const next = applyOptionDraftOp(
-      { options: draft.options, correctIndex: draft.correctIndex },
+      {
+        options: draft.options,
+        correctIndex: draft.correctIndex,
+        correctIndices: draft.correctIndices,
+      },
       op,
     );
     return { ...draft, ...next };
@@ -197,7 +207,10 @@ function EditQuestionForm({
       type: draft.type,
       prompt: draft.prompt,
       options: draft.options,
-      correctIndex: draft.correctIndex,
+      // QT-1: strictly one-of by type — multi carries the sorted set and no
+      // scalar, singles the reverse (QuestionInputSchema enforces both ways).
+      correctIndex: draft.type === "multi_select" ? undefined : draft.correctIndex,
+      correctIndices: draft.type === "multi_select" ? draft.correctIndices : undefined,
       explanation: draft.explanation,
     };
 
@@ -248,60 +261,128 @@ function EditQuestionForm({
               <Select
                 value={draft.type}
                 onValueChange={(v) => {
-                  const type = v as "mcq" | "true_false";
-                  setDraft((d) =>
-                    type === "true_false"
-                      ? {
-                          ...d,
-                          type,
-                          options: defaultTrueFalseOptions,
-                          correctIndex: 0,
-                        }
-                      : {
-                          ...d,
-                          type,
-                          options:
-                            d.options.length >= 2 ? d.options : ["", ""],
-                        },
-                  );
+                  const type = v as "mcq" | "true_false" | "multi_select";
+                  setDraft((d) => {
+                    if (type === "true_false") {
+                      return {
+                        ...d,
+                        type,
+                        options: defaultTrueFalseOptions,
+                        correctIndex: 0,
+                        correctIndices: undefined,
+                      };
+                    }
+                    if (type === "multi_select") {
+                      // QT-1 gesture amendment: multi questions cap at 4
+                      // options (palm-commit reserves five fingers) — a
+                      // 5-option draft cannot switch; ask the lecturer to
+                      // remove one option first.
+                      if (d.options.length > 4) {
+                        setError(tBuilder("multiOptionCap"));
+                        return d;
+                      }
+                      // Seed the set from the current single mark.
+                      const seed = d.correctIndex ?? 0;
+                      return {
+                        ...d,
+                        type,
+                        options: d.options.length >= 2 ? d.options : ["", ""],
+                        correctIndex: undefined,
+                        correctIndices: [Math.min(seed, Math.max(d.options.length - 1, 0))],
+                      };
+                    }
+                    return {
+                      ...d,
+                      type,
+                      options: d.options.length >= 2 ? d.options : ["", ""],
+                      correctIndex: d.correctIndices?.[0] ?? 0,
+                      correctIndices: undefined,
+                    };
+                  });
                 }}
               >
                 <SelectTrigger id="edit-q-type" className="w-full sm:w-auto sm:min-w-[12.5rem]">
 
                   <SelectValue placeholder={tBuilder("questionTypeLabel")}>
-                    {(v) => (v === "true_false" ? tCommon("trueFalse") : tCommon("mcq"))}
+                    {(v) =>
+                      v === "true_false"
+                        ? tCommon("trueFalse")
+                        : v === "multi_select"
+                          ? tCommon("multiSelect")
+                          : tCommon("mcq")
+                    }
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="mcq">{tCommon("mcq")}</SelectItem>
                   <SelectItem value="true_false">{tCommon("trueFalse")}</SelectItem>
+                  <SelectItem value="multi_select">{tCommon("multiSelect")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="edit-q-correct" className="text-xs font-extrabold text-foreground">
-                {tBuilder("correctAnswerLabel")}
-              </Label>
-              <Select
-                value={String(draft.correctIndex + 1)}
-                onValueChange={(v) =>
-                  setDraft((d) => ({ ...d, correctIndex: Number(v) - 1 }))
-                }
-              >
-                <SelectTrigger id="edit-q-correct" className="w-full sm:w-auto sm:min-w-[10rem]">
-                  <SelectValue placeholder={tBuilder("correctAnswerLabel")}>
-                    {(v) => (v ? `${tBuilder("optionLabel", { index: v })}` : tBuilder("correctAnswerLabel"))}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {draft.options.map((_, i) => (
-                    <SelectItem key={i} value={String(i + 1)}>
-                      {tBuilder("optionLabel", { index: i + 1 })}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {draft.type === "multi_select" ? (
+              // QT-1: a dropdown cannot multi-select — correct ANSWERS are a
+              // toggle-button group (aria-pressed per option).
+              <div className="space-y-1.5" role="group" aria-label={tBuilder("correctAnswersLabel")}>
+                <Label className="text-xs font-extrabold text-foreground">
+                  {tBuilder("correctAnswersLabel")}
+                </Label>
+                <div className="flex flex-wrap gap-1.5">
+                  {draft.options.map((_, i) => {
+                    const on = draft.correctIndices?.includes(i) ?? false;
+                    return (
+                      <button
+                        key={i}
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() =>
+                          setDraft((d) => {
+                            const cur = d.correctIndices ?? [];
+                            const next = cur.includes(i)
+                              ? cur.filter((x) => x !== i)
+                              : [...cur, i].sort((a, b) => a - b);
+                            return { ...d, correctIndices: next };
+                          })
+                        }
+                        className={cn(
+                          "rounded-full border-[2px] px-3 py-1 text-xs font-extrabold transition-colors",
+                          on
+                            ? "border-emerald-500 bg-emerald-100 text-emerald-900"
+                            : "border-border bg-muted/60 text-muted-foreground hover:border-emerald-300"
+                        )}
+                      >
+                        {tBuilder("optionLabel", { index: i + 1 })}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-q-correct" className="text-xs font-extrabold text-foreground">
+                  {tBuilder("correctAnswerLabel")}
+                </Label>
+                <Select
+                  value={String((draft.correctIndex ?? 0) + 1)}
+                  onValueChange={(v) =>
+                    setDraft((d) => ({ ...d, correctIndex: Number(v) - 1 }))
+                  }
+                >
+                  <SelectTrigger id="edit-q-correct" className="w-full sm:w-auto sm:min-w-[10rem]">
+                    <SelectValue placeholder={tBuilder("correctAnswerLabel")}>
+                      {(v) => (v ? `${tBuilder("optionLabel", { index: v })}` : tBuilder("correctAnswerLabel"))}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {draft.options.map((_, i) => (
+                      <SelectItem key={i} value={String(i + 1)}>
+                        {tBuilder("optionLabel", { index: i + 1 })}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
 
           {/* Question Prompt */}
@@ -329,7 +410,9 @@ function EditQuestionForm({
             <div className="flex items-center justify-between">
               <Label className="text-xs font-extrabold text-foreground">{tBuilder("correctAnswerLabel")}</Label>
               <span className="text-xs font-bold text-emerald-800 bg-emerald-100/80 border border-emerald-300/60 rounded-full px-2.5 py-0.5">
-                {tBuilder("correctAnswerLabel")}: {tBuilder("optionLabel", { index: draft.correctIndex + 1 })}
+                {draft.type === "multi_select"
+                  ? `${tBuilder("correctAnswersLabel")}: ${(draft.correctIndices ?? []).map((i) => tBuilder("optionLabel", { index: i + 1 })).join(", ") || "—"}`
+                  : `${tBuilder("correctAnswerLabel")}: ${tBuilder("optionLabel", { index: (draft.correctIndex ?? 0) + 1 })}`}
               </span>
             </div>
             <div className="space-y-2.5">
@@ -338,11 +421,19 @@ function EditQuestionForm({
                   <span
                     className={cn(
                       "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl font-heading text-xs font-extrabold transition-colors shadow-xs",
-                      draft.correctIndex === i
+                      (draft.type === "multi_select"
+                        ? (draft.correctIndices?.includes(i) ?? false)
+                        : draft.correctIndex === i)
                         ? "border-[2px] border-emerald-500 bg-emerald-100 text-emerald-900 shadow-emerald-200/50"
                         : "border-[2px] border-border bg-muted/60 text-muted-foreground"
                     )}
-                    title={draft.correctIndex === i ? tBuilder("correctAnswerLabel") : tBuilder("optionLabel", { index: i + 1 })}
+                    title={
+                      (draft.type === "multi_select"
+                        ? (draft.correctIndices?.includes(i) ?? false)
+                        : draft.correctIndex === i)
+                        ? tBuilder("correctAnswerLabel")
+                        : tBuilder("optionLabel", { index: i + 1 })
+                    }
                   >
                     {i + 1}
                   </span>
@@ -355,10 +446,12 @@ function EditQuestionForm({
                     disabled={draft.type === "true_false"}
                     className={cn(
                       "flex-1",
-                      draft.correctIndex === i && "border-emerald-400/80 bg-emerald-50/20"
+                      (draft.type === "multi_select"
+                        ? (draft.correctIndices?.includes(i) ?? false)
+                        : draft.correctIndex === i) && "border-emerald-400/80 bg-emerald-50/20"
                     )}
                   />
-                  {draft.type === "mcq" && (
+                  {draft.type !== "true_false" && (
                     <div className="flex shrink-0 items-center gap-1">
                       {draft.options.length > 1 && (
                         <>
@@ -404,6 +497,19 @@ function EditQuestionForm({
               ))}
             </div>
             {draft.type === "mcq" && draft.options.length < 5 && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={addOption}
+                className="mt-1"
+              >
+                {tBuilder("addOptionBtn")}
+              </Button>
+            )}
+            {draft.type === "multi_select" && draft.options.length < 4 && (
+              // QT-1 gesture amendment: multi questions cap at 4 options
+              // (palm-commit reserves five fingers).
               <Button
                 type="button"
                 variant="outline"

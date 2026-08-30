@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   QuestionInputSchema,
+  StudentQuestionInputSchema,
   CreateQuizSchema,
   UpdateQuizSchema,
   ReorderSchema,
@@ -298,5 +299,75 @@ describe("ReorderSchema", () => {
     if (!result.success) {
       expect(result.error.issues[0]?.message).toMatch(/valid UUID/i);
     }
+  });
+});
+
+
+const validMulti = {
+  type: "multi_select",
+  prompt: "Which are prime?",
+  options: ["2", "3", "4", "5"],
+  correctIndices: [0, 1, 3],
+};
+
+describe("QT-1 — multi-select question shape", () => {
+  it("U-QT1-1 accepts a valid multi_select question (sorted distinct set)", () => {
+    const parsed = QuestionInputSchema.parse(validMulti);
+    expect(parsed.correctIndices).toEqual([0, 1, 3]);
+    expect(parsed.correctIndex).toBeUndefined();
+  });
+
+  it("U-QT1-2 rejects multi_select with correctIndex present (strict one-of)", () => {
+    expect(
+      QuestionInputSchema.safeParse({ ...validMulti, correctIndex: 0 }).success,
+    ).toBe(false);
+  });
+
+  it("U-QT1-3 rejects multi_select without correctIndices", () => {
+    const rest = {
+      type: validMulti.type,
+      prompt: validMulti.prompt,
+      options: validMulti.options,
+    };
+    expect(QuestionInputSchema.safeParse(rest).success).toBe(false);
+  });
+
+  it("U-QT1-4 rejects an out-of-bounds correctIndices element", () => {
+    expect(
+      QuestionInputSchema.safeParse({ ...validMulti, correctIndices: [0, 9] }).success,
+    ).toBe(false);
+  });
+
+  it("U-QT1-5 rejects duplicate / unsorted sets", () => {
+    expect(
+      QuestionInputSchema.safeParse({ ...validMulti, correctIndices: [0, 0] }).success,
+    ).toBe(false);
+    expect(
+      QuestionInputSchema.safeParse({ ...validMulti, correctIndices: [2, 0] }).success,
+    ).toBe(false);
+  });
+
+  it("U-QT1-6 rejects correctIndices on single-answer types (strict one-of)", () => {
+    expect(
+      QuestionInputSchema.safeParse({ ...validMcq, correctIndices: [0] }).success,
+    ).toBe(false);
+    expect(
+      QuestionInputSchema.safeParse({ ...validTrueFalse, correctIndices: [0] }).success,
+    ).toBe(false);
+  });
+
+  it("U-QT1-6b multi_select with 5 options is rejected (gesture palm-commit cap)", () => {
+    expect(
+      QuestionInputSchema.safeParse({
+        ...validMulti,
+        options: ["1", "2", "3", "4", "5"],
+        correctIndices: [0, 1],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("U-QT1-7 student strict schema rejects multi_select with 400-shaped issue", () => {
+    const result = StudentQuestionInputSchema.safeParse(validMulti);
+    expect(result.success).toBe(false);
   });
 });

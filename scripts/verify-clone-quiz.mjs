@@ -171,6 +171,20 @@ async function main() {
   await appendQuestion(clientA, srcQuiz, 1, `${lecturerA.id}/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.png`);
   await appendQuestion(clientA, srcQuiz, 2);
 
+  // QT1-D9: a multi_select source question must clone with its answer-key SET.
+  {
+    const { error: qtMultiErr } = await clientA.rpc("append_question", {
+      p_quiz_id: srcQuiz,
+      p_type: "multi_select",
+      p_prompt: "Which are prime?",
+      p_options: ["2", "3", "4", "5"],
+      p_correct_index: null,
+      p_correct_indices: [0, 1, 3],
+      p_explanation: "2, 3, 5.",
+    });
+    assertNoError("QT1-D9 append multi question to source", { error: qtMultiErr });
+  }
+
   // AP2-D1 — owner clones own draft within the class.
   const { data: cloneId, error: cloneErr } = await clientA.rpc("clone_quiz", {
     p_src_quiz_id: srcQuiz,
@@ -212,18 +226,28 @@ async function main() {
   const { data: srcQuestions } = await clientA.from("questions").select("*").eq("quiz_id", srcQuiz).order("order_index");
   const { data: cloneQuestions } = await clientA.from("questions").select("*").eq("quiz_id", cloneId).order("order_index");
   const fidelity =
-    cloneQuestions?.length === 2 &&
+    cloneQuestions?.length === 3 &&
     cloneQuestions.every((q, i) =>
       q.order_index === srcQuestions[i].order_index &&
       q.type === srcQuestions[i].type &&
       q.prompt === srcQuestions[i].prompt &&
       JSON.stringify(q.options) === JSON.stringify(srcQuestions[i].options) &&
       q.correct_index === srcQuestions[i].correct_index &&
+      JSON.stringify(q.correct_indices) === JSON.stringify(srcQuestions[i].correct_indices) &&
       q.explanation === srcQuestions[i].explanation &&
       q.image_path === srcQuestions[i].image_path &&
       q.quiz_id === cloneId,
     );
   record("AP2-D2 question rows copied with fidelity (incl. image_path)", Boolean(fidelity), JSON.stringify(cloneQuestions?.map((q) => [q.order_index, q.prompt, q.image_path])));
+
+  const multiSrc = (srcQuestions ?? [])[2];
+  const multiClone = (cloneQuestions ?? [])[2];
+  record("QT1-D9 clone copies the multi answer-key set verbatim",
+    multiSrc?.type === "multi_select" &&
+      multiClone?.type === "multi_select" &&
+      multiClone?.correct_index === null &&
+      JSON.stringify(multiClone?.correct_indices) === JSON.stringify([0, 1, 3]),
+    `src=${JSON.stringify(multiSrc?.correct_indices)} clone=${JSON.stringify(multiClone?.correct_indices)}`);
 
   // AP2-D3 — metadata copied.
   record("AP2-D3 metadata copied (mode/time/retake/attempts/shuffle/source_text/auto_reveal)",

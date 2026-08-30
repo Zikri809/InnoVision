@@ -98,11 +98,14 @@ export default async function SharedQuizPage({ params }: Params) {
         code={normalized}
         quiz={meta}
         questions={(questions ?? [])
-          .filter((q) => q.id && q.type && q.prompt && q.options)
+          // QT-1: multi_select rows cannot exist in the student domain
+          // (student_quiz_questions CHECK) — filtered defensively so the
+          // 2-type player contract holds even against schema drift.
+          .filter((q) => q.id && q.type && q.prompt && q.options && q.type !== "multi_select")
           .map((q) => ({
             id: q.id!,
             order_index: q.order_index ?? 0,
-            type: q.type!,
+            type: q.type as "mcq" | "true_false",
             prompt: q.prompt!,
             options: q.options!,
             has_image: q.has_image === true,

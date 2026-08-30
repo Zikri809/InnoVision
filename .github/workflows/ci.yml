@@ -96,6 +96,9 @@ jobs:
       - name: Phase SQ student-quiz probes (SQ-D1-D8)
         run: npm run verify:student-quizzes
 
+      - name: "Clone-quiz probes (AP2-D1-D10 + QT1-D9 multi answer-key fidelity)"
+        run: npm run verify:clone
+
       - name: "Media probes (MEDIA-D1-D10: storage deny-by-default, image visibility, save RPC)"
         run: npm run verify:media
 

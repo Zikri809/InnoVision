@@ -71,6 +71,13 @@ export const GenerateQuizSchema = z.object({
     .optional(),
   difficulty: QuizDifficultySchema.optional().default("mixed"),
   formatDistribution: QuestionFormatDistributionSchema.optional().default("mixed"),
+  /**
+   * QT-1 opt-in (default false): when true, the mixed distribution may
+   * include multi_select questions. Deliberately ABSENT from
+   * GenerateStudentQuizSchema (below) — the student path inherits the
+   * lib-level default-false and can never emit multi rows.
+   */
+  allowMultiSelect: z.boolean().optional().default(false),
   steeringPrompt: z
     .string()
     .trim()

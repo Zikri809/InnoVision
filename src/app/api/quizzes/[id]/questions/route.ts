@@ -63,14 +63,19 @@ export async function POST(request: Request, { params }: Params) {
     return invalidBody(firstIssueMessage(parsed.error.issues, "Invalid question data."));
   }
 
-  const { type, prompt, options, correctIndex, explanation } = parsed.data;
+  const { type, prompt, options, correctIndex, correctIndices, explanation } = parsed.data;
 
   const { data: question, error } = await supabase.rpc("append_question", {
     p_quiz_id: id,
     p_type: type,
     p_prompt: prompt,
     p_options: options,
+    // Multi-select rows (QT-1) carry the answer key in correctIndices and
+    // leave the scalar NULL; single-answer types are the reverse. Zod's
+    // superRefine enforces the strictly-symmetric shape. Undefined keys are
+    // dropped by supabase-js and the RPC's default-null params apply.
     p_correct_index: correctIndex,
+    p_correct_indices: correctIndices,
     // The RPC normalizes "" → NULL (NULLIF), so passing a non-null string keeps
     // the generated RPC arg type happy and the DB semantics identical.
     p_explanation: explanation ?? "",
@@ -88,6 +93,7 @@ export async function POST(request: Request, { params }: Params) {
       msg.includes("empty_option") ||
       msg.includes("option_too_long") ||
       msg.includes("explanation_too_long") ||
+      msg.includes("invalid_correct_indices") ||
       // Table CHECK-constraint violations (e.g. true_false with 3 options,
       // correct_index out of range, prompt too long) surface as generic
       // "violates check constraint" messages — map to 400, not 503.

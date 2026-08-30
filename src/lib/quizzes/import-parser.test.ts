@@ -86,9 +86,33 @@ describe("parseImportText — asterisk option-prefix marking", () => {
     expect(codes(r)).toEqual(["doubleMark"]);
   });
 
-  it("U-AP1-9 multiple marked options are rejected", () => {
+  it("U-AP1-9 multiple marked options build a multi_select row (QT-1)", () => {
     const r = parseImportText("Q? | *one | *two | three");
-    expect(codes(r)).toEqual(["doubleMark"]);
+    expect(codes(r)).toEqual([]);
+    expect(r.rows).toHaveLength(1);
+    expect(r.rows[0].type).toBe("multi_select");
+    expect(r.rows[0].correctIndices).toEqual([0, 1]);
+    expect(r.rows[0].correctIndex).toBeUndefined();
+  });
+
+  it("U-AP1-9b letter-form multi marks map by letter and emit a sorted set", () => {
+    const r = parseImportText("Q? | *C) berlin | paris | *A) rome");
+    expect(codes(r)).toEqual([]);
+    expect(r.rows[0].type).toBe("multi_select");
+    expect(r.rows[0].options).toEqual(["berlin", "paris", "rome"]);
+    expect(r.rows[0].correctIndices).toEqual([0, 2]);
+  });
+
+  it("U-AP1-9c a multi mark out of range is answerOutOfRange", () => {
+    const r = parseImportText("Q? | *one | two | *E) x");
+    expect(r.rows).toEqual([]);
+    expect(codes(r)).toEqual(["answerOutOfRange"]);
+  });
+
+  it("U-AP1-9d a multi row with 5 options is multiTooManyOptions (gesture palm-commit cap)", () => {
+    const r = parseImportText("Q? | *one | *two | three | four | five");
+    expect(r.rows).toEqual([]);
+    expect(codes(r)).toEqual(["multiTooManyOptions"]);
   });
 
   it("U-AP1-10 an asterisk prefix without any answer is missingAnswer", () => {

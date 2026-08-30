@@ -53,7 +53,8 @@
     "errorTitle": "Something went wrong",
     "errorBody": "An unexpected error occurred. Please try again or return to the home screen.",
     "notFoundTitle": "Page not found",
-    "notFoundBody": "The page or quiz you are looking for does not exist or has been moved."
+    "notFoundBody": "The page or quiz you are looking for does not exist or has been moved.",
+    "multiSelect": "Multi-select"
   },
   "authErrors": {
     "invalidEmail": "Please enter a valid email address.",
@@ -432,8 +433,11 @@
         "errRateLimited": "Too many imports. Try again later.",
         "importedToast": "{count, plural, one {# question imported} other {# questions imported}}",
         "quizFull": "This quiz already has 30 questions. Remove one before importing more.",
-        "fileTooLarge": "That file is too large (max 512 KB)."
-      }
+        "fileTooLarge": "That file is too large (max 512 KB).",
+        "problemMultiTooManyOptions": "Line {line}: multi-select questions support at most {max} options."
+      },
+      "correctAnswersLabel": "Correct answers",
+      "multiOptionCap": "Multi-select questions support at most 4 options. Remove one option first."
     },
     "dialogs": {
       "editQuizTitle": "Edit quiz settings",
@@ -697,7 +701,12 @@
       "submitTimeout": "The submit request timed out. Please submit again.",
       "submitError": "Network error submitting the quiz. Please submit again.",
       "noQuestions": "This quiz has no questions yet. Please try again later."
-    }
+    },
+    "multiConfirm": "Confirm answer",
+    "multiHint": "Multi-select: select every correct option, then confirm.",
+    "multiSelectedCount": "{count, plural, one {# option selected} other {# options selected}}",
+    "multiPalmCommitHint": "or hold ✋ to confirm",
+    "multiSelectFirst": "Select at least one option before confirming."
   },
   "vision": {
     "keepHandVisible": "Keep your hand visible to answer",
@@ -718,7 +727,15 @@
     "lightingGood": "Lighting: Good ✓",
     "lightingTooDark": "Too dark — increase lighting",
     "lightingTooBright": "Too bright — avoid glare",
-    "lightingWarning": "Poor lighting may affect finger detection accuracy."
+    "lightingWarning": "Poor lighting may affect finger detection accuracy.",
+    "multiPracticeTitle": "Practice: multi-select questions",
+    "multiPracticeSubtitle": "This quiz has tap-to-select questions with more than one correct answer. Hold 1–4 fingers to switch an option on, then show your open palm to confirm.",
+    "multiPracticeOption": "Option {index}",
+    "multiPracticeIdle": "Try it: hold up 1, 2, 3 or 4 fingers to switch on the options above.",
+    "multiPracticeHolding": "{count, plural, =1 {1 option} other {# options}} switched on — show your open palm ✋ to confirm.",
+    "multiPracticeCommitted": "Confirmed {count, plural, =1 {1 option} other {# options}}! Hold different fingers to try again, then palm to confirm.",
+    "multiPracticeSuccess": "Nice — that's exactly how answering works.",
+    "multiPracticeCleared": "Hand lost — hold the fingers again."
   },
   "face": {
     "gateTitle": "Face verification",

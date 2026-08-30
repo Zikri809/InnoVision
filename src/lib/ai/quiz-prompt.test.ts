@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import {
+  buildRegenerateSystemPrompt,
   buildQuizSystemPrompt,
   buildQuizUserPrompt,
   buildRegeneratePrompt,
@@ -334,3 +335,81 @@ describe("difficulty & format distribution prompt generation", () => {
 });
 
 
+
+
+describe("QT-1 — allowMultiSelect gating", () => {
+  const multiJson = JSON.stringify({
+    title: "Mixed quiz",
+    questions: [
+      { type: "mcq", prompt: "What is 2+2?", options: ["3", "4"], correct_index: 1 },
+      { type: "true_false", prompt: "Sun is hot.", options: ["True", "False"], correct_index: 0 },
+      {
+        type: "multi_select",
+        prompt: "Which are prime?",
+        options: ["2", "3", "4", "5"],
+        correct_indices: [0, 1, 3],
+      },
+    ],
+  });
+
+  it("U-QT1-P1 default prompt never mentions multi_select (byte-identical default)", () => {
+    expect(buildQuizSystemPrompt()).not.toContain("multi_select");
+    expect(buildQuizSystemPrompt({ formatDistribution: "mixed" })).not.toContain("multi_select");
+  });
+
+  it("U-QT1-P2 opt-in prompt advertises multi_select + correct_indices", () => {
+    const prompt = buildQuizSystemPrompt({ allowMultiSelect: true });
+    expect(prompt).toContain("multi_select");
+    expect(prompt).toContain("correct_indices");
+  });
+
+  it("U-QT1-P3 default (flag off) rejects multi output via the retry loop", async () => {
+    const res = await generateQuiz({
+      chat: okChat(multiJson),
+      text: "chapter",
+      questionCount: 10,
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error).toBe("invalid_ai_output");
+      expect(res.message).toContain("Multi-select");
+    }
+  });
+
+  it("U-QT1-P4 opt-in (flag on) accepts the mixed quiz", async () => {
+    const res = await generateQuiz({
+      chat: okChat(multiJson),
+      text: "chapter",
+      questionCount: 10,
+      allowMultiSelect: true,
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.quiz.questions.some((q) => q.type === "multi_select")).toBe(true);
+    }
+  });
+
+  it("U-QT1-P5 regenerate keeps the multi type and its set key", async () => {
+    const multiQuestion: AiQuestion = {
+      type: "multi_select",
+      prompt: "Old multi",
+      options: ["a", "b", "c"],
+      correct_indices: [0, 2],
+    };
+    const rewritten = JSON.stringify({
+      type: "multi_select",
+      prompt: "New multi",
+      options: ["a", "b", "c"],
+      correct_indices: [1, 2],
+    });
+    const res = await regenerateQuestion({
+      chat: okChat(rewritten),
+      question: multiQuestion,
+      siblings: [],
+    });
+    expect(res.ok).toBe(true);
+    // The kept-type system prompt must have advertised correct_indices.
+    expect(buildRegenerateSystemPrompt("auto", "multi_select")).toContain("correct_indices");
+    expect(buildRegenerateSystemPrompt("auto", "mcq")).not.toContain("correct_indices");
+  });
+});

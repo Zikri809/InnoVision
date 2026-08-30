@@ -65,6 +65,8 @@ function problemMessage(t: ProblemT, p: ImportProblem): string {
       return t("problemBadAnswerMark", { line });
     case "answerOutOfRange":
       return t("problemAnswerOutOfRange", { line });
+    case "multiTooManyOptions":
+      return t("problemMultiTooManyOptions", { line, max });
     case "doubleMark":
       return t("problemDoubleMark", { line });
   }
@@ -144,6 +146,10 @@ export function BulkImportDialog({
             prompt: row.prompt,
             options: row.options,
             correctIndex: row.correctIndex,
+            // QT-1: multi-select rows carry the sorted correct set instead of
+            // the scalar (undefined keys are dropped by JSON.stringify, so
+            // single-answer rows keep the exact historical payload shape).
+            correctIndices: row.correctIndices,
           })),
         }),
       });
@@ -280,7 +286,7 @@ export function BulkImportDialog({
 
               <ul className="space-y-2">
                 {parsed.rows.map((row) => (
-                  <PreviewRow key={row.line} row={row} typeLabel={row.type === "true_false" ? tCommon("trueFalse") : tCommon("mcq")} />
+                  <PreviewRow key={row.line} row={row} typeLabel={row.type === "true_false" ? tCommon("trueFalse") : row.type === "multi_select" ? tCommon("multiSelect") : tCommon("mcq")} />
                 ))}
               </ul>
             </div>
@@ -334,7 +340,9 @@ function PreviewRow({
           {typeLabel}
         </span>
         <span className="rounded-full border-2 border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-extrabold text-primary min-w-0 max-w-full [overflow-wrap:anywhere]">
-          {row.options[row.correctIndex]}
+          {row.type === "multi_select" && row.correctIndices
+            ? row.correctIndices.map((i) => row.options[i]).join(" / ")
+            : row.options[row.correctIndex ?? 0]}
         </span>
       </div>
     </li>

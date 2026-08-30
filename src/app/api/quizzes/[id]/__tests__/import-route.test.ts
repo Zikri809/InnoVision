@@ -366,3 +366,49 @@ describe("POST /api/quizzes/[id]/import-questions", () => {
     expect(error?.message).toBe("quiz_question_limit_exceeded");
   });
 });
+
+
+describe("QT-1 — multi-select import rows", () => {
+  it("QT1-7 multi row maps correct_indices and nulls the scalar", async () => {
+    const ctx = ownerContext();
+    const res = await importRoute.POST(
+      req({
+        questions: [
+          {
+            type: "multi_select",
+            prompt: "Which are prime?",
+            options: ["2", "3", "4", "5"],
+            correctIndices: [0, 1, 3],
+          },
+        ],
+      }),
+      { params: Promise.resolve({ id: QUIZ }) },
+    );
+    expect(res.status).toBe(200);
+    const rows = ctx.client.tables["questions"] ?? [];
+    expect(rows[0]).toMatchObject({
+      type: "multi_select",
+      correct_index: null,
+      correct_indices: [0, 1, 3],
+    });
+  });
+
+  it("QT1-8 a multi row carrying the scalar too → 400 (strict one-of)", async () => {
+    ownerContext();
+    const res = await importRoute.POST(
+      req({
+        questions: [
+          {
+            type: "multi_select",
+            prompt: "Which are prime?",
+            options: ["2", "3", "4", "5"],
+            correctIndex: 0,
+            correctIndices: [0, 1],
+          },
+        ],
+      }),
+      { params: Promise.resolve({ id: QUIZ }) },
+    );
+    expect(res.status).toBe(400);
+  });
+});

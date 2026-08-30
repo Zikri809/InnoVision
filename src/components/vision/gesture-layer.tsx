@@ -57,11 +57,15 @@ export function GestureLayer({
   questionId,
   armed,
   nextArmed,
+  answerMode = "single",
+  hasMultiQuestions = false,
   blockInput,
   sessionPaused,
   faceStatus,
   onPause,
   onSelect,
+  onToggleSelect,
+  onCommit,
   onNext,
   onHoldProgress,
   onStatusChange,
@@ -72,6 +76,16 @@ export function GestureLayer({
   questionId: string;
   armed: boolean;
   nextArmed: boolean;
+  /** QT-1: "multi" on multi-select questions — holding N fingers (1..4)
+   * LATCHES a toggle of presented option N (onToggleSelect) and an open palm
+   * COMMITS the pending set (onCommit). Multi questions are capped at 4
+   * options (0037 questions_multi_option_cap) so five fingers is never an
+   * option pose. "single" (default) is the unchanged scalar latch. */
+  answerMode?: "single" | "multi";
+  /** QT-1: the quiz contains at least one multi-select question — the
+   * calibration panel renders an interactive toggle/commit practice module
+   * so students meet the new vocabulary BEFORE the first multi question. */
+  hasMultiQuestions?: boolean;
   blockInput: boolean;
   /** Server-side pause gate (P7): while true, the frame handler emits NO input. */
   sessionPaused?: boolean;
@@ -80,6 +94,11 @@ export function GestureLayer({
   /** P7: called when the hand-loss monitor fires `pause` (server-side pause). */
   onPause?: () => void;
   onSelect: (index: number) => void;
+  /** QT-1 multi mode: a latch TOGGLES presented option `index` in the
+   * pending set (never submits). */
+  onToggleSelect?: (index: number) => void;
+  /** QT-1 multi mode: an open-palm latch COMMITS the pending set. */
+  onCommit?: () => void;
   onNext: () => void;
   onHoldProgress: (p: HoldProgress | null) => void;
   onStatusChange: (status: "active" | "off") => void;
@@ -100,7 +119,13 @@ export function GestureLayer({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const trackerRef = useRef<IHandTracker | null>(null);
   const answerHoldRef = useRef(new HoldConfirm(HOLD_MS));
+  const commitHoldRef = useRef(new HoldConfirm(HOLD_MS));
   const nextHoldRef = useRef(new HoldConfirm(HOLD_MS));
+  // QT-1 re-arm gate: the finger count of the last latch (null = armed).
+  // A latch re-arms only after the pose CHANGES (hand lost or different
+  // count) — a sustained hold must never re-fire (a 2.4s hold would toggle
+  // an option straight back off).
+  const rearmCountRef = useRef<number | null>(null);
   const lossRef = useRef(
     new HandLossMonitor({
       warnAfterMs: WARN_AFTER_MS,
@@ -124,6 +149,7 @@ export function GestureLayer({
     questionId,
     armed,
     nextArmed,
+    answerMode,
     scanning,
     status,
   });
@@ -135,6 +161,8 @@ export function GestureLayer({
   const onPauseRef = useRef(onPause);
   const frameHandlerRef = useRef<(frame: HandFrame) => void>(() => {});
   const onSelectRef = useRef(onSelect);
+  const onToggleSelectRef = useRef(onToggleSelect);
+  const onCommitRef = useRef(onCommit);
   const onNextRef = useRef(onNext);
   const onHoldRef = useRef(onHoldProgress);
   const onStatusChangeRef = useRef(onStatusChange);
@@ -166,12 +194,14 @@ export function GestureLayer({
   // Latest-ref effect (every render): reassign the mirrors + the frame handler.
   useEffect(() => {
     onSelectRef.current = onSelect;
+    onToggleSelectRef.current = onToggleSelect;
+    onCommitRef.current = onCommit;
     onNextRef.current = onNext;
     onHoldRef.current = onHoldProgress;
     onStatusChangeRef.current = onStatusChange;
     sessionPausedRef.current = Boolean(sessionPaused);
     onPauseRef.current = onPause;
-    stateRef.current = { optionCount, questionId, armed, nextArmed, scanning, status };
+    stateRef.current = { optionCount, questionId, armed, nextArmed, answerMode, scanning, status };
 
     frameHandlerRef.current = (frame) => {
       const s = stateRef.current;
@@ -230,6 +260,8 @@ export function GestureLayer({
 
       // 2. Palm-next (before the answer path). Finger 5 on an optionCount < 5
       //    question can never be a valid answer, so it is a safe "next" affordance.
+      //    (QT-1 multi questions cap at 4 options, so this gate never blocks
+      //    them; in multi mode palm means COMMIT while armed anyway — 2b/3.)
       if (s.nextArmed && s.optionCount < MAX_ANSWER_FINGERS && !s.scanning) {
         const nextRes = nextHoldRef.current.update(frame.fingerCount === 5 ? 5 : 0, now);
         if (frame.fingerCount === 5) {
@@ -240,6 +272,7 @@ export function GestureLayer({
         if (nextRes.latched !== undefined) {
           nextHoldRef.current.reset();
           emitHold(null);
+          rearmCountRef.current = MAX_ANSWER_FINGERS;
           onNextRef.current();
           return;
         }
@@ -247,10 +280,63 @@ export function GestureLayer({
         nextHoldRef.current.reset();
       }
 
-      // 3. Answer path.
+      // 2b. QT-1 re-arm gate: after ANY latch, holds stay dead until the pose
+      //     changes (hand lost or a different finger count) — a sustained
+      //     hold must never re-fire (a 2.4s hold would toggle an option
+      //     straight back off). Applies to every path below; in single mode
+      //     it is normally a no-op because a latch leaves `armed` anyway.
+      if (rearmCountRef.current !== null) {
+        if (!frame.handPresent || frame.fingerCount !== rearmCountRef.current) {
+          rearmCountRef.current = null;
+        } else {
+          answerHoldRef.current.reset();
+          commitHoldRef.current.reset();
+          nextHoldRef.current.reset();
+          emitHold(null);
+          return;
+        }
+      }
+
+      // 3. Answer path. "multi" mode (QT-1): holds 1..4 TOGGLE the presented
+      //    option and an open palm COMMITS the pending set; "single" mode is
+      //    the unchanged scalar latch (hold = submit one answer).
       if (s.scanning || !s.armed) {
         answerHoldRef.current.reset();
+        commitHoldRef.current.reset();
         emitHold(null);
+        return;
+      }
+      if (s.answerMode === "multi") {
+        if (frame.fingerCount === MAX_ANSWER_FINGERS) {
+          const commitRes = commitHoldRef.current.update(MAX_ANSWER_FINGERS, now);
+          emitHold({ finger: MAX_ANSWER_FINGERS, progress: commitRes.progress });
+          if (commitRes.latched !== undefined) {
+            commitHoldRef.current.reset();
+            answerHoldRef.current.reset();
+            emitHold(null);
+            rearmCountRef.current = MAX_ANSWER_FINGERS;
+            onCommitRef.current?.();
+          }
+          return;
+        }
+        commitHoldRef.current.reset();
+        if (mapFingersToOption(frame.fingerCount, s.optionCount) === null) {
+          answerHoldRef.current.reset();
+          emitHold(null);
+          return;
+        }
+        const ansRes = answerHoldRef.current.update(frame.fingerCount, now);
+        emitHold({ finger: frame.fingerCount, progress: ansRes.progress });
+        if (ansRes.latched !== undefined) {
+          answerHoldRef.current.reset();
+          commitHoldRef.current.reset();
+          emitHold(null);
+          rearmCountRef.current = frame.fingerCount;
+          // `latched` is 1-based; map through the single authority. Non-null by
+          // construction (latched <= optionCount), guarded defensively anyway.
+          const index = mapFingersToOption(ansRes.latched, s.optionCount);
+          if (index !== null) onToggleSelectRef.current?.(index);
+        }
         return;
       }
       if (mapFingersToOption(frame.fingerCount, s.optionCount) === null) {
@@ -263,6 +349,7 @@ export function GestureLayer({
       if (ansRes.latched !== undefined) {
         answerHoldRef.current.reset();
         emitHold(null);
+        rearmCountRef.current = frame.fingerCount;
         // `latched` is 1-based; map through the single authority. Non-null by
         // construction (latched <= optionCount), guarded defensively anyway.
         const index = mapFingersToOption(ansRes.latched, s.optionCount);
@@ -493,6 +580,7 @@ export function GestureLayer({
             handDetected={calibHandDetected}
             lighting={calibLighting}
             notice={t("privacyNotice")}
+            multiPractice={hasMultiQuestions}
             onContinue={() => {
               setHandLostState(null);
               lossRef.current.reset();

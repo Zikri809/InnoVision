@@ -405,7 +405,12 @@ export class FakeSupabase {
         type: args?.p_type,
         prompt: args?.p_prompt,
         options: args?.p_options,
-        correct_index: args?.p_correct_index,
+        correct_index: args?.p_correct_index ?? null,
+        // QT-1: absent for single-answer rows (undefined drops from spread);
+        // multi rows carry the sorted set.
+        ...(args?.p_correct_indices !== undefined
+          ? { correct_indices: args.p_correct_indices }
+          : {}),
         explanation: args?.p_explanation ?? null,
         created_at: "2026-01-01T00:00:00Z",
       };
@@ -446,7 +451,10 @@ export class FakeSupabase {
           type: row.type,
           prompt: row.prompt,
           options: row.options,
-          correct_index: row.correct_index,
+          correct_index: row.correct_index ?? null,
+          ...(row.correct_indices !== undefined && row.correct_indices !== null
+            ? { correct_indices: row.correct_indices }
+            : {}),
           explanation: row.explanation ?? null,
           created_at: "2026-01-01T00:00:00Z",
         };
@@ -691,6 +699,7 @@ export class FakeSupabase {
 
     const questionId = String(args?.p_question_id);
     const selectedIndex = args?.p_selected_index as number | undefined;
+    const selectedIndices = args?.p_selected_indices as number[] | undefined;
     const answers = (this.tables["session_answers"] ??= []);
 
     // Resolve correctness against the seeded question's correct_index.
@@ -701,16 +710,49 @@ export class FakeSupabase {
       return { data: { error: "invalid_question" }, error: null };
     }
     const options = (question.options as string[]) ?? [];
-    if (
-      selectedIndex === undefined ||
-      selectedIndex === null ||
-      selectedIndex < 0 ||
-      selectedIndex >= options.length
-    ) {
-      return { data: { error: "invalid_selected_index" }, error: null };
+    const isMultiQuestion = question.type === "multi_select";
+
+    // QT-1: multi questions answer with the SET (the scalar must be absent);
+    // single-answer questions reject the set. Mirrors the 0037 RPC branches,
+    // including the SQL-NULL-element trap.
+    let isCorrect: boolean;
+    let storedIndex: number | null;
+    let storedSet: number[] | null;
+    if (isMultiQuestion) {
+      if (
+        selectedIndex !== undefined ||
+        !selectedIndices ||
+        selectedIndices.length < 1 ||
+        selectedIndices.length > 5 ||
+        selectedIndices.some(
+          (e) => e === null || e === undefined || e < 0 || e >= options.length,
+        )
+      ) {
+        return { data: { error: "invalid_selected_indices" }, error: null };
+      }
+      const normalized = [...new Set(selectedIndices)].sort((a, b) => a - b);
+      const key = (question.correct_indices as number[] | null) ?? [];
+      isCorrect =
+        normalized.length === key.length && normalized.every((v, i) => v === key[i]);
+      storedIndex = null;
+      storedSet = normalized;
+    } else {
+      if (selectedIndices !== undefined) {
+        return { data: { error: "invalid_selected_indices" }, error: null };
+      }
+      if (
+        selectedIndex === undefined ||
+        selectedIndex === null ||
+        selectedIndex < 0 ||
+        selectedIndex >= options.length
+      ) {
+        return { data: { error: "invalid_selected_index" }, error: null };
+      }
+      isCorrect = selectedIndex === (question.correct_index as number);
+      storedIndex = selectedIndex;
+      storedSet = null;
     }
 
-    const isCorrect = selectedIndex === (question.correct_index as number);
     const mode = session.mode as string;
     const existing = answers.find(
       (a) => a.session_id === sessionId && a.question_id === questionId,
@@ -721,18 +763,26 @@ export class FakeSupabase {
     }
 
     if (existing) {
-      existing.selected_index = selectedIndex;
+      existing.selected_index = storedIndex;
+      existing.selected_indices = storedSet;
       existing.is_correct = isCorrect;
       existing.answered_at = "2026-01-01T00:01:00Z";
       return {
         data:
           mode === "assessment"
             ? { recorded: true }
-            : {
-                is_correct: isCorrect,
-                correct_index: question.correct_index,
-                explanation: question.explanation ?? null,
-              },
+            : isMultiQuestion
+              ? {
+                  is_correct: isCorrect,
+                  correct_index: null,
+                  correct_indices: question.correct_indices ?? [],
+                  explanation: question.explanation ?? null,
+                }
+              : {
+                  is_correct: isCorrect,
+                  correct_index: question.correct_index,
+                  explanation: question.explanation ?? null,
+                },
         error: null,
       };
     }
@@ -741,7 +791,10 @@ export class FakeSupabase {
       id: randomUuid(),
       session_id: sessionId,
       question_id: questionId,
-      selected_index: selectedIndex,
+      selected_index: storedIndex,
+      // QT-1: single-select rows keep the exact historical shape (no key);
+      // multi rows carry the canonical set.
+      ...(storedSet ? { selected_indices: storedSet } : {}),
       is_correct: isCorrect,
       answered_at: "2026-01-01T00:01:00Z",
     };
@@ -750,11 +803,18 @@ export class FakeSupabase {
       data:
         mode === "assessment"
           ? { recorded: true }
-          : {
-              is_correct: isCorrect,
-              correct_index: question.correct_index,
-              explanation: question.explanation ?? null,
-            },
+          : isMultiQuestion
+            ? {
+                is_correct: isCorrect,
+                correct_index: null,
+                correct_indices: question.correct_indices ?? [],
+                explanation: question.explanation ?? null,
+              }
+            : {
+                is_correct: isCorrect,
+                correct_index: question.correct_index,
+                explanation: question.explanation ?? null,
+              },
       error: null,
     };
   }

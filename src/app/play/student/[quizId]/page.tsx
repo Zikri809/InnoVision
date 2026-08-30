@@ -53,15 +53,19 @@ export default async function SelfPlayPage({ params }: Params) {
   // Strip everything except the safe player shape (defense-in-depth: even
   // though this page is creator-only, the player component must never receive
   // correct_index/explanation). Only the image PRESENCE flag crosses — never
-  // the storage path (signing is route-mediated).
-  const questions: SafeQuestion[] = (rows ?? []).map((q) => ({
-    id: q.id,
-    order_index: q.order_index,
-    type: q.type,
-    prompt: q.prompt,
-    options: q.options,
-    has_image: q.image_path != null,
-  }));
+  // the storage path (signing is route-mediated). QT-1: multi_select rows
+  // cannot exist here (student_quiz_questions CHECK) — filtered defensively
+  // so the 2-type player contract holds even against a future schema drift.
+  const questions: SafeQuestion[] = (rows ?? [])
+    .filter((q) => q.type !== "multi_select")
+    .map((q) => ({
+      id: q.id,
+      order_index: q.order_index,
+      type: q.type as "mcq" | "true_false",
+      prompt: q.prompt,
+      options: q.options,
+      has_image: q.image_path != null,
+    }));
 
   return (
     <div className="min-h-dvh bg-background">

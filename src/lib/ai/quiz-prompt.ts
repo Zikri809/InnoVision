@@ -32,6 +32,20 @@ export interface QuizPromptConfig {
   language?: "en" | "ms" | "auto";
   difficulty?: "easy" | "medium" | "hard" | "mixed";
   formatDistribution?: "mixed" | "mcq_only" | "true_false_only";
+  /**
+   * QT-1 opt-in (default FALSE — the default prompt stays byte-identical).
+   * When true, the mixed distribution may include multi_select questions and
+   * the JSON contract advertises `correct_indices`. Exclusive distributions
+   * (mcq_only/true_false_only) are unaffected by the flag.
+   */
+  allowMultiSelect?: boolean;
+}
+
+/** JSON schema example for the regenerate contract, per the kept type. */
+function regenerateSchemaExample(type: AiQuestion["type"]): string {
+  return type === "multi_select"
+    ? '{"type": "multi_select", "prompt": string, "options": string[], "correct_indices": number[], "explanation"?: string}'
+    : '{"type": "mcq"|"true_false", "prompt": string, "options": string[], "correct_index": number, "explanation"?: string}';
 }
 
 /** System prompt: gesture constraints + untrusted-source hardening + difficulty & format tuning. */
@@ -45,6 +59,7 @@ export function buildQuizSystemPrompt(
     language = "auto",
     difficulty = "mixed",
     formatDistribution = "mixed",
+    allowMultiSelect = false,
   } = config;
 
   const langRule =
@@ -54,12 +69,20 @@ export function buildQuizSystemPrompt(
         ? "- Language: Generate all content (title, questions, options, explanation) in English. For true_false questions, use exactly 2 options: ['True', 'False']."
         : "- Language: Match the language of the source text. If the source text is in Bahasa Melayu (Malay), generate content in Malay and for true_false questions use exactly 2 options: ['Betul', 'Salah']. If in English, use English and ['True', 'False'].";
 
+  // QT-1: the multi_select line renders ONLY behind the opt-in flag so the
+  // default prompt is byte-identical to the pre-QT-1 contract.
+  const multiRule = allowMultiSelect
+    ? " For 'multi_select' questions (2 to 4 options), provide 'correct_indices': a sorted array of 1 to 4 indices of the correct options, INSTEAD of 'correct_index'."
+    : "";
+
   const formatRule =
     formatDistribution === "mcq_only"
       ? "- Question Types: Generate ONLY multiple-choice questions ('mcq' with 2 to 5 options, preferably 4). Do NOT generate any true_false questions."
       : formatDistribution === "true_false_only"
         ? "- Question Types: Generate ONLY True/False questions ('true_false' with exactly 2 options)."
-        : "- Question Types: Generate a balanced mix of multiple-choice ('mcq', 2 to 5 options) and True/False ('true_false', exactly 2 options).";
+        : allowMultiSelect
+          ? "- Question Types: Generate a balanced mix of multiple-choice ('mcq', 2 to 5 options), True/False ('true_false', exactly 2 options), and multi-select ('multi_select', 2 to 4 options)."
+          : "- Question Types: Generate a balanced mix of multiple-choice ('mcq', 2 to 5 options) and True/False ('true_false', exactly 2 options).";
 
   const difficultyRule = (() => {
     switch (difficulty) {
@@ -80,7 +103,9 @@ export function buildQuizSystemPrompt(
       ? '"type": "mcq"'
       : formatDistribution === "true_false_only"
         ? '"type": "true_false"'
-        : '"type": "mcq"|"true_false"';
+        : allowMultiSelect
+          ? '"type": "mcq"|"true_false"|"multi_select"'
+          : '"type": "mcq"|"true_false"';
 
   return [
     "You are an expert assessment designer generating gesture-answerable quiz questions from educational material.",
@@ -90,7 +115,7 @@ export function buildQuizSystemPrompt(
     difficultyRule,
     langRule,
     "- Keep question prompts concise (under 30 words) and options brief (under 12 words) for fast distance-reading on camera.",
-    "- The correct answer index must be 0-based and point at an existing option.",
+    "- The correct answer index must be 0-based and point at an existing option." + multiRule,
     "- Options must be distinct (case-insensitive). Keep options short and unambiguous.",
     "- Provide a concise 1-2 sentence explanation of the correct answer for each question.",
     "- The first field is the quiz title (a concise topic or chapter title).",
@@ -105,8 +130,12 @@ export function buildQuizSystemPrompt(
   ].join("\n");
 }
 
-/** Dedicated system prompt for single-question regeneration. */
-export function buildRegenerateSystemPrompt(language: "en" | "ms" | "auto" = "auto"): string {
+/** Dedicated system prompt for single-question regeneration. `type` (QT-1)
+ * switches the JSON contract when the kept question is multi_select. */
+export function buildRegenerateSystemPrompt(
+  language: "en" | "ms" | "auto" = "auto",
+  type: AiQuestion["type"] = "mcq",
+): string {
   const langRule =
     language === "ms"
       ? "- Language: Write the prompt, options, and explanation in Bahasa Melayu (Malay). For true_false questions, use exactly 2 options: ['Betul', 'Salah']."
@@ -120,12 +149,14 @@ export function buildRegenerateSystemPrompt(language: "en" | "ms" | "auto" = "au
     "- Return exactly ONE question object.",
     langRule,
     "- Keep question prompts concise (under 30 words) and options brief (under 12 words) for fast distance-reading on camera.",
-    "- The correct answer index must be 0-based and point at an existing option.",
+    type === "multi_select"
+      ? "- The correct answers must be provided as 'correct_indices': a sorted array of 1 to 5 indices of the correct options."
+      : "- The correct answer index must be 0-based and point at an existing option.",
     "- Options must be distinct (case-insensitive). Keep options short and unambiguous.",
     "- Provide a concise 1-2 sentence explanation of the correct answer.",
     "",
     "Respond with ONLY a JSON object of the form:",
-    '{"type": "mcq"|"true_false", "prompt": string, "options": string[], "correct_index": number, "explanation"?: string}',
+    regenerateSchemaExample(type),
   ].join("\n");
 }
 
@@ -199,7 +230,7 @@ export function buildRegeneratePrompt(opts: {
     `Rewrite the following question as a better, gesture-answerable question.`,
     `Keep the SAME type (${question.type}).`,
     `Maintain the SAME language as the existing question (e.g. if in Bahasa Melayu, write the prompt, options, and explanation in Bahasa Melayu; for true_false questions in Bahasa Melayu, use options ["Betul", "Salah"]).`,
-    `Return ONLY a JSON object of the form: {"type": "mcq"|"true_false", "prompt": string, "options": string[], "correct_index": number, "explanation"?: string}.`,
+    `Return ONLY a JSON object of the form: ${regenerateSchemaExample(question.type)}.`,
     ``,
     `=== UNTRUSTED EXISTING QUESTION ===`,
     `\`\`\``,
@@ -319,6 +350,14 @@ export async function generateQuiz(opts: {
   difficulty?: "easy" | "medium" | "hard" | "mixed";
   formatDistribution?: "mixed" | "mcq_only" | "true_false_only";
   steeringPrompt?: string;
+  /**
+   * QT-1 opt-in (default FALSE). Gated at the LIB level so BOTH callers
+   * (lecturer generate-quiz AND student-quizzes generate) inherit it: the
+   * multi format rule renders in the prompt only when true, and when false
+   * any parsed multi_select question triggers the retry loop below — the
+   * student path can never emit a multi row its table CHECK would reject.
+   */
+  allowMultiSelect?: boolean;
   /** Wall-clock deadline for attempt+retry combined. Defaults to now + 15 min (GENERATION_BUDGET_MS). */
   deadlineMs?: number;
 }): Promise<GenerateQuizResult> {
@@ -330,6 +369,7 @@ export async function generateQuiz(opts: {
     difficulty = "mixed",
     formatDistribution = "mixed",
     steeringPrompt,
+    allowMultiSelect = false,
     deadlineMs = Date.now() + 900_000,
   } = opts;
 
@@ -339,6 +379,7 @@ export async function generateQuiz(opts: {
       language,
       difficulty,
       formatDistribution,
+      allowMultiSelect,
     });
     const userContent = buildQuizUserPrompt({
       text,
@@ -381,6 +422,16 @@ export async function generateQuiz(opts: {
         message: "All questions must be True/False ('true_false'). Do not generate mcq questions.",
       };
     }
+    // QT-1 opt-in gate: multi_select is rejected (with retry) unless the
+    // caller explicitly allowed it.
+    if (!allowMultiSelect && parsed.quiz.questions.some((q) => q.type === "multi_select")) {
+      return {
+        ok: false,
+        error: "invalid_ai_output",
+        message:
+          "Multi-select questions are not enabled for this quiz. Use only 'mcq' and 'true_false' questions.",
+      };
+    }
 
     return { ok: true, quiz: parsed.quiz };
   };
@@ -415,7 +466,7 @@ export async function regenerateQuestion(opts: {
   const attempt = async (extra?: string): Promise<RegenerateResult> => {
     const remaining = remainingBudgetMs(deadlineMs);
     const messages: ChatMessage[] = [
-      { role: "system", content: buildRegenerateSystemPrompt(language) },
+      { role: "system", content: buildRegenerateSystemPrompt(language, question.type) },
       {
         role: "user",
         content: extra
