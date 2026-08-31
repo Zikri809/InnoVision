@@ -12,11 +12,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { ClipboardList, Zap, ShieldCheck, Timer, Play, ScanFace, Layers } from "lucide-react";
+import { ClipboardList, Zap, ShieldCheck, Timer, Play, ScanFace, Layers, Clock, X } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { EmptyBoxIllustration } from "@/components/illustrations/empty-box";
 import { formatDuration } from "@/lib/format/duration";
 import { getModeLabel } from "@/lib/quizzes/labels";
+import { formatDue } from "@/lib/format/window";
 
 type QuizRow = {
   id: string;
@@ -26,6 +27,9 @@ type QuizRow = {
   time_limit_sec: number | null;
   allow_retake?: boolean | null;
   max_attempts?: number | null;
+  /** SQ-1: availability window (QC-3 columns, read-only in this domain). */
+  opens_at?: string | null;
+  closes_at?: string | null;
   created_at: string;
   classes: { title: string } | null;
   /** SQ-2: latest COMPLETED session id for this quiz, or null. */
@@ -34,12 +38,21 @@ type QuizRow = {
   resultsRevealed: boolean;
 };
 
+/** SQ-1: "closing soon" styling threshold. */
+const CLOSING_SOON_MS = 24 * 60 * 60 * 1000;
+
 export function StudentQuizzesClient({
   quizzes,
   enrolled,
+  classFilter = null,
+  classFilterTitle = null,
 }: {
   quizzes: QuizRow[];
   enrolled: boolean;
+  /** SQ-4: ?class=<id> drill-down (server-validated shape; RLS scopes rows). */
+  classFilter?: string | null;
+  /** SQ-4: the filtered class's title (null when the id is unknown/unenrolled). */
+  classFilterTitle?: string | null;
 }) {
   const router = useRouter();
   const locale = useLocale();
@@ -107,6 +120,25 @@ export function StudentQuizzesClient({
 
   const practiceCount = quizzes.filter((q) => q.mode === "practice").length;
   const assessmentCount = quizzes.filter((q) => q.mode === "assessment").length;
+
+  // SQ-1: deadline chip state per card. The view is LIVE-only, so "closed"
+  // (past closes_at but still listed) only happens under cron lag — styled
+  // grey and truthful. A `Date.now()` read in a client component is fine
+  // (the render is not SSR-stable-critical; chips re-render per visit).
+  // eslint-disable-next-line react-hooks/purity
+  const nowMs = Date.now();
+  function deadlineChip(q: QuizRow): {
+    label: string;
+    tone: "amber" | "grey";
+  } | null {
+    if (!q.closes_at) return null;
+    const ts = Date.parse(q.closes_at);
+    if (Number.isNaN(ts)) return null;
+    const due = formatDue(q.closes_at, locale);
+    if (!due) return null;
+    if (ts <= nowMs) return { label: t("chipClosed"), tone: "grey" };
+    return { label: t("chipDue", { due }), tone: ts - nowMs < CLOSING_SOON_MS ? "amber" : "grey" };
+  }
 
   return (
     <div className="space-y-8">
@@ -184,6 +216,23 @@ export function StudentQuizzesClient({
         </div>
       )}
 
+      {/* ── SQ-4: removable class filter chip ── */}
+      {classFilter && (
+        <div className="flex items-center gap-3">
+          <span className="inline-flex items-center gap-2 rounded-full border-[3px] border-accent/40 bg-blue-100 px-3.5 py-1.5 text-xs font-extrabold text-accent">
+            {t("filterChipLabel")}
+            {classFilterTitle && <span className="text-accent">{classFilterTitle}</span>}
+            <Link
+              href="/student/quizzes"
+              aria-label={t("filterChipRemove")}
+              className="ml-0.5 grid h-4 w-4 place-items-center rounded-full transition-colors hover:bg-blue-200"
+            >
+              <X className="h-3.5 w-3.5" aria-hidden />
+            </Link>
+          </span>
+        </div>
+      )}
+
       {/* ── Quiz cards ── */}
       {quizzes.length === 0 ? (
         <EmptyState
@@ -196,6 +245,7 @@ export function StudentQuizzesClient({
         <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
           {quizzes.map((q) => {
             const isPractice = q.mode === "practice";
+            const chip = deadlineChip(q);
             return (
               <li key={q.id}>
                 <Card className="flex h-full flex-col transition-[transform,box-shadow] duration-200 hover:-translate-y-1 hover:shadow-[8px_10px_0_rgba(194,65,12,0.16)]">
@@ -226,6 +276,23 @@ export function StudentQuizzesClient({
                     <CardDescription>
                       {q.classes?.title ?? "Class"}
                     </CardDescription>
+                    {chip && (
+                      // SQ-1: deadline chip. Amber = closing within 24h
+                      // (future); grey = comfortably open or cron-lag closed.
+                      // Plain span, no role="status" — the label is static
+                      // after mount, and a live region would make SRs
+                      // announce every card's chip on page load.
+                      <span
+                        className={`mt-2 inline-flex w-fit items-center gap-1.5 rounded-full border-[3px] px-3 py-1 text-xs font-extrabold tabular-nums ${
+                          chip.tone === "amber"
+                            ? "border-amber-300 bg-amber-50 text-amber-800"
+                            : "border-border bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        <Clock className="h-3.5 w-3.5" aria-hidden />
+                        {chip.label}
+                      </span>
+                    )}
                   </CardHeader>
                   <CardContent className="mt-auto flex items-center justify-between gap-3 pt-1">
                     {notice[q.id] ? (

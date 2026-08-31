@@ -60,6 +60,18 @@ function formatter(locale: string): Intl.DateTimeFormat {
   });
 }
 
+/** Shared formatter with weekday, for due-date chips (SQ-1). */
+function dueFormatter(locale: string): Intl.DateTimeFormat {
+  return new Intl.DateTimeFormat(locale === "ms" ? "ms-MY" : "en-US", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: DISPLAY_TIME_ZONE,
+  });
+}
+
 /**
  * Human window line for cards/dialogs: "Opens 1 Sep, 2:00 PM" /
  * "Due 1 Sep, 4:00 PM" / "1 Sep, 2:00 PM – 4:00 PM".
@@ -83,4 +95,17 @@ function parseable(iso: string | null | undefined): string | null {
   if (!iso) return null;
   const t = Date.parse(iso);
   return Number.isNaN(t) ? null : iso;
+}
+
+/**
+ * Due-date chip line (SQ-1): "Due Fri 12 Sep, 4:00 PM" style localized string
+ * for a closes_at instant. Null/unparseable → null (no chip to render).
+ */
+export function formatDue(
+  closesAt: string | null | undefined,
+  locale: string = "en",
+): string | null {
+  const closes = parseable(closesAt);
+  if (!closes) return null;
+  return dueFormatter(locale).format(new Date(closes));
 }

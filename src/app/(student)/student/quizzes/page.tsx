@@ -2,10 +2,23 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { StudentQuizzesClient } from "./student-quizzes-client";
 import { ProfilePendingPanel, LoadErrorPanel } from "@/components/layout/load-state";
+import { filterByClass, sortByDeadline } from "./list-order";
 
 const QUIZ_LIST_LIMIT = 200;
 
-export default async function StudentQuizzesPage() {
+export default async function StudentQuizzesPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  // SQ-4: optional ?class=<id> drill-down from a class card. The id is only a
+  // narrow filter — RLS (student_quiz_view's is_enrolled_in_class predicate)
+  // guarantees an unenrolled/invalid id simply yields an empty list, so no
+  // validation beyond the shape check is needed (no oracle either way).
+  const rawClass = params.class;
+  const classFilter = typeof rawClass === "string" ? rawClass : null;
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -43,7 +56,7 @@ export default async function StudentQuizzesPage() {
     await Promise.all([
       supabase
         .from("student_quiz_view")
-        .select("id, class_id, title, mode, status, time_limit_sec, allow_retake, max_attempts, results_revealed_at, created_at")
+        .select("id, class_id, title, mode, status, time_limit_sec, allow_retake, max_attempts, results_revealed_at, opens_at, closes_at, created_at")
         .order("created_at", { ascending: false })
         .limit(QUIZ_LIST_LIMIT),
       supabase
@@ -91,7 +104,15 @@ export default async function StudentQuizzesPage() {
   // The views' generated types mark columns nullable (views can't express NOT
   // NULL to the type generator); the underlying columns are NOT NULL. Narrow
   // to the non-null shape the client expects.
-  const quizzesWithClass = (quizzes ?? [])
+  // SQ-1: deadline sort + SQ-4 class filter — pure helpers in list-order.ts
+  // (unit-pinned). Server component: each request is a fresh render, so
+  // reading the clock here is intentional (same suppressed-purity precedent
+  // as the play page's serverNow seed).
+  // eslint-disable-next-line react-hooks/purity
+  const nowMs = Date.now();
+  const sortedQuizzes = sortByDeadline(quizzes ?? [], nowMs);
+
+  const quizzesWithClass = filterByClass(sortedQuizzes, classFilter)
     .filter((q) => q.id && q.title && q.mode && q.status && q.class_id)
     .map((q) => ({
       id: q.id!,
@@ -102,6 +123,8 @@ export default async function StudentQuizzesPage() {
       time_limit_sec: q.time_limit_sec,
       allow_retake: q.allow_retake,
       max_attempts: q.max_attempts,
+      opens_at: q.opens_at,
+      closes_at: q.closes_at,
       created_at: q.created_at!,
       classes: classTitleById.get(q.class_id!) ? { title: classTitleById.get(q.class_id!)! } : null,
       // SQ-2: null = no completed attempt (or practice — client ignores it);
@@ -115,6 +138,8 @@ export default async function StudentQuizzesPage() {
     <StudentQuizzesClient
       quizzes={quizzesWithClass}
       enrolled={profile.face_enrollment_status === "enrolled"}
+      classFilter={classFilter}
+      classFilterTitle={classFilter ? (classTitleById.get(classFilter) ?? null) : null}
     />
   );
 }

@@ -186,7 +186,9 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
               {classes.map((c) => (
                 <li key={c.id}>
                   <Link
-                    href="/student/quizzes"
+                    // SQ-4: drill-down — the badge now tells the truth; the
+                    // quizzes list filters to this class (?class=<id>).
+                    href={`/student/quizzes?class=${c.id}`}
                     className="group flex h-full flex-col rounded-[22px] border-[3px] border-border bg-card p-5 shadow-[var(--shadow-clay)] transition-[transform,box-shadow] duration-200 hover:-translate-y-1 hover:shadow-[8px_10px_0_rgba(194,65,12,0.16)]"
                   >
                     <div className="flex items-start justify-between gap-3">
