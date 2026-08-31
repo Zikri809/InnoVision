@@ -56,6 +56,15 @@ const nextConfig: NextConfig = {
   // exceljs is a heavy CJS Node module used only inside the export route —
   // keep it out of the bundler (runtime require, no client impact).
   serverExternalPackages: ["exceljs"],
+  experimental: {
+    optimizePackageImports: [
+      "lucide-react",
+      "@remixicon/react",
+      "sonner",
+      "clsx",
+      "tailwind-merge",
+    ],
+  },
   async headers() {
     return [{ source: "/:path*", headers: SECURITY_HEADERS }];
   },
