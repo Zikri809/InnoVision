@@ -10,7 +10,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { ClipboardList, Info, Play, ShieldAlert } from "lucide-react";
+import Link from "next/link";
+import { ArrowLeft, ClipboardList, Info, Play, ShieldAlert } from "lucide-react";
 import {
   StudentPracticePlayer,
   type SafeQuestion,
@@ -53,7 +54,16 @@ export function SharedQuizClient({
   }
 
   return (
-    <div className="mx-auto max-w-xl px-4 py-10">
+    <div className="mx-auto max-w-xl px-4 py-8">
+      <div className="mb-4 flex items-center justify-between">
+        <Link
+          href="/dashboard"
+          className="inline-flex items-center gap-1.5 text-xs font-extrabold text-muted-foreground transition-colors hover:text-primary"
+        >
+          <ArrowLeft className="h-4 w-4" aria-hidden /> {tMy("heroTitle")}
+        </Link>
+      </div>
+
       <div className="mb-4 flex items-start gap-3 rounded-[22px] border-[3px] border-amber-300 bg-amber-50 px-5 py-4 shadow-[0_4px_0_rgba(217,119,6,0.15)]">
         <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" aria-hidden />
         <p className="text-sm font-semibold text-amber-800">{t("banner")}</p>

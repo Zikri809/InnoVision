@@ -58,6 +58,7 @@ type RosterEntry = {
   student_id: string;
   enrolled_at: string;
   full_name: string | null;
+  matric_no?: string | null;
 };
 
 type QuizRow = {
@@ -523,25 +524,9 @@ export function ClassDetailClient({
                 />
               </div>
             </div>
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <p id="quiz-create-time-helper" className="text-xs font-semibold text-muted-foreground">
-                {opensAt || closesAt ? t("windowHelperSet") : t("timeLimitHelperNone")}
-              </p>
-
-              <Button type="submit" disabled={creating || !title.trim()}>
-                {creating ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
-                    {t("creatingQuizBtn")}
-                  </>
-                ) : (
-                  t("createQuizBtn")
-                )}
-              </Button>
-            </div>
             {mode === "assessment" && (
               <div className="flex flex-wrap items-center gap-4">
-                <label className="flex items-center gap-2.5 text-sm font-semibold text-foreground">
+                <label className="flex items-center gap-2.5 text-sm font-semibold text-foreground cursor-pointer">
                   <input
                     type="checkbox"
                     checked={allowRetake}
@@ -570,17 +555,43 @@ export function ClassDetailClient({
                 )}
               </div>
             )}
-            <label className="flex items-center gap-2.5 text-sm font-semibold text-foreground">
-              <input
-                type="checkbox"
-                checked={shuffleQuestions}
-                onChange={(e) => setShuffleQuestions(e.target.checked)}
-                disabled={creating}
-                className="size-4 accent-[var(--primary)]"
-              />
-              {t("shuffleQuestions")}
-            </label>
-            <p className="text-xs font-semibold text-muted-foreground">{t("shuffleQuestionsHelper")}</p>
+            <div className="space-y-1">
+              <label className="flex items-center gap-2.5 text-sm font-semibold text-foreground cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={shuffleQuestions}
+                  onChange={(e) => setShuffleQuestions(e.target.checked)}
+                  disabled={creating}
+                  className="size-4 accent-[var(--primary)]"
+                />
+                {t("shuffleQuestions")}
+              </label>
+              <p className="text-xs font-semibold text-muted-foreground">{t("shuffleQuestionsHelper")}</p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-1">
+              <p id="quiz-create-time-helper" className="text-xs font-semibold text-muted-foreground">
+                {opensAt || closesAt
+                  ? t("windowHelperSet")
+                  : mode === "practice"
+                    ? (locale === "ms" ? "Kuiz latihan tidak dihadkan masa." : "Practice quizzes are untimed.")
+                    : (hours || minutes)
+                      ? t("timeLimitHelperSet", { hours: hours || "0", minutes: minutes || "0" })
+                      : t("timeLimitHelperNone")}
+              </p>
+
+              <Button type="submit" disabled={creating || !title.trim()}>
+                {creating ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+                    {t("creatingQuizBtn")}
+                  </>
+                ) : (
+                  t("createQuizBtn")
+                )}
+              </Button>
+            </div>
+
             {error && (
               <p className="rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm font-bold text-destructive" role="alert">
                 {error}
@@ -670,7 +681,12 @@ export function ClassDetailClient({
                     <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-orange-100 font-heading text-sm font-bold text-primary">
                       {(s.full_name ?? "U").trim().charAt(0).toUpperCase()}
                     </span>
-                    <span translate="no" className="truncate font-heading text-base font-semibold">{s.full_name ?? t("unnamedStudent")}</span>
+                    <span className="min-w-0">
+                      <span translate="no" className="block truncate font-heading text-base font-semibold">{s.full_name ?? t("unnamedStudent")}</span>
+                      {s.matric_no && (
+                        <span className="font-mono text-xs font-bold text-muted-foreground">{s.matric_no}</span>
+                      )}
+                    </span>
                   </span>
                   <span className="shrink-0 text-xs font-bold text-muted-foreground">
                     {t("joinedOn", { date: formatDate(s.enrolled_at) })}

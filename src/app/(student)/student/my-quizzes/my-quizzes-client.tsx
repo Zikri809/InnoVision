@@ -3,9 +3,10 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useTranslations, useLocale } from "next-intl";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import {
   Card,
   CardContent,
@@ -14,13 +15,13 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  ResponsiveModal,
+  ResponsiveModalContent,
+  ResponsiveModalDescription,
+  ResponsiveModalFooter,
+  ResponsiveModalHeader,
+  ResponsiveModalTitle,
+} from "@/components/ui/responsive-modal";
 import { Input } from "@/components/ui/input";
 import {
   ClipboardList,
@@ -46,8 +47,21 @@ type MyQuiz = {
   question_count: number;
 };
 
+function formatQuizDate(dateStr: string, locale: string) {
+  try {
+    return new Intl.DateTimeFormat(locale === "ms" ? "ms-MY" : "en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }).format(new Date(dateStr));
+  } catch {
+    return dateStr;
+  }
+}
+
 export function MyQuizzesClient({ quizzes }: { quizzes: MyQuiz[] }) {
   const router = useRouter();
+  const locale = useLocale();
   const t = useTranslations("myQuizzes");
   const tCommon = useTranslations("common");
 
@@ -127,11 +141,11 @@ export function MyQuizzesClient({ quizzes }: { quizzes: MyQuiz[] }) {
   }
 
   const shareHref = shareTarget?.share_code
-    ? `${window.location.origin}/s/${shareTarget.share_code}`
+    ? `${typeof window !== "undefined" ? window.location.origin : ""}/s/${shareTarget.share_code}`
     : "";
   const whatsappHref = shareTarget?.share_code
     ? `https://wa.me/?text=${encodeURIComponent(
-        `${shareTarget.title} — ${window.location.origin}/s/${shareTarget.share_code}`,
+        `${shareTarget.title} — ${typeof window !== "undefined" ? window.location.origin : ""}/s/${shareTarget.share_code}`,
       )}`
     : "";
 
@@ -147,16 +161,17 @@ export function MyQuizzesClient({ quizzes }: { quizzes: MyQuiz[] }) {
               <ClipboardList className="h-4 w-4" aria-hidden /> {t("heroTitle")}
             </span>
             <h1 className="mt-4 font-heading text-3xl font-semibold [text-wrap:balance] md:text-4xl">
-              {t("heroSubtitle")}
+              {t("heroTitle")}
             </h1>
             <p className="mt-2 max-w-xl text-sm font-semibold text-muted-foreground md:text-base">
               {t("heroSubtitle")}
             </p>
           </div>
-          <Link href="/student/my-quizzes/new">
-            <Button size="lg" className="shadow-[0_5px_0_var(--primary-deep)]">
-              <Plus className="h-5 w-5" aria-hidden /> {t("createCta")}
-            </Button>
+          <Link
+            href="/student/my-quizzes/new"
+            className={cn(buttonVariants({ size: "lg" }), "shadow-[0_5px_0_var(--primary-deep)]")}
+          >
+            <Plus className="h-5 w-5" aria-hidden /> {t("createCta")}
           </Link>
         </div>
       </section>
@@ -206,21 +221,32 @@ export function MyQuizzesClient({ quizzes }: { quizzes: MyQuiz[] }) {
                   {q.description && (
                     <CardDescription className="line-clamp-2">{q.description}</CardDescription>
                   )}
+                  <p className="mt-1 text-xs font-bold text-muted-foreground">
+                    {formatQuizDate(q.created_at, locale)}
+                  </p>
                 </CardHeader>
                 <CardContent className="mt-auto space-y-3 pt-1">
                   <p className="text-sm font-semibold text-muted-foreground">
                     {t("questionCount", { count: q.question_count })}
                   </p>
                   <div className="flex flex-wrap items-center gap-2">
-                    <Link href={`/play/student/${q.id}`} aria-disabled={q.question_count === 0}>
-                      <Button size="sm" disabled={q.question_count === 0}>
+                    {q.question_count === 0 ? (
+                      <Button size="sm" disabled>
                         <Play className="h-4 w-4" aria-hidden /> {t("playBtn")}
                       </Button>
-                    </Link>
-                    <Link href={`/student/my-quizzes/${q.id}/edit`}>
-                      <Button variant="outline" size="sm">
-                        <Pencil className="h-4 w-4" aria-hidden /> {t("editBtn")}
-                      </Button>
+                    ) : (
+                      <Link
+                        href={`/play/student/${q.id}`}
+                        className={buttonVariants({ size: "sm" })}
+                      >
+                        <Play className="h-4 w-4" aria-hidden /> {t("playBtn")}
+                      </Link>
+                    )}
+                    <Link
+                      href={`/student/my-quizzes/${q.id}/edit`}
+                      className={buttonVariants({ variant: "outline", size: "sm" })}
+                    >
+                      <Pencil className="h-4 w-4" aria-hidden /> {t("editBtn")}
                     </Link>
                     <Button
                       variant="outline"
@@ -251,22 +277,22 @@ export function MyQuizzesClient({ quizzes }: { quizzes: MyQuiz[] }) {
       )}
 
       {/* ── Share dialog ── */}
-      <Dialog
+      <ResponsiveModal
         open={!!shareTarget}
         onOpenChange={(o) => {
           if (!o) {
             setShareTarget(null);
-            setRegenArmed(false); // never reopen into the armed-confirm state
+            setRegenArmed(false);
           }
         }}
       >
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>
+        <ResponsiveModalContent className="sm:max-w-md">
+          <ResponsiveModalHeader>
+            <ResponsiveModalTitle>
               {shareTarget ? t("shareTitle", { title: shareTarget.title }) : ""}
-            </DialogTitle>
-            <DialogDescription>{t("shareIntro")}</DialogDescription>
-          </DialogHeader>
+            </ResponsiveModalTitle>
+            <ResponsiveModalDescription>{t("shareIntro")}</ResponsiveModalDescription>
+          </ResponsiveModalHeader>
           {shareTarget?.share_code ? (
             <div className="space-y-3">
               <div className="flex items-center gap-2">
@@ -280,10 +306,7 @@ export function MyQuizzesClient({ quizzes }: { quizzes: MyQuiz[] }) {
                       await navigator.clipboard.writeText(shareHref);
                       setError(null);
                       toast.success(tCommon("copied"));
-                    } catch {
-                      // Clipboard denied / insecure context — the link stays
-                      // selected in the readonly input for manual copying.
-                    }
+                    } catch {}
                   }}
                 >
                   <Link2 className="h-4 w-4" aria-hidden />
@@ -324,28 +347,28 @@ export function MyQuizzesClient({ quizzes }: { quizzes: MyQuiz[] }) {
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> {t("mintingLink")}
             </p>
           )}
-        </DialogContent>
-      </Dialog>
+        </ResponsiveModalContent>
+      </ResponsiveModal>
 
       {/* ── Delete confirm dialog ── */}
-      <Dialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{t("deleteConfirmTitle")}</DialogTitle>
-            <DialogDescription>
+      <ResponsiveModal open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <ResponsiveModalContent className="sm:max-w-md">
+          <ResponsiveModalHeader>
+            <ResponsiveModalTitle>{t("deleteConfirmTitle")}</ResponsiveModalTitle>
+            <ResponsiveModalDescription>
               {deleteTarget ? t("deleteConfirmBody", { title: deleteTarget.title }) : ""}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="gap-2">
+            </ResponsiveModalDescription>
+          </ResponsiveModalHeader>
+          <ResponsiveModalFooter className="gap-2">
             <Button variant="outline" onClick={() => setDeleteTarget(null)}>
               {tCommon("cancel")}
             </Button>
             <Button variant="destructive" onClick={() => void handleDelete()}>
               <Trash2 className="h-4 w-4" aria-hidden /> {tCommon("delete")}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </ResponsiveModalFooter>
+        </ResponsiveModalContent>
+      </ResponsiveModal>
     </div>
   );
 }

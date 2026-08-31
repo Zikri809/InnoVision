@@ -954,13 +954,22 @@ export function QuizBuilderClient({
                     >
                       <SelectTrigger id="q-correct" className="w-full sm:w-auto sm:min-w-[10rem]">
                         <SelectValue placeholder={t("correctAnswerLabel")}>
-                          {(v) => (v ? `${t("optionLabel", { index: v })}` : t("correctAnswerLabel"))}
+                          {(v) => {
+                            if (!v) return t("correctAnswerLabel");
+                            const idx = Number(v) - 1;
+                            if (draft.type === "true_false") {
+                              return idx === 0 ? (locale === "ms" ? "Betul (True)" : "True") : (locale === "ms" ? "Salah (False)" : "False");
+                            }
+                            return t("optionLabel", { index: v });
+                          }}
                         </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         {draft.options.map((_, i) => (
                           <SelectItem key={i} value={String(i + 1)}>
-                            {t("optionLabel", { index: i + 1 })}
+                            {draft.type === "true_false"
+                              ? (i === 0 ? (locale === "ms" ? "Betul (True)" : "True") : (locale === "ms" ? "Salah (False)" : "False"))
+                              : t("optionLabel", { index: i + 1 })}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -994,28 +1003,47 @@ export function QuizBuilderClient({
 
               <div className="space-y-2">
                 <Label>{t("correctAnswerLabel")}</Label>
-                {draft.options.map((opt, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <span
-                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl font-heading text-xs font-extrabold transition-colors shadow-xs ${
-                        (draft.type === "multi_select"
-                          ? (draft.correctIndices?.includes(i) ?? false)
-                          : draft.correctIndex === i)
-                          ? "border-[2px] border-emerald-500 bg-emerald-100 dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-200"
-                          : "border-[2px] border-border bg-muted/60 text-muted-foreground"
-                      }`}
-                    >
-                      {i + 1}
-                    </span>
-                    <Input
-                      value={opt}
-                      onChange={(e) => setOption(i, e.target.value)}
-                      maxLength={500}
-                      placeholder={t("optionLabel", { index: i + 1 })}
-                      aria-label={t("optionLabel", { index: i + 1 })}
-                      disabled={draft.type === "true_false"}
-                      className="flex-1"
-                    />
+                {draft.options.map((opt, i) => {
+                  const isCorrect =
+                    draft.type === "multi_select"
+                      ? (draft.correctIndices?.includes(i) ?? false)
+                      : draft.correctIndex === i;
+
+                  return (
+                    <div key={i} className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        title={t("correctAnswerLabel")}
+                        onClick={() => {
+                          if (draft.type === "multi_select") {
+                            setDraft((d) => {
+                              const cur = d.correctIndices ?? [];
+                              const next = cur.includes(i)
+                                ? cur.filter((x) => x !== i)
+                                : [...cur, i].sort((a, b) => a - b);
+                              return { ...d, correctIndices: next };
+                            });
+                          } else {
+                            setDraft((d) => ({ ...d, correctIndex: i }));
+                          }
+                        }}
+                        className={`flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl font-heading text-xs font-extrabold transition-all hover:scale-105 active:scale-95 shadow-xs ${
+                          isCorrect
+                            ? "border-[2px] border-emerald-500 bg-emerald-100 dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-200"
+                            : "border-[2px] border-border bg-muted/60 text-muted-foreground hover:border-emerald-300"
+                        }`}
+                      >
+                        {isCorrect ? "✓" : i + 1}
+                      </button>
+                      <Input
+                        value={opt}
+                        onChange={(e) => setOption(i, e.target.value)}
+                        maxLength={500}
+                        placeholder={t("optionLabel", { index: i + 1 })}
+                        aria-label={t("optionLabel", { index: i + 1 })}
+                        disabled={draft.type === "true_false"}
+                        className="flex-1"
+                      />
                     {draft.type !== "true_false" && (
                       <>
                         {draft.options.length > 1 && (
@@ -1055,8 +1083,9 @@ export function QuizBuilderClient({
                         )}
                       </>
                     )}
-                  </div>
-                ))}
+                    </div>
+                  );
+                })}
                 {draft.type === "mcq" && draft.options.length < 5 && (
                   <Button
                     type="button"
@@ -1162,7 +1191,9 @@ export function QuizBuilderClient({
                       <span className="text-xs font-bold text-muted-foreground">
                         {q.type === "multi_select"
                           ? `${t("correctAnswersLabel")}: ${(q.correct_indices ?? []).map((i) => t("optionLabel", { index: i + 1 })).join(", ") || "—"}`
-                          : `${t("correctAnswerLabel")}: ${t("optionLabel", { index: (q.correct_index ?? 0) + 1 })}`}
+                          : q.type === "true_false"
+                            ? `${t("correctAnswerLabel")}: ${q.options[q.correct_index ?? 0] ?? (q.correct_index === 0 ? "True" : "False")}`
+                            : `${t("correctAnswerLabel")}: ${t("optionLabel", { index: (q.correct_index ?? 0) + 1 })}`}
                       </span>
                     </div>
                     <p className="mt-1.5 font-heading text-base font-semibold">{q.prompt}</p>

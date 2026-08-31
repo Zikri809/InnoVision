@@ -117,9 +117,13 @@ export function SessionDetailClient({
             </div>
             <div className="rounded-2xl border-[3px] border-border bg-card px-4 py-3 shadow-[var(--shadow-clay-sm)]">
               <span className="font-heading text-2xl font-bold">
-                {answers.filter((a) => a.is_correct).length}
+                {questions.length > 0 && session.score != null
+                  ? `${Math.round((session.score / questions.length) * 100)}%`
+                  : "—"}
               </span>
-              <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">{t("tableHeaderScore")}</p>
+              <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">
+                {locale === "ms" ? "Ketepatan" : "Accuracy"}
+              </p>
             </div>
           </div>
         </div>

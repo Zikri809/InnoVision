@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { getTranslations } from "next-intl/server";
 import { AppUserMenu } from "./app-user-menu";
 import { AppNavLink } from "./app-nav-link";
+import { MobileBottomNav } from "./mobile-bottom-nav";
 
 /**
  * Shared clay app shell for the authenticated areas. Renders a sticky topbar
@@ -66,7 +67,7 @@ export async function AppShell({
               </span>
             </Link>
 
-            <nav aria-label={t("primaryNav")} className="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-1">
+            <nav aria-label={t("primaryNav")} className="hidden sm:flex items-center gap-1.5 overflow-x-auto scrollbar-none py-1">
               {links.map((l) => (
                 <AppNavLink key={l.href} href={l.href} label={l.label} />
               ))}
@@ -88,9 +89,11 @@ export async function AppShell({
         </div>
       </header>
 
-      <main id="main" className="mx-auto w-full max-w-6xl flex-1 px-6 py-8 md:py-10">
+      <main id="main" className="mx-auto w-full max-w-6xl flex-1 px-4 sm:px-6 py-6 sm:py-8 md:py-10 pb-24 sm:pb-10">
         {children}
       </main>
+
+      <MobileBottomNav role={role} />
     </div>
   );
 }

@@ -8,13 +8,13 @@ import { logout } from "@/lib/auth/logout";
 import { isSystemAssignedMatric } from "@/lib/auth/matric";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+  ResponsiveModal,
+  ResponsiveModalContent,
+  ResponsiveModalDescription,
+  ResponsiveModalHeader,
+  ResponsiveModalTitle,
+  ResponsiveModalTrigger,
+} from "@/components/ui/responsive-modal";
 import {
   Camera,
   CircleCheck,
@@ -205,8 +205,8 @@ export function AppUserMenu({
       <LanguageToggle />
       <ThemeToggle />
 
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogTrigger
+      <ResponsiveModal open={open} onOpenChange={setOpen}>
+        <ResponsiveModalTrigger
           aria-label={t("accountMenu")}
           className="relative grid h-11 w-11 cursor-pointer place-items-center overflow-hidden rounded-2xl border-[3px] border-border bg-card font-sans text-sm font-extrabold text-foreground shadow-[0_4px_0_var(--border)] transition-[transform,box-shadow] duration-[180ms] ease-out hover:-translate-y-0.5 hover:shadow-[0_6px_0_var(--border)] active:translate-y-0.5 active:shadow-[0_1px_0_var(--border)]"
         >
@@ -223,7 +223,7 @@ export function AppUserMenu({
           ) : (
             initialsFrom(displayName)
           )}
-        </DialogTrigger>
+        </ResponsiveModalTrigger>
 
         {/* Hidden file input lives outside the modal so the picker can be
             opened from the badge rendered beside the profile badge in the
@@ -236,8 +236,8 @@ export function AppUserMenu({
           onChange={(e) => void handleAvatarFile(e.target.files?.[0])}
         />
 
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
+        <ResponsiveModalContent className="sm:max-w-sm">
+          <ResponsiveModalHeader>
             <div className="relative mb-1 h-12 w-12">
               <div className="relative grid h-full w-full place-items-center overflow-hidden rounded-2xl bg-primary/15 text-primary">
                 {shownAvatarUrl ? (
@@ -272,8 +272,8 @@ export function AppUserMenu({
                 )}
               </button>
             </div>
-            <DialogTitle className="break-all text-base">{displayName}</DialogTitle>
-            <DialogDescription className="flex flex-col gap-1">
+            <ResponsiveModalTitle className="break-all text-base">{displayName}</ResponsiveModalTitle>
+            <ResponsiveModalDescription className="flex flex-col gap-1">
               {/* Role chip — lecturers only; students are identified by the
                   matric card below instead. */}
               {!isStudent && (
@@ -289,8 +289,8 @@ export function AppUserMenu({
                 </span>
               )}
               <span>{t("accountMenu")}</span>
-            </DialogDescription>
-          </DialogHeader>
+            </ResponsiveModalDescription>
+          </ResponsiveModalHeader>
 
           <div className="space-y-3">
             {/* Profile photo (self-only) — upload rides the badge beside the
@@ -386,8 +386,8 @@ export function AppUserMenu({
             <LogOut className="h-4 w-4" aria-hidden />
             {signingOut ? t("signingOut") : t("signOut")}
           </Button>
-        </DialogContent>
-      </Dialog>
+        </ResponsiveModalContent>
+      </ResponsiveModal>
     </div>
   );
 }

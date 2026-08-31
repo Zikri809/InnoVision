@@ -54,7 +54,8 @@
     "errorBody": "An unexpected error occurred. Please try again or return to the home screen.",
     "notFoundTitle": "Page not found",
     "notFoundBody": "The page or quiz you are looking for does not exist or has been moved.",
-    "multiSelect": "Multi-select"
+    "multiSelect": "Multi-select",
+    "myClasses": "My Classes"
   },
   "authErrors": {
     "invalidEmail": "Please enter a valid email address.",
@@ -106,7 +107,8 @@
     "matricTemporary": "Temporary",
     "matricHint": "Visible to your lecturers on class lists and exports.",
     "matricChangeHint": "Need a correction? Email the IT department to change it.",
-    "primaryNav": "Primary navigation"
+    "primaryNav": "Primary navigation",
+    "archivedClassesLabel": "Archived Classes"
   },
   "landing": {
     "badge": "No clicks needed · Just raise your hand",
@@ -225,11 +227,11 @@
       "createClassCardSubtitle": "Generate a join code so students can enroll and play.",
       "classTitleLabel": "Class title",
       "titleLabel": "Class title",
-      "classTitlePlaceholder": "e.g. CS101 — Intro to Computer Science",
-      "titlePlaceholder": "e.g. CS101 — Intro to Computer Science",
+      "classTitlePlaceholder": "e.g. CS101 — Algorithms",
+      "titlePlaceholder": "e.g. CS101 — Algorithms",
       "createBtn": "Create class",
       "creatingBtn": "Creating…",
-      "myClasses": "My classes",
+      "myClasses": "My Classes",
       "emptyTitle": "No classes yet",
       "emptySubtitle": "Create your first class on the left to get a join code for your students.",
       "archivedClassesLabel": "Archived classes",
@@ -293,6 +295,7 @@
       "timeLimitLabel": "Time limit (assessment only)",
       "noTimeLimit": "No time limit",
       "timeLimitHelperNone": "No time limit set for this assessment.",
+      "timeLimitHelperSet": "Assessment time limit: {hours}h {minutes}min.",
       "hoursShort": "h",
       "minutesShort": "min",
       "windowOpensLabel": "Opens at",

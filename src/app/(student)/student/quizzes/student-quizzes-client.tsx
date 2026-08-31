@@ -329,14 +329,20 @@ export function StudentQuizzesClient({
                             : t("oneAttempt")}
                       </span>
                     )}
-                    <Button
-                      variant={isPractice ? "default" : "accent"}
-                      onClick={() => handleStart(q.id)}
-                      disabled={startingId === q.id}
-                    >
-                      <Play className="h-4 w-4" aria-hidden />
-                      {startingId === q.id ? t("startingBtn") : t("startBtn")}
-                    </Button>
+                    {!isPractice && q.completedSessionId && !q.allow_retake ? (
+                      <Button variant="outline" disabled className="opacity-70 cursor-not-allowed">
+                        {tCommon("completed")}
+                      </Button>
+                    ) : (
+                      <Button
+                        variant={isPractice ? "default" : "accent"}
+                        onClick={() => handleStart(q.id)}
+                        disabled={startingId === q.id}
+                      >
+                        <Play className="h-4 w-4" aria-hidden />
+                        {startingId === q.id ? t("startingBtn") : t("startBtn")}
+                      </Button>
+                    )}
                   </CardContent>
                 </Card>
               </li>
@@ -351,7 +357,7 @@ export function StudentQuizzesClient({
               <span className="grid h-11 w-11 place-items-center rounded-2xl border-[3px] border-current">
                 <Layers className="h-5 w-5" aria-hidden />
               </span>
-              <span className="text-sm font-extrabold">{tCommon("all")}</span>
+              <span className="text-sm font-extrabold">{tCommon("myClasses")}</span>
             </Link>
           </li>
         </ul>

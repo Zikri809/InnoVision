@@ -9,6 +9,7 @@ import { startInstitutionalSso } from "@/lib/auth/sso";
 import { sanitizeRedirect } from "@/lib/auth/redirect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import {
   Card,
@@ -168,10 +169,9 @@ export function LoginForm({ ssoConfigured }: { ssoConfigured: boolean }) {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="password">{t("password")}</Label>
-                <Input
+                <PasswordInput
                   id="password"
                   name="password"
-                  type="password"
                   autoComplete="current-password"
                   placeholder={t("passwordPlaceholder")}
                   value={password}

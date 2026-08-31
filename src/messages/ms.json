@@ -54,7 +54,8 @@
     "errorBody": "Ralat tidak dijangka berlaku. Sila cuba lagi atau kembali ke laman utama.",
     "notFoundTitle": "Halaman tidak ditemui",
     "notFoundBody": "Halaman atau kuiz yang anda cari tidak wujud atau telah dipindahkan.",
-    "multiSelect": "Jawapan Pelbagai"
+    "multiSelect": "Jawapan Pelbagai",
+    "myClasses": "Kelas Saya"
   },
   "authErrors": {
     "invalidEmail": "Sila masukkan alamat e-mel yang sah.",
@@ -106,7 +107,8 @@
     "matricTemporary": "Sementara",
     "matricHint": "Boleh dilihat oleh pensyarah anda dalam senarai kelas dan eksport.",
     "matricChangeHint": "Perlu pembetulan? E-mel jabatan IT untuk menukarnya.",
-    "primaryNav": "Navigasi utama"
+    "primaryNav": "Navigasi utama",
+    "archivedClassesLabel": "Arkib Kelas"
   },
   "landing": {
     "badge": "Tanpa klik tetikus · Angkat tangan sahaja",
@@ -225,8 +227,8 @@
       "createClassCardSubtitle": "Jana kod penyertaan supaya pelajar boleh mendaftar dan menyertai kuiz.",
       "classTitleLabel": "Nama kelas",
       "titleLabel": "Nama kelas",
-      "classTitlePlaceholder": "cth. SKK101 — Pengenalan Sains Komputer",
-      "titlePlaceholder": "cth. SKK101 — Pengenalan Sains Komputer",
+      "classTitlePlaceholder": "cth. SKK101 — Algoritma",
+      "titlePlaceholder": "cth. SKK101 — Algoritma",
       "createBtn": "Cipta kelas",
       "creatingBtn": "Sedang mencipta…",
       "myClasses": "Kelas saya",
@@ -293,6 +295,7 @@
       "timeLimitLabel": "Had masa (penilaian sahaja)",
       "noTimeLimit": "Tiada had masa",
       "timeLimitHelperNone": "Tiada had masa ditetapkan untuk penilaian ini.",
+      "timeLimitHelperSet": "Had masa penilaian: {hours}j {minutes}min.",
       "hoursShort": "j",
       "minutesShort": "min",
       "windowOpensLabel": "Dibuka pada",

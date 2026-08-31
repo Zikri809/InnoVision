@@ -203,7 +203,7 @@ export function ClassesPageClient({
               )}
             </div>
 
-            {archivedCount > 0 && (
+            {archivedCount > 0 && activeClasses.length === 0 && (
               <Link
                 href="/lecturer/classes/archived"
                 className="inline-flex items-center gap-1.5 rounded-full border-[3px] border-border bg-card px-3.5 py-1 text-xs font-extrabold text-muted-foreground shadow-[var(--shadow-clay-sm)] transition-[transform,border-color,color] duration-180 hover:-translate-y-0.5 hover:border-primary hover:text-primary active:translate-y-0 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/40"

@@ -530,7 +530,7 @@ export function ResultsDashboardClient({
                               >
                                 {String.fromCharCode(65 + d.optionIndex)}
                               </span>
-                              <span className="w-24 shrink-0 truncate text-muted-foreground" title={qi.options[d.optionIndex]}>
+                              <span className="min-w-[70px] max-w-[200px] truncate text-muted-foreground" title={qi.options[d.optionIndex]}>
                                 {qi.options[d.optionIndex]}
                               </span>
                               <span className="h-2.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted">
@@ -632,9 +632,10 @@ export function ResultsDashboardClient({
                     <div className="flex flex-wrap shrink-0 items-center gap-2.5 self-start sm:self-auto">
                       <Link
                         href={`/lecturer/quizzes/${row.quiz_id}/results/${row.id}`}
-                        className="text-xs font-extrabold text-primary hover:underline"
+                        className="rounded-full border-2 border-primary/30 bg-primary/10 px-2.5 py-1 text-xs font-extrabold text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+                        aria-label={`Actions - ${row.studentName ?? "Student"}`}
                       >
-                        {tCommon("actions")}
+                        {locale === "ms" ? "Lihat Jawapan" : "View Answers"}
                       </Link>
                       <span className={`rounded-full border-[3px] px-2.5 py-0.5 text-xs font-extrabold ${STATUS_CLASS[row.displayStatus]}`}>
                         {getStatusLabel(row.displayStatus)}
@@ -665,10 +666,10 @@ export function ResultsDashboardClient({
                   )}
                   {row.mode === "assessment" && row.displayStatus !== "flagged" && (
                     <div className="flex flex-wrap gap-2 pb-3">
-                      <Button size="sm" variant="outline" disabled={busyRows.has(row.id)} onClick={() => setExemptRow(row.id)}>
+                      <Button size="sm" variant="outline" className="text-xs" disabled={busyRows.has(row.id)} onClick={() => setExemptRow(row.id)}>
                         {t("exemptBtn")}
                       </Button>
-                      <Button size="sm" variant="destructive" disabled={busyRows.has(row.id)} onClick={() => { setResetRow(row.id); setResetCooled(false); }}>
+                      <Button size="sm" variant="ghost" className="text-xs text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={busyRows.has(row.id)} onClick={() => { setResetRow(row.id); setResetCooled(false); }}>
                         {t("resetBtn")}
                       </Button>
                     </div>

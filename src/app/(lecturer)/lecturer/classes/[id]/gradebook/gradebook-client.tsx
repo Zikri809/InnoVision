@@ -144,11 +144,17 @@ export function GradebookClient({
                   <th
                     key={quiz.id}
                     scope="col"
-                    className="min-w-[110px] border-l-2 border-border/60 px-3 py-3 text-center align-top"
+                    className="min-w-[120px] border-l-2 border-border/60 px-3 py-3 text-center align-top"
                   >
-                    <span className="block max-w-[140px] truncate font-heading font-semibold" title={quiz.title}>
-                      {quiz.title}
-                    </span>
+                    <Link
+                      href={`/lecturer/quizzes/${quiz.id}/results`}
+                      className="group block font-heading font-semibold hover:text-primary transition-colors"
+                      title={quiz.title}
+                    >
+                      <span className="block max-w-[180px] sm:max-w-none truncate sm:whitespace-normal group-hover:underline underline-offset-2">
+                        {quiz.title}
+                      </span>
+                    </Link>
                     <span className="mt-0.5 block text-[11px] font-bold text-muted-foreground">
                       /{quiz.questionCount}
                     </span>
