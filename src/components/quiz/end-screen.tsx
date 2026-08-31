@@ -1,5 +1,7 @@
 "use client";
 
+import { useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
@@ -45,10 +47,50 @@ export function EndScreen({
   breakdown?: ResultsBreakdownRow[];
 }) {
   const locale = useLocale();
+  const router = useRouter();
   const t = useTranslations("play.end");
   const tCommon = useTranslations("common");
   const isPractice = session.mode === "practice";
   const pct = revealed && total > 0 && score != null ? Math.round((score / total) * 100) : 0;
+
+  // SQ-3: practice "Try Again" starts a REAL fresh attempt — POST /api/sessions
+  // (rejoin semantics: a completed practice session never matches the RPC's
+  // resume select, so this always returns a new session id) and route into it.
+  // Mirrors student-quizzes-client handleStart's status mapping.
+  const retryLock = useRef(false);
+  const [retrying, setRetrying] = useState(false);
+
+  async function handleTryAgain() {
+    if (retryLock.current) return;
+    retryLock.current = true;
+    setRetrying(true);
+    try {
+      const res = await fetch("/api/sessions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ quizId: session.quiz_id }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (res.ok && body.session?.id) {
+        router.push(`/play/${body.session.id}`);
+        return;
+      }
+      // Assessment sessions never see this button (isPractice-gated), but a
+      // 409 with a live session id is still a valid route-into target.
+      if (res.status === 409 && body.error === "already_attempted" && body.session_id) {
+        router.push(`/play/${body.session_id}`);
+        return;
+      }
+      // Degraded (window closed / offline): fall back to the quiz list rather
+      // than stranding the student — the button must never dead-end silently.
+      router.push("/student/quizzes");
+    } catch {
+      router.push("/student/quizzes");
+    } finally {
+      retryLock.current = false;
+      setRetrying(false);
+    }
+  }
 
   function formatOptionText(text: string): string {
     const lower = text.trim().toLowerCase();
@@ -120,9 +162,9 @@ export function EndScreen({
             <Button variant="outline" size="lg">{t("backToQuizzes")}</Button>
           </Link>
           {isPractice && (
-            <Link href="/student/quizzes">
-              <Button size="lg">{t("tryAgain")}</Button>
-            </Link>
+            <Button size="lg" onClick={() => void handleTryAgain()} disabled={retrying}>
+              {retrying ? t("tryAgainStarting") : t("tryAgain")}
+            </Button>
           )}
         </div>
       </div>

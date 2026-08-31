@@ -361,7 +361,7 @@ export default async function PlayPage({ params }: PageProps) {
   return (
     <PlayClient
       sessionId={s.id}
-      quiz={{ title: quiz.title, mode: quiz.mode, timeLimitSec: quiz.time_limit_sec }}
+      quiz={{ id: quiz.id, title: quiz.title, mode: quiz.mode, timeLimitSec: quiz.time_limit_sec }}
       questions={presentedQuestions}
       initialAnswers={presentedAnswers}
       initialIndex={initialIndex}

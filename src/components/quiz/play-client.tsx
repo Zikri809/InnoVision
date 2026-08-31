@@ -10,6 +10,7 @@ import { GestureLayer } from "@/components/vision/gesture-layer";
 import { Button } from "@/components/ui/button";
 import { MAX_ANSWER_FINGERS } from "@/lib/gestures/constants";
 import { optionScope, shufflePlan, toCanonical, toPresented } from "@/lib/sessions/shuffle";
+import { milestoneFor, type TimerMilestone } from "@/lib/a11y/timer-milestones";
 import type { HoldProgress } from "@/lib/gestures/types";
 import { FaceVerifier } from "@/components/face/face-verifier";
 import { useFacePipeline, type FacePipelinePhase } from "@/components/face/use-face-pipeline";
@@ -32,6 +33,7 @@ type Question = {
 };
 
 type Quiz = {
+  id: string;
   title: string;
   mode: "practice" | "assessment";
   timeLimitSec: number | null;
@@ -169,9 +171,12 @@ export function PlayClient({
   const [gestureActive, setGestureActive] = useState(false);
   const [faceStatus, setFaceStatus] = useState<FaceStatus>(face?.initialFaceStatus ?? "off");
   const [faceUnavailable, setFaceUnavailable] = useState(false);
+  // SQ-3: pending flag for the end-state "Try again" fresh attempt.
+  const [retrying, setRetrying] = useState(false);
 
   // Locks: one answer in flight at a time; no submit while answering.
   const submitLock = useRef(false);
+  const retryLock = useRef(false);
   const inFlightAnswer = useRef<Promise<void> | null>(null);
   // Mirror of `phase` in a ref so concurrent handlers (submitNow / handleTimeUp) can
   // tell whether handleTimeUp already moved us into timeUp).
@@ -184,6 +189,13 @@ export function PlayClient({
   const isPractice = quiz.mode === "practice";
   const question = questions[Math.min(index, questions.length - 1)];
   const answered = answers[question?.id];
+
+  // SQ-3 dead-end: when the seed is the all-answered state (initialIndex -1 →
+  // feedback on Q1), "Next" would strand the student — advancing into an
+  // already-answered question renders zero actionable buttons (selectOption
+  // early-returns, Confirm requires unanswered, Next requires feedback). With
+  // everything answered, the only sensible action is Finish → submit.
+  const allAnswered = questions.length > 0 && questions.every((q) => answers[q.id]);
 
   // A11y: the answered option/Confirm unmounts as feedback mounts — move
   // focus to Next/Finish so keyboard + SR users keep their anchor (the
@@ -311,6 +323,38 @@ export function PlayClient({
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [remainingMs, phase, faceStatus]);
+
+  // ── AX-3: discrete timer milestones for screen readers ───────────
+  // The countdown pill itself is aria-live="off" (per-second ticks would
+  // spam); instead each threshold fires ONE announcement: T-10m/5m/1m polite,
+  // <30s assertive-once (coinciding with the pill's red flip). Value-keyed
+  // (not wall-clock) so pause/flag gaps are inherently tolerated. The
+  // announced-set ref (FlaggedWaitTicker transition idiom) guarantees
+  // once-per-milestone even across re-renders. Announcement state is derived
+  // DURING RENDER (no setState-in-effect) — the ref mutates only when a new
+  // milestone fires, so re-renders don't re-trigger.
+  const announcedMilestones = useRef<Set<TimerMilestone>>(new Set());
+  const [milestoneAnnouncement, setMilestoneAnnouncement] = useState<string | null>(null);
+  const [assertiveAnnouncement, setAssertiveAnnouncement] = useState<string | null>(null);
+  // AX-3: "Answer N confirmed" channel (polite; fired from answer() success).
+  const [answerAnnouncement, setAnswerAnnouncement] = useState<string | null>(null);
+  if (remainingMs !== null) {
+    const milestone = milestoneFor(remainingMs);
+    if (milestone && !announcedMilestones.current.has(milestone)) {
+      announcedMilestones.current.add(milestone);
+      if (milestone === "s30") {
+        setAssertiveAnnouncement(t("hud.milestoneS30"));
+      } else {
+        setMilestoneAnnouncement(
+          milestone === "m10"
+            ? t("hud.milestoneM10")
+            : milestone === "m5"
+              ? t("hud.milestoneM5")
+              : t("hud.milestoneM1"),
+        );
+      }
+    }
+  }
 
   async function handleTimeUp() {
     if (phase === "submitted" || phase === "timeUp") return;
@@ -550,6 +594,15 @@ export function PlayClient({
         }));
         setPendingMulti([]);
         setPhaseAndRef("feedback");
+        // AX-3: confirm the commit by its VISIBLE label (on-screen option
+        // numerals, presented space — same number the student clicked), via
+        // the polite announcer. Multi commits read the count instead of a
+        // letter-per-option list.
+        setAnswerAnnouncement(
+          isMulti
+            ? t("hud.answerSetConfirmed", { count: set!.length })
+            : t("hud.answerConfirmed", { label: scalar! + 1 }),
+        );
       } catch (err) {
         // Abort/network error → surface a retry (endpoints are idempotent).
         if ((err as Error)?.name === "AbortError") {
@@ -673,12 +726,51 @@ export function PlayClient({
     }
   }
 
+  /**
+   * SQ-3: practice "Try again" from the inline end state — start a REAL fresh
+   * attempt and route into it. The start RPC's resume select only matches
+   * active/paused sessions (0032), so after a completed practice attempt this
+   * always returns a brand-new session id. Mirrors student-quizzes-client
+   * handleStart's status mapping; on degraded states (window closed, network)
+   * fall back to the quiz list — the button must never dead-end silently.
+   */
+  async function handleTryAgain() {
+    if (retryLock.current) return;
+    retryLock.current = true;
+    setRetrying(true);
+    try {
+      const res = await fetch("/api/sessions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ quizId: quiz.id }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (res.ok && body.session?.id) {
+        router.push(`/play/${body.session.id}`);
+        return;
+      }
+      if (res.status === 409 && body.error === "already_attempted" && body.session_id) {
+        router.push(`/play/${body.session_id}`);
+        return;
+      }
+      router.push("/student/quizzes");
+    } catch {
+      router.push("/student/quizzes");
+    } finally {
+      retryLock.current = false;
+      setRetrying(false);
+    }
+  }
+
   function goNext() {
     // Phase guard (P6): the Next button only renders in `feedback`, so this is
     // behavior-preserving for clicks but blocks a stale palm-next frame from
     // flipping `timeUp`/`submitting` back to `question`.
     if (phase !== "feedback") return;
-    if (index + 1 >= questions.length) {
+    // SQ-3: advancing into an all-answered state re-creates the stranded
+    // resume dead-end (no actionable button on an answered question) — the
+    // only correct action is submit, so the feedback button acts as Finish.
+    if (allAnswered || index + 1 >= questions.length) {
       void submitNow();
       return;
     }
@@ -739,7 +831,9 @@ export function PlayClient({
               {t("end.backToQuizzes")}
             </Button>
             {isPractice && (
-              <Button size="lg" onClick={() => router.push("/student/quizzes")}>{t("end.tryAgain")}</Button>
+              <Button size="lg" onClick={() => void handleTryAgain()} disabled={retrying}>
+                {retrying ? t("end.tryAgainStarting") : t("end.tryAgain")}
+              </Button>
             )}
           </div>
         </div>
@@ -879,6 +973,18 @@ export function PlayClient({
               )}
             </div>
 
+            {/* AX-3: discrete sr-only announcers. Polite channel carries timer
+                milestones + answer confirmations; the assertive channel fires
+                ONCE below 30s (separate node so a late polite message can
+                never queue ahead of the urgent warning). */}
+            <div className="sr-only" aria-live="polite" role="status">
+              {milestoneAnnouncement}
+              {answerAnnouncement}
+            </div>
+            <div className="sr-only" aria-live="assertive" role="alert">
+              {assertiveAnnouncement}
+            </div>
+
             <QuestionCard
               question={question}
               answer={answered}
@@ -889,19 +995,26 @@ export function PlayClient({
               pendingMulti={pendingMulti}
             />
 
-            <div className="flex min-h-12 items-center justify-end">
+            {/* AX-3: the action zone announces its phase swaps (Recording →
+                Submitting → Retry-submit) — the buttons unmount/mount, so a
+                polite live region on the container is the only SR channel.
+                The inner multi-count span is deliberately NOT itself a live
+                region (no nested aria-live — a nested region would make some
+                SR/VO combos announce both the inner and outer change). */}
+            <div className="flex min-h-12 items-center justify-end" aria-live="polite">
               {phase === "question" && question.type === "multi_select" && !answered && (
                 <>
-                  {/* Live count of the pending selection (SR users otherwise
-                      only hear each toggle's own pressed state). */}
-                  <span className="sr-only" aria-live="polite">
+                  {/* Pending-selection count (pre-existing SR channel; kept
+                      inside the live container which now announces it). */}
+                  <span className="sr-only">
                     {t("multiSelectedCount", { count: pendingMulti.length })}
                   </span>
                   {/* Palm-commit hint (QT-1 gesture amendment): holds toggle
                       options, an open palm commits — always visible while
-                      gesture-active so the affordance is discoverable. */}
+                      gesture-active so the affordance is discoverable. Plain
+                      span: the live container above already announces it. */}
                   {gestureActive && (
-                    <span className="mr-3 text-sm font-bold text-muted-foreground" role="status">
+                    <span className="mr-3 text-sm font-bold text-muted-foreground">
                       {t("multiPalmCommitHint")}
                     </span>
                   )}
@@ -917,7 +1030,8 @@ export function PlayClient({
               {phase === "feedback" && (
                 <div className="flex items-center gap-3">
                   {gestureActive && question.options.length < MAX_ANSWER_FINGERS && (
-                    <span className="text-sm font-bold text-muted-foreground" role="status">
+                    // Plain span — inside the live container (no nested region).
+                    <span className="text-sm font-bold text-muted-foreground">
                       {t("feedback.orHold")}
                     </span>
                   )}
@@ -926,7 +1040,9 @@ export function PlayClient({
                     onClick={goNext}
                     ref={nextButtonRef}
                   >
-                    {index + 1 >= questions.length ? t("feedback.finish") : t("feedback.next")}
+                    {allAnswered || index + 1 >= questions.length
+                      ? t("feedback.finish")
+                      : t("feedback.next")}
                   </Button>
                 </div>
               )}

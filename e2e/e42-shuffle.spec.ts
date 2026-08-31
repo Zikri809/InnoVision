@@ -292,6 +292,15 @@ test.describe("E42 — per-session question/option shuffling", () => {
         .nth(presentedCorrectPos),
     ).toHaveAttribute("aria-pressed", "true");
 
+    // SQ-3 dead-end fix: with EVERY question answered, the feedback button
+    // must read Finish and act as submit — never advance into an
+    // already-answered question (which renders zero actionable buttons and
+    // strands the student). Click it → EndScreen with the full score.
+    await expect(studentPage.getByRole("button", { name: "Finish", exact: true })).toBeVisible();
+    await studentPage.getByRole("button", { name: "Finish", exact: true }).click();
+    await expect(studentPage.getByText(/^3\s*\/\s*3$/)).toBeVisible({ timeout: 10_000 });
+    await expect(studentPage.getByText("Answer breakdown")).toBeVisible();
+
     await lecturerCtx.close();
     await studentCtx.close();
   });

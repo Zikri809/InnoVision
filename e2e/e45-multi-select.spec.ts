@@ -183,9 +183,16 @@ test.describe("E45 — multi-select questions", () => {
     // "Correct answer" tag on the MISSED key option (selected-but-wrong and
     // correct-but-not-selected multi branches — never painted by the ✓-only
     // journey above).
+    // SQ-3: "Try again" now starts a REAL fresh attempt (routes into a NEW
+    // /play/<uuid> session), not the quiz list. We're ALREADY on a /play URL,
+    // so toHaveURL passes trivially — poll until the URL CHANGES (the POST +
+    // router.push completes in <1s when healthy; every handler path navigates).
+    const wrongJourneySessionUrl = studentPage.url();
     await studentPage.getByRole("button", { name: /Try again/i }).click();
-    await expect(studentPage).toHaveURL(/\/student\/quizzes/);
-    await startQuizByTitle(studentPage, QUIZ_PRACTICE);
+    await expect
+      .poll(() => studentPage.url(), { timeout: 10_000 })
+      .not.toBe(wrongJourneySessionUrl);
+    await expect(studentPage).toHaveURL(/\/play\/[0-9a-f-]+/);
     await expect(studentPage.getByText(MULTI_PROMPT, { exact: true })).toBeVisible();
     await studentPage.getByRole("button", { name: /^A Dolphin/ }).click();
     await studentPage.getByRole("button", { name: /^B Shark/ }).click();
@@ -210,12 +217,16 @@ test.describe("E45 — multi-select questions", () => {
     await expect(studentPage.getByText("50% correct", { exact: true })).toBeVisible();
 
     // RESUME: the completed session renders the EndScreen (not the resume
-    // path). Drive a FRESH practice attempt via the EndScreen "Try again" and
-    // reload BEFORE submitting — the seeded answer keeps aria-pressed on the
-    // presented slots.
+    // path). Drive a FRESH practice attempt via the EndScreen "Try again"
+    // (SQ-3: routes directly into a NEW session — poll until the URL changes;
+    // we're already on a /play URL) and reload BEFORE submitting — the seeded
+    // answer keeps aria-pressed on the presented slots.
+    const resumeJourneySessionUrl = studentPage.url();
     await studentPage.getByRole("button", { name: /Try again/i }).click();
-    await expect(studentPage).toHaveURL(/\/student\/quizzes/);
-    await startQuizByTitle(studentPage, QUIZ_PRACTICE);
+    await expect
+      .poll(() => studentPage.url(), { timeout: 10_000 })
+      .not.toBe(resumeJourneySessionUrl);
+    await expect(studentPage).toHaveURL(/\/play\/[0-9a-f-]+/);
     await expect(studentPage.getByText(MULTI_PROMPT, { exact: true })).toBeVisible();
     await studentPage.getByRole("button", { name: /^A Dolphin/ }).click();
     await studentPage.getByRole("button", { name: /^C Bat/ }).click();
@@ -596,9 +607,14 @@ test.describe("E45 — multi-select questions", () => {
     // presented options array). Assert-and-stop, per the e42 resume pattern:
     // goNext onto an already-seeded question has no phase-correction, so
     // navigating forward is deliberately not exercised here.
+    // SQ-3: "Try again" routes DIRECTLY into a new session (no quiz-list hop;
+    // poll until the URL changes — we're already on a /play URL).
+    const shuffledResumeUrl = studentPage.url();
     await studentPage.getByRole("button", { name: /Try again/i }).click();
-    await expect(studentPage).toHaveURL(/\/student\/quizzes/);
-    await startQuizByTitle(studentPage, QUIZ_SHUFFLED);
+    await expect
+      .poll(() => studentPage.url(), { timeout: 10_000 })
+      .not.toBe(shuffledResumeUrl);
+    await expect(studentPage).toHaveURL(/\/play\/[0-9a-f-]+/);
     const resumeSessionId = currentSessionId(studentPage);
     expect(resumeSessionId).not.toBe(sessionId);
     const resumeQuestionPlan = shufflePlan(resumeSessionId, "questions", canonicalQuestions.length);

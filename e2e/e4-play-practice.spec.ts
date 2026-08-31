@@ -118,6 +118,24 @@ test.describe("E4 — practice quiz click-first with resume + replay", () => {
     await expect(studentPage.getByText(/^3\s*\/\s*3$/)).toBeVisible();
     await expect(studentPage.getByText("100% correct", { exact: true })).toBeVisible();
 
+    // ── 6. SQ-3: EndScreen "Try again" starts a REAL fresh attempt ──
+    // (routes into a NEW /play/<uuid> session at Q1 — never the quiz list).
+    await studentPage.getByRole("button", { name: "Try again", exact: true }).click();
+    // We are ALREADY on a /play/<uuid> URL, so toHaveURL passes trivially —
+    // poll until the URL CHANGES (bounded; the POST + push completes in <1s
+    // when healthy, and any handler path navigates somewhere).
+    await expect
+      .poll(() => studentPage.url(), { timeout: 10_000 })
+      .not.toBe(sessionUrl);
+    await expect(studentPage).toHaveURL(/\/play\/[0-9a-f-]+/);
+    await expect(studentPage.getByText("What is velocity?", { exact: true })).toBeVisible();
+    await expect(studentPage.getByText("Q 1/3", { exact: true })).toBeVisible();
+    // The fresh question starts unanswered (no seeded highlight).
+    await expect(studentPage.getByRole("button", { name: /Speed in a direction/i })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+
     await lecturerCtx.close();
     await studentCtx.close();
   });
