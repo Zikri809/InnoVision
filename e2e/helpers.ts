@@ -552,6 +552,13 @@ export async function enrollViaFacePage(page: Page) {
     timeout: 15_000,
   });
   if (await startBtn.isVisible().catch(() => false)) {
+    await setFacePose(page, {
+      yaw: 0,
+      centered: true,
+      faceDetected: true,
+      facesSeen: 1,
+      lighting: "good",
+    });
     await startBtn.click();
     // 3 guided angles (front → left → right); one blink per angle, synced on
     // the EXACT per-angle prompt. The wizard also gates each SIDE angle on
