@@ -1009,7 +1009,7 @@ async function main() {
           { type: "multi_select", prompt: "string element", options: ["a", "b"], correct_indices: ["1"] },
         ],
       });
-      const { data: multiOk, error: multiOkErr } = await clientA.rpc("save_quiz_questions", {
+      const { error: multiOkErr } = await clientA.rpc("save_quiz_questions", {
         p_quiz_id: qtQuiz.id,
         p_title: null,
         p_source_file_url: null,

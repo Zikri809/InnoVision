@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DISPLAY_TIME_ZONE,
+  formatDue,
   formatWindow,
   windowIsoToLocalInput,
   windowLocalInputToIso,
@@ -76,3 +77,31 @@ describe("formatWindow", () => {
     expect(formatWindow("junk", "2026-09-01T06:00:00.000Z", "en")).not.toContain("junk");
   });
 });
+
+describe("formatDue", () => {
+  it("renders weekday + date + time in Asia/Kuala_Lumpur for en locale", () => {
+    const line = formatDue("2026-09-01T06:00:00.000Z", "en");
+    expect(line).not.toBeNull();
+    expect(line).toMatch(/Tue/);
+    expect(line).toMatch(/Sep/);
+    expect(line).toMatch(/1/);
+    expect(line).toMatch(/2:00 PM/);
+  });
+
+  it("ms locale tags the Malay weekday/month format", () => {
+    const msLine = formatDue("2026-09-01T06:00:00.000Z", "ms");
+    expect(msLine).not.toBeNull();
+    expect(msLine?.length).toBeGreaterThan(0);
+    expect(msLine).toMatch(/Sel/);
+  });
+
+  it("null, undefined, or empty returns null", () => {
+    expect(formatDue(null)).toBeNull();
+    expect(formatDue(undefined)).toBeNull();
+    expect(formatDue("")).toBeNull();
+  });
+
+  it("unparseable input returns null without throwing", () => {
+    expect(formatDue("garbage-date")).toBeNull();
+  });
+});

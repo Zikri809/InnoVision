@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import ExcelJS from "exceljs";
 import { FakeSupabase } from "../../quizzes/__tests__/fake-supabase";
 
 // The gradebook-export route imports createClient from
@@ -174,7 +175,6 @@ describe("GET /api/classes/[id]/gradebook-export — happy path", () => {
     expect(res.headers.get("Content-Type")).toMatch(/spreadsheetml/);
     expect(res.headers.get("Content-Disposition")).toMatch(/gradebook-\d{4}-\d{2}-\d{2}\.xlsx/);
 
-    const { default: ExcelJS } = await import("exceljs");
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(await res.arrayBuffer());
     const names = wb.worksheets.map((w) => w.name);
