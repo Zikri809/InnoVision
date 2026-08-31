@@ -42,6 +42,15 @@ export default async function StudentLayout({
   // own retry state rather than redirecting into a cross-role loop.
   if (profile && profile.role !== "student") redirect("/lecturer/classes");
 
+  // AU-2: OAuth-provisioned students arrive with matric_no NULL (password
+  // registration and the 0027 backfill always set one). Every student surface
+  // is gated behind the one-time capture page — top-level, OUTSIDE this
+  // layout, so the redirect cannot loop. Password-registered students always
+  // carry a matric and never see the gate.
+  if (profile && profile.role === "student" && !profile.matric_no) {
+    redirect("/matric-capture");
+  }
+
   const initialItems: NotificationItem[] = (listRes.data ?? [])
     .map((r) => mapRawRow(r as Parameters<typeof mapRawRow>[0]))
     .filter((x): x is NotificationItem => x !== null);

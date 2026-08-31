@@ -71,6 +71,9 @@ export default defineConfig({
         RESET_RATE_LIMIT: "1000",
         RESET_IP_RATE_LIMIT: "1000",
         RESET_CONFIRM_RATE_LIMIT: "1000",
+        // AU-2 matric-gate spec (e47) fires capture attempts in one window;
+        // raised for the harness only — production default stays 5/min per IP.
+        MATRIC_CAPTURE_RATE_LIMIT: "1000",
         AI_BASE_URL: `http://127.0.0.1:${MOCK_AI_PORT}/v1`,
         AI_API_KEY: "test-key",
         AI_MODEL: "gpt-4o-mini",
