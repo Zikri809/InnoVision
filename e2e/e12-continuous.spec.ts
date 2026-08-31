@@ -14,8 +14,6 @@ import {
 } from "./helpers";
 
 const LECTURER_INVITE_CODE = process.env.LECTURER_INVITE_CODE ?? "";
-const CLASS_TITLE = "E12 Continuous";
-const QUIZ_TITLE = "E12 Assessment";
 
 /**
  * E12 (demo-killer, UNTIMED) — continuous verify:
@@ -36,6 +34,8 @@ test.describe("E12 — continuous verify", () => {
     const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const lecturerEmail = `lecturer-e12-${stamp}@innovision.test`;
     const studentEmail = `student-e12-${stamp}@innovision.test`;
+    const classTitle = `E12 Continuous ${stamp}`;
+    const quizTitle = `E12 Assessment ${stamp}`;
 
     const lecturerCtx = await browser.newContext();
     const studentCtx = await browser.newContext();
@@ -45,16 +45,16 @@ test.describe("E12 — continuous verify", () => {
     // Lecturer: class + UNTIMED assessment (3 questions) + publish.
     await registerUser(lecturerPage, lecturerEmail, "lecturer", LECTURER_INVITE_CODE);
     await expect(lecturerPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
-    const joinCode = await createClass(lecturerPage, CLASS_TITLE);
+    const joinCode = await createClass(lecturerPage, classTitle);
 
-    await lecturerPage.getByText(CLASS_TITLE, { exact: true }).click();
+    await lecturerPage.getByText(classTitle, { exact: true }).click();
     await expect(lecturerPage).toHaveURL(/\/lecturer\/classes\/[^/]+$/);
-    await lecturerPage.getByLabel("Quiz title").fill(QUIZ_TITLE);
+    await lecturerPage.getByLabel("Quiz title").fill(quizTitle);
     await lecturerPage.getByLabel("Mode").click();
     await lecturerPage.getByRole("option", { name: "Assessment" }).click();
     await lecturerPage.getByRole("button", { name: /create quiz|new quiz/i }).click();
-    await expect(lecturerPage.getByText(QUIZ_TITLE, { exact: true })).toBeVisible();
-    await lecturerPage.getByText(QUIZ_TITLE, { exact: true }).click();
+    await expect(lecturerPage.getByText(quizTitle, { exact: true })).toBeVisible();
+    await lecturerPage.getByText(quizTitle, { exact: true }).click();
     await expect(lecturerPage).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
 
     for (let i = 0; i < 3; i++) {
@@ -73,12 +73,12 @@ test.describe("E12 — continuous verify", () => {
     // Student: register + join + enroll + start.
     await registerUser(studentPage, studentEmail, "student", LECTURER_INVITE_CODE);
     await expect(studentPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
-    await joinClass(studentPage, joinCode, CLASS_TITLE);
+    await joinClass(studentPage, joinCode, classTitle);
     await installFakeFaceTracker(studentPage);
     await enrollViaFacePage(studentPage);
 
     // enrollViaFacePage redirects to /student/quizzes — verify the quiz is live.
-    await expect(studentPage.getByText(QUIZ_TITLE, { exact: true })).toBeVisible();
+    await expect(studentPage.getByText(quizTitle, { exact: true })).toBeVisible();
     await studentPage.getByRole("button", { name: "Start", exact: true }).click();
     await expect(studentPage).toHaveURL(/\/play\/[0-9a-f-]+/);
 
