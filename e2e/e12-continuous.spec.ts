@@ -13,9 +13,6 @@ import {
   waitForPauseOverlay,
 } from "./helpers";
 
-const TEST_TIMESTAMP = Date.now();
-const LECTURER_EMAIL = `lecturer-e12-${TEST_TIMESTAMP}@innovision.test`;
-const STUDENT_EMAIL = `student-e12-${TEST_TIMESTAMP}@innovision.test`;
 const LECTURER_INVITE_CODE = process.env.LECTURER_INVITE_CODE ?? "";
 const CLASS_TITLE = "E12 Continuous";
 const QUIZ_TITLE = "E12 Assessment";
@@ -36,13 +33,17 @@ test.describe("E12 — continuous verify", () => {
     testInfo.setTimeout(120_000);
     test.skip(!LECTURER_INVITE_CODE, "LECTURER_INVITE_CODE not set");
 
+    const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const lecturerEmail = `lecturer-e12-${stamp}@innovision.test`;
+    const studentEmail = `student-e12-${stamp}@innovision.test`;
+
     const lecturerCtx = await browser.newContext();
     const studentCtx = await browser.newContext();
     const lecturerPage = await lecturerCtx.newPage();
     const studentPage = await studentCtx.newPage();
 
     // Lecturer: class + UNTIMED assessment (3 questions) + publish.
-    await registerUser(lecturerPage, LECTURER_EMAIL, "lecturer", LECTURER_INVITE_CODE);
+    await registerUser(lecturerPage, lecturerEmail, "lecturer", LECTURER_INVITE_CODE);
     await expect(lecturerPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
     const joinCode = await createClass(lecturerPage, CLASS_TITLE);
 
@@ -70,7 +71,7 @@ test.describe("E12 — continuous verify", () => {
     await expect(lecturerPage.getByText(/^Live/)).toBeVisible();
 
     // Student: register + join + enroll + start.
-    await registerUser(studentPage, STUDENT_EMAIL, "student", LECTURER_INVITE_CODE);
+    await registerUser(studentPage, studentEmail, "student", LECTURER_INVITE_CODE);
     await expect(studentPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
     await joinClass(studentPage, joinCode, CLASS_TITLE);
     await installFakeFaceTracker(studentPage);

@@ -59,6 +59,7 @@ function isBuildStale(): boolean {
 
 export default defineConfig({
   testDir: "./e2e",
+  testIgnore: process.env.COMPREFACE_SMOKE ? [] : ["**/compreface-smoke.spec.ts"],
   timeout: 30_000,
   expect: {
     timeout: 15_000,
