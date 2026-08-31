@@ -185,7 +185,7 @@ export function LoginForm({ ssoConfigured }: { ssoConfigured: boolean }) {
               <div className="flex justify-end">
                 <Link
                   href="/forgot-password"
-                  className="text-sm font-semibold text-muted-foreground hover:text-primary hover:underline"
+                  className="inline-flex min-h-[36px] items-center py-1 text-sm font-semibold text-muted-foreground hover:text-primary hover:underline"
                 >
                   {t("forgotLink")}
                 </Link>
@@ -231,7 +231,7 @@ export function LoginForm({ ssoConfigured }: { ssoConfigured: boolean }) {
               )}
               <p className="text-sm font-semibold text-muted-foreground">
                 {t("noAccount")}{" "}
-                <Link href="/register" className="font-extrabold text-primary hover:underline">
+                <Link href="/register" className="inline-block py-1 font-extrabold text-primary hover:underline">
                   {t("registerLink")}
                 </Link>
               </p>

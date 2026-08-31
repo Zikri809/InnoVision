@@ -195,7 +195,7 @@ export function SessionDetailClient({
                                   : ROW_PLAIN
                               }`}
                             >
-                              {selected ? "\u2713" : i + 1}
+                              {selected ? (isCorrect ? "\u2713" : "\u2715") : i + 1}
                             </span>
                             <span
                               className={`min-w-0 font-semibold ${

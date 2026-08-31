@@ -134,24 +134,24 @@ export function GradebookClient({
           <table className="w-full border-collapse text-sm">
             <thead>
               <tr className="border-b-[3px] border-border">
-                <th scope="col" className="sticky left-0 z-10 min-w-[180px] bg-card px-4 py-3 text-left font-heading font-semibold">
+                <th scope="col" className="sticky left-0 z-10 min-w-[130px] sm:min-w-[180px] bg-card px-3 sm:px-4 py-3 text-left font-heading font-semibold border-r border-border/40 sm:border-r-0 shadow-[2px_0_4px_rgba(0,0,0,0.04)] sm:shadow-none">
                   {t("colStudent")}
                 </th>
-                <th scope="col" className="min-w-[90px] px-3 py-3 text-left font-heading font-semibold">
+                <th scope="col" className="hidden sm:table-cell min-w-[90px] px-3 py-3 text-left font-heading font-semibold">
                   {t("colMatric")}
                 </th>
                 {model.quizzes.map((quiz) => (
                   <th
                     key={quiz.id}
                     scope="col"
-                    className="min-w-[120px] border-l-2 border-border/60 px-3 py-3 text-center align-top"
+                    className="min-w-[110px] sm:min-w-[120px] border-l-2 border-border/60 px-3 py-3 text-center align-top"
                   >
                     <Link
                       href={`/lecturer/quizzes/${quiz.id}/results`}
                       className="group block font-heading font-semibold hover:text-primary transition-colors"
                       title={quiz.title}
                     >
-                      <span className="block max-w-[180px] sm:max-w-none truncate sm:whitespace-normal group-hover:underline underline-offset-2">
+                      <span className="block max-w-[140px] sm:max-w-none truncate sm:whitespace-normal group-hover:underline underline-offset-2">
                         {quiz.title}
                       </span>
                     </Link>
@@ -167,7 +167,7 @@ export function GradebookClient({
                     )}
                   </th>
                 ))}
-                <th scope="col" className="min-w-[90px] border-l-[3px] border-border px-3 py-3 text-center font-heading font-semibold">
+                <th scope="col" className="min-w-[80px] sm:min-w-[90px] border-l-[3px] border-border px-3 py-3 text-center font-heading font-semibold">
                   {t("colCumulative")}
                 </th>
               </tr>
@@ -175,10 +175,17 @@ export function GradebookClient({
             <tbody>
               {model.rows.map((row) => (
                 <tr key={row.studentId} className="border-b-2 border-border/40 last:border-b-0">
-                  <th scope="row" className="sticky left-0 z-10 bg-card px-4 py-2.5 text-left font-bold">
-                    {row.fullName ?? row.studentId}
+                  <th scope="row" className="sticky left-0 z-10 bg-card px-3 sm:px-4 py-2.5 text-left font-bold border-r border-border/40 sm:border-r-0 shadow-[2px_0_4px_rgba(0,0,0,0.04)] sm:shadow-none">
+                    <span className="block max-w-[120px] sm:max-w-none truncate sm:whitespace-normal">
+                      {row.fullName ?? row.studentId}
+                    </span>
+                    {row.matricNo && (
+                      <span className="block text-[11px] font-mono font-normal text-muted-foreground sm:hidden">
+                        {row.matricNo}
+                      </span>
+                    )}
                   </th>
-                  <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground">
+                  <td className="hidden sm:table-cell px-3 py-2.5 font-mono text-xs text-muted-foreground">
                     {row.matricNo ?? "—"}
                   </td>
                   {row.cells.map((cell, i) => (
@@ -216,10 +223,10 @@ export function GradebookClient({
             </tbody>
             <tfoot>
               <tr className="border-t-[3px] border-border bg-muted/40">
-                <th scope="row" className="sticky left-0 z-10 bg-card px-4 py-2.5 text-left font-heading font-semibold">
+                <th scope="row" className="sticky left-0 z-10 bg-card px-3 sm:px-4 py-2.5 text-left font-heading font-semibold border-r border-border/40 sm:border-r-0 shadow-[2px_0_4px_rgba(0,0,0,0.04)] sm:shadow-none">
                   {t("footerAverage")}
                 </th>
-                <td aria-hidden />
+                <td className="hidden sm:table-cell" aria-hidden />
                 {model.quizzes.map((quiz) => (
                   <td key={quiz.id} className="border-l-2 border-border/60 px-3 py-2.5 text-center tabular-nums font-bold">
                     {quiz.averagePercent !== null ? (

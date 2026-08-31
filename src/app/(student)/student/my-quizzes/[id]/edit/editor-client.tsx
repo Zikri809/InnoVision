@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useId, useRef, useState } from "react";
 import Link from "next/link";
@@ -30,7 +30,7 @@ import {
 import { QuestionInputSchema } from "@/lib/quizzes/validation";
 import { GenerateFromFileDialog } from "@/components/extract/GenerateFromFileDialog";
 import { QuestionImageField } from "@/components/media/question-image-field";
-import { ArrowDown, ArrowUp, Check, Image as ImageIcon, Loader2, Pencil, Plus, Sparkles, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, Check, Image as ImageIcon, Loader2, Pencil, Plus, Sparkles, Trash2, X } from "lucide-react";
 
 export type EditorQuestion = {
   id: string;
@@ -407,6 +407,15 @@ export function QuizEditorClient({
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
+      <div>
+        <Link
+          href="/student/my-quizzes"
+          className="inline-flex items-center gap-1.5 text-sm font-extrabold text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ArrowLeft className="h-4 w-4" aria-hidden /> {tMy("heroTitle")}
+        </Link>
+      </div>
+
       {/* ── Meta card ── */}
       <Card className="rounded-[28px] border-[3px] shadow-[var(--shadow-clay)]">
         <CardHeader>

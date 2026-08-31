@@ -264,20 +264,6 @@ export function ClassesPageClient({
                   </Link>
                 </li>
               ))}
-
-              {/* Balancing "new class" tile */}
-              <li>
-                <button
-                  type="button"
-                  onClick={() => document.getElementById("class-title")?.focus()}
-                  className="flex h-full min-h-[164px] w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-[22px] border-[3px] border-dashed border-border bg-transparent p-5 text-muted-foreground transition-[border-color,color,transform] duration-200 hover:-translate-y-1 hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/40"
-                >
-                  <span className="grid h-10 w-10 place-items-center rounded-2xl border-[3px] border-current">
-                    <Plus className="h-5 w-5" aria-hidden />
-                  </span>
-                  <span className="text-sm font-extrabold">{t("createCardTitle")}</span>
-                </button>
-              </li>
             </ul>
           )}
         </div>

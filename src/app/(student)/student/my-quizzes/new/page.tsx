@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
@@ -13,7 +14,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ClipboardList, Loader2 } from "lucide-react";
+import { ArrowLeft, ClipboardList, Loader2 } from "lucide-react";
 
 /**
  * /student/my-quizzes/new — creates an EMPTY practice quiz (title/description)
@@ -67,6 +68,15 @@ export default function NewStudentQuizPage() {
 
   return (
     <div className="mx-auto max-w-xl space-y-6">
+      <div>
+        <Link
+          href="/student/my-quizzes"
+          className="inline-flex items-center gap-1.5 text-sm font-extrabold text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ArrowLeft className="h-4 w-4" aria-hidden /> {tMy("heroTitle")}
+        </Link>
+      </div>
+
       <div>
         <h1 className="font-heading text-3xl font-semibold">{tMy("heroTitle")}</h1>
         <p className="mt-1 text-sm font-semibold text-muted-foreground">

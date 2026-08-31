@@ -336,7 +336,7 @@ export default function RegisterPage() {
                 {t("haveAccount")}{" "}
                 <Link
                   href="/login"
-                  className="font-extrabold text-primary hover:underline"
+                  className="inline-block py-1 font-extrabold text-primary hover:underline"
                 >
                   {t("loginLink")}
                 </Link>

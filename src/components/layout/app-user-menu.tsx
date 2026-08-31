@@ -288,7 +288,6 @@ export function AppUserMenu({
                   {t("memberSince", { date: memberSinceLabel })}
                 </span>
               )}
-              <span>{t("accountMenu")}</span>
             </ResponsiveModalDescription>
           </ResponsiveModalHeader>
 

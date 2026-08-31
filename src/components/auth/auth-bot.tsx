@@ -42,12 +42,12 @@ export function AuthBot({
     <div
       ref={boxRef}
       aria-hidden="true"
-      className="pointer-events-none fixed top-1/2 -right-[32vmin] z-0 hidden -translate-y-1/2 lg:block"
+      className="pointer-events-none fixed top-1/2 -right-[16vmin] xl:-right-[12vmin] z-0 hidden -translate-y-1/2 lg:block opacity-90 transition-all duration-300"
     >
       <BotAvatar
         state={state}
         size={48}
-        className="h-[110vmin] w-[110vmin]"
+        className="h-[75vmin] w-[75vmin] max-h-[640px] max-w-[640px]"
         bodyClassName={danger ? "fill-destructive" : undefined}
         gazeRef={gazeRef}
         eyeSepScale={0.35}
