@@ -74,7 +74,7 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
   return (
     <div className="space-y-8">
       {/* ── Hero band ── */}
-      <section className="relative overflow-hidden rounded-[28px] border-[3px] border-border bg-gradient-to-br from-blue-100 via-blue-50 to-orange-50 p-7 shadow-[var(--shadow-clay)] md:p-9">
+      <section className="relative overflow-hidden rounded-[28px] border-[3px] border-border bg-gradient-to-br from-blue-100 via-blue-50 to-orange-50 dark:from-blue-950/40 dark:via-card dark:to-orange-950/40 p-7 shadow-[var(--shadow-clay)] md:p-9">
         <div aria-hidden className="pointer-events-none absolute -right-8 -top-10 h-40 w-40 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-white/50" />
         <div aria-hidden className="pointer-events-none absolute -bottom-12 left-1/3 h-28 w-28 rounded-[60%_40%_45%_55%/50%_60%_40%_55%] bg-orange-100/70" />
         <div className="relative">
