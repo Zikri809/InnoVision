@@ -4,10 +4,15 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getClassRoster } from "@/lib/classes/roster";
 import { assembleResultsRows } from "@/lib/results/derive";
 import { RESULTS_SESSION_LIMIT, RESULTS_AUDIT_LIMIT } from "@/lib/results/constants";
+import { buildExportModel } from "@/lib/results/export";
+import { buildQuestionInsights } from "@/lib/results/insights";
 import { ResultsDashboardClient } from "./results-dashboard-client";
 import { ProfilePendingPanel, LoadErrorPanel } from "@/components/layout/load-state";
 
 export const dynamic = "force-dynamic";
+
+/** RA-2: hard row cap on the answers read (mirrors the export route's cap). */
+const ANSWERS_LIMIT = 20_000;
 
 /**
  * Lecturer results dashboard — attendance (= sessions), scores, and integrity
@@ -80,10 +85,13 @@ export default async function LecturerQuizResultsPage({
   if (!ownedClass) notFound();
 
   // ── Parallel reads, each with explicit projections (D8) ──────────
+  // RA-2: the item analysis needs FULL question rows + answers (the export
+  // route's read shape) — added to the same Promise.all.
   const [
     { data: sessions, error: sessionsError },
     rosterResult,
     { count: totalQuestions, error: totalQuestionsError },
+    { data: questionRows, error: questionsError },
   ] = await Promise.all([
       supabase
         .from("lecturer_session_view")
@@ -92,10 +100,18 @@ export default async function LecturerQuizResultsPage({
           "id, quiz_id, student_id, mode, status, score, started_at, submitted_at, last_activity_at, face_unavailable_at, face_exempt, face_fail_streak, focus_pause_count, attempt",
         )
         .eq("quiz_id", id)
+        // id DESC secondary keeps the representative-session pick deterministic
+        // on equal timestamps (same discipline as the export route's feed).
         .order("started_at", { ascending: false })
+        .order("id", { ascending: false })
         .limit(RESULTS_SESSION_LIMIT),
       getClassRoster(supabase, quiz.class_id),
       supabase.from("questions").select("id", { count: "exact", head: true }).eq("quiz_id", id),
+      supabase
+        .from("questions")
+        .select("id, order_index, type, prompt, options, correct_index, correct_indices, explanation")
+        .eq("quiz_id", id)
+        .order("order_index", { ascending: true }),
     ]);
 
   if (sessionsError) {
@@ -116,10 +132,41 @@ export default async function LecturerQuizResultsPage({
       <LoadErrorPanel />
     );
   }
+  if (questionsError) {
+    console.error("Questions fetch error:", questionsError);
+    return (
+      <LoadErrorPanel />
+    );
+  }
 
   const sessionRows = (sessions ?? []) as import("@/lib/results/types").ResultsSessionInput[];
   const sessionIds = sessionRows.map((s) => s.id);
   const studentIds = sessionRows.map((s) => s.student_id);
+
+  // RA-2: answers of the visible sessions only (export route's projection +
+  // cap; hitting the cap sets the insights truncation flag).
+  type InsightAnswerRow = {
+    session_id: string;
+    question_id: string;
+    selected_index: number | null;
+    selected_indices: number[] | null;
+    is_correct: boolean;
+  };
+  const { data: answerRows, error: answersError } =
+    sessionIds.length === 0
+      ? { data: [] as InsightAnswerRow[], error: null as null }
+      : await supabase
+          .from("lecturer_answers_view")
+          .select("session_id, question_id, selected_index, selected_indices, is_correct")
+          .in("session_id", sessionIds)
+          .limit(ANSWERS_LIMIT);
+  if (answersError) {
+    console.error("Answers fetch error:", answersError);
+    return (
+      <LoadErrorPanel />
+    );
+  }
+  const answersTruncated = (answerRows?.length ?? 0) >= ANSWERS_LIMIT;
 
   // Guarded-empty reads: skip the fetch entirely when there are no sessions.
   const [
@@ -247,6 +294,28 @@ export default async function LecturerQuizResultsPage({
     (s) => s.mode === "assessment" && s.status === "completed",
   ).length;
 
+  // ── RA-2: on-screen item analysis ────────────────────────────────
+  // Same inputs as the export route (representative-session feed order is
+  // started_at DESC, id DESC — set above), so the on-screen percentages are
+  // the workbook's by construction. Output is a separate serializable prop —
+  // ResultsSessionRow stays free of key/explanation fields (types.ts).
+  // View-generated types mark every column nullable; the underlying columns
+  // are NOT NULL (same narrowing as the export route's feed).
+  // Server render clock — same suppressed purity as assembleResultsRows above.
+  // eslint-disable-next-line react-hooks/purity
+  const nowMs = Date.now();
+  const insights = buildQuestionInsights({
+    quiz: { title: quiz.title, mode: quiz.mode, status: quiz.status },
+    className: null,
+    generatedAtISO: new Date(nowMs).toISOString(),
+    questions: (questionRows ?? []) as Parameters<typeof buildExportModel>[0]["questions"],
+    roster: rosterResult.roster,
+    sessions: sessionRows as Parameters<typeof buildExportModel>[0]["sessions"],
+    answers: (answerRows ?? []) as Parameters<typeof buildExportModel>[0]["answers"],
+    nowMs,
+    answersTruncated,
+  });
+
   return (
     <ResultsDashboardClient
       quizId={quiz.id}
@@ -260,6 +329,8 @@ export default async function LecturerQuizResultsPage({
       unrevealedCompleted={quiz.results_revealed_at == null ? unrevealedCompleted : 0}
       rows={rows}
       incidentClips={incidentClips}
+      questionInsights={insights}
+      insightsTruncated={answersTruncated}
     />
   );
 }

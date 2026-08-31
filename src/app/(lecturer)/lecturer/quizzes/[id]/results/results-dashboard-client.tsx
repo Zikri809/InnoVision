@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatDuration } from "@/lib/format/duration";
-import { ArrowLeft, Check, FileSpreadsheet, Megaphone } from "lucide-react";
+import { ArrowLeft, BarChart3, Check, ChevronDown, FileSpreadsheet, Megaphone } from "lucide-react";
+import type { QuestionInsightsModel } from "@/lib/results/insights";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
@@ -42,6 +43,8 @@ export function ResultsDashboardClient({
   unrevealedCompleted,
   rows,
   incidentClips = {},
+  questionInsights = null,
+  insightsTruncated = false,
 }: {
   quizId: string;
   quizTitle: string;
@@ -59,6 +62,10 @@ export function ResultsDashboardClient({
     string,
     { id: string; url: string; reason: string; durationMs: number; recordedFrom: string | null }[]
   >;
+  /** RA-2: on-screen item analysis (separate prop type — ResultsSessionRow must never widen with key fields). */
+  questionInsights?: QuestionInsightsModel | null;
+  /** RA-2: the answers read hit its 20k cap — percentages may under-report. */
+  insightsTruncated?: boolean;
 }) {
   const router = useRouter();
   const locale = useLocale();
@@ -99,6 +106,9 @@ export function ResultsDashboardClient({
   const [busyRows, setBusyRows] = useState<Set<string>>(new Set());
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  // RA-2: the "Question insights" section starts collapsed (rows are the
+  // primary surface; insights are a drill-down).
+  const [insightsOpen, setInsightsOpen] = useState(false);
 
   const [exemptRow, setExemptRow] = useState<string | null>(null);
   const [exemptReason, setExemptReason] = useState("");
@@ -434,6 +444,114 @@ export function ResultsDashboardClient({
               </p>
             )}
           </CardContent>
+        </Card>
+      )}
+
+      {/* ── RA-2: Question insights (collapsible item analysis) ── */}
+      {questionInsights && questionInsights.questions.length > 0 && (
+        <Card className="mb-6">
+          <CardHeader>
+            <button
+              type="button"
+              className="flex w-full cursor-pointer items-center justify-between gap-3 text-left"
+              onClick={() => setInsightsOpen((p) => !p)}
+              aria-expanded={insightsOpen}
+            >
+              <span className="flex min-w-0 items-center gap-2.5">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-violet-100 text-violet-700">
+                  <BarChart3 className="size-5" aria-hidden />
+                </span>
+                <span className="min-w-0">
+                  <CardTitle>{t("insightsTitle")}</CardTitle>
+                  <CardDescription>
+                    {questionInsights.hasDegenerate
+                      ? t("insightsDegenerateSubtitle")
+                      : t("insightsSubtitle")}
+                  </CardDescription>
+                </span>
+              </span>
+              <ChevronDown
+                className={`size-5 shrink-0 text-muted-foreground transition-transform duration-200 ${insightsOpen ? "rotate-180" : ""}`}
+                aria-hidden
+              />
+            </button>
+          </CardHeader>
+          {insightsOpen && (
+            <CardContent>
+              {insightsTruncated && (
+                <p role="status" className="mb-3 rounded-xl border-[3px] border-amber-300 bg-amber-50 px-4 py-2.5 text-sm font-bold text-amber-800">
+                  {t("insightsTruncated")}
+                </p>
+              )}
+              <ul className="space-y-3">
+                {questionInsights.questions.map((qi) => {
+                  const degenerate = qi.lowCorrect || qi.hasNeverPickedDistractor;
+                  return (
+                    <li
+                      key={qi.index}
+                      className={`rounded-[22px] border-2 bg-card p-4 shadow-[var(--shadow-clay-sm)] ${
+                        degenerate ? "border-amber-300" : "border-border"
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2.5">
+                        <p className="min-w-0 font-heading text-sm font-bold text-foreground">
+                          <span className="text-muted-foreground">Q{qi.index}.</span> {qi.prompt}
+                        </p>
+                        <div className="flex shrink-0 items-center gap-2">
+                          {qi.lowCorrect && (
+                            <span className="rounded-full border-2 border-amber-300 bg-amber-50 px-2.5 py-0.5 text-[11px] font-extrabold uppercase tracking-wide text-amber-800">
+                              {t("insightsLowCorrect", { percent: qi.percentCorrect })}
+                            </span>
+                          )}
+                          {qi.hasNeverPickedDistractor && (
+                            <span className="rounded-full border-2 border-sky-300 bg-sky-50 px-2.5 py-0.5 text-[11px] font-extrabold uppercase tracking-wide text-sky-800">
+                              {t("insightsNeverPicked")}
+                            </span>
+                          )}
+                          <span className="rounded-full border-2 border-border bg-muted px-2.5 py-0.5 text-[11px] font-extrabold tabular-nums text-muted-foreground">
+                            {t("insightsCorrectStat", { percent: qi.percentCorrect, answered: qi.timesAnswered })}
+                          </span>
+                        </div>
+                      </div>
+                      {/* Per-option pick distribution — inline bars, no chart lib. */}
+                      <ul className="mt-3 space-y-1.5">
+                        {qi.distribution.map((d) => {
+                          const onKey =
+                            qi.correctIndices?.includes(d.optionIndex) ??
+                            qi.correctIndex === d.optionIndex;
+                          return (
+                            <li key={d.optionIndex} className="flex items-center gap-2.5 text-xs font-semibold">
+                              <span
+                                className={`grid h-5 w-5 shrink-0 place-items-center rounded-full text-[10px] font-extrabold ${
+                                  onKey
+                                    ? "bg-emerald-600 text-white"
+                                    : "border border-border bg-muted text-muted-foreground"
+                                }`}
+                              >
+                                {String.fromCharCode(65 + d.optionIndex)}
+                              </span>
+                              <span className="w-24 shrink-0 truncate text-muted-foreground" title={qi.options[d.optionIndex]}>
+                                {qi.options[d.optionIndex]}
+                              </span>
+                              <span className="h-2.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted">
+                                <span
+                                  className={`block h-full rounded-full ${onKey ? "bg-emerald-500" : "bg-sky-400"}`}
+                                  style={{ width: `${Math.min(100, d.chosenPercent)}%` }}
+                                />
+                              </span>
+                              <span className="w-14 shrink-0 text-right tabular-nums text-muted-foreground">
+                                {t("insightsPickStat", { percent: d.chosenPercent, count: d.chosenCount })}
+                              </span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </li>
+                  );
+                })}
+              </ul>
+            </CardContent>
+          )}
         </Card>
       )}
 

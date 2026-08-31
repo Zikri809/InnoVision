@@ -90,6 +90,28 @@ test.describe("E18 — results Excel export", () => {
       lecturerPage.getByRole("list").getByText("Completed", { exact: true }),
     ).toHaveCount(1);
 
+    // ── RA-2: the on-screen "Question insights" section mirrors the model ──
+    await fast(lecturerPage.getByRole("button", { name: /Question insights/i })).toBeVisible();
+    await lecturerPage.getByRole("button", { name: /Question insights/i }).click();
+    // Q1 (2+2): the student answered correctly → 100% stat chip. The
+    // never-picked-distractor hint FIRES here: with 2 options, the unpicked
+    // "3" is a wrong option (distractor) — exactly the class-never-touched-it
+    // signal RA-2 exists to surface.
+    const q1Card = lecturerPage.locator("li").filter({ hasText: "What is 2+2?" });
+    await fast(q1Card.getByText(/100% · 1 answered/)).toBeVisible();
+    await fast(q1Card.getByText(/Distractor never picked/i)).toBeVisible();
+    // Q2 (Capital of France): wrong pick → 0% + the low-correct hint chip
+    // (<30% threshold). The distractor hint must NOT fire here: the only
+    // UNPICKED option (Paris) is the KEY, and key options are excluded from
+    // the distractor check (insights.ts) — a wrong pick never triggers it on
+    // a 2-option question.
+    const q2Card = lecturerPage.locator("li").filter({ hasText: "Capital of France?" });
+    await fast(q2Card.getByText(/0% · 1 answered/)).toBeVisible();
+    await fast(q2Card.getByText(/Only 0% correct/i)).toBeVisible();
+    await fast(q2Card.getByText(/Distractor never picked/i)).toHaveCount(0);
+    // The section's summary line flips to the degenerate variant (Q2 is 0%).
+    await fast(lecturerPage.getByText(/teaching gap/i)).toBeVisible();
+
     const downloadPromise = lecturerPage.waitForEvent("download");
     await lecturerPage.getByRole("button", { name: /Export Excel/i }).click();
     const download = await downloadPromise;

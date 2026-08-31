@@ -130,6 +130,87 @@ export type ExportModel = {
 };
 
 /**
+ * Normalize raw question rows into presentation-order ExportQuestions
+ * (RA-2: extracted from buildExportModel so the item-analysis module shares
+ * the exact same normalization — prompts/options safeText'd, 1-based index).
+ */
+export function normalizeExportQuestions(
+  raw: {
+    id: string;
+    order_index: number;
+    type: string;
+    prompt: string;
+    options: string[] | null;
+    correct_index: number | null;
+    correct_indices: number[] | null;
+    explanation: string | null;
+  }[],
+): ExportQuestion[] {
+  return [...raw]
+    .sort((a, b) => a.order_index - b.order_index)
+    .map((q, i) => ({
+      id: q.id,
+      index: i + 1,
+      prompt: safeText(q.prompt),
+      type: q.type,
+      options: (q.options ?? []).map((o) => safeText(o)),
+      correctIndex: q.correct_index,
+      correctIndices: q.correct_indices,
+      explanation: q.explanation ? safeText(q.explanation) : null,
+    }));
+}
+
+/**
+ * Choice distribution over ANSWERED attempts of the given (REPRESENTATIVE)
+ * sessions only — never over raw sessions, so the numbers always match the
+ * visible rows. QT-1: multi rows count EACH selected option (an attempt still
+ * adds 1 to answeredCount, so per-option percentages stay out of 100).
+ * RA-2: extracted from buildExportModel verbatim so the on-screen item
+ * analysis and the xlsx sheet 3 can never disagree.
+ */
+export function computeDistributions(
+  questions: ExportQuestion[],
+  sessions: ExportSessionInput[],
+  answers: ExportAnswerInput[],
+): OptionDistribution[][] {
+  const answersByKey = new Map<string, ExportAnswerInput>();
+  for (const a of answers) answersByKey.set(`${a.session_id}:${a.question_id}`, a);
+
+  return questions.map((q) => {
+    const keyBound = Math.max(
+      q.correctIndex ?? -1,
+      ...(q.correctIndices ?? []),
+    );
+    const counts = new Array<number>(Math.max(q.options.length, keyBound + 1)).fill(0);
+    let answeredCount = 0;
+    for (const s of sessions) {
+      const a = answersByKey.get(`${s.id}:${q.id}`);
+      if (!a) continue;
+      if (q.type === "multi_select") {
+        const sel = a.selected_indices ?? [];
+        if (sel.length === 0) continue;
+        for (const i of sel) {
+          if (i < 0 || i >= counts.length) continue;
+          counts[i] += 1;
+        }
+        answeredCount += 1;
+        continue;
+      }
+      if (a.selected_index === null) continue;
+      if (a.selected_index < 0 || a.selected_index >= counts.length) continue;
+      counts[a.selected_index] += 1;
+      answeredCount += 1;
+    }
+    return q.options.map((_, oi) => ({
+      optionIndex: oi,
+      chosenCount: counts[oi],
+      chosenPercent:
+        answeredCount > 0 ? Math.round((counts[oi] / answeredCount) * 100) : 0,
+    }));
+  });
+}
+
+/**
  * Pick the REPRESENTATIVE attempt per student. Assessment quizzes have at most
  * one session (0008's partial unique index), so this only ever matters for
  * practice retakes: prefer the terminal attempt (completed/flagged), else the
@@ -195,18 +276,7 @@ export type BuildExportInput = {
 
 export function buildExportModel(input: BuildExportInput): ExportModel {
   // Questions in presentation order; prompts/options pass safeText.
-  const questions: ExportQuestion[] = [...input.questions]
-    .sort((a, b) => a.order_index - b.order_index)
-    .map((q, i) => ({
-      id: q.id,
-      index: i + 1,
-      prompt: safeText(q.prompt),
-      type: q.type,
-      options: (q.options ?? []).map((o) => safeText(o)),
-      correctIndex: q.correct_index,
-      correctIndices: q.correct_indices,
-      explanation: q.explanation ? safeText(q.explanation) : null,
-    }));
+  const questions = normalizeExportQuestions(input.questions);
 
   const total = questions.length;
 
@@ -336,41 +406,9 @@ export function buildExportModel(input: BuildExportInput): ExportModel {
   });
 
   // Choice distribution over ANSWERED attempts of the REPRESENTATIVE sessions
-  // only — never over raw sessions, so the numbers always match the visible
-  // rows above. QT-1: multi rows count EACH selected option (an attempt still
-  // adds 1 to answeredCount, so per-option percentages stay out of 100).
-  const distribution: OptionDistribution[][] = questions.map((q) => {
-    const keyBound = Math.max(
-      q.correctIndex ?? -1,
-      ...(q.correctIndices ?? []),
-    );
-    const counts = new Array<number>(Math.max(q.options.length, keyBound + 1)).fill(0);
-    let answeredCount = 0;
-    for (const s of selectedSessions) {
-      const a = answersByKey.get(`${s.id}:${q.id}`);
-      if (!a) continue;
-      if (q.type === "multi_select") {
-        const sel = a.selected_indices ?? [];
-        if (sel.length === 0) continue;
-        for (const i of sel) {
-          if (i < 0 || i >= counts.length) continue;
-          counts[i] += 1;
-        }
-        answeredCount += 1;
-        continue;
-      }
-      if (a.selected_index === null) continue;
-      if (a.selected_index < 0 || a.selected_index >= counts.length) continue;
-      counts[a.selected_index] += 1;
-      answeredCount += 1;
-    }
-    return q.options.map((_, oi) => ({
-      optionIndex: oi,
-      chosenCount: counts[oi],
-      chosenPercent:
-        answeredCount > 0 ? Math.round((counts[oi] / answeredCount) * 100) : 0,
-    }));
-  });
+  // only — the extracted helper (shared with the RA-2 on-screen item analysis)
+  // implements the QT-1 semantics exactly as before.
+  const distribution = computeDistributions(questions, selectedSessions, input.answers);
 
   return {
     meta: {
