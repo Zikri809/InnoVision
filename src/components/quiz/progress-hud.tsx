@@ -2,8 +2,9 @@
 
 import { useTranslations } from "next-intl";
 
-/** Time (ms) below which the remaining-time display turns red. */
-const WARNING_THRESHOLD_MS = 30_000;
+/** Time (ms) below which the remaining-time display turns red. Exported as
+ * the AX-3 assertive-milestone twin (timer-milestones.ts asserts equality). */
+export const WARNING_THRESHOLD_MS = 30_000;
 
 /**
  * "Question n/N" + time remaining as a chunky clay progress bar. Time is
@@ -51,6 +52,12 @@ export function ProgressHud({
         </span>
         {remainingMs !== null && (
           <span
+            // AX-3: role="timer" with explicit aria-live="off" — the ticking
+            // value must NEVER be announced per-second (face-verifier.tsx:69
+            // precedent); discrete milestones fire via the sibling announcer.
+            role="timer"
+            aria-live="off"
+            aria-label={t("timeRemaining")}
             className={
               warning
                 ? "rounded-lg bg-destructive/15 px-2 py-0.5 tabular-nums text-destructive"

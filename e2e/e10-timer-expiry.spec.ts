@@ -195,6 +195,26 @@ test.describe("E10 — timer expiry (API + UI halves)", () => {
     await expect(hudTimer).toHaveClass(/text-destructive/);
     await expect(hudTimer).toHaveClass(/bg-destructive\/15/);
 
+    // AX-3: the countdown element exposes role="timer" (aria-live OFF — the
+    // per-second value must never be announced) and a localized accessible
+    // name ("Time remaining").
+    await expect(hudTimer).toHaveAttribute("role", "timer");
+    await expect(hudTimer).toHaveAccessibleName(/time remaining/i);
+
+    // AX-3: a sub-30s session fires the assertive ONCE-only warning on mount
+    // (the announced-set seeds on the first render under the threshold). The
+    // sr-only announcer carries the "less than 30 seconds" copy.
+    await expect(
+      studentPage.locator('div[aria-live="assertive"]').filter({ hasText: /30 seconds|30 saat/i }),
+    ).toBeVisible({ timeout: 10_000 });
+    // Exactly ONE assertive node belongs to the play surface — Next's App
+    // Router route announcer also renders div[aria-live="assertive"] in a
+    // shadow root (Playwright CSS pierces shadow DOM), so the page-wide
+    // count is 2; scope ours by its sr-only class + role=alert combo.
+    await expect(
+      studentPage.locator('div[aria-live="assertive"].sr-only[role="alert"]'),
+    ).toHaveCount(1);
+
     // Answer one question correctly (correct_index defaults to option 1 = "3"
     // in createTimedAssessment) — well within 10s.
     await expect(studentPage.getByText("What is 2+2?", { exact: true })).toBeVisible();
