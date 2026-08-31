@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 import { config as loadEnv } from "dotenv";
-import { existsSync } from "fs";
-
+import { existsSync, statSync, readdirSync } from "fs";
+import path from "path";
 import os from "os";
 
 // Load .env.local (without overriding already-set process env) so E2E specs
@@ -13,6 +13,49 @@ if (existsSync(".env.local")) {
 const PORT = process.env.PLAYWRIGHT_PORT ?? "3001";
 const BASE_URL = `http://localhost:${PORT}`;
 const MOCK_AI_PORT = process.env.MOCK_AI_PORT ?? "8787";
+
+/**
+ * Smart build check:
+ * - If in CI or PLAYWRIGHT_BUILD=1 -> always build fresh.
+ * - If PLAYWRIGHT_BUILD=0 -> explicitly skip build.
+ * - If any source file in src/, public/, or config is newer than .next/BUILD_ID -> rebuild automatically.
+ * - If only test files (e2e/*) were edited -> reuse warm build for instant startup.
+ */
+function isBuildStale(): boolean {
+  if (process.env.PLAYWRIGHT_BUILD === "1") return true;
+  if (process.env.PLAYWRIGHT_BUILD === "0") return false;
+  if (process.env.CI) return true;
+
+  const buildIdPath = path.join(process.cwd(), ".next", "BUILD_ID");
+  if (!existsSync(buildIdPath)) return true;
+
+  try {
+    const buildTime = statSync(buildIdPath).mtimeMs;
+    const checkPaths = ["src", "public", "next.config.ts", "package.json"];
+    for (const p of checkPaths) {
+      if (!existsSync(p)) continue;
+      const stat = statSync(p);
+      if (stat.mtimeMs > buildTime) return true;
+      if (stat.isDirectory()) {
+        const queue = [p];
+        while (queue.length > 0) {
+          const dir = queue.pop()!;
+          const entries = readdirSync(dir, { withFileTypes: true });
+          for (const entry of entries) {
+            const fullPath = path.join(dir, entry.name);
+            const entryStat = statSync(fullPath);
+            if (entryStat.mtimeMs > buildTime) return true;
+            if (entry.isDirectory()) queue.push(fullPath);
+          }
+        }
+      }
+    }
+  } catch {
+    return true;
+  }
+
+  return false;
+}
 
 export default defineConfig({
   testDir: "./e2e",
@@ -47,14 +90,11 @@ export default defineConfig({
       timeout: 30_000,
     },
     {
-      // PRODUCTION server: reuses existing .next build automatically if present,
-      // skipping redundant 10-15s next build on every test run.
-      // Force rebuild by setting PLAYWRIGHT_BUILD=1.
-      command: process.env.PLAYWRIGHT_BUILD === "1"
+      // PRODUCTION server: automatically rebuilds if any source file changed,
+      // but reuses warm build when only test files changed.
+      command: isBuildStale()
         ? `npm run build && npm run start -- -p ${PORT}`
-        : (process.env.PLAYWRIGHT_BUILD === "0" || existsSync(".next"))
-          ? `npm run start -- -p ${PORT}`
-          : `npm run build && npm run start -- -p ${PORT}`,
+        : `npm run start -- -p ${PORT}`,
       url: BASE_URL,
       reuseExistingServer: !process.env.CI,
       timeout: 300_000,
