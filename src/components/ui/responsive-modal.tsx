@@ -105,8 +105,7 @@ export function ResponsiveModalClose({
   );
 }
 
-export interface ResponsiveModalContentProps
-  extends React.HTMLAttributes<HTMLDivElement> {}
+export type ResponsiveModalContentProps = React.HTMLAttributes<HTMLDivElement>;
 
 export function ResponsiveModalContent({
   className,
@@ -130,8 +129,7 @@ export function ResponsiveModalContent({
   );
 }
 
-export interface ResponsiveModalHeaderProps
-  extends React.HTMLAttributes<HTMLDivElement> {}
+export type ResponsiveModalHeaderProps = React.HTMLAttributes<HTMLDivElement>;
 
 export function ResponsiveModalHeader({
   className,
@@ -155,8 +153,7 @@ export function ResponsiveModalHeader({
   );
 }
 
-export interface ResponsiveModalFooterProps
-  extends React.HTMLAttributes<HTMLDivElement> {}
+export type ResponsiveModalFooterProps = React.HTMLAttributes<HTMLDivElement>;
 
 export function ResponsiveModalFooter({
   className,
@@ -180,8 +177,7 @@ export function ResponsiveModalFooter({
   );
 }
 
-export interface ResponsiveModalTitleProps
-  extends React.HTMLAttributes<HTMLHeadingElement> {}
+export type ResponsiveModalTitleProps = React.HTMLAttributes<HTMLHeadingElement>;
 
 export function ResponsiveModalTitle({
   className,
@@ -205,8 +201,7 @@ export function ResponsiveModalTitle({
   );
 }
 
-export interface ResponsiveModalDescriptionProps
-  extends React.HTMLAttributes<HTMLParagraphElement> {}
+export type ResponsiveModalDescriptionProps = React.HTMLAttributes<HTMLParagraphElement>;
 
 export function ResponsiveModalDescription({
   className,
