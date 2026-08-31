@@ -50,11 +50,12 @@ test.describe("E15 — Quiz Metadata Editing (Title, Mode, Time Limit)", () => {
 
     // 4. E15-2 & E15-3: Open EditQuizDialog via Mode pill and change time limit
     await page.getByRole("button", { name: /Quiz mode: Assessment/i }).click();
-    await expect(page.getByRole("dialog", { name: "Edit quiz settings" })).toBeVisible();
-    await expect(page.getByLabel("Title")).toHaveValue("Renamed Inline Title");
+    const settingsDialog = page.getByRole("dialog", { name: "Edit quiz settings" });
+    await expect(settingsDialog).toBeVisible();
+    await expect(settingsDialog.getByLabel("Title", { exact: true })).toHaveValue("Renamed Inline Title");
 
     // Change title and update time limit to 1h 15m
-    await page.getByLabel("Title").fill("Final Comprehensive Exam");
+    await settingsDialog.getByLabel("Title", { exact: true }).fill("Final Comprehensive Exam");
     await page.getByLabel("h", { exact: true }).fill("1");
     await page.getByLabel("min", { exact: true }).fill("15");
 
@@ -141,7 +142,7 @@ test.describe("E15 — Quiz Metadata Editing (Title, Mode, Time Limit)", () => {
     const liveDialog = page.getByRole("dialog", { name: "Edit quiz settings" });
     await expect(liveDialog).toBeVisible();
     // Metadata is draft-only server-side — the inputs must be disabled.
-    await expect(liveDialog.getByLabel("Title")).toBeDisabled();
+    await expect(liveDialog.getByLabel("Title", { exact: true })).toBeDisabled();
     await liveDialog.getByRole("button", { name: "Cancel" }).click();
     await expect(liveDialog).toBeHidden();
 

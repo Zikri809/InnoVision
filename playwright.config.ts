@@ -21,6 +21,7 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 1,
+  maxFailures: process.env.CI ? 1 : undefined,
   // Capped locally: even the production server saturates with too many
   // parallel workers on one DB (register storms hit the same auth tables).
   workers: process.env.CI ? 1 : 4,
