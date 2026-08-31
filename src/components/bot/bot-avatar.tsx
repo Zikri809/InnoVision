@@ -172,14 +172,14 @@ export function BotAvatar({
             cy={fmt(e.cy)}
             rx={fmt(e.rx)}
             ry={fmt(e.ry)}
-            fill="var(--card)"
+            fill="#ffffff"
           />
         ) : (
           <path
             key={i}
             d={`M ${fmt(e.cx - e.rx)} ${fmt(e.cy)} Q ${fmt(e.cx)} ${fmt(e.cy - e.rx * 1.2)} ${fmt(e.cx + e.rx)} ${fmt(e.cy)}`}
             fill="none"
-            stroke="var(--card)"
+            stroke="#ffffff"
             strokeWidth={0.085}
             strokeLinecap="round"
           />
