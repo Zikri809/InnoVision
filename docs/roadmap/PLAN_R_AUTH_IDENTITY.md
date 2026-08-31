@@ -126,6 +126,46 @@ matric capture gate E2E.
 
 <!-- Required before ANY item above is implemented. See roadmap README Step 1. -->
 
+- 2026-08-31: AU-2 reconciled against the current main and implemented same
+  day. Migration 0038 taken (0037 was multi-select). KEY DECISIONS +
+  CORRECTIONS: (1) The sketch's "reject BEFORE the profile trigger can fire"
+  is UNACHIEVABLE app-side — GoTrue's handle_new_user fires at user creation,
+  before any callback code runs. Post-callback reject = signOut(scope:"local")
+  ON the redirect response + /login?message=sso-domain bounce → no usable
+  session; the orphan profile is inert (RLS, role student, matric NULL →
+  cannot pass the matric gate). Documented deviation. (2) Same-email conflict
+  policy REVISED by user decision: GoTrue auto-links the azure identity to an
+  existing same-email password account (safe — tenant-specific authority +
+  domain filter gate the trust chain); accepted as a link (not a data merge),
+  transparency notice deferred to a follow-up (no merge/copy occurs).
+  (3) Domain semantics pinned: case-insensitive EXACT match, no wildcard
+  subdomains, missing email → reject (institutional.ts, unit matrix).
+  (4) Callback route had ZERO error handling (route.ts:36 threw) — hardened:
+  try via typed return, GoTrue error params → /login?message=sso-error,
+  failed exchange → local signOut + clean redirect (recovery flow benefits).
+  (5) The restricted-columns trigger (0019) blocks ONLY role/consent_given_at
+  — matric self-update is legitimate; captureOwnMatric enforces the 0027
+  contract server-side (normalizeMatric + service-role duplicate pre-check +
+  unique-index race mapping, register.ts precedent). NO definer RPC needed;
+  0038 only teaches handle_new_user the OIDC `name` claim (password path
+  untouched). (6) Matric gate lives in the student layout (null matric ⇔
+  OAuth user: password registration + 0027 backfill always set one) →
+  top-level /matric-capture (outside the layout, no loop); gate page
+  self-bounces captured students/lecturers. (7) Login button renders ONLY
+  when INSTITUTIONAL_EMAIL_DOMAINS is non-empty (absent env = absent
+  affordance = clean E2E seam). (8) E2E: no real Entra in the harness — e47
+  seeds an OAuth-SHAPED identity via the admin API (createUser WITH a
+  password — the admin magic-link seam is UNUSABLE, the same verdict as
+  AU-1's recovery-link probe: implicit #access_token shape + site_url
+  redirect that never reaches the harness callback; confirmed by a live
+  GoTrue probe during the E2E audit) and signs in through the real /login
+  form; the trigger fires with no registration metadata → matric NULL (the
+  gate's precondition) and 0038 maps the OIDC `name` claim to full_name. The
+  GoTrue auto-link + hosted Azure config remain manual
+  checks (AU-1 posture). Env: INSTITUTIONAL_EMAIL_DOMAINS added to
+  .env.local.example; MATRIC_CAPTURE_RATE_LIMIT harness bump in
+  playwright.config.ts (production default 5/min).
+
 - 2026-08-30 (AU-2 scope note, pre-reconciliation): user pinned the
   provider + trust boundary — Microsoft institutional login with a
   university-domain allowlist (e.g. `@xxxuni.edu.my`); personal Microsoft

@@ -261,6 +261,28 @@ subtly once. Mirrors finger glyphs already displayed.
 
 <!-- Required before ANY item above is implemented. See roadmap README Step 1. -->
 
+- 2026-08-31: SQ-3 + SQ-1 + SQ-4 reconciled against the current main (post
+  QT-1, 0f8f6f1); implemented same day. Corrections: play client lives at
+  src/components/quiz/play-client.tsx (try-again handlers at :737–744, not
+  :620–622); the shared player's handleRetry (student-quiz/player-client.tsx
+  :185) is a STATELESS reset, NOT a template for session retry — the real fix
+  POSTs /api/sessions (practice rejoin select matches active/paused only,
+  0032:182–187, so a completed attempt yields a fresh 201). No migration
+  (0038 taken by AU-2); start route untouched. Dead-end root cause pinned:
+  all-answered resume seeds initialIndex=-1 → feedback on Q1 → Next strands
+  on Q2's question phase (selectOption early-return :342, Confirm requires
+  !answered :893, Next requires feedback :917); fix = allAnswered feedback
+  button acts as Finish→submitNow. e45:216/:599 PINNED the broken Try Again
+  (asserted /student/quizzes) and were updated by this change. SQ-1/SQ-4: NO
+  migration — student_quiz_view already projects opens_at/closes_at/class_id
+  (0034:35-38); page select extended, sort+filter extracted to pure
+  list-order.ts (unit-pinned); ZERO RSC searchParams precedent existed —
+  pattern established here (Next 15 async searchParams, in-memory filter,
+  invalid id → empty list, RLS backstops); formatDue added to
+  src/lib/format/window.ts (weekday variant of the house formatter); on-screen
+  numerals mean copy is "Due {date}" (Intl weekday+date+time, ms-MY/en-US).
+  e46 added (fail-fast e18 convention).
+
 - 2026-08-29: SQ-5 reconciled against 99a06a3; no migration needed; scope
   refined per the reconciled block above (taxonomy util lands here as the
   AX-7 shared kernel; onUnavailable error-drop plumbing corrected; surfaces

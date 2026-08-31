@@ -122,14 +122,14 @@ Update as work proceeds (keep honest; this mirrors reality, not intention):
 | Plan | State | Shipped as | Log |
 |---|---|---|---|
 | QUIZ_LIFECYCLE | ✅ shipped | [../PLAN_CLOSE_AND_SCHEDULE.md](../PLAN_CLOSE_AND_SCHEDULE.md) | QC-1..QC-4 (2026-08-28) |
-| RESULTS_ANALYTICS | 🔶 partial — RA-1 shipped | — | RA-1 + RA-7 via SQ-2 (2026-08-28) |
-| STUDENT_QOL | 🔶 partial — SQ-2, SQ-5 shipped | — | SQ-2 (2026-08-28) · SQ-5 (2026-08-29, 8b542cf) |
+| RESULTS_ANALYTICS | 🔶 partial — RA-1, RA-2 shipped | — | RA-1 + RA-7 via SQ-2 (2026-08-28) · RA-2 (2026-08-31) |
+| STUDENT_QOL | 🔶 partial — SQ-1..SQ-5 shipped | — | SQ-2 (2026-08-28) · SQ-5 (2026-08-29, 8b542cf) · SQ-3 + SQ-1 + SQ-4 (2026-08-31) |
 | AUTHORING_PRODUCTIVITY | 🔶 partial — AP-1, AP-2 shipped | — | AP-1 + AP-2 (2026-08-29, 0035) · AP-3 parked |
 | QUESTION_TYPES | 🔶 partial — QT-1, QT-3 shipped | — | QT-3 (2026-08-29, 0034) · QT-1 (2026-08-30, 0036+0037) |
-| AUTH_IDENTITY | 🔶 partial — AU-1 shipped | — | AU-1 (2026-08-28) |
+| AUTH_IDENTITY | 🔶 partial — AU-1, AU-2 shipped | — | AU-1 (2026-08-28) · AU-2 (2026-08-31, 0038) |
 | CLASS_MANAGEMENT | 🔲 planned | — | — |
 | INTEGRITY_OPS | 🔶 partial — IO-1 shipped | — | IO-1 (2026-08-29, 8b542cf) |
-| ACCESSIBILITY_PLATFORM | 🔶 partial — AX-1, AX-2 shipped | — | AX-1 + AX-2 (2026-08-29, 99a06a3) |
+| ACCESSIBILITY_PLATFORM | 🔶 partial — AX-1..AX-3 shipped | — | AX-1 + AX-2 (2026-08-29, 99a06a3) · AX-3 (2026-08-31) |
 
 > Partial states: implementation logs live inside each domain plan doc
 > (Pre-flight + Implementation log sections). A plan doc moves out (Step 3)
@@ -145,24 +145,20 @@ Update as work proceeds (keep honest; this mirrors reality, not intention):
 6. ~~IO-1 flagged-unlock notification + SQ-5 camera messaging~~ ✅ (2026-08-29)
 7. Then depth: ~~QT-3 shuffling (cheap)~~ ✅ (2026-08-29) → ~~AP-1/AP-2 authoring~~ ✅ (2026-08-29) → ~~QT-1 multi-select~~ ✅ (2026-08-30)
 
-8. Current runner list (re-ranked 2026-08-30 by ROI ÷ effort, post-QT-1;
+8. ~~Current runner list (re-ranked 2026-08-30 by ROI ÷ effort, post-QT-1;
    user confirmed the AU-2 scope — Microsoft institutional login,
-   university-domain filtered):
+   university-domain filtered)~~ ✅ ALL SHIPPED (2026-08-31, audited 3 rounds):
 
-   1. **SQ-3** practice Try Again fix + the pre-existing
-      all-answered-resume dead-end (both surfaced during the QT-1 audit;
-      smallest effort, two real student-facing bugs)
-   2. **SQ-1** deadline chips on student quiz cards (QC-3 columns already
-      shipped — pure read-side UI, biggest student-visible win)
-   3. **SQ-4** class-card drill-down filter (small honesty fix; pairs with
-      SQ-1 in one PR)
-   4. **AX-3** timer/phase screen-reader announcements (small, high a11y
-      value)
-   5. **RA-2** item analysis on the results dashboard (the export model
-      already exists and is now multi-select-aware — rendering it inline
-      is mostly UI)
-   6. **AU-2** Microsoft institutional SSO with university-domain
-      allowlist (e.g. `@xxxuni.edu.my`), personal Microsoft accounts
-      rejected pre-profile-creation — scope pinned in
-      PLAN_R_AUTH_IDENTITY.md; strategic, medium surface, now explicitly
-      on the runner list rather than an afterthought
+   1. ~~**SQ-3** practice Try Again fix + the pre-existing
+      all-answered-resume dead-end~~ ✅ (2026-08-31)
+   2. ~~**SQ-1** deadline chips on student quiz cards~~ ✅ (2026-08-31)
+   3. ~~**SQ-4** class-card drill-down filter~~ ✅ (2026-08-31)
+   4. ~~**AX-3** timer/phase screen-reader announcements~~ ✅ (2026-08-31)
+   5. ~~**RA-2** item analysis on the results dashboard~~ ✅ (2026-08-31)
+   6. ~~**AU-2** Microsoft institutional SSO with university-domain
+      allowlist~~ ✅ (2026-08-31, migration 0038; hosted Azure config +
+      real-Microsoft sign-in remain manual checks per the plan doc)
+
+   Remaining roadmap work: SQ-6..SQ-10, RA-3..RA-6, RA-8, AX-4..AX-8,
+   AP-3, AU-2 leftovers (none — hosted checks only), CM-* (whole domain),
+   IO-2..; re-rank the next runner list before starting.

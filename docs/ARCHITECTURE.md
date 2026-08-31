@@ -149,12 +149,28 @@ quiz → class → lecturer so a non-owner gets the same 404 as a missing row
 ## 4. Auth, roles, and identity
 
 - **Supabase Auth (GoTrue)** owns credentials + sessions; the app stores
-  nothing password-related. PKCE code exchange lands in `/auth/callback`.
+  nothing password-related. PKCE code exchange lands in `/auth/callback`
+  (shared by password recovery AND Microsoft institutional SSO — the route
+  hardens failed exchanges with a local signOut whose cookie deletions ride
+  the RETURNED redirect response).
 - **`profiles` table (id = auth.users.id)** carries `role`
   (`'student' | 'lecturer'`), `full_name`, `locale`, consent/enrollment state.
-  Created by trigger `handle_new_user` (migration 0001) which **hardcodes
-  `role='student'`** — client-supplied metadata is ignored (role-escalation
-  fix).
+  Created by trigger `handle_new_user` (latest definition 0038) which
+  **hardcodes `role='student'`** — client-supplied metadata is ignored
+  (role-escalation fix); 0038 additionally maps the OIDC `name` claim to
+  `full_name` for Microsoft SSO users (password signups keep setting
+  `full_name` metadata explicitly).
+- **Microsoft institutional SSO (AU-2, 2026-08-31)**: `signInWithOAuth`
+  (provider `azure`, tenant-specific authority configured dashboard-side)
+  starts in `src/lib/auth/sso.ts`; the shared callback enforces a SECOND
+  trust layer — `src/lib/auth/institutional.ts` allowlists
+  `INSTITUTIONAL_EMAIL_DOMAINS` (case-insensitive exact match, fail-closed
+  when unset) and rejects personal Microsoft accounts with a local signOut +
+  `/login?message=sso-domain`. Same-email password accounts auto-link (no
+  data merge). OAuth-provisioned students have `matric_no NULL` — the
+  student layout gates them behind one-time `/matric-capture`
+  (`src/lib/auth/matric-capture.ts`, server-side 0027 validation + role
+  check) until captured.
 - **Lecturer promotion** happens only in the `register` server action
   (`src/lib/auth/register.ts`): the submitted invite code is compared against
   a hash of `LECTURER_INVITE_CODE` using `extensions.digest` in
@@ -621,6 +637,36 @@ rows + `results_revealed_at` so completed+revealed cards link
 show an "awaiting results" status chip (no link). Flagged sessions render no
 chip (intentional divergence from the gradebook, which shows their scores).
 
+On-screen item analysis (RA-2, 2026-08-31): the results dashboard gains a
+collapsible "Question insights" section fed by the SAME export model
+(`buildExportModel` + `summarizeQuestionStats` via
+`src/lib/results/insights.ts`) — the RSC adds two reads (full question rows +
+`lecturer_answers_view`, 20k cap + truncation flag) and passes a separate
+serializable prop (`QuestionInsightsModel`; `ResultsSessionRow` never widens
+with key fields). Per-question % correct + per-option pick bars; hints for
+<30% correct (`LOW_CORRECT_THRESHOLD`) and never-picked distractors (key
+options excluded).
+
+Student quiz list deadline visibility (SQ-1/SQ-4, 2026-08-31): the list
+consumes `student_quiz_view`'s `opens_at/closes_at` read-only — "Due …" chips
+(amber <24h, grey past/comfortable), deadline sort (future closing-soonest
+first, then undated by created_at DESC, past-closed last; pure
+`list-order.ts`), and `?class=<id>` drill-down from class cards with a
+removable filter chip (invalid ids → empty list; RLS backstops visibility).
+
+Practice Try Again + resume dead-end (SQ-3, 2026-08-31): the EndScreen and
+inline end-state "Try again" POST `/api/sessions` and route into the fresh
+session (the practice rejoin select matches active/paused only, so a
+completed attempt always yields a new session id); when every question is
+answered (all-answered resume seed), the feedback button acts as
+Finish → submit, eliminating the stranded no-actionable-button state.
+
+AX-3 (2026-08-31): the timed assessment's countdown is `role="timer"`
+(aria-live off); discrete sr-only milestones announce T-10m/5m/1m polite and
+<30s assertive-once (`src/lib/a11y/timer-milestones.ts`, twin-pinned to the
+HUD's `WARNING_THRESHOLD_MS`); answer commits and action-zone phase swaps
+announce politely.
+
 ### 7.10 Notifications
 
 Write path is entirely trigger-driven (migration 0022) — application code
@@ -763,6 +809,7 @@ See `.env.local.example` for the authoritative annotated list. Summary:
 | `NEXT_PUBLIC_SUPABASE_URL` / `_ANON_KEY` | everywhere (browser + server) | anon key is RLS-scoped by design |
 | `SUPABASE_SERVICE_ROLE_KEY` | admin client only (incident storage, results signing, register promotion) | server-only module; bypasses RLS |
 | `LECTURER_INVITE_CODE` | register promotion | hashed compare; also required by e2e specs |
+| `INSTITUTIONAL_EMAIL_DOMAINS` | `lib/auth/institutional.ts` (SSO callback + login button gating) | comma-separated university domain allowlist; unset = SSO disabled |
 | `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL` | `lib/ai/client.ts` (server) | OpenAI-compatible; e2e points at the mock server |
 | `COMPREFACE_BASE_URL` / `_API_KEY` | `compreface-client.ts` (server) | self-hosted Docker |
 | `COMPREFACE_MOCK_ENABLED` | same | `"1"` opts into canned responses (non-prod only) |

@@ -180,6 +180,26 @@ All changes must leave `npm run check:i18n` green.
 
 <!-- Required before ANY item above is implemented. See roadmap README Step 1. -->
 
+- 2026-08-31: AX-3 reconciled against the current main and implemented same
+  day. CORRECTIONS to the sketch: (a) the "existing announcer utility in
+  src/lib/a11y/" DOES NOT EXIST — src/lib/a11y/ held only focus-trap.ts; AX-3
+  created the announcer machinery (pure timer-milestones.ts +
+  in-component sr-only polite/assertive nodes following the notification-bell
+  inline-announcer idiom and the FlaggedWaitTicker fire-once pattern). (b)
+  On-screen option labels are NUMERALS, not letters — the confirmation copy is
+  "Answer {label} confirmed" with label = presented index + 1 (matches what
+  the student sees), not "Answer B confirmed". (c) progress-hud.tsx moved to
+  src/components/quiz/ (plan cited a stale path); countdown span now at :53
+  carries role="timer" + explicit aria-live="off" (face-verifier.tsx:69
+  precedent) + accessible name (existing play.hud.timeRemaining). (d)
+  Milestones are value-keyed (remainingMs) so pause/flag gaps are
+  inherently tolerated; T-10m/5m/1m polite, <30s assertive ONCE via an
+  announced-set ref, threshold ASSERTIVE_THRESHOLD_MS=30_000 twin-pinned to
+  the HUD's WARNING_THRESHOLD_MS by unit test; derived during render (no
+  setState-in-effect). Action zone div (:892) wrapped aria-live="polite" for
+  Recording→Submitting→Retry swaps. e10(b) extended with the a11y assertions.
+  No migration; keys under play.hud (en+ms same commit).
+
 - 2026-08-29: AX-1 + AX-2 reconciled against 5f6b1da; no migrations involved
   (CSS/component/unit-test surface only); noted `color-scheme` CSS rules now
   exist in globals.css:145–151 (audit-era contradiction partially self-healed

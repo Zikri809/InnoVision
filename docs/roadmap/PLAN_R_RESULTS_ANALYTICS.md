@@ -262,6 +262,22 @@ a flagged case as reviewed, no score override, no private case notes.
 
 <!-- Required before ANY item above is implemented. See roadmap README Step 1. -->
 
+- 2026-08-31: RA-2 reconciled against the current main and implemented same
+  day. Corrections: the results RSC is src/app/(lecturer)/lecturer/quizzes/[id]/
+  results/page.tsx and does NOT read answers/questions rows today — two new
+  reads added (questions full projection mirroring the export route;
+  lecturer_answers_view with a 20k ANSWERS_LIMIT cap + truncation flag). The
+  session feed gained the export route's `id DESC` secondary order so the
+  representative-session pick is deterministic here too. Security note upheld:
+  insights pass as a SEPARATE serializable prop (QuestionInsightsModel);
+  ResultsSessionRow is untouched. Design refinement: instead of duplicating
+  distribution math, the export model's normalization + distribution loop
+  were EXTRACTED verbatim into normalizeExportQuestions/computeDistributions
+  (export.ts) and buildQuestionInsights (insights.ts) reuses buildExportModel
+  + summarizeQuestionStats — screen = workbook by construction. LOW_CORRECT_
+  THRESHOLD=30 + never-picked-distractor hints (key options excluded from the
+  distractor check). e18 extended with the on-screen parity assertions.
+
 - 2026-08-28: reconciled against d1cfcb9 (post AU-1); RA-1 pre-flight DONE —
   migration will be 0033 only if a schema change emerges (current design needs
   NONE: lecturer_session_view already carries score+attempt since 0032,
