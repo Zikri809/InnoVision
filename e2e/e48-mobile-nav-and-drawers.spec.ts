@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { registerUser } from "./helpers";
+import { fastRegisterUser } from "./helpers";
 
 const LECTURER_INVITE_CODE = process.env.LECTURER_INVITE_CODE ?? "";
 
@@ -36,7 +36,7 @@ test.describe("E48 — Mobile Bottom Nav, Responsive Drawers, and Password Toggl
     await page.setViewportSize({ width: 375, height: 812 });
 
     // 2. Register fresh student user
-    await registerUser(page, email, "student", "");
+    await fastRegisterUser(page, email, "student", "");
 
     // 3. Assert Mobile Navigation bar is visible and desktop horizontal nav is hidden
     const mobileNav = page.getByRole("navigation", { name: /mobile navigation/i });
@@ -85,7 +85,7 @@ test.describe("E48 — Mobile Bottom Nav, Responsive Drawers, and Password Toggl
 
     await page.setViewportSize({ width: 375, height: 812 });
 
-    await registerUser(page, email, "lecturer", LECTURER_INVITE_CODE);
+    await fastRegisterUser(page, email, "lecturer", LECTURER_INVITE_CODE);
 
     const mobileNav = page.getByRole("navigation", { name: /mobile navigation/i });
     await expect(mobileNav).toBeVisible({ timeout: 5_000 });

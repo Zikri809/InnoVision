@@ -119,6 +119,68 @@ export async function registerUser(
 }
 
 /**
+ * Fast registration: If local admin seam is available (via resolveServiceClient),
+ * creates user and profile directly via DB admin API, then signs in cleanly via /login.
+ * Avoids long /register multi-field typing and reduces setup time from ~3s to <0.5s.
+ */
+export async function fastRegisterUser(
+  page: Page,
+  email: string,
+  role: "lecturer" | "student",
+  inviteCode: string,
+): Promise<{ matric: string | null }> {
+  const admin = resolveServiceClient();
+  const landing = role === "lecturer" ? /\/lecturer\/classes/ : /\/student\/classes/;
+
+  let matric: string | null = null;
+  if (role === "student") {
+    let h = 0;
+    const source = `${email}#0`;
+    for (let i = 0; i < source.length; i++) {
+      h = (h * 31 + source.charCodeAt(i)) % 100000;
+    }
+    matric = `8${String(h).padStart(5, "0")}`;
+  }
+
+  if (admin) {
+    try {
+      const { data, error } = await admin.auth.admin.createUser({
+        email,
+        password: E2E_PASSWORD,
+        email_confirm: true,
+        user_metadata: {
+          role,
+          full_name: `${role}-${email.split("@")[0]}`,
+          matric_no: matric,
+          consent_given_at: new Date().toISOString(),
+        },
+      });
+
+      if (!error && data.user) {
+        await admin.from("profiles").upsert({
+          id: data.user.id,
+          role,
+          full_name: `${role}-${email.split("@")[0]}`,
+          matric_no: matric,
+          consent_given_at: new Date().toISOString(),
+        });
+
+        await page.goto("/login");
+        await page.getByLabel(/Email/).fill(email);
+        await page.getByLabel("Password", { exact: true }).fill(E2E_PASSWORD);
+        await page.getByRole("button", { name: /sign in/i }).click();
+        await page.waitForURL(landing, { timeout: 15_000 });
+        return { matric };
+      }
+    } catch {
+      // Fall through to UI registration on error
+    }
+  }
+
+  return registerUser(page, email, role, inviteCode);
+}
+
+/**
  * Lecturer: create a class and return its join code (captured from the card).
  * Assumes the lecturer is already on /lecturer/classes.
  */

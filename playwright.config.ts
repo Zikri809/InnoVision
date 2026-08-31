@@ -2,6 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 import { config as loadEnv } from "dotenv";
 import { existsSync } from "fs";
 
+import os from "os";
+
 // Load .env.local (without overriding already-set process env) so E2E specs
 // see LECTURER_INVITE_CODE etc. without requiring shell exports.
 if (existsSync(".env.local")) {
@@ -22,9 +24,8 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 1,
   maxFailures: process.env.CI ? 1 : undefined,
-  // Capped locally: even the production server saturates with too many
-  // parallel workers on one DB (register storms hit the same auth tables).
-  workers: process.env.CI ? 1 : 4,
+  // Capped in CI to prevent runner CPU saturation; scaled to machine capacity locally
+  workers: process.env.CI ? 1 : Math.min(6, os.cpus().length || 4),
   reporter: "html",
   use: {
     baseURL: BASE_URL,
@@ -46,14 +47,14 @@ export default defineConfig({
       timeout: 30_000,
     },
     {
-      // PRODUCTION server, never `next dev`: dev compiles every route on
-      // demand (per-navigation latency, unbounded memory, dev-only error
-      // overlays) and was the shared bottleneck of this suite. `next build`
-      // runs once up front; `next start` serves prebuilt routes at flat
-      // latency. PLAYWRIGHT_BUILD=0 reuses a warm .next to skip the rebuild.
-      command: process.env.PLAYWRIGHT_BUILD === "0"
-        ? `npm run start -- -p ${PORT}`
-        : `npm run build && npm run start -- -p ${PORT}`,
+      // PRODUCTION server: reuses existing .next build automatically if present,
+      // skipping redundant 10-15s next build on every test run.
+      // Force rebuild by setting PLAYWRIGHT_BUILD=1.
+      command: process.env.PLAYWRIGHT_BUILD === "1"
+        ? `npm run build && npm run start -- -p ${PORT}`
+        : (process.env.PLAYWRIGHT_BUILD === "0" || existsSync(".next"))
+          ? `npm run start -- -p ${PORT}`
+          : `npm run build && npm run start -- -p ${PORT}`,
       url: BASE_URL,
       reuseExistingServer: !process.env.CI,
       timeout: 300_000,
