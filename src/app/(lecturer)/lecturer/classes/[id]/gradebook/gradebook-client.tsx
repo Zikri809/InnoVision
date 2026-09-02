@@ -1,20 +1,47 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { ArrowLeft, Download, EyeOff, Loader2 } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowUpDown,
+  Download,
+  EyeOff,
+  ListFilter,
+  Loader2,
+  Search,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { GradebookModel } from "@/lib/results/gradebook";
+import {
+  filterGradebookRows,
+  sortGradebookRows,
+  type GradebookSortKey,
+  type GradebookStatusFilter,
+} from "./gradebook-views";
 
 /**
- * RA-1 gradebook matrix (client island — export button is the only
- * interactive piece; the matrix itself is serializable-model rendering).
+ * RA-1 gradebook matrix (client island — export button plus the toolbar
+ * search/filter/sort are the interactive pieces; the matrix itself is
+ * serializable-model rendering).
  *
  * A11y: real <table> with th scope, sticky first column, em-dash cells carry
  * sr-only "not attempted" text. Quiz headers include an unrevealed marker
- * (EyeOff icon + sr-only label) when results_revealed_at is null.
+ * (EyeOff icon + sr-only label) when results_revealed_at is null. Toolbar
+ * shaping is client-only via the pure helpers in gradebook-views.ts; the
+ * default view renders every roster row in enrollment order (the e39 e2e
+ * contract).
  */
 export function GradebookClient({
   model,
@@ -31,9 +58,41 @@ export function GradebookClient({
 }) {
   const t = useTranslations("lecturer.gradebook");
   const [exporting, setExporting] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<GradebookStatusFilter>("all");
+  const [sortKey, setSortKey] = useState<GradebookSortKey>("default");
 
   const hasQuizzes = model.quizzes.length > 0;
   const hasStudents = model.rows.length > 0;
+  const filtersActive =
+    searchQuery.trim() !== "" || statusFilter !== "all" || sortKey !== "default";
+
+  const visibleRows = useMemo(
+    () =>
+      sortGradebookRows(
+        filterGradebookRows(model.rows, searchQuery, statusFilter),
+        sortKey,
+      ),
+    [model.rows, searchQuery, statusFilter, sortKey],
+  );
+
+  // SelectValue resolves labels from items registered in the popup, which
+  // only mount once opened — map raw values to labels up front like the
+  // class-detail quiz-mode select does.
+  const statusLabels: Record<GradebookStatusFilter, string> = {
+    all: t("filterAll"),
+    attempted: t("filterAttempted"),
+    unattempted: t("filterUnattempted"),
+  };
+  const sortLabels: Record<GradebookSortKey, string> = {
+    default: t("sortDefault"),
+    "name-asc": t("sortNameAsc"),
+    "name-desc": t("sortNameDesc"),
+    "matric-asc": t("sortMatricAsc"),
+    "matric-desc": t("sortMatricDesc"),
+    "overall-desc": t("sortOverallDesc"),
+    "overall-asc": t("sortOverallAsc"),
+  };
 
   async function handleExport() {
     if (exporting) return;
@@ -115,6 +174,127 @@ export function GradebookClient({
         </p>
       )}
 
+      {hasQuizzes && hasStudents && (
+        <section aria-label={t("toolbarLabel")} className="flex flex-col gap-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="relative w-full sm:min-w-0 sm:flex-1">
+              <label htmlFor="gradebook-search" className="sr-only">
+                {t("searchPlaceholder")}
+              </label>
+              <Search
+                className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+                aria-hidden
+              />
+              <Input
+                id="gradebook-search"
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder={t("searchPlaceholder")}
+                className="h-12 rounded-2xl border-[3px] border-border bg-card pl-11 pr-10 text-sm font-bold shadow-[var(--shadow-clay-sm)] focus-visible:ring-4 focus-visible:ring-primary/20"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery("")}
+                  aria-label={t("clearSearchAria")}
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 rounded-full p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                >
+                  <X className="h-4 w-4" aria-hidden />
+                </button>
+              )}
+            </div>
+
+            <div className="flex shrink-0 flex-wrap items-center gap-3">
+              <div className="flex items-center gap-1.5">
+                <ListFilter
+                  className="hidden h-4 w-4 shrink-0 text-muted-foreground sm:block"
+                  aria-hidden
+                />
+                <Select
+                  value={statusFilter}
+                  onValueChange={(v) => setStatusFilter(v as GradebookStatusFilter)}
+                >
+                  <SelectTrigger
+                    id="gradebook-status-filter"
+                    aria-label={t("filterStatusLabel")}
+                    className="h-12 w-44 rounded-2xl border-[3px] border-border bg-card text-sm font-bold shadow-[var(--shadow-clay-sm)]"
+                  >
+                    <SelectValue>
+                      {(v) => statusLabels[v as GradebookStatusFilter] ?? String(v)}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t("filterAll")}</SelectItem>
+                    <SelectItem value="attempted">{t("filterAttempted")}</SelectItem>
+                    <SelectItem value="unattempted">{t("filterUnattempted")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <ArrowUpDown
+                  className="hidden h-4 w-4 shrink-0 text-muted-foreground sm:block"
+                  aria-hidden
+                />
+                <Select
+                  value={sortKey}
+                  onValueChange={(v) => setSortKey(v as GradebookSortKey)}
+                >
+                  <SelectTrigger
+                    id="gradebook-sort"
+                    aria-label={t("sortLabel")}
+                    className="h-12 w-44 rounded-2xl border-[3px] border-border bg-card text-sm font-bold shadow-[var(--shadow-clay-sm)]"
+                  >
+                    <SelectValue>
+                      {(v) => sortLabels[v as GradebookSortKey] ?? String(v)}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="default">{t("sortDefault")}</SelectItem>
+                    <SelectItem value="name-asc">{t("sortNameAsc")}</SelectItem>
+                    <SelectItem value="name-desc">{t("sortNameDesc")}</SelectItem>
+                    <SelectItem value="matric-asc">{t("sortMatricAsc")}</SelectItem>
+                    <SelectItem value="matric-desc">{t("sortMatricDesc")}</SelectItem>
+                    <SelectItem value="overall-desc">{t("sortOverallDesc")}</SelectItem>
+                    <SelectItem value="overall-asc">{t("sortOverallAsc")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <div
+              role="status"
+              aria-live="polite"
+              className="text-xs font-extrabold text-muted-foreground"
+            >
+              {t("visibleCount", {
+                visible: visibleRows.length,
+                total: model.rows.length,
+              })}
+            </div>
+            {filtersActive && (
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                onClick={() => {
+                  setSearchQuery("");
+                  setStatusFilter("all");
+                  setSortKey("default");
+                }}
+                className="font-extrabold"
+              >
+                <X className="mr-1 h-3.5 w-3.5" aria-hidden />
+                {t("clearFilters")}
+              </Button>
+            )}
+          </div>
+        </section>
+      )}
+
       {!hasQuizzes ? (
         <section className="rounded-[28px] border-[3px] border-dashed border-border bg-card p-10 text-center">
           <h2 className="font-heading text-xl font-semibold">{t("emptyNoQuizzesTitle")}</h2>
@@ -156,7 +336,7 @@ export function GradebookClient({
                       </span>
                     </Link>
                     <span className="mt-0.5 block text-[11px] font-bold text-muted-foreground">
-                      /{quiz.questionCount}
+                      {t("questionCount", { count: quiz.questionCount })}
                     </span>
                     {!quiz.revealed && (
                       <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-amber-900">
@@ -173,53 +353,79 @@ export function GradebookClient({
               </tr>
             </thead>
             <tbody>
-              {model.rows.map((row) => (
-                <tr key={row.studentId} className="border-b-2 border-border/40 last:border-b-0">
-                  <th scope="row" className="sticky left-0 z-10 bg-card px-3 sm:px-4 py-2.5 text-left font-bold border-r border-border/40 sm:border-r-0 shadow-[2px_0_4px_rgba(0,0,0,0.04)] sm:shadow-none">
-                    <span className="block max-w-[120px] sm:max-w-none truncate sm:whitespace-normal">
-                      {row.fullName ?? row.studentId}
-                    </span>
-                    {row.matricNo && (
-                      <span className="block text-[11px] font-mono font-normal text-muted-foreground sm:hidden">
-                        {row.matricNo}
-                      </span>
-                    )}
-                  </th>
-                  <td className="hidden sm:table-cell px-3 py-2.5 font-mono text-xs text-muted-foreground">
-                    {row.matricNo ?? "—"}
-                  </td>
-                  {row.cells.map((cell, i) => (
-                    <td key={model.quizzes[i].id} className="border-l-2 border-border/60 px-3 py-2.5 text-center tabular-nums">
-                      {cell ? (
-                        <span className="font-bold">
-                          {cell.percent}
-                          <span className="text-muted-foreground">%</span>
-                          {cell.attempt !== null && cell.attempt > 1 && (
-                            <span className="sr-only"> ({t("attemptSuffix", { n: cell.attempt })})</span>
-                          )}
-                        </span>
-                      ) : (
-                        <span>
-                          {t("notAttempted")}
-                          <span className="sr-only"> not attempted</span>
-                        </span>
-                      )}
-                    </td>
-                  ))}
-                  <td className="border-l-[3px] border-border bg-muted/30 px-3 py-2.5 text-center tabular-nums">
-                    <span className="font-heading font-bold">
-                      {row.cumulativePercent !== null ? (
-                        <>
-                          {row.cumulativePercent}
-                          <span className="text-muted-foreground">%</span>
-                        </>
-                      ) : (
-                        t("notAttempted")
-                      )}
-                    </span>
+              {visibleRows.length === 0 ? (
+                <tr className="border-b-2 border-border/40">
+                  <td colSpan={model.quizzes.length + 3} className="px-4 py-10 text-center">
+                    <p className="font-heading text-lg font-semibold">{t("noMatchTitle")}</p>
+                    <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+                      {t("noMatchSubtitle")}
+                    </p>
+                    <div className="mt-4">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setSearchQuery("");
+                          setStatusFilter("all");
+                          setSortKey("default");
+                        }}
+                        className="font-extrabold"
+                      >
+                        {t("clearFilters")}
+                      </Button>
+                    </div>
                   </td>
                 </tr>
-              ))}
+              ) : (
+                visibleRows.map((row) => (
+                  <tr key={row.studentId} className="border-b-2 border-border/40 last:border-b-0">
+                    <th scope="row" className="sticky left-0 z-10 bg-card px-3 sm:px-4 py-2.5 text-left font-bold border-r border-border/40 sm:border-r-0 shadow-[2px_0_4px_rgba(0,0,0,0.04)] sm:shadow-none">
+                      <span className="block max-w-[120px] sm:max-w-none truncate sm:whitespace-normal">
+                        {row.fullName ?? row.studentId}
+                      </span>
+                      {row.matricNo && (
+                        <span className="block text-[11px] font-mono font-normal text-muted-foreground sm:hidden">
+                          {row.matricNo}
+                        </span>
+                      )}
+                    </th>
+                    <td className="hidden sm:table-cell px-3 py-2.5 font-mono text-xs text-muted-foreground">
+                      {row.matricNo ?? "—"}
+                    </td>
+                    {row.cells.map((cell, i) => (
+                      <td key={model.quizzes[i].id} className="border-l-2 border-border/60 px-3 py-2.5 text-center tabular-nums">
+                        {cell ? (
+                          <span className="font-bold">
+                            {cell.percent}
+                            <span className="text-muted-foreground">%</span>
+                            {cell.attempt !== null && cell.attempt > 1 && (
+                              <span className="sr-only"> ({t("attemptSuffix", { n: cell.attempt })})</span>
+                            )}
+                          </span>
+                        ) : (
+                          <span>
+                            {t("notAttempted")}
+                            <span className="sr-only"> not attempted</span>
+                          </span>
+                        )}
+                      </td>
+                    ))}
+                    <td className="border-l-[3px] border-border bg-muted/30 px-3 py-2.5 text-center tabular-nums">
+                      <span className="font-heading font-bold">
+                        {row.cumulativePercent !== null ? (
+                          <>
+                            {row.cumulativePercent}
+                            <span className="text-muted-foreground">%</span>
+                          </>
+                        ) : (
+                          t("notAttempted")
+                        )}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
             <tfoot>
               <tr className="border-t-[3px] border-border bg-muted/40">

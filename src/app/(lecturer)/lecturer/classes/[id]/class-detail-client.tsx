@@ -5,7 +5,9 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { DateTimePicker } from "@/components/ui/datetime-picker";
+import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -37,6 +39,7 @@ import {
   Archive,
   RotateCcw,
   Loader2,
+  BarChart3,
 } from "lucide-react";
 import { formatDuration } from "@/lib/format/duration";
 import { windowLocalInputToIso } from "@/lib/format/window";
@@ -289,7 +292,7 @@ export function ClassDetailClient({
                   setArchiveError(null);
                   setArchiveDialogOpen(true);
                 }}
-                className="border-[3px] border-amber-600/30 bg-card/90 text-xs font-extrabold text-amber-800 hover:bg-amber-100 hover:text-amber-950 hover:border-amber-600/60 transition-all shadow-[var(--shadow-clay-sm)]"
+                className="border-[3px] border-amber-600/30 bg-card/90 text-xs font-extrabold text-amber-800 hover:bg-amber-100 hover:text-amber-950 hover:border-amber-600/60 dark:border-amber-500/60 dark:bg-amber-500/25 dark:text-amber-200 dark:hover:bg-amber-500/40 dark:hover:text-amber-100 transition-all shadow-[var(--shadow-clay-sm)]"
               >
                 <Archive className="mr-1.5 h-3.5 w-3.5" aria-hidden />
                 {t("archiveClass")}
@@ -301,7 +304,7 @@ export function ClassDetailClient({
               <div className="flex items-center gap-2.5">
                 <h1 className="font-heading text-3xl font-semibold [text-wrap:balance]">{cls.title}</h1>
                 {cls.archived_at && (
-                  <span className="rounded-full border-[3px] border-amber-600/40 bg-amber-100 px-3 py-0.5 text-xs font-extrabold text-amber-800 uppercase tracking-wider">
+                  <span className="rounded-full border-[3px] border-amber-600/40 bg-amber-100 px-3 py-0.5 text-xs font-extrabold text-amber-800 uppercase tracking-wider dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300">
                     {t("isArchivedBadge")}
                   </span>
                 )}
@@ -339,16 +342,16 @@ export function ClassDetailClient({
 
       {/* ── Archived class warning banner ── */}
       {cls.archived_at && (
-        <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border-[3px] border-amber-400/60 bg-amber-50 p-5 text-amber-900 shadow-[var(--shadow-clay-sm)]">
+        <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border-[3px] border-amber-400/60 bg-amber-50 p-5 text-amber-900 shadow-[var(--shadow-clay-sm)] dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
           <div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-amber-200/80 text-amber-800">
+            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-amber-200/80 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300">
               <Archive className="h-5 w-5" aria-hidden />
             </div>
             <div>
-              <p className="text-sm font-bold text-amber-950">
+              <p className="text-sm font-bold text-amber-950 dark:text-amber-100">
                 {t("isArchivedBadge")}
               </p>
-              <p className="text-xs font-semibold text-amber-900/90">
+              <p className="text-xs font-semibold text-amber-900/90 dark:text-amber-200/80">
                 {t("archivedBannerNotice")}
               </p>
             </div>
@@ -374,8 +377,9 @@ export function ClassDetailClient({
             <CardTitle>{t("classQuizzes")}</CardTitle>
             <Link
               href={`/lecturer/classes/${cls.id}/gradebook`}
-              className="text-xs font-bold text-primary hover:underline"
+              className={buttonVariants({ variant: "outline", size: "sm" })}
             >
+              <BarChart3 className="mr-1.5 h-3.5 w-3.5" aria-hidden />
               {t("gradebookLink")}
             </Link>
           </div>
@@ -429,7 +433,7 @@ export function ClassDetailClient({
                   </SelectContent>
                 </Select>
               </div>
-              <div className="flex items-end gap-1.5">
+              <div className="flex items-center gap-1.5">
                 <div className="space-y-1">
                   <Label htmlFor="quiz-time-hours" className="sr-only">
                     {t("hoursShort")}
@@ -462,7 +466,7 @@ export function ClassDetailClient({
                     className="w-16 text-center placeholder:text-center [appearance:textfield] [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                   />
                 </div>
-                <span aria-hidden className="pb-2.5 text-xs font-extrabold text-muted-foreground">{t("hoursShort")}</span>
+                <span aria-hidden className="text-xs font-extrabold text-muted-foreground">{t("hoursShort")}</span>
                 <div className="space-y-1">
                   <Label htmlFor="quiz-time-minutes" className="sr-only">
                     {t("minutesShort")}
@@ -492,47 +496,39 @@ export function ClassDetailClient({
                     className="w-16 text-center placeholder:text-center [appearance:textfield] [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                   />
                 </div>
-                <span aria-hidden className="pb-2.5 text-xs font-extrabold text-muted-foreground">{t("minutesShort")}</span>
+                <span aria-hidden className="text-xs font-extrabold text-muted-foreground">{t("minutesShort")}</span>
               </div>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-              <div className="flex items-center gap-1.5">
-                <Label htmlFor="quiz-opens-at" className="sr-only">
-                  {t("windowOpensLabel")}
-                </Label>
-                <Input
+              <div className="flex flex-wrap items-center gap-1.5">
+                <DateTimePicker
                   id="quiz-opens-at"
-                  type="datetime-local"
-                  aria-label={t("windowOpensLabel")}
+                  ariaLabel={t("windowOpensLabel")}
                   value={opensAt}
+                  onChange={setOpensAt}
                   disabled={creating}
-                  onChange={(e) => setOpensAt(e.target.value)}
-                  className="w-56"
+                  placeholder={t("windowPlaceholder")}
+                  buttonClassName="w-52"
                 />
                 <span aria-hidden className="text-xs font-extrabold text-muted-foreground">–</span>
-                <Label htmlFor="quiz-closes-at" className="sr-only">
-                  {t("windowClosesLabel")}
-                </Label>
-                <Input
+                <DateTimePicker
                   id="quiz-closes-at"
-                  type="datetime-local"
-                  aria-label={t("windowClosesLabel")}
+                  ariaLabel={t("windowClosesLabel")}
                   value={closesAt}
+                  onChange={setClosesAt}
                   disabled={creating}
-                  onChange={(e) => setClosesAt(e.target.value)}
-                  className="w-56"
+                  placeholder={t("windowPlaceholder")}
+                  buttonClassName="w-52"
                 />
               </div>
             </div>
             {mode === "assessment" && (
               <div className="flex flex-wrap items-center gap-4">
                 <label className="flex items-center gap-2.5 text-sm font-semibold text-foreground cursor-pointer">
-                  <input
-                    type="checkbox"
+                  <Switch
                     checked={allowRetake}
-                    onChange={(e) => setAllowRetake(e.target.checked)}
+                    onCheckedChange={(checked) => setAllowRetake(checked)}
                     disabled={creating}
-                    className="size-4 accent-[var(--primary)]"
                   />
                   {t("retakeAllow")}
                 </label>
@@ -557,12 +553,10 @@ export function ClassDetailClient({
             )}
             <div className="space-y-1">
               <label className="flex items-center gap-2.5 text-sm font-semibold text-foreground cursor-pointer">
-                <input
-                  type="checkbox"
+                <Switch
                   checked={shuffleQuestions}
-                  onChange={(e) => setShuffleQuestions(e.target.checked)}
+                  onCheckedChange={(checked) => setShuffleQuestions(checked)}
                   disabled={creating}
-                  className="size-4 accent-[var(--primary)]"
                 />
                 {t("shuffleQuestions")}
               </label>
@@ -721,7 +715,7 @@ export function ClassDetailClient({
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <div className="mb-2 grid h-12 w-12 place-items-center rounded-2xl border-[3px] border-amber-600/20 bg-amber-100 text-amber-800">
+            <div className="mb-2 grid h-12 w-12 place-items-center rounded-2xl border-[3px] border-amber-600/20 bg-amber-100 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300">
               <Archive className="h-6 w-6" aria-hidden />
             </div>
             <DialogTitle className="font-heading text-xl font-bold text-foreground">
@@ -752,7 +746,7 @@ export function ClassDetailClient({
               variant="default"
               disabled={archiving}
               onClick={handleArchiveClass}
-              className="bg-amber-600 hover:bg-amber-700 text-white font-extrabold"
+              className="bg-amber-600 hover:bg-amber-700 text-white font-extrabold dark:bg-amber-500 dark:hover:bg-amber-400 dark:text-amber-950"
             >
               {archiving ? (
                 <>
