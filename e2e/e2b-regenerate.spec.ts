@@ -35,7 +35,7 @@ async function createDraftQuizWithQuestions(page: Page, classTitle: string, quiz
   await page.getByRole("textbox", { name: "Question prompt" }).fill("What is velocity?");
   await page.getByLabel("Option 1").fill("Speed in a direction");
   await page.getByLabel("Option 2").fill("Total distance");
-  await page.getByRole("button", { name: /add question/i }).click();
+  await page.getByRole("button", { name: /add this question/i }).click();
   await expect(page.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
   await expect(page.getByText("What is velocity?", { exact: true })).toBeVisible();
 
@@ -43,7 +43,7 @@ async function createDraftQuizWithQuestions(page: Page, classTitle: string, quiz
   await page.getByRole("textbox", { name: "Question prompt" }).fill("Which unit is force measured in?");
   await page.getByLabel("Option 1").fill("Joule");
   await page.getByLabel("Option 2").fill("Newton");
-  await page.getByRole("button", { name: /add question/i }).click();
+  await page.getByRole("button", { name: /add this question/i }).click();
   await expect(page.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
   await expect(page.getByText("Which unit is force measured in?", { exact: true })).toBeVisible();
 }

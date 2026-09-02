@@ -305,7 +305,7 @@ export async function createQuizWithQuestions(
       await page.getByLabel("Explanation (optional)").fill(q.explanation);
     }
 
-    await page.getByRole("button", { name: /add question/i }).click();
+    await page.getByRole("button", { name: /add this question/i }).click();
     // The save completes when the form resets (Question field cleared).
     await expect(page.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
     await expect(page.getByText(q.prompt, { exact: true })).toBeVisible();

@@ -48,7 +48,7 @@ async function addQuestion(
   await optionInputs.nth(1).fill(optB);
   await page.getByRole("textbox", { name: /prompt/i }).fill(prompt);
   await page.getByRole("radio").first().check();
-  await page.getByRole("button", { name: /add question/i }).click();
+  await page.getByRole("button", { name: /add this question/i }).click();
   await expect(page.getByText(prompt, { exact: true })).toBeVisible();
 }
 
@@ -83,12 +83,12 @@ test("delete confirms natively and persists", async ({ page }) => {
   await createQuiz(page, `E28 Delete ${stamp}`);
   await addQuestion(page, "Delete me?", "x1", "x2");
 
-  page.once("dialog", (d) => d.accept());
   await page
     .locator("li")
     .filter({ hasText: "Delete me?" })
     .getByRole("button", { name: "Delete", exact: true })
     .click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Confirm", exact: true }).click();
 
   await expect(page.getByText("Delete me?", { exact: true })).toHaveCount(0);
   await page.reload();

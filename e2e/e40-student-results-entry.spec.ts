@@ -79,9 +79,12 @@ test.describe("E40 — student results entry point", () => {
     await completeQuiz(studentPage, ["6"], { next: "Next", finish: "Finish" });
     await fast(studentPage.getByText(/Assessment submitted!/i)).toBeVisible();
 
-    // Neither revealed → BOTH cards show the awaiting chip, NEITHER is a link.
+    // Neither revealed → BOTH cards are locked: a disabled "Awaiting
+    // results" button each (no-retake merge), NEITHER is a link.
     await openQuizList(studentPage);
-    await fast(studentPage.getByRole("status").filter({ hasText: /awaiting results|menunggu keputusan/i })).toHaveCount(2);
+    await fast(
+      studentPage.getByRole("button", { name: /awaiting results|menunggu keputusan/i }),
+    ).toHaveCount(2);
     await fast(studentPage.getByRole("link", { name: new RegExp(QUIZ_1) })).toHaveCount(0);
 
     // Lecturer reveals QUIZ_1 only.
@@ -98,7 +101,11 @@ test.describe("E40 — student results entry point", () => {
         { timeout: 10_000 },
       )
       .toBe(1);
-    await fast(studentPage.getByRole("status").filter({ hasText: /awaiting results|menunggu keputusan/i })).toHaveCount(1);
+    // QUIZ_2 (still unrevealed, no retake) stays locked as the disabled
+    // "Awaiting results" button.
+    await fast(
+      studentPage.getByRole("button", { name: /awaiting results|menunggu keputusan/i }),
+    ).toHaveCount(1);
 
     // Click through: EndScreen renders the score (1/1 → "1").
     await studentPage.getByRole("link", { name: new RegExp(`View results.*${QUIZ_1}`) }).click();
@@ -135,7 +142,7 @@ test.describe("E40 — student results entry point", () => {
     await lecturerPage.getByRole("textbox", { name: "Question prompt" }).fill("8+8?");
     await lecturerPage.getByLabel("Option 1").fill("15");
     await lecturerPage.getByLabel("Option 2").fill("16");
-    await lecturerPage.getByRole("button", { name: /add question/i }).click();
+    await lecturerPage.getByRole("button", { name: /add this question/i }).click();
     await fast(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
     const publishButton = lecturerPage.getByRole("button", { name: /publish/i });
     await publishButton.click();

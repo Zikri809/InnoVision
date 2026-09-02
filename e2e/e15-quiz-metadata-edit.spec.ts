@@ -125,7 +125,7 @@ test.describe("E15 — Quiz Metadata Editing (Title, Mode, Time Limit)", () => {
     await page.getByLabel("Question prompt").fill("What is 10 x 10?");
     await page.getByLabel("Option 1").fill("100");
     await page.getByLabel("Option 2").fill("20");
-    await page.getByRole("button", { name: /add question/i }).click();
+    await page.getByRole("button", { name: /add this question/i }).click();
     await expect(page.getByText("What is 10 x 10?")).toBeVisible();
 
     await page.getByRole("button", { name: /publish/i }).click();

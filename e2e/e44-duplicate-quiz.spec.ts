@@ -53,7 +53,7 @@ test.describe("E44 — duplicate quiz", () => {
         r.request().method() === "POST",
     );
     await form.getByTestId("question-image-input").setInputFiles("e2e/fixtures/tiny.png");
-    await page.getByRole("button", { name: /add question/i }).click();
+    await page.getByRole("button", { name: /add this question/i }).click();
     expect((await stagePost).status()).toBeLessThan(400);
     await expect(page.getByText("Imaged diagram?")).toBeVisible();
 

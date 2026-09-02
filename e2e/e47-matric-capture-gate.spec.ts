@@ -65,7 +65,9 @@ test.describe("E47 — AU-2 matric capture gate", () => {
     // poisoned-retry fallback).
     await page.goto("/login");
     await page.getByLabel(/email/i).fill(email);
-    await page.getByLabel(/password/i).fill(E2E_PASSWORD);
+    // exact: the PasswordInput toggle (aria-label "Show password") also
+    // matches a bare /password/i — strict-mode violation otherwise.
+    await page.getByLabel("Password", { exact: true }).fill(E2E_PASSWORD);
     await page.getByRole("button", { name: /sign in/i }).click();
     await fast(page).toHaveURL(/\/(dashboard|student)/, { timeout: 15_000 });
 

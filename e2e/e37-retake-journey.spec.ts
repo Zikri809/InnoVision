@@ -88,14 +88,16 @@ test("retake journey: enable on live quiz → spawn → chip → budget exhausti
     student.getByText(/released by your lecturer/i),
   ).toBeVisible({ timeout: 10_000 });
 
-  // ── 2. Default config: Start again → redirect to the completed session
-  // (already_attempted + session_id, e5-pinned journey).
+  // ── 2. Default config: the completed card is LOCKED — a single DISABLED
+  // "Awaiting results" button (awaiting state merged into it), no Start to
+  // click (the legacy already_attempted + session_id redirect contract is
+  // server-side only).
   await student.goto("/student/quizzes");
-  await student.getByRole("button", { name: "Start" }).click();
-  await expect(student).toHaveURL(attempt1Url);
-  await expect(
-    student.getByText(/released by your lecturer/i),
-  ).toBeVisible({ timeout: 10_000 });
+  const lockedCard = student.locator("li").filter({ hasText: QUIZ_TITLE });
+  const lockedBtn = lockedCard.getByRole("button", {
+    name: /awaiting results|menunggu keputusan/i,
+  });
+  await expect(lockedBtn).toBeDisabled();
 
   // ── 3. Lecturer enables retakes (2 attempts) via the edit dialog on the
   // LIVE quiz — metadata fields are disabled, retake controls are not.
@@ -106,7 +108,7 @@ test("retake journey: enable on live quiz → spawn → chip → budget exhausti
   const dialog = lecturer.getByRole("dialog", { name: "Edit quiz settings" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByLabel("Title")).toBeDisabled();
-  await dialog.getByLabel("Allow students to retake this assessment").check();
+  await dialog.getByRole("switch", { name: "Allow students to retake this assessment" }).click();
   await dialog.getByLabel("Max attempts").fill("2");
   await dialog.getByRole("button", { name: "Save changes" }).click();
   await expect(dialog).toBeHidden({ timeout: 10_000 });
@@ -159,8 +161,11 @@ test("retake journey: enable on live quiz → spawn → chip → budget exhausti
     lecturer.getByText(/attempt #2/i).first(),
   ).toBeVisible({ timeout: 10_000 });
 
-  // ── 7. Budget exhausted: a third Start redirects to the LATEST completed
-  // session (attempt 2's URL), never spawning attempt 3.
+  // ── 7. Budget exhausted (2/2 with retakes enabled): the card still offers
+  // Start (the completed-lock button only applies to no-retake quizzes), but
+  // a third Start redirects to the LATEST completed session (attempt 2's
+  // URL) — the legacy already_attempted + session_id contract — never
+  // spawning attempt 3.
   await student.goto("/student/quizzes");
   await student.getByRole("button", { name: "Start" }).click();
   await expect(student).toHaveURL(attempt2Url);

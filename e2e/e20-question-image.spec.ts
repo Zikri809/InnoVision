@@ -82,7 +82,7 @@ test("stage image in the add-question dropzone → renders in self-play", async 
       /\/api\/student-quizzes\/[\w-]+\/questions\/[\w-]+\/image$/.test(r.url()) &&
       r.request().method() === "POST",
   );
-  await page.getByRole("button", { name: /add question/i }).click();
+  await page.getByRole("button", { name: /add this question/i }).click();
 
   // The multipart image POST must land BEFORE navigating away to play — and
   // must have succeeded (a 5xx would otherwise surface as a cryptic
@@ -91,7 +91,7 @@ test("stage image in the add-question dropzone → renders in self-play", async 
   await expect(page.getByText(QUESTION_PROMPT)).toBeVisible();
 
   // Self-play renders the image above the options.
-  await page.getByRole("link", { name: /open builder|play/i }).first().click();
+  await page.getByRole("link", { name: /preview quiz|play/i }).first().click();
   await page.waitForURL(/\/play\/student\//);
   const img = page.locator("img[decoding='async']").first();
   await expect(img).toBeVisible({ timeout: 15_000 });
@@ -175,7 +175,7 @@ test("image POST failure after create: question kept, toast shown, stage cleared
   await addFormImageInput(page).setInputFiles("e2e/fixtures/tiny.png");
   await expect(page.locator('img[src^="blob:"]')).toBeVisible();
 
-  await page.getByRole("button", { name: /add question/i }).click();
+  await page.getByRole("button", { name: /add this question/i }).click();
   await expect(page.getByText(/question added, but the image could not be uploaded/i)).toBeVisible();
   await expect(page.getByText("Survives a failed upload?")).toBeVisible(); // question KEPT
   // Stage CLEARED — the dropzone is back so the file cannot silently attach
@@ -348,7 +348,7 @@ test("lecturer EditQuestionDialog: replace → remove image (draft)", async ({ b
       r.request().method() === "POST",
   );
   await lecturerInput.setInputFiles("e2e/fixtures/tiny.png");
-  await page.getByRole("button", { name: /add question/i }).click();
+  await page.getByRole("button", { name: /add this question/i }).click();
   expect((await stagePost).status()).toBeLessThan(400);
 
   // Open the edit dialog — signed-URL mint proves committed-mode seeding.

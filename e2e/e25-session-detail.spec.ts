@@ -145,14 +145,15 @@ test.describe("E25 — session detail drill-in", () => {
     await expect(q2.getByText("✗").first()).toBeVisible();
 
     // Chosen-option contract: the picked "London" row carries the red TINT
-    // (bg-destructive/10 + border-destructive/30), its circle badge ✕, and the
-    // trailing wrong-choice marker ✕ — scoped to the option row, not the
-    // question pill.
+    // (bg-destructive/10 + border-destructive/30) and renders the ✕ marker
+    // TWICE — the circle badge (selected && !isCorrect → ✕, 6e7c90f) and the
+    // trailing wrong-choice marker — so assert at least one, not a single
+    // element (strict mode would violate on the pair).
     const q2Chosen = q2.locator("li").filter({ hasText: "London" });
     await expect(q2Chosen).toHaveCount(1);
     await expect(q2Chosen).toHaveClass(/bg-destructive\/10/);
     await expect(q2Chosen).toHaveClass(/border-destructive\/30/);
-    await expect(q2Chosen.getByText("\u2715")).toBeVisible();
+    await expect(q2Chosen.getByText("\u2715").first()).toBeVisible();
 
     // Sanity: the correct answer text appears in Q2's options list too.
     await expect(q2.getByText("Paris", { exact: true })).toBeVisible();

@@ -7,6 +7,7 @@ import {
   completeQuiz,
   resolveServiceClient,
 } from "./helpers";
+import { setDateTime } from "./helpers-datetime";
 
 const TEST_TIMESTAMP = Date.now();
 const LECTURER_INVITE_CODE = process.env.LECTURER_INVITE_CODE ?? "";
@@ -22,14 +23,6 @@ const QUIZ_DATED_A2 = `E46 Due Soon A2 ${TEST_TIMESTAMP}`;
 // budget), 120s ceiling, skip without invite code. No networkidle, no fixed
 // sleeps; polling uses expect.poll with a bounded timeout.
 const fast = expect.configure({ timeout: 5_000 });
-
-function localInput(d: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return (
-    `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}` +
-    `T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`
-  );
-}
 
 /**
  * E46 — SQ-1 deadline chips + SQ-4 class drill-down filter, END TO END:
@@ -64,8 +57,8 @@ test.describe("E46 — deadline chips + class filter", () => {
     await fast(lecturerPage).toHaveURL(/\/lecturer\/classes\/[^/]+$/);
     await lecturerPage.getByLabel("Quiz title").fill(QUIZ_DATED_A);
     const closes = new Date(Date.now() + 12 * 3600_000);
-    await lecturerPage.getByLabel("Opens at").fill(localInput(new Date(Date.now() - 3600_000)));
-    await lecturerPage.getByLabel("Closes at").fill(localInput(closes));
+    await setDateTime(lecturerPage, lecturerPage.getByLabel("Opens at"), new Date(Date.now() - 3600_000));
+    await setDateTime(lecturerPage, lecturerPage.getByLabel("Closes at"), closes);
     await lecturerPage.getByRole("button", { name: /create quiz|new quiz/i }).click();
     await fast(lecturerPage.getByText(QUIZ_DATED_A, { exact: true })).toBeVisible();
     await lecturerPage.getByText(QUIZ_DATED_A, { exact: true }).click();
@@ -73,7 +66,7 @@ test.describe("E46 — deadline chips + class filter", () => {
     await lecturerPage.getByRole("textbox", { name: "Question prompt" }).fill("E46 dated?");
     await lecturerPage.getByLabel("Option 1").fill("x");
     await lecturerPage.getByLabel("Option 2").fill("y");
-    await lecturerPage.getByRole("button", { name: /add question/i }).click();
+    await lecturerPage.getByRole("button", { name: /add this question/i }).click();
     await fast(lecturerPage.getByRole("button", { name: /publish/i })).toBeEnabled();
     await lecturerPage.getByRole("button", { name: /publish/i }).click();
     await fast(lecturerPage.getByText("Live", { exact: true })).toBeVisible();

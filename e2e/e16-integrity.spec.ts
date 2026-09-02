@@ -67,7 +67,7 @@ test.describe("E16 — integrity suite", () => {
       await lp.getByRole("textbox", { name: "Question prompt" }).fill("What is 3+3?");
       await lp.getByLabel("Option 1").fill("5");
       await lp.getByLabel("Option 2").fill("6");
-      await lp.getByRole("button", { name: /add question/i }).click();
+      await lp.getByRole("button", { name: /add this question/i }).click();
       await expect(lp.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
       const publishButton = lp.getByRole("button", { name: /publish/i });
       await expect(publishButton).toBeEnabled();

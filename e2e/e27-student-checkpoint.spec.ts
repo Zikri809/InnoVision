@@ -38,7 +38,7 @@ async function createQuizWithThreeQuestions(page: import("@playwright/test").Pag
     await optionInputs.nth(1).fill(optB);
     await page.getByRole("textbox", { name: /prompt/i }).fill(prompt);
     await page.getByRole("radio").first().check();
-    await page.getByRole("button", { name: /add question/i }).click();
+    await page.getByRole("button", { name: /add this question/i }).click();
     await expect(page.getByText(prompt, { exact: true })).toBeVisible();
   }
 }

@@ -16,8 +16,8 @@ const QUIZ_TITLE = "E5 One Attempt";
  *  1. Lecturer creates an UNTIMED assessment quiz (so it can't race the client
  *     auto-submit), publishes.
  *  2. Student A starts, answers, submits.
- *  3. Student A clicks Start again → lands back on the completed session's
- *     play page (reveal-gated "results pending" EndScreen, no 500).
+ *  3. Student A's completed card is LOCKED: "Completed" button disabled +
+ *     awaiting-results chip (one-attempt enforced in the UI).
  *  4. Student B (same class) can still start — one-attempt is per student.
  */
 
@@ -57,13 +57,13 @@ test.describe("E5 — assessment one-attempt lock", () => {
     await lecturerPage.getByRole("textbox", { name: "Question prompt" }).fill("What is 2+2?");
     await lecturerPage.getByLabel("Option 1").fill("3");
     await lecturerPage.getByLabel("Option 2").fill("4");
-    await lecturerPage.getByRole("button", { name: /add question/i }).click();
+    await lecturerPage.getByRole("button", { name: /add this question/i }).click();
     await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
 
     await lecturerPage.getByRole("textbox", { name: "Question prompt" }).fill("Capital of France?");
     await lecturerPage.getByLabel("Option 1").fill("Paris");
     await lecturerPage.getByLabel("Option 2").fill("London");
-    await lecturerPage.getByRole("button", { name: /add question/i }).click();
+    await lecturerPage.getByRole("button", { name: /add this question/i }).click();
     await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
 
     const publishButton = lecturerPage.getByRole("button", { name: /publish/i });
@@ -95,18 +95,21 @@ test.describe("E5 — assessment one-attempt lock", () => {
       studentAPage.getByText("results will be released by your lecturer", { exact: false }),
     ).toBeVisible();
 
-    // â”€â”€ 3. Student A clicks Start again â†’ clean already-taken â”€â”€â”€â”€â”€
+    // â”€â”€ 3. Completed attempt blocks restart (locked card) â”€â”€â”€â”€â”€
     await studentAPage.getByRole("button", { name: "Back to quizzes" }).click();
     await expect(studentAPage).toHaveURL(/\/student\/quizzes/);
-    await studentAPage.getByRole("button", { name: "Start", exact: true }).click();
-    // 409 `already_attempted` redirects to the completed session's play page,
-    // which renders the EndScreen's reveal-gated pending state (no 500, and
-    // no score leaked before reveal).
-    await expect(studentAPage).toHaveURL(/\/play\/[0-9a-f-]+/);
-    await expect(
-      studentAPage.getByText("results will be released by your lecturer", { exact: false }),
-    ).toBeVisible();
-    await expect(studentAPage.getByText("Your score", { exact: true })).toHaveCount(0);
+    // The completed card renders a single DISABLED "Awaiting results" button
+    // (no Start at all; the awaiting state is merged into the button) — the
+    // one-attempt lock is enforced in the UI itself, so the legacy Start →
+    // 409 already_attempted redirect journey is unreachable by clicking.
+    // The 409 contract stays covered server-side.
+    const completedCard = studentAPage.locator("li").filter({ hasText: QUIZ_TITLE });
+    const completedBtn = completedCard.getByRole("button", {
+      name: /awaiting results|menunggu keputusan/i,
+    });
+    await expect(completedBtn).toBeVisible();
+    await expect(completedBtn).toBeDisabled();
+    await expect(completedBtn).not.toHaveAttribute("onclick");
 
     // â”€â”€ 4. Student B can still start (one-attempt is per student) â”€
     await registerUser(studentBPage, STUDENT_B_EMAIL, "student", LECTURER_INVITE_CODE);

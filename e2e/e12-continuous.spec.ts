@@ -61,7 +61,7 @@ test.describe("E12 — continuous verify", () => {
       await lecturerPage.getByRole("textbox", { name: "Question prompt" }).fill(`Q${i + 1}`);
       await lecturerPage.getByLabel("Option 1").fill("a");
       await lecturerPage.getByLabel("Option 2").fill("b");
-      await lecturerPage.getByRole("button", { name: /add question/i }).click();
+      await lecturerPage.getByRole("button", { name: /add this question/i }).click();
       await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
     }
 

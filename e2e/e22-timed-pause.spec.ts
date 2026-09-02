@@ -99,14 +99,14 @@ test("timed assessment: paused wall-time is not charged to the countdown", async
     await lecturerPage.getByRole("textbox", { name: "Question prompt" }).fill("What is 2+2?");
     await lecturerPage.getByLabel("Option 1").fill("3");
     await lecturerPage.getByLabel("Option 2").fill("4");
-    await lecturerPage.getByRole("button", { name: /add question/i }).click();
+    await lecturerPage.getByRole("button", { name: /add this question/i }).click();
     await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
     // Second question so answering Q1 surfaces an explicit Next button
     // (a single-question assessment auto-submits instead).
     await lecturerPage.getByRole("textbox", { name: "Question prompt" }).fill("Sky color?");
     await lecturerPage.getByLabel("Option 1").fill("Red");
     await lecturerPage.getByLabel("Option 2").fill("Blue");
-    await lecturerPage.getByRole("button", { name: /add question/i }).click();
+    await lecturerPage.getByRole("button", { name: /add this question/i }).click();
     await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
     const publishButton = lecturerPage.getByRole("button", { name: /publish/i });
     await expect(publishButton).toBeEnabled();

@@ -54,7 +54,7 @@ test.describe("E23 — builder mutations", () => {
     await expect(form.getByLabel("Option 1")).toHaveValue("Bb");
     await expect(form.getByLabel("Option 2")).toHaveValue("Cc");
 
-    await builder.getByRole("button", { name: /add question/i }).click();
+    await builder.getByRole("button", { name: /add this question/i }).click();
     await expect(builder.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
     const row = builder.locator("li").filter({ hasText: "Pick the second?" });
     await expect(row).toBeVisible();
@@ -101,14 +101,14 @@ test.describe("E23 — builder mutations", () => {
       builder.getByRole("button", { name: /publish/i }),
     ).toBeEnabled();
 
-    // window.confirm — arm an acceptor BEFORE the click (Playwright
-    // auto-DISMISSES dialogs by default, which would cancel the delete).
-    builder.once("dialog", (d) => d.accept());
+    // Delete flows through the AlertDialog confirmation now — click Delete,
+    // then Confirm inside the dialog.
     await builder
       .locator("li")
       .filter({ hasText: "Delete me?" })
       .getByRole("button", { name: "Delete", exact: true })
       .click();
+    await builder.getByRole("alertdialog").getByRole("button", { name: "Confirm", exact: true }).click();
 
     await expect(builder.getByText("Delete me?", { exact: true })).toHaveCount(0);
     // Empty-state copy + zero-count chip replace the question list.
@@ -173,7 +173,7 @@ test.describe("E23 — builder mutations", () => {
     await form.getByRole("textbox", { name: "Question prompt" }).fill("Second?");
     await form.getByLabel("Option 1").fill("y1");
     await form.getByLabel("Option 2").fill("y2");
-    const addBtn = form.getByRole("button", { name: /add question/i });
+    const addBtn = form.getByRole("button", { name: /add this question/i });
     // force: a successful submit resets the form and DISABLES the button, so a
     // naive second click would just wait forever. Force-dispatch both clicks to
     // simulate a genuine rapid double-click landing in the same tick.

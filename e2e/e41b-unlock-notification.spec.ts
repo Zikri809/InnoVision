@@ -64,7 +64,7 @@ test.describe("E41b — unlock notification", () => {
     await lecturerPage.getByRole("textbox", { name: "Question prompt" }).fill("What is 3+3?");
     await lecturerPage.getByLabel("Option 1").fill("5");
     await lecturerPage.getByLabel("Option 2").fill("6");
-    await lecturerPage.getByRole("button", { name: /add question/i }).click();
+    await lecturerPage.getByRole("button", { name: /add this question/i }).click();
     const publishButton = lecturerPage.getByRole("button", { name: /publish/i });
     await expect(publishButton).toBeEnabled();
     await publishButton.click();

@@ -64,7 +64,7 @@ async function createTimedAssessment(
     await page.getByRole("textbox", { name: "Question prompt" }).fill(q.prompt);
     await page.getByLabel("Option 1").fill(q.options[0]);
     await page.getByLabel("Option 2").fill(q.options[1]);
-    await page.getByRole("button", { name: /add question/i }).click();
+    await page.getByRole("button", { name: /add this question/i }).click();
     await expect(page.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
     await expect(page.getByText(q.prompt, { exact: true })).toBeVisible();
   }

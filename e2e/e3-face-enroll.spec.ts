@@ -65,13 +65,13 @@ test.describe("E3/E3b — face enrollment + assessment gate", () => {
     await lecturerPage.getByRole("textbox", { name: "Question prompt" }).fill("What is 2+2?");
     await lecturerPage.getByLabel("Option 1").fill("3");
     await lecturerPage.getByLabel("Option 2").fill("4");
-    await lecturerPage.getByRole("button", { name: /add question/i }).click();
+    await lecturerPage.getByRole("button", { name: /add this question/i }).click();
     await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
 
     await lecturerPage.getByRole("textbox", { name: "Question prompt" }).fill("Capital of France?");
     await lecturerPage.getByLabel("Option 1").fill("Paris");
     await lecturerPage.getByLabel("Option 2").fill("London");
-    await lecturerPage.getByRole("button", { name: /add question/i }).click();
+    await lecturerPage.getByRole("button", { name: /add this question/i }).click();
     await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
 
     const publishButton = lecturerPage.getByRole("button", { name: /publish/i });
@@ -142,7 +142,7 @@ test.describe("E3/E3b — face enrollment + assessment gate", () => {
     await lecturerPage.getByRole("textbox", { name: "Question prompt" }).fill("Q1");
     await lecturerPage.getByLabel("Option 1").fill("a");
     await lecturerPage.getByLabel("Option 2").fill("b");
-    await lecturerPage.getByRole("button", { name: /add question/i }).click();
+    await lecturerPage.getByRole("button", { name: /add this question/i }).click();
     await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
     const publishButton = lecturerPage.getByRole("button", { name: /publish/i });
     await expect(publishButton).toBeEnabled();
@@ -252,7 +252,7 @@ test.describe("E3/E3b — face enrollment + assessment gate", () => {
     await lecturerPage.getByRole("textbox", { name: "Question prompt" }).fill("Q1");
     await lecturerPage.getByLabel("Option 1").fill("a");
     await lecturerPage.getByLabel("Option 2").fill("b");
-    await lecturerPage.getByRole("button", { name: /add question/i }).click();
+    await lecturerPage.getByRole("button", { name: /add this question/i }).click();
     await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
 
     // Set the time limit (3s) via the PATCH route (the builder has no

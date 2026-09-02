@@ -48,11 +48,11 @@ test("creator lifecycle — create, build, play own quiz", async ({ page }) => {
     .getByRole("textbox", { name: /prompt/i })
     .fill("What is the capital of France?");
   await page.getByRole("radio").first().check(); // mark Paris correct
-  await page.getByRole("button", { name: /add question/i }).click();
+  await page.getByRole("button", { name: /add this question/i }).click();
   await expect(page.getByText("What is the capital of France?")).toBeVisible();
 
-  // Self-play from the editor's play link.
-  await page.getByRole("link", { name: /open builder|play/i }).first().click();
+  // Self-play from the editor's preview link.
+  await page.getByRole("link", { name: /preview quiz|play/i }).first().click();
   await page.waitForURL(/\/play\/student\//);
   await page.getByRole("button", { name: "London" }).click(); // wrong on purpose
   await expect(page.getByText(/not quite/i)).toBeVisible();

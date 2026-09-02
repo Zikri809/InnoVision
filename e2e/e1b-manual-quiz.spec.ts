@@ -71,7 +71,7 @@ test.describe("E1b — Manual quiz → publish → visible to student", () => {
     await lecturerPage.getByRole("textbox", { name: "Option 3" }).fill("Time taken");
     await lecturerPage.getByRole("button", { name: /add option/i }).click();
     await lecturerPage.getByRole("textbox", { name: "Option 4" }).fill("Acceleration");
-    await lecturerPage.getByRole("button", { name: /add question/i }).click();
+    await lecturerPage.getByRole("button", { name: /add this question/i }).click();
     // The save completes when the form resets (Question field cleared).
     await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
     await expect(lecturerPage.getByText("What is velocity?")).toBeVisible();
@@ -82,7 +82,7 @@ test.describe("E1b — Manual quiz → publish → visible to student", () => {
     await lecturerPage.getByRole("textbox", { name: "Option 2" }).fill("Newton");
     await lecturerPage.getByRole("button", { name: /add option/i }).click();
     await lecturerPage.getByRole("textbox", { name: "Option 3" }).fill("Watt");
-    await lecturerPage.getByRole("button", { name: /add question/i }).click();
+    await lecturerPage.getByRole("button", { name: /add this question/i }).click();
     await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
     await expect(lecturerPage.getByText("Which unit is force measured in?")).toBeVisible();
 
@@ -90,7 +90,7 @@ test.describe("E1b — Manual quiz → publish → visible to student", () => {
     await lecturerPage.getByLabel("Type").click();
     await lecturerPage.getByRole("option", { name: "True / False" }).click();
     await lecturerPage.getByRole("textbox", { name: "Question prompt" }).fill("Light travels faster than sound.");
-    await lecturerPage.getByRole("button", { name: /add question/i }).click();
+    await lecturerPage.getByRole("button", { name: /add this question/i }).click();
     await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
     await expect(lecturerPage.getByText("Light travels faster than sound.")).toBeVisible();
 

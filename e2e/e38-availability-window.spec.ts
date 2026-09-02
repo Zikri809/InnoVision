@@ -5,6 +5,7 @@ import {
   joinClass,
   resolveServiceClient,
 } from "./helpers";
+import { setDateTime } from "./helpers-datetime";
 
 /**
  * E38 — QC-3 availability-window journey (the E2E gaps unit/verify tests
@@ -35,14 +36,6 @@ const INVITE = process.env.LECTURER_INVITE_CODE ?? "";
 const CLASS_TITLE = `E38 Window ${stamp}`;
 const QUIZ_TITLE = `E38 Window Quiz ${stamp}`;
 
-function localInput(d: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return (
-    `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}` +
-    `T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`
-  );
-}
-
 test.describe.configure({ mode: "serial" });
 
 test("window journey: not-open → opened → window-closed → autoclose hides card", async ({
@@ -66,8 +59,8 @@ test("window journey: not-open → opened → window-closed → autoclose hides 
   await lecturer.getByText(CLASS_TITLE, { exact: true }).click();
   await expect(lecturer).toHaveURL(/\/lecturer\/classes\/[^/]+$/);
   await lecturer.getByLabel("Quiz title").fill(QUIZ_TITLE);
-  await lecturer.getByLabel("Opens at").fill(localInput(opens));
-  await lecturer.getByLabel("Closes at").fill(localInput(closes));
+  await setDateTime(lecturer, lecturer.getByLabel("Opens at"), opens);
+  await setDateTime(lecturer, lecturer.getByLabel("Closes at"), closes);
   await lecturer.getByRole("button", { name: /create quiz|new quiz/i }).click();
   await expect(lecturer.getByText(QUIZ_TITLE, { exact: true })).toBeVisible();
   await lecturer.getByText(QUIZ_TITLE, { exact: true }).click();
@@ -77,7 +70,7 @@ test("window journey: not-open → opened → window-closed → autoclose hides 
   )?.[1] ?? "";
   expect(quizId).toMatch(/^[0-9a-f-]{36}$/);
   const promptBox = lecturer.getByRole("textbox", { name: "Question prompt" });
-  const addBtn = lecturer.getByRole("button", { name: /add question/i });
+  const addBtn = lecturer.getByRole("button", { name: /add this question/i });
   // Fail fast: assert editability/enabled BEFORE interacting so a race fails
   // here with a clear message instead of a long actionability-wait stall.
   await expect(promptBox).toBeEditable();
@@ -119,8 +112,10 @@ test("window journey: not-open → opened → window-closed → autoclose hides 
   await lecturer.getByRole("button", { name: /Availability window:/i }).click();
   const dialog = lecturer.getByRole("dialog", { name: "Edit quiz settings" });
   await expect(dialog).toBeVisible();
-  await dialog.getByLabel("Opens at (UTC)").fill(
-    localInput(new Date(Date.now() - 60_000)),
+  await setDateTime(
+    lecturer,
+    dialog.getByLabel("Opens at (UTC)"),
+    new Date(Date.now() - 60_000),
   );
   await dialog.getByRole("button", { name: "Save changes" }).click();
   await expect(dialog).toBeHidden({ timeout: 10_000 });
@@ -230,8 +225,8 @@ test("mid-session window close: answer dead-screens with window copy, submit gra
   await lecturer.getByText(`${CLASS_TITLE} B`, { exact: true }).click();
   await expect(lecturer).toHaveURL(/\/lecturer\/classes\/[^/]+$/);
   await lecturer.getByLabel("Quiz title").fill(`${QUIZ_TITLE} B`);
-  await lecturer.getByLabel("Opens at").fill(localInput(opens));
-  await lecturer.getByLabel("Closes at").fill(localInput(closes));
+  await setDateTime(lecturer, lecturer.getByLabel("Opens at"), opens);
+  await setDateTime(lecturer, lecturer.getByLabel("Closes at"), closes);
   await lecturer.getByRole("button", { name: /create quiz|new quiz/i }).click();
   await expect(lecturer.getByText(`${QUIZ_TITLE} B`, { exact: true })).toBeVisible();
   await lecturer.getByText(`${QUIZ_TITLE} B`, { exact: true }).click();
@@ -241,7 +236,7 @@ test("mid-session window close: answer dead-screens with window copy, submit gra
   )?.[1] ?? "";
   expect(quizId).toMatch(/^[0-9a-f-]{36}$/);
   const promptBox = lecturer.getByRole("textbox", { name: "Question prompt" });
-  const addBtn = lecturer.getByRole("button", { name: /add question/i });
+  const addBtn = lecturer.getByRole("button", { name: /add this question/i });
   // Fail fast on a disabled control: assert editability/enabled BEFORE each
   // click so a race fails here with a clear message instead of stalling in
   // Playwright's enabled-wait loop for the full actionability timeout.

@@ -1,7 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 import { config as loadEnv } from "dotenv";
-import { existsSync, statSync, readdirSync } from "fs";
-import path from "path";
+import { existsSync } from "fs";
 import os from "os";
 
 // Load .env.local (without overriding already-set process env) so E2E specs
@@ -15,47 +14,15 @@ const BASE_URL = `http://localhost:${PORT}`;
 const MOCK_AI_PORT = process.env.MOCK_AI_PORT ?? "8787";
 
 /**
- * Smart build check:
- * - If in CI or PLAYWRIGHT_BUILD=1 -> always build fresh.
- * - If PLAYWRIGHT_BUILD=0 -> explicitly skip build.
- * - If any source file in src/, public/, or config is newer than .next/BUILD_ID -> rebuild automatically.
- * - If only test files (e2e/*) were edited -> reuse warm build for instant startup.
+ * Build policy: ALWAYS rebuild fresh before every suite run.
+ *
+ * The old smart-check (`src/`/`public/` mtime vs `.next/BUILD_ID`, PLAYWRIGHT_BUILD=0 to skip) was removed: NEXT_PUBLIC_* env vars
+ * (NEXT_PUBLIC_E2E_FAKE_SEAM, NEXT_PUBLIC_SUPABASE_URL, ...) are inlined at
+ * build time, so a bundle produced by a manual `npm run build` — or any build
+ * without the harness env — bakes a dead fake-tracker seam into the suite and
+ * fails face/gesture specs cluster-wide while looking "warm". Rebuilding under
+ * the webServer env makes the harness bundle's env self-consistent every run.
  */
-function isBuildStale(): boolean {
-  if (process.env.PLAYWRIGHT_BUILD === "1") return true;
-  if (process.env.PLAYWRIGHT_BUILD === "0") return false;
-  if (process.env.CI) return true;
-
-  const buildIdPath = path.join(process.cwd(), ".next", "BUILD_ID");
-  if (!existsSync(buildIdPath)) return true;
-
-  try {
-    const buildTime = statSync(buildIdPath).mtimeMs;
-    const checkPaths = ["src", "public", "next.config.ts", "package.json"];
-    for (const p of checkPaths) {
-      if (!existsSync(p)) continue;
-      const stat = statSync(p);
-      if (stat.mtimeMs > buildTime) return true;
-      if (stat.isDirectory()) {
-        const queue = [p];
-        while (queue.length > 0) {
-          const dir = queue.pop()!;
-          const entries = readdirSync(dir, { withFileTypes: true });
-          for (const entry of entries) {
-            const fullPath = path.join(dir, entry.name);
-            const entryStat = statSync(fullPath);
-            if (entryStat.mtimeMs > buildTime) return true;
-            if (entry.isDirectory()) queue.push(fullPath);
-          }
-        }
-      }
-    }
-  } catch {
-    return true;
-  }
-
-  return false;
-}
 
 export default defineConfig({
   testDir: "./e2e",
@@ -91,11 +58,10 @@ export default defineConfig({
       timeout: 30_000,
     },
     {
-      // PRODUCTION server: automatically rebuilds if any source file changed,
-      // but reuses warm build when only test files changed.
-      command: isBuildStale()
-        ? `npm run build && npm run start -- -p ${PORT}`
-        : `npm run start -- -p ${PORT}`,
+      // PRODUCTION server: rebuilt fresh every run (see the build-policy note
+      // above — env is inlined at build time, so the bundle must be produced
+      // under THIS env block).
+      command: `npm run build && npm run start -- -p ${PORT}`,
       url: BASE_URL,
       reuseExistingServer: !process.env.CI,
       timeout: 300_000,
