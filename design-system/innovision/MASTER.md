@@ -105,6 +105,16 @@ Clay uses **hard offset shadows** (no blur) for the toy-like 3D press, plus a su
 
 ## Component Specs
 
+### Component Sourcing (shadcn-first rule)
+
+This project runs official shadcn on the **Base UI** base (`"style": "base-lyra"` in `components.json`).
+
+- **Before hand-writing an interactive component, check official shadcn** (docs via Context7 `/shadcn-ui/ui`; registry JSON at `https://ui.shadcn.com/r/styles/base-lyra/<component>.json`), then `npx shadcn@latest add <component>` and clay-reskin the dropped file. Do not add third-party registries.
+- **Never hand-roll interaction-heavy components** (calendar, popover, tabs, combobox, focus-trapping dialogs) — upstream is accessibility-tested; ours rot. Reference implementations: `src/components/ui/calendar.tsx` (official base-lyra + clay skin), `src/components/ui/datetime-picker.tsx` (official date-picker composition pattern).
+- Hand-write only pure-styling wrappers (card, label) and app-specific compositions no registry ships.
+- Keep upstream `data-*`/a11y wiring intact when porting; `data-day` must stay ISO (`en-CA`) for `e2e/helpers-datetime.ts`; form dates use the `datetime-local` string contract.
+- E2e-relied accessible names are a contract — grep `e2e/` before changing interactive copy/markup.
+
 ### Buttons (clay — 3D base + soft-press)
 
 All buttons have a **solid "3D base" shadow** under them. On `:hover` they lift (base grows), on `:active` they **press down** (base collapses). This tactile press is the signature clay interaction.

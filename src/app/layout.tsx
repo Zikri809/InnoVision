@@ -4,6 +4,7 @@ import { Fredoka, Nunito } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
 import { Toaster } from "@/components/ui/toaster";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { THEME_INIT_SCRIPT } from "@/lib/theme/theme";
 import "./globals.css";
 import { cn } from "@/lib/utils";
@@ -55,8 +56,10 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       </head>
       <body className="min-h-full flex flex-col font-sans">
         <NextIntlClientProvider messages={messages} locale={locale}>
-          {children}
-          <Toaster />
+          <TooltipProvider delay={300}>
+            {children}
+            <Toaster />
+          </TooltipProvider>
         </NextIntlClientProvider>
       </body>
     </html>
