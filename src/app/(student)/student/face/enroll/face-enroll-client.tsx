@@ -405,7 +405,7 @@ export function FaceEnrollClient({
           <p className="mt-2 text-sm font-semibold text-muted-foreground">
             {t("consentBody")}
           </p>
-          <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-2xl border-[3px] border-border bg-orange-50/60 p-4">
+          <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-2xl border-[3px] border-border bg-orange-50/60 p-4 dark:border-amber-500/40 dark:bg-amber-500/10">
             <Checkbox
               checked={consent}
               onCheckedChange={(v) => {

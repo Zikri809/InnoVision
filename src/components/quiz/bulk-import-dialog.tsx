@@ -233,12 +233,13 @@ export function BulkImportDialog({
                 />
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="link"
                   size="sm"
+                  className="px-0 font-bold hover:underline"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={committing}
                 >
-                  <FileUp className="mr-1.5 size-4" aria-hidden="true" />
+                  <FileUp className="mr-1 size-3.5" aria-hidden="true" />
                   {t("fileBtn")}
                 </Button>
                 <span className="text-[11px] font-semibold text-muted-foreground">

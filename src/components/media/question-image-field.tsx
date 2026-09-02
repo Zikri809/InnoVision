@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
-import { Image as ImageIcon, Trash2, UploadCloud } from "lucide-react";
+import { Image as ImageIcon, UploadCloud, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MAX_QUESTION_IMAGE_BYTES } from "@/lib/media/validation";
 import { formatBytes, validateImageFile } from "@/lib/media/client";
@@ -243,7 +243,19 @@ export function QuestionImageField({
               the current one instead of hitting browser defaults. */}
           <div className="space-y-1.5" onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
           <div className="relative">
-            <div className="flex h-36 w-full items-center justify-center overflow-hidden rounded-2xl border-[3px] border-border bg-muted/40 sm:h-48">
+            {/* The preview itself is the replace affordance: click (or drop)
+                a file onto it — no separate upload chrome to explain. */}
+            <button
+              type="button"
+              disabled={disabled || isBusy}
+              onClick={() => inputRef.current?.click()}
+              aria-label={t("replaceAria")}
+              className={`group/preview relative flex h-36 w-full cursor-pointer items-center justify-center overflow-hidden rounded-2xl border-[3px] bg-muted/40 outline-none transition-colors focus-visible:ring-4 focus-visible:ring-ring/40 disabled:cursor-not-allowed sm:h-48 ${
+                dragOver
+                  ? "border-primary bg-primary/10"
+                  : "border-border hover:border-primary/60"
+              }`}
+            >
               {variant === "staged" && file ? (
                 <img
                   ref={stagedImgRef}
@@ -270,49 +282,43 @@ export function QuestionImageField({
                   </span>
                 )
               ) : null}
-            </div>
+              <span
+                aria-hidden="true"
+                className={`pointer-events-none absolute inset-0 items-center justify-center bg-black/50 font-heading text-xs font-bold text-white ${
+                  dragOver
+                    ? "flex"
+                    : "hidden group-hover/preview:flex group-focus-visible/preview:flex"
+                }`}
+              >
+                {t("dropPrompt")}
+              </span>
+            </button>
 
-            {/* Scrimmed clay chip keeps the icon buttons legible on ANY image
-                and always visible (touch has no hover). */}
-            <div className="absolute right-2 top-2 flex gap-1.5 rounded-xl border-[3px] border-border bg-card/95 p-1 shadow-[var(--shadow-clay-sm)]">
-              {isBusy ? (
+            {/* Remove is a literal bare X (no button chrome) — the dark drop
+                shadow halo carries legibility on ANY image, touch has no
+                hover, and it sits above the preview's own click target. */}
+            {isBusy ? (
+              <span
+                role="status"
+                aria-label={t("imageUploading")}
+                className="absolute right-2 top-2 flex items-center rounded-xl border-[3px] border-border bg-card/95 px-2 py-1.5 shadow-[var(--shadow-clay-sm)]"
+              >
                 <span
-                  role="status"
-                  aria-label={t("imageUploading")}
-                  className="flex items-center px-1.5 py-1"
-                >
-                  <span
-                    aria-hidden="true"
-                    className="size-3.5 animate-spin rounded-full border-2 border-primary border-t-transparent"
-                  />
-                </span>
-              ) : (
-                <>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    disabled={disabled}
-                    onClick={() => inputRef.current?.click()}
-                    aria-label={t("replaceAria")}
-                    className="size-8 rounded-lg"
-                  >
-                    <UploadCloud className="size-4" />
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    disabled={disabled}
-                    onClick={handleRemove}
-                    aria-label={t("removeAria")}
-                    className="size-8 rounded-lg text-destructive hover:bg-destructive/10 hover:text-destructive"
-                  >
-                    <Trash2 className="size-4" />
-                  </Button>
-                </>
-              )}
-            </div>
+                  aria-hidden="true"
+                  className="size-3.5 animate-spin rounded-full border-2 border-primary border-t-transparent"
+                />
+              </span>
+            ) : (
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={handleRemove}
+                aria-label={t("removeAria")}
+                className="absolute right-2 top-2 cursor-pointer rounded-full p-1 text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.9),0_0_5px_rgba(0,0,0,0.45)] transition-transform duration-150 outline-none hover:scale-110 focus-visible:ring-4 focus-visible:ring-ring/40 disabled:pointer-events-none disabled:opacity-50"
+              >
+                <X className="size-5" aria-hidden />
+              </button>
+            )}
           </div>
           {variant === "staged" && file && (
             <p className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground">

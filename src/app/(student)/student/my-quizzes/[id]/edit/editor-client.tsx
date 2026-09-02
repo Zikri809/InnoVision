@@ -21,6 +21,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogMedia,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -30,7 +41,7 @@ import {
 import { QuestionInputSchema } from "@/lib/quizzes/validation";
 import { GenerateFromFileDialog } from "@/components/extract/GenerateFromFileDialog";
 import { QuestionImageField } from "@/components/media/question-image-field";
-import { ArrowDown, ArrowLeft, ArrowUp, Check, Image as ImageIcon, Loader2, Pencil, Plus, Sparkles, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, Check, Image as ImageIcon, Loader2, Pencil, Play, Plus, Sparkles, Trash2, X } from "lucide-react";
 
 export type EditorQuestion = {
   id: string;
@@ -78,6 +89,7 @@ export function QuizEditorClient({
   const [description, setDescription] = useState(quiz.description ?? "");
   const [questions, setQuestions] = useState<EditorQuestion[]>(initialQuestions);
   const [error, setError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<EditorQuestion | null>(null);
   const [savingMeta, setSavingMeta] = useState(false);
 
   // Add-question form state.
@@ -357,7 +369,12 @@ export function QuizEditorClient({
 
   async function handleDelete(q: EditorQuestion) {
     if (lock.current) return;
-    if (!window.confirm(t("deleteQuestionConfirm"))) return;
+    setDeleteTarget(q);
+  }
+
+  async function confirmDelete() {
+    const q = deleteTarget;
+    if (!q || lock.current) return;
     clearBanners();
     lock.current = true;
     setBusy(true);
@@ -368,6 +385,7 @@ export function QuizEditorClient({
       );
       if (!ok) return fail(body.message);
       setQuestions((prev) => prev.filter((x) => x.id !== q.id));
+      setDeleteTarget(null);
     } catch {
       fail();
     } finally {
@@ -461,7 +479,7 @@ export function QuizEditorClient({
             </Button>
             <Link href={`/play/student/${quiz.id}`}>
               <Button variant="outline">
-                <Check className="h-4 w-4" aria-hidden /> {t("openBuilder")}
+                <Play className="h-4 w-4" aria-hidden /> {t("previewQuiz")}
               </Button>
             </Link>
           </div>
@@ -579,7 +597,7 @@ export function QuizEditorClient({
               ) : (
                 <Plus className="h-4 w-4" aria-hidden />
               )}
-              {t("addQuestion")}
+              {t("addQuestionSubmit")}
             </Button>
           </form>
         </CardContent>
@@ -695,6 +713,35 @@ export function QuizEditorClient({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ── Delete-question confirmation (replaces window.confirm) ── */}
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && busy) return;
+          setDeleteTarget(open ? deleteTarget : null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogMedia className="border-destructive/30 bg-destructive/10 text-destructive">
+              <Trash2 className="size-6" aria-hidden="true" />
+            </AlertDialogMedia>
+            <AlertDialogTitle>{t("deleteConfirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("deleteConfirmBody")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>{tCommon("cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={busy}
+              onClick={() => void confirmDelete()}
+            >
+              {busy ? tCommon("loading") : tCommon("confirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

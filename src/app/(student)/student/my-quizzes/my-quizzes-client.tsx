@@ -24,7 +24,9 @@ import {
 } from "@/components/ui/responsive-modal";
 import { Input } from "@/components/ui/input";
 import {
+  CalendarDays,
   ClipboardList,
+  ListChecks,
   Play,
   Pencil,
   Share2,
@@ -120,7 +122,14 @@ export function MyQuizzesClient({ quizzes }: { quizzes: MyQuiz[] }) {
       body: JSON.stringify({ action }),
     });
     if (!ok) return;
-    if (action === "unshare") toast.success(t("unsharedNotice"));
+    if (action === "unshare") {
+      toast.success(t("unsharedNotice"));
+      // Without a share_code the dialog would fall into its "minting link"
+      // spinner branch — close it; the card flips to Private via refresh.
+      setShareTarget(null);
+      setRegenArmed(false);
+      return;
+    }
     const updated = body.quiz as Partial<MyQuiz> | undefined;
     if (updated?.id) {
       setShareTarget((prev) =>
@@ -201,73 +210,93 @@ export function MyQuizzesClient({ quizzes }: { quizzes: MyQuiz[] }) {
         <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
           {quizzes.map((q) => (
             <li key={q.id}>
-              <Card className="flex h-full flex-col transition-[transform,box-shadow] duration-200 hover:-translate-y-1 hover:shadow-[8px_10px_0_rgba(194,65,12,0.16)]">
-                <CardHeader>
+              <Card className="group flex h-full flex-col transition-[transform,box-shadow] duration-200 hover:-translate-y-1 hover:shadow-[8px_10px_0_rgba(194,65,12,0.16)]">
+                <CardHeader className="gap-3">
                   <div className="flex items-start justify-between gap-3">
-                    <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-emerald-100 text-emerald-600">
+                    <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl border-[3px] border-emerald-600/25 bg-emerald-100 text-emerald-700 shadow-[var(--shadow-clay-sm)] transition-transform duration-200 group-hover:-rotate-6 dark:border-emerald-400/30 dark:bg-emerald-500/15 dark:text-emerald-300">
                       <ClipboardList className="h-6 w-6" aria-hidden />
                     </span>
                     <span
-                      className={`rounded-full border-[3px] px-3 py-1 text-xs font-extrabold ${
+                      className={`inline-flex items-center gap-1.5 rounded-full border-[3px] px-3 py-1 text-xs font-extrabold uppercase tracking-wide ${
                         q.share_code
-                          ? "border-emerald-300 bg-emerald-100 text-emerald-800"
-                          : "border-border bg-muted text-muted-foreground"
+                          ? "border-emerald-300 bg-emerald-100 text-emerald-800 dark:border-emerald-400/40 dark:bg-emerald-500/15 dark:text-emerald-300"
+                          : "border-border bg-muted text-muted-foreground dark:bg-muted/40"
                       }`}
                     >
-                      {q.share_code ? t("shared") : t("priv")}
+                      {q.share_code ? (
+                        <>
+                          <Share2 className="h-3 w-3" aria-hidden /> {t("shared")}
+                        </>
+                      ) : (
+                        <>
+                          <EyeOff className="h-3 w-3" aria-hidden /> {t("priv")}
+                        </>
+                      )}
                     </span>
                   </div>
-                  <CardTitle className="text-lg [text-wrap:balance]">{q.title}</CardTitle>
+                  <CardTitle className="text-lg leading-snug [text-wrap:balance]">
+                    {q.title}
+                  </CardTitle>
                   {q.description && (
                     <CardDescription className="line-clamp-2">{q.description}</CardDescription>
                   )}
-                  <p className="mt-1 text-xs font-bold text-muted-foreground">
-                    {formatQuizDate(q.created_at, locale)}
-                  </p>
                 </CardHeader>
                 <CardContent className="mt-auto space-y-3 pt-1">
-                  <p className="text-sm font-semibold text-muted-foreground">
-                    {t("questionCount", { count: q.question_count })}
-                  </p>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {q.question_count === 0 ? (
-                      <Button size="sm" disabled>
-                        <Play className="h-4 w-4" aria-hidden /> {t("playBtn")}
-                      </Button>
-                    ) : (
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl border-[3px] border-border/70 bg-muted/50 px-3 py-2 text-xs font-bold text-muted-foreground dark:border-border/60 dark:bg-muted/20">
+                    <span className="inline-flex items-center gap-1.5">
+                      <ListChecks className="h-3.5 w-3.5 text-primary" aria-hidden />
+                      {t("questionCount", { count: q.question_count })}
+                    </span>
+                    <span aria-hidden className="text-border">•</span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <CalendarDays className="h-3.5 w-3.5 text-primary" aria-hidden />
+                      <time dateTime={q.created_at}>{formatQuizDate(q.created_at, locale)}</time>
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      {q.question_count === 0 ? (
+                        <Button size="sm" className="flex-[2]" disabled>
+                          <Play className="h-4 w-4" aria-hidden /> {t("playBtn")}
+                        </Button>
+                      ) : (
+                        <Link
+                          href={`/play/student/${q.id}`}
+                          className={cn(buttonVariants({ size: "sm" }), "flex-[2]")}
+                        >
+                          <Play className="h-4 w-4" aria-hidden /> {t("playBtn")}
+                        </Link>
+                      )}
                       <Link
-                        href={`/play/student/${q.id}`}
-                        className={buttonVariants({ size: "sm" })}
+                        href={`/student/my-quizzes/${q.id}/edit`}
+                        className={cn(buttonVariants({ variant: "outline", size: "sm" }), "flex-1")}
                       >
-                        <Play className="h-4 w-4" aria-hidden /> {t("playBtn")}
+                        <Pencil className="h-4 w-4" aria-hidden /> {t("editBtn")}
                       </Link>
-                    )}
-                    <Link
-                      href={`/student/my-quizzes/${q.id}/edit`}
-                      className={buttonVariants({ variant: "outline", size: "sm" })}
-                    >
-                      <Pencil className="h-4 w-4" aria-hidden /> {t("editBtn")}
-                    </Link>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={busyId === q.id}
-                      onClick={() => {
-                        setShareTarget(q);
-                        void shareAction(q, "share");
-                      }}
-                    >
-                      <Share2 className="h-4 w-4" aria-hidden /> {t("shareBtn")}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-destructive hover:text-destructive"
-                      disabled={busyId === q.id}
-                      onClick={() => setDeleteTarget(q)}
-                    >
-                      <Trash2 className="h-4 w-4" aria-hidden /> {t("deleteBtn")}
-                    </Button>
+                    </div>
+                    <div className="mt-3 flex items-center justify-between gap-2 border-t-[3px] border-dashed border-border/70 pt-3 dark:border-border/50">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="-ml-2 text-muted-foreground hover:text-primary"
+                        disabled={busyId === q.id}
+                        onClick={() => {
+                          setShareTarget(q);
+                          void shareAction(q, "share");
+                        }}
+                      >
+                        <Share2 className="h-4 w-4" aria-hidden /> {t("shareBtn")}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="-mr-2 text-muted-foreground hover:text-destructive"
+                        disabled={busyId === q.id}
+                        onClick={() => setDeleteTarget(q)}
+                      >
+                        <Trash2 className="h-4 w-4" aria-hidden /> {t("deleteBtn")}
+                      </Button>
+                    </div>
                   </div>
                 </CardContent>
               </Card>

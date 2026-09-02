@@ -6,6 +6,8 @@ import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DateTimePicker } from "@/components/ui/datetime-picker";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -402,35 +404,27 @@ function EditQuizForm({
             </legend>
 
             <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-1.5">
-                <Label htmlFor="edit-quiz-opens-at" className="sr-only">
-                  {t("windowOpensLabel")}
-                </Label>
-                <Input
-                  id="edit-quiz-opens-at"
-                  type="datetime-local"
-                  value={opensAt}
-                  onChange={(e) => setOpensAt(e.target.value)}
-                  disabled={saving}
-                  className="w-56"
-                />
-              </div>
+              <DateTimePicker
+                id="edit-quiz-opens-at"
+                ariaLabel={t("windowOpensLabel")}
+                value={opensAt}
+                onChange={setOpensAt}
+                disabled={saving}
+                placeholder={t("windowPlaceholder")}
+                buttonClassName="w-52"
+              />
               <span aria-hidden="true" className="text-xs font-extrabold text-muted-foreground">
                 –
               </span>
-              <div className="flex items-center gap-1.5">
-                <Label htmlFor="edit-quiz-closes-at" className="sr-only">
-                  {t("windowClosesLabel")}
-                </Label>
-                <Input
-                  id="edit-quiz-closes-at"
-                  type="datetime-local"
-                  value={closesAt}
-                  onChange={(e) => setClosesAt(e.target.value)}
-                  disabled={saving}
-                  className="w-56"
-                />
-              </div>
+              <DateTimePicker
+                id="edit-quiz-closes-at"
+                ariaLabel={t("windowClosesLabel")}
+                value={closesAt}
+                onChange={setClosesAt}
+                disabled={saving}
+                placeholder={t("windowPlaceholder")}
+                buttonClassName="w-52"
+              />
             </div>
 
             <p className="text-xs font-semibold text-muted-foreground">
@@ -449,14 +443,12 @@ function EditQuizForm({
                 </span>
               </legend>
 
-              <label className="flex items-center gap-2.5 text-sm font-semibold text-foreground">
-                <input
+              <label className="flex items-center gap-2.5 text-sm font-semibold text-foreground cursor-pointer">
+                <Switch
                   id="edit-quiz-allow-retake"
-                  type="checkbox"
                   checked={allowRetake}
-                  onChange={(e) => setAllowRetake(e.target.checked)}
+                  onCheckedChange={(checked) => setAllowRetake(checked)}
                   disabled={saving}
-                  className="size-4 accent-[var(--primary)]"
                 />
                 {t("retakeAllow")}
               </label>
@@ -498,14 +490,12 @@ function EditQuizForm({
               so the checkbox locks with metadataLocked (the route 409s and
               the DB trigger backstops it anyway). */}
           <fieldset className="space-y-2" disabled={saving}>
-            <label className="flex items-center gap-2.5 text-sm font-semibold text-foreground">
-              <input
+            <label className="flex items-center gap-2.5 text-sm font-semibold text-foreground cursor-pointer">
+              <Switch
                 id="edit-quiz-shuffle"
-                type="checkbox"
                 checked={shuffleQuestions}
-                onChange={(e) => setShuffleQuestions(e.target.checked)}
+                onCheckedChange={(checked) => setShuffleQuestions(checked)}
                 disabled={saving || metadataLocked}
-                className="size-4 accent-[var(--primary)]"
               />
               {t("shuffleQuestions")}
             </label>

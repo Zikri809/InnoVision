@@ -193,16 +193,16 @@ export function StudentQuizzesClient({
       </div>
 
       {!enrolled && (
-        <div className="flex flex-wrap items-center justify-between gap-4 rounded-[24px] border-[3px] border-amber-300 bg-amber-50 p-5 shadow-[0_4px_0_rgba(217,119,6,0.15)]">
+        <div className="flex flex-wrap items-center justify-between gap-4 rounded-[24px] border-[3px] border-amber-300 bg-amber-50 p-5 shadow-[0_4px_0_rgba(217,119,6,0.15)] dark:border-amber-500/40 dark:bg-amber-500/10 dark:shadow-none">
           <div className="flex items-start gap-3.5">
-            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-amber-100 text-amber-700">
+            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-amber-100 text-amber-700 dark:border-[3px] dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300">
               <ScanFace className="h-6 w-6" aria-hidden />
             </span>
             <div>
-              <p className="font-heading text-base font-semibold text-amber-800">
+              <p className="font-heading text-base font-semibold text-amber-800 dark:text-amber-200">
                 {t("enrollBannerTitle")}
               </p>
-              <p className="mt-1 max-w-md text-sm font-semibold text-amber-700">
+              <p className="mt-1 max-w-md text-sm font-semibold text-amber-700 dark:text-amber-300">
                 {t("enrollBannerBody")}
               </p>
             </div>
@@ -219,13 +219,13 @@ export function StudentQuizzesClient({
       {/* ── SQ-4: removable class filter chip ── */}
       {classFilter && (
         <div className="flex items-center gap-3">
-          <span className="inline-flex items-center gap-2 rounded-full border-[3px] border-accent/40 bg-blue-100 px-3.5 py-1.5 text-xs font-extrabold text-accent">
+          <span className="inline-flex items-center gap-2 rounded-full border-[3px] border-accent/40 bg-blue-100 px-3.5 py-1.5 text-xs font-extrabold text-accent dark:border-accent/40 dark:bg-blue-500/15 dark:text-blue-300">
             {t("filterChipLabel")}
-            {classFilterTitle && <span className="text-accent">{classFilterTitle}</span>}
+            {classFilterTitle && <span className="text-accent dark:text-blue-300">{classFilterTitle}</span>}
             <Link
               href="/student/quizzes"
               aria-label={t("filterChipRemove")}
-              className="ml-0.5 grid h-4 w-4 place-items-center rounded-full transition-colors hover:bg-blue-200"
+              className="ml-0.5 grid h-4 w-4 place-items-center rounded-full transition-colors hover:bg-blue-200 dark:hover:bg-blue-500/25"
             >
               <X className="h-3.5 w-3.5" aria-hidden />
             </Link>
@@ -252,15 +252,17 @@ export function StudentQuizzesClient({
                   <CardHeader>
                     <div className="flex items-start justify-between gap-3">
                       <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-2xl ${
-                        isPractice ? "bg-emerald-100 text-emerald-600" : "bg-blue-100 text-accent"
+                        isPractice
+                          ? "bg-emerald-100 text-emerald-600 dark:border-[3px] dark:border-emerald-400/30 dark:bg-emerald-500/15 dark:text-emerald-300"
+                          : "bg-blue-100 text-accent dark:border-[3px] dark:border-accent/40 dark:bg-blue-500/15 dark:text-blue-300"
                       }`}>
                         {isPractice ? <Zap className="h-6 w-6" aria-hidden /> : <ShieldCheck className="h-6 w-6" aria-hidden />}
                       </span>
                       <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                         <span className={`rounded-full border-[3px] px-3 py-1 text-xs font-extrabold ${
                           isPractice
-                            ? "border-emerald-300 bg-emerald-100 text-emerald-800"
-                            : "border-accent/40 bg-blue-100 text-accent"
+                            ? "border-emerald-300 bg-emerald-100 text-emerald-800 dark:border-emerald-400/40 dark:bg-emerald-500/15 dark:text-emerald-300"
+                            : "border-accent/40 bg-blue-100 text-accent dark:border-accent/40 dark:bg-blue-500/15 dark:text-blue-300"
                         }`}>
                           {getModeLabel(q.mode, locale)}
                         </span>
@@ -312,14 +314,15 @@ export function StudentQuizzesClient({
                         {t("cardViewResults")}
                       </Link>
                     ) : q.completedSessionId ? (
-                      // SQ-2: completed + NOT revealed → status text, not a
-                      // dead link (unrevealed EndScreen is score-less anyway).
-                      // Stays even with retakes enabled (pinned by E40): the
-                      // chip reflects completed attempt 1; the Start button
-                      // reflects the resumable attempt 2.
-                      <span className="rounded-full border-[3px] border-border bg-muted px-3 py-1 text-xs font-extrabold text-muted-foreground" role="status">
-                        {t("cardCompletedAwaiting")}
-                      </span>
+                      // SQ-2: completed + NOT revealed → "Awaiting results".
+                      // With retake: a status chip — it reflects completed
+                      // attempt 1 while the Start button reflects the
+                      // resumable attempt 2 (coexistence pinned by E40).
+                      q.allow_retake ? (
+                        <span className="rounded-full border-[3px] border-border bg-muted px-3 py-1 text-xs font-extrabold text-muted-foreground" role="status">
+                          {t("cardAwaitingResults")}
+                        </span>
+                      ) : null
                     ) : (
                       <span className="text-sm font-semibold text-muted-foreground">
                         {isPractice
@@ -330,8 +333,14 @@ export function StudentQuizzesClient({
                       </span>
                     )}
                     {!isPractice && q.completedSessionId && !q.allow_retake ? (
-                      <Button variant="outline" disabled className="opacity-70 cursor-not-allowed">
-                        {tCommon("completed")}
+                      // Completed + unrevealed + no retake: one affordance —
+                      // the disabled button itself carries the awaiting state.
+                      <Button
+                        variant="outline"
+                        disabled
+                        className="cursor-not-allowed opacity-70"
+                      >
+                        {t("cardAwaitingResults")}
                       </Button>
                     ) : (
                       <Button

@@ -405,6 +405,21 @@ function EditQuestionForm({
             />
           </div>
 
+          {/* Image sits between prompt and options — same order as the
+              add-question form and the player (WYSIWYG authoring). Commits
+              immediately — independent of Save below. */}
+          <QuestionImageField
+            variant="committed"
+            questionId={question.id}
+            hasImage={hasImageOverride ?? Boolean(question.image_path)}
+            altPrompt={draft.prompt}
+            busy={imageBusy}
+            errorText={imageError}
+            disabled={saving}
+            onFile={(file) => uploadImage(file)}
+            onRemove={() => removeImage()}
+          />
+
           {/* Options */}
           <div className="space-y-2.5">
             <div className="flex items-center justify-between">
@@ -539,19 +554,6 @@ function EditQuestionForm({
               className="resize-y"
             />
           </div>
-
-          {/* Image (commits immediately — independent of Save below). */}
-          <QuestionImageField
-            variant="committed"
-            questionId={question.id}
-            hasImage={hasImageOverride ?? Boolean(question.image_path)}
-            altPrompt={draft.prompt}
-            busy={imageBusy}
-            errorText={imageError}
-            disabled={saving}
-            onFile={(file) => uploadImage(file)}
-            onRemove={() => removeImage()}
-          />
 
           {error && (
             <p

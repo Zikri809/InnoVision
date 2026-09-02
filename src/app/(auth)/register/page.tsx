@@ -295,7 +295,7 @@ export default function RegisterPage() {
                 </div>
               )}
 
-              <div className="flex items-start space-x-3 rounded-2xl border-[3px] border-border bg-orange-50/60 p-4">
+              <div className="flex items-start space-x-3 rounded-2xl border-[3px] border-border bg-orange-50/60 p-4 dark:border-amber-500/40 dark:bg-amber-500/10">
                 <Checkbox
                   id="consent"
                   checked={consent}

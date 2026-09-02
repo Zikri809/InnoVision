@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { BotAvatar } from "@/components/bot/bot-avatar";
 import { QuestionImage } from "@/components/media/question-image";
-import { ArrowRight, Check, X } from "lucide-react";
+import { ArrowRight, X } from "lucide-react";
 
 export type SafeQuestion = {
   id: string;
@@ -435,24 +435,20 @@ export function StudentPracticePlayer({
             )}
             {feedback && (
               <>
-                <p
-                  className={`rounded-2xl border-[3px] px-4 py-3 text-sm font-extrabold ${
-                    feedback.isCorrect
-                      ? "border-emerald-300 bg-emerald-50 text-emerald-800"
-                      : "border-amber-300 bg-amber-50 text-amber-800"
-                  }`}
-                  role="status"
-                >
-                  {feedback.isCorrect ? (
-                    <>
-                      <Check className="inline h-4 w-4" aria-hidden /> {t("correctFeedback")}
-                    </>
-                  ) : (
-                    <>
-                      <X className="inline h-4 w-4" aria-hidden /> {t("wrongFeedback")}
-                    </>
-                  )}
-                </p>
+                {feedback.isCorrect ? (
+                  // The glowing green option row already signals success
+                  // visually; keep only the sr-only live announcement.
+                  <p role="status" className="sr-only">
+                    {t("correctFeedback")}
+                  </p>
+                ) : (
+                  <p
+                    className="rounded-2xl border-[3px] border-amber-300 bg-amber-50 px-4 py-3 text-sm font-extrabold text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200"
+                    role="status"
+                  >
+                    <X className="inline h-4 w-4" aria-hidden /> {t("wrongFeedback")}
+                  </p>
+                )}
                 {feedback.explanation && (
                   <p className="rounded-2xl border-[3px] border-border bg-muted/50 px-4 py-3 text-sm font-semibold text-muted-foreground">
                     <strong className="font-extrabold text-foreground">

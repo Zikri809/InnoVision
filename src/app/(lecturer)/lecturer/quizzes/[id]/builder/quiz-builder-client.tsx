@@ -40,6 +40,18 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogMedia,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { GenerateFromFileDialog } from "@/components/extract/GenerateFromFileDialog";
 import { SourceTextPreview } from "@/components/extract/SourceTextPreview";
 import { EditQuestionDialog } from "@/components/quiz/edit-question-dialog";
@@ -373,13 +385,22 @@ export function QuizBuilderClient({
   }
 
   const deletingId = useRef<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<QuestionRow | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   async function handleDelete(q: QuestionRow) {
-    // Irreversible — confirm like the student editor does, and lock against
-    // double-clicks (the second DELETE would 404 and mask the success).
+    // Irreversible — confirmed through the AlertDialog (deleteTarget), and
+    // locked against double-clicks (the second DELETE would 404 and mask
+    // the success).
     if (deletingId.current) return;
-    if (!window.confirm(t("deleteQuestionConfirm"))) return;
+    setDeleteTarget(q);
+  }
+
+  async function confirmDelete() {
+    const q = deleteTarget;
+    if (!q || deletingId.current) return;
     deletingId.current = q.id;
+    setDeleteBusy(true);
     setError(null);
     try {
       const res = await fetch(`/api/quizzes/${quiz.id}/questions/${q.id}`, {
@@ -391,11 +412,13 @@ export function QuizBuilderClient({
         return;
       }
       toast.success(t("questionDeleted"));
+      setDeleteTarget(null);
       router.refresh();
     } catch {
       setError(tCommon("errorGeneric"));
     } finally {
       deletingId.current = null;
+      setDeleteBusy(false);
     }
   }
 
@@ -1126,7 +1149,7 @@ export function QuizBuilderClient({
 
               <div className="flex items-center gap-3">
                 <Button type="submit" disabled={saving || !draft.prompt.trim()}>
-                  {saving ? tCommon("loading") : t("addQuestionBtn")}
+                  {saving ? tCommon("loading") : t("addQuestionSubmitBtn")}
                 </Button>
               </div>
             </form>
@@ -1221,44 +1244,72 @@ export function QuizBuilderClient({
                         <Wand2 className="size-3.5 text-primary" />
                         {t("regenerateBtn")}
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={() => startEdit(q, idx)}
-                        aria-label={t("editBtn")}
-                        className="size-8"
-                      >
-                        <Pencil className="size-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={() => handleMove(q, "up")}
-                        disabled={idx === 0 || reordering}
-                        aria-label={t("moveUp")}
-                        className="size-8"
-                      >
-                        <ArrowUp className="size-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={() => handleMove(q, "down")}
-                        disabled={idx === questions.length - 1 || reordering}
-                        aria-label={t("moveDown")}
-                        className="size-8"
-                      >
-                        <ArrowDown className="size-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={() => handleDelete(q)}
-                        aria-label={t("deleteBtn")}
-                        className="size-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                      >
-                        <Trash2 className="size-4" />
-                      </Button>
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => startEdit(q, idx)}
+                              aria-label={t("editBtn")}
+                              className="size-8"
+                            >
+                              <Pencil className="size-4" />
+                            </Button>
+                          }
+                        />
+                        <TooltipContent>{t("editBtn")}</TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => handleMove(q, "up")}
+                              disabled={idx === 0 || reordering}
+                              aria-label={t("moveUp")}
+                              className="size-8"
+                            >
+                              <ArrowUp className="size-4" />
+                            </Button>
+                          }
+                        />
+                        <TooltipContent>{t("moveUp")}</TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => handleMove(q, "down")}
+                              disabled={idx === questions.length - 1 || reordering}
+                              aria-label={t("moveDown")}
+                              className="size-8"
+                            >
+                              <ArrowDown className="size-4" />
+                            </Button>
+                          }
+                        />
+                        <TooltipContent>{t("moveDown")}</TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => handleDelete(q)}
+                              aria-label={t("deleteBtn")}
+                              className="size-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                            >
+                              <Trash2 className="size-4" />
+                            </Button>
+                          }
+                        />
+                        <TooltipContent>{t("deleteBtn")}</TooltipContent>
+                      </Tooltip>
                     </div>
                   )}
                 </li>
@@ -1331,6 +1382,36 @@ export function QuizBuilderClient({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ── Delete-question confirmation (replaces window.confirm) ── */}
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && !deleteBusy) setDeleteTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogMedia className="border-destructive/30 bg-destructive/10 text-destructive">
+              <Trash2 className="size-6" aria-hidden="true" />
+            </AlertDialogMedia>
+            <AlertDialogTitle>{t("deleteConfirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("deleteConfirmBody")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteBusy}>
+              {tCommon("cancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={deleteBusy}
+              onClick={() => void confirmDelete()}
+            >
+              {deleteBusy ? tCommon("loading") : tCommon("confirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

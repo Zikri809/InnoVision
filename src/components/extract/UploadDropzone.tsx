@@ -10,6 +10,15 @@ import {
   MAX_TOTAL_UPLOAD_BYTES,
   sanitizeStorageFilename,
 } from "@/lib/extract/types";
+import {
+  Attachment,
+  AttachmentAction,
+  AttachmentActions,
+  AttachmentContent,
+  AttachmentDescription,
+  AttachmentMedia,
+  AttachmentTitle,
+} from "@/components/ui/attachment";
 
 export type UploadedFileItem = {
   id: string;
@@ -200,54 +209,50 @@ export function UploadDropzone({
             <span>{t("uploadedFilesTitle", { count: files.length, max: MAX_FILES })}</span>
             <span>{formatBytes(totalBytes)} / {formatBytes(MAX_TOTAL_UPLOAD_BYTES)}</span>
           </div>
-          <div className="grid gap-2 max-h-60 overflow-y-auto pr-1">
+          <div className="flex max-h-72 flex-wrap items-stretch gap-2 overflow-y-auto p-1 sm:p-2">
             {files.map((item) => {
               const isImage = item.file.type.startsWith("image/") || /\.(png|jpe?g|webp)$/i.test(item.file.name);
               const isOffice = /\.(pptx|docx|txt|md)$/i.test(item.file.name);
               return (
-                <div
-                  key={item.id}
-                  className="flex items-center justify-between gap-2.5 rounded-xl border-[3px] border-border bg-card px-3.5 py-2.5 shadow-[var(--shadow-clay-sm)] text-xs"
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="shrink-0 rounded-lg bg-primary/10 p-1.5 text-primary">
-                      {isImage ? <ImageIcon className="size-4" /> : <FileText className="size-4" />}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <p className="font-bold text-foreground truncate max-w-[240px] sm:max-w-[320px]" title={item.file.name}>
-                          {item.file.name}
-                        </p>
-                        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-extrabold border leading-none ${
-                          isOffice
-                            ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30"
-                            : "bg-primary/10 text-primary border-primary/20"
-                        }`}>
-                          {isOffice ? (
-                            <Zap className="size-2.5 shrink-0" />
-                          ) : isImage ? (
-                            <ImageIcon className="size-2.5 shrink-0" />
-                          ) : (
-                            <FileText className="size-2.5 shrink-0" />
-                          )}
-                          <span>{isOffice ? t("badgeNative") : isImage ? t("badgeOcr") : t("badgePdf")}</span>
-                        </span>
-                      </div>
-                      <p className="text-[11px] font-semibold text-muted-foreground mt-0.5">
-                        {formatBytes(item.file.size)}
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    aria-label={t("removeFile", { filename: item.file.name })}
-                    onClick={(e) => handleRemoveFile(item.id, e)}
-                    disabled={disabled || uploading}
-                    className="shrink-0 rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/15 hover:text-destructive transition-colors disabled:opacity-50"
-                  >
-                    <Trash2 className="size-4" />
-                  </button>
-                </div>
+                <Attachment key={item.id} className="min-w-[14rem] flex-1 basis-[calc(50%-0.5rem)] lg:basis-[calc(33.333%-0.667rem)]">
+                  <AttachmentMedia variant="icon">
+                    {isImage ? <ImageIcon className="size-4" /> : <FileText className="size-4" />}
+                  </AttachmentMedia>
+                  <AttachmentContent>
+                    <AttachmentTitle title={item.file.name}>
+                      {item.file.name}
+                    </AttachmentTitle>
+                    <AttachmentDescription>
+                      {formatBytes(item.file.size)} •{" "}
+                      <span className={`inline-flex items-center gap-1 text-[10px] font-extrabold uppercase leading-none ${
+                        isOffice
+                          ? "text-emerald-700 dark:text-emerald-300"
+                          : "text-primary"
+                      }`}>
+                        {isOffice ? (
+                          <Zap className="size-2.5 shrink-0" />
+                        ) : isImage ? (
+                          <ImageIcon className="size-2.5 shrink-0" />
+                        ) : (
+                          <FileText className="size-2.5 shrink-0" />
+                        )}
+                        <span>{isOffice ? t("badgeNative") : isImage ? t("badgeOcr") : t("badgePdf")}</span>
+                      </span>
+                    </AttachmentDescription>
+                  </AttachmentContent>
+                  <AttachmentActions>
+                    <AttachmentAction
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label={t("removeFile", { filename: item.file.name })}
+                      onClick={(e) => handleRemoveFile(item.id, e)}
+                      disabled={disabled || uploading}
+                      className="text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
+                    >
+                      <Trash2 className="size-4" />
+                    </AttachmentAction>
+                  </AttachmentActions>
+                </Attachment>
               );
             })}
           </div>
