@@ -321,7 +321,9 @@ async function run() {
   await page.waitForTimeout(800);
   await page.screenshot({ path: path.join(SCREENSHOT_DIR, "37_mobile_shared_quiz.png"), fullPage: true });
 
-  // Switch to Lecturer on mobile
+  // Switch to Lecturer on mobile (clear the student session first —
+  // /login redirects authenticated users to their dashboard).
+  await context.clearCookies();
   await page.goto(`${BASE_URL}/login`);
   await page.fill('input[type="email"]', "lecturer@innovision.test");
   await page.fill('input[type="password"]', "Password123!");

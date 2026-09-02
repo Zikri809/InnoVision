@@ -62,6 +62,12 @@ next-env.d.ts
 # IDE
 /.idea/
 
+# UI exploration screenshots (regenerate with scripts/explore-*.mjs)
+/screenshots/
+
+# ZCode session artifacts
+/.zcode/
+
 # graphify (local code-graph cache/artifacts; regenerate with `graphify update .`)
 /graphify-out/
 
