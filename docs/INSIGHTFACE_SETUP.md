@@ -49,6 +49,24 @@ FACE_SMOKE=1 npm run test:face-smoke
 Validates `/health`, 512-d unit-norm extraction, same-image cosine ≥ 0.9,
 impostor cosine < 0.5 against `e2e/fixtures/faces/*.jpg` (synthetic faces).
 
+## Assessment scenario harness (optional, opt-in)
+
+```bash
+npm run face:start          # sidecar must be up
+npm run face:scenarios
+```
+
+End-to-end assessment scenarios against REAL sidecar extracts + REAL Supabase
+RPCs (auth users, class, live assessment sessions): genuine enroll + verify,
+capture variation (dim/blur/resized/shifted), imposter at the gate, a second
+person in frame, blank wall, duplicate-enrollment (someone else's face →
+`pending_review` → lecturer reject → re-enroll), fail-streak → flagged →
+unlock, and a genuine-vs-impostor threshold-margin report. Faces are
+AI-generated (thispersondoesnotexist.com dataset via Hugging Face — no real
+person depicted); fixtures live in `e2e/fixtures/faces/scenarios/`.
+Requires local Supabase (migration 0039 applied); cleans up everything it
+creates.
+
 ## Ops scripts
 
 | Script | What it does |
@@ -56,6 +74,7 @@ impostor cosine < 0.5 against `e2e/fixtures/faces/*.jpg` (synthetic faces).
 | `npm run face:start` / `face:stop` | start/stop the sidecar container |
 | `npm run face:reset` | wipe `profile_face_samples` + face checks + consent flags (dev DB only) |
 | `npm run verify:face` | authoritative RPC/RLS/security harness against local Supabase |
+| `npm run face:scenarios` | end-to-end assessment scenarios (real sidecar + real RPCs) — see above |
 | `npm run face:report` | threshold report over recorded `face_checks` |
 
 ## Cutover & rollback

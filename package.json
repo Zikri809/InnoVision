@@ -45,6 +45,7 @@
     "verify:mediapipe": "node scripts/verify-mediapipe.mjs",
     "seed:demo": "node scripts/seed-demo.mjs",
     "face:report": "node scripts/face-threshold-report.mjs",
+    "face:scenarios": "node scripts/face-scenarios.mjs",
     "incident:cleanup": "node scripts/incident-cleanup.mjs",
     "verify:clone": "node scripts/verify-clone-quiz.mjs"
   },
