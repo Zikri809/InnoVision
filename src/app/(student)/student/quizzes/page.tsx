@@ -31,6 +31,12 @@ export default async function StudentQuizzesPage({
     .eq("id", user.id)
     .maybeSingle();
 
+  // InsightFace migration (0039): status alone is not sufficient — a
+  // pre-migration enrollee has status 'enrolled' but NO stored baseline (raw
+  // frames were never kept). The enroll CTA must show for them.
+  const baseline = await supabase.rpc("face_baseline_status");
+  const hasBaseline = (baseline.data as { present: boolean } | null)?.present === true;
+
   if (!profile) {
     return (
       <ProfilePendingPanel />
@@ -137,7 +143,7 @@ export default async function StudentQuizzesPage({
   return (
     <StudentQuizzesClient
       quizzes={quizzesWithClass}
-      enrolled={profile.face_enrollment_status === "enrolled"}
+      enrolled={profile.face_enrollment_status === "enrolled" && hasBaseline}
       classFilter={classFilter}
       classFilterTitle={classFilter ? (classTitleById.get(classFilter) ?? null) : null}
     />

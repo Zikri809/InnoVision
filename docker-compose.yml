@@ -1,28 +1,29 @@
 # Self-hosted AI/vision services that run alongside `supabase start`:
-#   - CompreFace — face recognition (detection, alignment, embedding, matching
-#     all server-side). The Next.js API routes call it over loopback only
-#     (127.0.0.1:8000), so classroom WiFi can never reach it
-#     (PLAN_PHASE7_COMPREFACE_MIGRATION §1, §7).
-#   - glm-ocr — GLM-OCR (Z.ai) served by vLLM with an OpenAI-compatible API.
+#   - insightface — single stateless face service (FastAPI + ONNX Runtime,
+#     buffalo_l: SCRFD detection + 3D-68 landmark pose + ArcFace embedding in
+#     ONE /extract call). Replaces the 5-container CompreFace stack; embeddings
+#     live in Supabase (profile_face_samples, migration 0039), so the sidecar
+#     is fully stateless (no volumes, no internal DB, no API keys). The Next.js
+#     API routes call it over loopback only (127.0.0.1:8000), so classroom WiFi
+#     can never reach it. FACE_SIDECAR_TOKEN is a defense-in-depth shared
+#     secret against bind drift — provision a real value for production
+#     (compose reads it from the shell env or a project-root `.env`, NOT
+#     `.env.local`; the Next.js side reads .env.local as usual);
+#     empty = header check disabled (local dev default).
+#   - glm-ocr — GLM-OCR (Z.ai) served by vLLM with an [OI]-compatible API.
 #     Replaces the unstable native-Ollama GLM path: vLLM is the officially
-#     recommended production runtime for GLM-OCR (the Ollama OpenAI-compat
+#     recommended production runtime for GLM-OCR (the Ollama [OI]-compat
 #     vision endpoint is known to 502). The lecturer's browser talks to it over
 #     loopback only (127.0.0.1:11434) — see docs/GLM_OCR_SETUP.md.
 #
-# CompreFace layout mirrors the official exadel/CompreFace compose for 1.2.0,
-# which split the admin backend (`compreface-admin`) and the web UI
-# (`compreface-fe` / nginx) out of the inference API (`compreface-api`):
-#   - compreface-fe  serves the admin UI and proxies `/api/v1/*` to admin/api.
-#   - compreface-api is the face recognition/verification engine (no UI).
-# Only `compreface-fe` publishes a port (127.0.0.1:8000); everything else stays
-# internal to the compose network. Network aliases map the plan's `compreface-*`
-# names onto the names the CompreFace API image resolves by default
-# (`comprehend-*`) — belt-and-braces for both naming conventions.
-# Named volumes only (never bind mounts) so biometric data is never committed.
+# Rollback note: the CompreFace volumes (compreface-postgres-data) may still
+# exist on hosts that ran the old stack. They contain biometric data — do NOT
+# `docker compose down -v` casually; disposal is a documented security step
+# after the migration stability window (docs/INSIGHTFACE_SETUP.md §Cutover).
 name: innovision
 
 services:
-  # GLM-OCR via vLLM — OpenAI-compatible `/v1/chat/completions` + `/v1/models`.
+  # GLM-OCR via vLLM — [OI]-compatible `/v1/chat/completions` + `/v1/models`.
   # The model (zai-org/GLM-OCR, ~0.9B params) is pulled from Hugging Face on
   # first start (~2.5 GB image + model weights). GPU-accelerated via the NVIDIA
   # container toolkit; falls back to CPU when no GPU is present (slow, ~30s/page).
@@ -51,7 +52,7 @@ services:
       - "0.7"
       - --enforce-eager
     ports:
-      - "127.0.0.1:11434:11434" # loopback-only: OpenAI-compatible API
+      - "127.0.0.1:11434:11434" # loopback-only: [OI]-compatible API
     deploy:
       resources:
         reservations:
@@ -65,91 +66,28 @@ services:
       timeout: 10s
       retries: 5
       start_period: 120s
-  compreface-postgres:
-    image: postgres:12
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: compreface
-      POSTGRES_PASSWORD: compreface
-      POSTGRES_DB: compreface
-    volumes:
-      - compreface-postgres-data:/var/lib/postgresql/data
-    networks:
-      default:
-        aliases:
-          - comprehend-postgres-db
-    # NOT host-bound — internal to the compose network only.
 
-  compreface-core:
-    image: exadel/compreface-core:1.2.0
+  # InsightFace sidecar — detection + pose + embedding in one call.
+  # WEB_CONCURRENCY=1 (one model instance ≈ 350–500 MB with det + 3d68
+  # landmark + recognition; a second worker would double that for no benefit
+  # at classroom scale — the routes time out at 5s per call). Loopback-only
+  # publish. Build context is docker/insightface itself (NOT the repo root —
+  # shipping node_modules/playwright-report to the daemon costs minutes on
+  # WSL2).
+  insightface-service:
+    build:
+      context: ./docker/insightface
+      dockerfile: Dockerfile
+    image: innovision-insightface:local
     restart: unless-stopped
     environment:
-      ML_PORT: "3000"
-      UWSGI_PROCESSES: "2"
-      UWSGI_THREADS: "1"
-    # ML worker ports (3000/3100) stay internal — the API reaches the core via
-    # the compose network, never via published host ports.
-    networks:
-      default:
-        aliases:
-          - comprehend-core
-
-  compreface-api:
-    image: exadel/compreface-api:1.2.0
-    restart: unless-stopped
-    environment:
-      POSTGRES_URL: jdbc:postgresql://compreface-postgres:5432/compreface
-      POSTGRES_USER: compreface
-      POSTGRES_PASSWORD: compreface
-      SPRING_PROFILES_ACTIVE: dev
-      ML_PORT: "3000"
-      ML_KERAS_PORT: "3100"
-      SAVE_IMAGES_TO_DB: "true"
-      CONNECTION_TIMEOUT: "10000"
-      READ_TIMEOUT: "60000"
-    depends_on:
-      - compreface-postgres
-      - compreface-core
-    volumes:
-      - compreface-api-logs:/tmp
-    networks:
-      default:
-        aliases:
-          - comprehend-api
-
-  compreface-admin:
-    image: exadel/compreface-admin:1.2.0
-    restart: unless-stopped
-    environment:
-      POSTGRES_URL: jdbc:postgresql://compreface-postgres:5432/compreface
-      POSTGRES_USER: compreface
-      POSTGRES_PASSWORD: compreface
-      SPRING_PROFILES_ACTIVE: dev
-    depends_on:
-      - compreface-postgres
-      - compreface-api
-    networks:
-      default:
-        aliases:
-          - comprehend-admin
-
-  compreface-fe:
-    image: exadel/compreface-fe:1.2.0
-    restart: unless-stopped
-    environment:
-      CLIENT_MAX_BODY_SIZE: "150m"
-      PROXY_READ_TIMEOUT: "60000ms"
-      PROXY_CONNECT_TIMEOUT: "10000ms"
+      FACE_SIDECAR_TOKEN: "${FACE_SIDECAR_TOKEN:-}"
+      WEB_CONCURRENCY: "1"
     ports:
-      - "127.0.0.1:8000:80" # loopback-only: admin UI + /api/v1 proxy
-    depends_on:
-      - compreface-api
-      - compreface-admin
-    networks:
-      default:
-        aliases:
-          - comprehend-fe
-
-volumes:
-  compreface-postgres-data:
-  compreface-api-logs:
+      - "127.0.0.1:8000:8000" # loopback-only: /extract + /health
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s

@@ -210,5 +210,15 @@ describe("scoreFrameQuality", () => {
     expect(straightScore).toBe(120);
     expect(tiltedScore).toBe(110); // +15 for 15 < abs(yaw) <= 25
     expect(turnedScore).toBe(95); // +0 for abs(yaw) > 25
+
+    const allowedTurnedScore = scoreFrameQuality({
+      faceDetected: true,
+      centered: true,
+      yaw: 40,
+      eyesOpen: true,
+      lightingOk: true,
+      allowTurned: true,
+    });
+    expect(allowedTurnedScore).toBe(115); // +20 for abs(yaw) <= 45 when allowTurned is true
   });
 });

@@ -16,7 +16,7 @@
 | **API / integration** | Vitest + route-handler invocation + MSW (mock OpenAI-compatible endpoint) | Grading, face verify streaks, AI generate with retry, OCR route | Every commit |
 | **E2E** | Playwright (+ fake webcam via `--use-fake-device-for-media-stream` / custom `getUserMedia` stub) | Full lecturer→student→assessment flow, gesture sim, face sim | Pre-merge / pre-demo |
 
-**Mocking strategy for vision:** MediaPipe models can't load in CI reliably. All vision code is behind interfaces (`IFaceTracker`, `IHandTracker`) — unit tests use fakes; E2E injects a **deterministic fake face tracker** (returns `FAKE_FRAME_MATCH`/`FAKE_FRAME_MISMATCH` frame markers that the route-level CompreFace mock maps to match/mismatch) and a **fake hand tracker** (scripted finger counts). Real-model smoke test is manual-only. CompreFace is mocked server-side (`COMPREFACE_MOCK_ENABLED=1`) — E2E never needs the Docker container.
+**Mocking strategy for vision:** MediaPipe models can't load in CI reliably. All vision code is behind interfaces (`IFaceTracker`, `IHandTracker`) — unit tests use fakes; E2E injects a **deterministic fake face tracker** (returns `FAKE_FRAME_MATCH`/`FAKE_FRAME_MISMATCH` frame markers that the route-level InsightFace mock maps to match/mismatch) and a **fake hand tracker** (scripted finger counts). Real-model smoke test is manual-only. The InsightFace sidecar is mocked server-side (`FACE_MOCK_ENABLED=1`) — E2E never needs the Docker container.
 
 ---
 
@@ -280,7 +280,7 @@
 | I-vote | verify | 2-of-3 frame majority passes; 1-of-3 fails; a lookalike ranking top-1 does NOT fail (1:1 by lookup — margin rule removed in 0020) | per-vote outcome — face-routes.test.ts I-vote block |
 | I-threshold | verify | similarity exactly `FACE_SIMILARITY_MIN` (0.50) vs 0.49 | matched flips at the boundary |
 | I4b | verify | **empty-framed no-face sentinel** | fail row (paused), CompreFace NOT called, never a pass |
-| I-compreface-down | verify/enroll | CompreFace `compreface_unavailable` / HTTP `compreface_error` | 503 with distinct error keys |
+| I-sidecar-down | verify/enroll | sidecar `insightface_unavailable` / HTTP `insightface_error` | 503 with distinct error keys |
 | I-pose | enroll | out-of-range yaw | 400 `pose_invalid` |
 | I-health | GET `/api/face/health` | CompreFace up / down | `{ available: true/false }` |
 | I-exempt | verify | `face_exempt=true` | `{matched:true, distance:null}`, no nonce rotation |
@@ -408,6 +408,10 @@
 8. **Dev-server contention.** Next 16 enforces ONE dev server per checkout directory — concurrent Playwright runs collide on `.next/dev/lock` regardless of assigned ports (symptom: intermittent `ERR_CONNECTION_REFUSED`). Serialize suite runs and agent repairs. Workers are capped at 4 locally (uncapped workers saturate `next dev`'s on-demand compilation until even logins exceed 30s).
 9. **Read `[WebServer]` output lines.** Server-side truth surfaces there (`signInWithPassword error`, signup errors, face-boot fallbacks) — client-side timeouts often have their explanation already printed above them. `test-results/<spec>/error-context.md` snapshots show actual DOM at failure; they are wiped by later runs, so capture early.
 10. **Known-benign noise (do not chase):** `[face-boot] primary boot failed ... NotSupportedError` (headless Chromium lacks WebGL for MediaPipe; fake-tracker path unaffected), `[WebServer] ⨯ Error: The destination stream closed early.` at context teardown, mediapipe `gl_context.cc` warnings.
+11. **Hardcoded route rate budgets vs the 6-worker burst (2026-09-04 mass failure).** Beyond the env-tunable auth budgets (lesson 1), ~60 route limiters are hardcoded constants (`VERIFY_RATE`, `START_RATE`, …) plus a non-tunable `invite:global` 100/min bucket in `register.ts`. Under the full suite these overflow mid-run and the failures migrate between specs with the same `registerUser` timeout / fallback-login signature. Fix: `E2E_RATE_LIMIT_DISABLED=1` (webServer env only) short-circuits `rateLimit()` in `lib/classes/rate-limit.ts`; it is inert in production and safe because no e2e spec asserts a 429 — limits are pinned by route-level vitest tests that seed buckets directly (`_seedRateLimit`). Symptom to recognize: first run after a long gap fails ~15+ auth specs cluster-wide; specs pass solo.
+12. **Base UI switch & datetime-picker locators (base-lyra migration).** A Base UI `Switch` renders BOTH a `role="switch"` element and a hidden twin form input, so `getByLabel(/.../i).check()` strict-mode-violates (resolved to 2) — target `getByRole("switch", { name: ... })` and `.click()` it (e37/e40/e42 pattern). The `DateTimePicker` trigger label ("Opens at") is also a PREFIX of its segment inputs ("Opens at — hours/minutes"), so `getByLabel("Opens at")` resolves to 3 — use `{ exact: true }` (e38/e46).
+13. **`setDateTime` fills UTC wall-clock, not local.** The availability-window surface is a `datetime-local` input that `lib/format/window.windowLocalInputToIso` parses as UTC ("lecturer schedules in UTC quiz time"; edit-dialog labels say "(UTC)"). The helper types `getUTC*` components; filling `getHours()`-style local components shifts every window by the machine's UTC offset (UTC+8 here) and silently inverts window journeys — the student-side "isn't open yet"/"window closed" assertions then fail for schedule reasons that look like RPC bugs.
+14. **Share dialog auto-closes on unshare.** Since f80ea9a, `my-quizzes-client` sets `shareTarget(null)` after a successful unshare (a null `share_code` would strand the dialog in its minting spinner). Specs must not click a Close button afterwards — assert `getByRole("dialog")` is hidden instead (e17).
 
 ---
 

@@ -166,11 +166,17 @@ export default async function PlayPage({ params }: PageProps) {
     .select("consent_given_at, face_enrollment_status")
     .eq("id", user.id)
     .maybeSingle();
+  // InsightFace migration (0039): enrollment status alone is not sufficient —
+  // a pre-migration enrollee has status 'enrolled' but NO stored baseline
+  // (raw frames were never kept). The gate additionally requires a real
+  // biometric baseline so such students re-enroll instead of failing every
+  // verify mid-quiz.
+  const baselinePromise = supabase.rpc("face_baseline_status");
 
   // QC-2: a CLOSED+REVEALED quiz falls out of the live-only
   // student_quiz_view — recover its metadata through the closed-revealed
   // view (reveal-gated, barrier). Closed+unrevealed stays a truthful 404.
-  const [quizRes, questionsRes, answersRes, faceChecksRes, profileRes] = await Promise.allSettled([
+  const [quizRes, questionsRes, answersRes, faceChecksRes, profileRes, baselineRes] = await Promise.allSettled([
     supabase
       .from("student_quiz_view")
       .select("id, title, mode, status, time_limit_sec, results_revealed_at, shuffle_questions")
@@ -194,6 +200,7 @@ export default async function PlayPage({ params }: PageProps) {
     answersPromise,
     faceChecksPromise,
     profilePromise,
+    baselinePromise,
   ]);
 
   if (quizRes.status === "rejected" || quizRes.value.error) {
@@ -241,9 +248,14 @@ export default async function PlayPage({ params }: PageProps) {
   // active); !hasFaceChecks → 'gate'; else 'ready'.
   const hasFaceChecks = (faceChecksRes.value.count ?? 0) > 0;
   const ownProfile = profileRes.value.data as { consent_given_at: string | null; face_enrollment_status: string | null } | null;
+  const baseline = baselineRes.status === "fulfilled"
+    ? (baselineRes.value.data as { present: boolean; sample_count: number } | null)
+    : null;
   const consentGiven = Boolean(ownProfile?.consent_given_at);
-  // pending_review must NOT count as enrolled (the gate blocks it).
-  const enrolled = ownProfile?.face_enrollment_status === "enrolled";
+  // pending_review must NOT count as enrolled (the gate blocks it); a
+  // cutover student (status enrolled, zero samples) must re-enroll.
+  const enrolled =
+    ownProfile?.face_enrollment_status === "enrolled" && baseline?.present === true;
 
   let initialFaceStatus: FaceStatus = "off";
   if (s.mode === "assessment") {

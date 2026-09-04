@@ -133,7 +133,9 @@ test.describe("E40 — student results entry point", () => {
     await lecturerPage.getByLabel("Quiz title").fill("E40 Retake Quiz");
     await lecturerPage.getByLabel("Mode").click();
     await lecturerPage.getByRole("option", { name: "Assessment" }).click();
-    await lecturerPage.getByLabel(/allow retake/i).check();
+    // Base UI Switch: role="switch" span is the a11y target (hidden form
+    // input makes getByLabel().check() strict-violate — see e37 pattern).
+    await lecturerPage.getByRole("switch", { name: /allow retake/i }).click();
     await lecturerPage.getByLabel(/max attempts/i).selectOption("2");
     await lecturerPage.getByRole("button", { name: /create quiz|new quiz/i }).click();
     await fast(lecturerPage.getByText("E40 Retake Quiz", { exact: true })).toBeVisible();

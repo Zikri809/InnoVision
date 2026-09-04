@@ -7,7 +7,7 @@ import type { FaceStatus, FaceCheckResult } from "./types";
  * to the next pipeline state. Centralizes the DB→UI mapping so routes, hooks,
  * and tests share ONE translation table.
  *
- * Error branches (PLAN_PHASE7 §2 / COMPREFACE_MIGRATION §3):
+ * Error branches (InsightFace migration / PLAN_INTEGRITY_SUITE):
  *  - `not_enrolled` (403) → explicit client state: the student must enroll or
  *    use the click-fallback surface — NOT an undefined branch.
  *  - `consent_required` (403) → explicit: re-show the consent surface.
@@ -15,8 +15,8 @@ import type { FaceStatus, FaceCheckResult } from "./types";
  *    and retries once before this resolves).
  *  - `session_not_active` (409) → session is completed/paused/flagged server-
  *    side; surface the state.
- *  - `duplicate_detected` (409) → enrollment was held for lecturer review
- *    (CompreFace migration L10); re-show the enroll surface.
+ *  - `duplicate_detected` (409) → enrollment was held for lecturer review;
+ *    re-show the enroll surface.
  *  - any other error / unknown → surface as `unavailable` (fail-open the
  *    L14 passthrough, NEVER a silent `ready` — an unrecognized/empty verify
  *    outcome must not mark the student verified with no recorded row).
@@ -54,8 +54,8 @@ export function resolveVerifyOutcome(
       return { next: "flagged", surfaceError: "flagged" };
     case "duplicate_detected":
       return { next: "gate", surfaceError: "duplicate_detected" };
-    case "compreface_unavailable":
-      return { next: "unavailable", surfaceError: "compreface_unavailable" };
+    case "insightface_unavailable":
+      return { next: "unavailable", surfaceError: "insightface_unavailable" };
     default:
       // FAIL-CLOSED: an unrecognized error / unparsed body (429 rate_limited,
       // 413 oversized frame, 401/404, or a stripped 200) must NEVER resolve to

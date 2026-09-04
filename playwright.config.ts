@@ -26,7 +26,7 @@ const MOCK_AI_PORT = process.env.MOCK_AI_PORT ?? "8787";
 
 export default defineConfig({
   testDir: "./e2e",
-  testIgnore: process.env.COMPREFACE_SMOKE ? [] : ["**/compreface-smoke.spec.ts"],
+  testIgnore: process.env.FACE_SMOKE ? [] : ["**/insightface-smoke.spec.ts"],
   timeout: 30_000,
   expect: {
     timeout: 15_000,
@@ -80,6 +80,13 @@ export default defineConfig({
         RESET_RATE_LIMIT: "1000",
         RESET_IP_RATE_LIMIT: "1000",
         RESET_CONFIRM_RATE_LIMIT: "1000",
+        // Kill-switch for the ~60 hardcoded per-route budgets (VERIFY_RATE,
+        // START_RATE, the non-tunable `invite:global` 100/min signup bucket,
+        // ...) which the suite's 6-worker burst overflows mid-run — the
+        // 2026-09-04 mass-failure root cause (see TESTING §5.1). Inert in
+        // production (flag unset); rate limiting is still proven by the
+        // route-level vitest tests, which seed buckets directly.
+        E2E_RATE_LIMIT_DISABLED: "1",
         // AU-2 matric-gate spec (e47) fires capture attempts in one window;
         // raised for the harness only — production default stays 5/min per IP.
         MATRIC_CAPTURE_RATE_LIMIT: "1000",
@@ -87,10 +94,9 @@ export default defineConfig({
         AI_API_KEY: "test-key",
         AI_MODEL: "gpt-4o-mini",
         OCR_VISION_MODEL: "gpt-4o-mini",
-        // CompreFace mock mode — E2E must NOT require a running Docker container.
-        COMPREFACE_BASE_URL: "http://localhost:8000",
-        COMPREFACE_API_KEY: "test-key",
-        COMPREFACE_MOCK_ENABLED: "1",
+        // InsightFace mock mode — E2E must NOT require a running Docker container.
+        INSIGHTFACE_BASE_URL: "http://localhost:8000",
+        FACE_MOCK_ENABLED: "1",
         // Fake tracker seams (face + hand). The suite serves the PRODUCTION
         // build where NODE_ENV-based seam gating is dead — the seams need an
         // explicit harness-only opt-in that survives the build (src/lib/face/

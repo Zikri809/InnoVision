@@ -1,9 +1,9 @@
 import { z } from "zod";
 
 /**
- * Zod schemas for the face API surface (PLAN_PHASE7_COMPREFACE_MIGRATION Step 3).
+ * Zod schemas for the face API surface (InsightFace migration; shape from the Phase 7 plan).
  *
- * CompreFace migration: the wire payload is a base64 JPEG FRAME, not a 192-dim
+ * InsightFace migration: the wire payload is a base64 JPEG FRAME, not a 192-dim
  * embedding. `frameSchema` is the single contract owner — a non-empty string
  * capped at `MAX_FRAME_BASE64_CHARS` (~150 KB; the route returns 413 on
  * overflow). Both the enroll and verify routes validate through it.
@@ -26,9 +26,9 @@ export type EnrollInput = z.infer<typeof EnrollSchema>;
 /**
  * Verify frames — each entry allows the EMPTY string as the client's
  * "no face captured" sentinel for that capture slot. The verify route skips
- * CompreFace for empty frames (a fail vote) and passes the rest to
- * CompreFace; the RPC records ONE row whose verdict is the strict majority
- * of per-frame self-similarities ≥ 0.5. Enrollment frames stay non-empty
+ * the sidecar for empty frames (a fail vote) and passes the rest to the
+ * sidecar; the RPC records ONE row whose verdict is the strict majority
+ * of per-frame baseline similarities ≥ 0.5. Enrollment frames stay non-empty
  * via `frameSchema`.
  */
 export const verifyFrameSchema = z.string("Frame must be a base64 image string.");

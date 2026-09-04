@@ -33,25 +33,35 @@ export class BlinkDetector {
   /**
    * Feed one liveness sample. `left`/`right` are the blendshape values
    * (0..1). Returns the current state after the update.
+   * `isTurned` adapts thresholds for angled poses (Angle 1 Left, Angle 2 Right)
+   * where perspective projection foreshortens the far eye.
    */
-  update(left: number, right: number): BlinkState {
+  update(left: number, right: number, isTurned = false): BlinkState {
     if (this.state !== "pending") return this.state;
+
+    const effectiveClosedMin = isTurned
+      ? Math.min(this.eyeClosedMin, 0.45)
+      : this.eyeClosedMin;
+    const effectiveOpenMax = isTurned
+      ? Math.max(this.eyeOpenMax, 0.42)
+      : this.eyeOpenMax;
 
     // CLOSED is evaluated FIRST: the single-eye rule overlaps the open
     // fallbacks (e.g. left=0.62/right=0.18 averages to "open"), and a strong
     // closure must always win the tie — otherwise turned-pose blinks read as
     // permanently open.
     const isClosed =
-      (left >= this.eyeClosedMin && right >= this.eyeClosedMin) ||
+      (left >= effectiveClosedMin && right >= effectiveClosedMin) ||
       // Dominant single-eye closure also counts: at a turned pose the FAR eye
       // is geometrically occluded and its blendshape stays low even mid-blink
       // — requiring both eyes stranded blinks at the exact angles the guided
       // enrollment asks for. A strong one-eye close is still a voluntary
       // live-motion transition (a photo can never produce it).
-      Math.max(left, right) >= this.eyeClosedMin;
+      Math.max(left, right) >= effectiveClosedMin;
     const isOpen =
-      (left <= this.eyeOpenMax && right <= this.eyeOpenMax) ||
-      (Math.min(left, right) <= this.eyeOpenMax && (left + right) / 2 <= 0.48);
+      (left <= effectiveOpenMax && right <= effectiveOpenMax) ||
+      (Math.min(left, right) <= effectiveOpenMax && (left + right) / 2 <= 0.48) ||
+      (isTurned && Math.min(left, right) <= effectiveOpenMax && Math.max(left, right) < effectiveClosedMin);
 
     if (isClosed) {
       if (this.wasOpen) {
@@ -69,8 +79,9 @@ export class BlinkDetector {
 
     // Ambiguous (between thresholds). If we never saw an open sample, this is
     // an unverifiable mid-blink start → fail so the caller re-arms rather than
-    // letting a stale "closed" sample pass later.
-    if (!this.wasOpen) {
+    // letting a stale "closed" sample pass later. In turned poses, we stay pending
+    // so we don't continuously reset wasOpen before a voluntary blink.
+    if (!this.wasOpen && !isTurned) {
       this.state = "failed";
     }
     return this.state;

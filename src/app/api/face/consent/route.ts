@@ -3,7 +3,6 @@ import { requireStudent } from "@/lib/classes/guards";
 import { rateLimit } from "@/lib/classes/rate-limit";
 import { ConsentSchema } from "@/lib/face/schemas";
 import { mapFaceError } from "@/lib/face/rpc-mapping";
-import * as compreface from "@/lib/face/server/compreface-client";
 import {
   checkSameOrigin,
   firstIssueMessage,
@@ -13,8 +12,6 @@ import {
 } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
-// The revoke path calls CompreFace deleteSubject (can be slow under load).
-export const maxDuration = 20;
 
 // Per-user rate limit on consent set/revoke.
 const CONSENT_RATE = { limit: 5, windowMs: 60 * 1000 };
@@ -27,18 +24,17 @@ const CONSENT_RATE = { limit: 5, windowMs: 60 * 1000 };
  * `consent_given_at` (anti-forgery), so the sanctioned path goes through a
  * SECURITY DEFINER RPC that opts in via `app.consent_write`.
  *
- * `{ consent: false }` → CompreFace migration (L17):
- *   1. `revoke_face_consent()` RPC FIRST — DB state cleaned (consent null,
- *      `face_enrollment_status` null, `face_deletion_pending` true), in-progress
- *      assessments flagged, completed face_checks deleted, audited.
- *   2. CompreFace `deleteSubject(auth.uid())` AFTER the RPC (best-effort). If
- *      CompreFace is down, `face_deletion_pending` stays true and the retry
- *      path (enroll-route check + `npm run compreface:cleanup`) deletes it later.
- * Re-consent restores `consent_given_at` only — it does NOT un-flag or
- * re-enroll.
+ * `{ consent: false }` → InsightFace migration (0039):
+ *   `revoke_face_consent()` RPC — ONE atomic transaction: consent nulled,
+ *   `face_enrollment_status` null, biometric samples purged
+ *   (`profile_face_samples`), in-progress assessments flagged
+ *   (`paused_at` reset), completed face_checks deleted, audited with the
+ *   purge count. The old two-phase queue (`face_deletion_pending` +
+ *   `confirm_face_subject_deleted` + cleanup cron) is retired — a revoke can
+ *   never leave vectors of a non-consenting student behind.
+ * Re-consent restores `consent_given_at` only — it does NOT re-enroll.
  *
- * Preamble: guard → CSRF → rate-limit → parse → Zod → RPC/update → CompreFace →
- * `mapFaceError`.
+ * Preamble: guard → CSRF → rate-limit → parse → Zod → RPC → `mapFaceError`.
  */
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -85,7 +81,7 @@ export async function POST(request: Request) {
     return Response.json({ consent: true }, { status: 200, headers: { "content-type": "application/json" } });
   }
 
-  // 1. RPC first — DB state is authoritative; CompreFace deletion is retriable.
+  // One atomic RPC: DB state + biometric purge together (0039).
   const { data, error } = await supabase.rpc("revoke_face_consent");
 
   if (error) {
@@ -101,22 +97,6 @@ export async function POST(request: Request) {
   if (payload?.ok !== true) {
     console.error("revoke_face_consent unexpected payload:", payload);
     return internalError("Could not revoke consent right now.");
-  }
-
-  // 2. Best-effort CompreFace subject deletion. If it fails, `face_deletion_pending`
-  //    remains true (set by the RPC) and the retry path (`compreface:cleanup`,
-  //    the enroll-route check) cleans up later. If it SUCCEEDS, clear the flag
-  //    via the security-definer RPC (the column is revoked from direct client
-  //    writes — see migration 0024) so the cleanup script never deletes a
-  //    recreated subject and the flag reflects the true state.
-  const del = await compreface.deleteSubject(auth.userId);
-  if (!("error" in del)) {
-    const { error: confirmError } = await supabase.rpc("confirm_face_subject_deleted");
-    if (confirmError) {
-      // Non-fatal: the flag staying true only means the (idempotent) cleanup
-      // script may re-delete an already-deleted subject. Log and continue.
-      console.error("confirm_face_subject_deleted error:", confirmError);
-    }
   }
 
   return Response.json(

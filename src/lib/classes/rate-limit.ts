@@ -17,11 +17,19 @@ type Bucket = { timestamps: number[]; windowMs: number };
 const buckets = new Map<string, Bucket>();
 const MAX_BUCKETS = 10_000;
 
+// Harness-only opt-out (playwright.config.ts webServer env): the e2e suite
+// bursts far past every per-route budget from one IP/process. No e2e spec
+// asserts a 429 — limits are proven by route-level vitest tests that seed
+// buckets directly (_seedRateLimit) in their own process — so disabling here
+// is test-only and inert in production (flag unset).
+const RATE_LIMIT_DISABLED = process.env.E2E_RATE_LIMIT_DISABLED === "1";
+
 /** Prune + record a hit for `key`; returns true if within limit, false if exceeded. */
 export function rateLimit(
   key: string,
   opts: { limit: number; windowMs: number },
 ): boolean {
+  if (RATE_LIMIT_DISABLED) return true;
   const now = Date.now();
   let bucket = buckets.get(key);
 

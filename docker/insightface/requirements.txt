@@ -1,0 +1,20 @@
+# InsightFace sidecar — pinned dependency set.
+#
+# NOTE (verified against PyPI): insightface 0.7.3 ships SDIST-ONLY (no
+# wheels) with a C++ Cython extension, so the build stage needs a C++
+# toolchain + preinstalled numpy/cython and `--no-build-isolation`
+# (see the Dockerfile). Direct pins only: the numpy==1.26.4 pin is what
+# blocks the resolver pulling numpy 2.x against the compiled extension.
+# The science stack (scipy/scikit-*/albumentations/matplotlib/Pillow/…)
+# arrives transitively UNPINNED — after the first successful build, run
+# `pip freeze` inside the image and commit the full lock if build
+# reproducibility across months matters (house decision: acceptable for a
+# locally-built dev sidecar).
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+numpy==1.26.4
+cython==3.0.11
+insightface==0.7.3
+onnxruntime==1.19.2
+onnx==1.17.0
+opencv-python-headless==4.10.0.84

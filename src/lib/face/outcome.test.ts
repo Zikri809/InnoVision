@@ -88,9 +88,9 @@ describe("resolveVerifyOutcome", () => {
     expect(out).toEqual({ next: "gate", surfaceError: "duplicate_detected" });
   });
 
-  it("compreface_unavailable → unavailable (fail-open, no hard block)", () => {
-    const out = resolveVerifyOutcome({ error: "compreface_unavailable" });
-    expect(out).toEqual({ next: "unavailable", surfaceError: "compreface_unavailable" });
+  it("insightface_unavailable → unavailable (fail-open, no hard block)", () => {
+    const out = resolveVerifyOutcome({ error: "insightface_unavailable" });
+    expect(out).toEqual({ next: "unavailable", surfaceError: "insightface_unavailable" });
   });
 
   it("unknown / null → unavailable (fail-closed — never a silent ready-pass)", () => {

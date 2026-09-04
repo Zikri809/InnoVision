@@ -46,17 +46,17 @@ const STUDENT_ID = "00000000-0000-4000-8000-0000000000ff";
 const LECTURER_ID = "00000000-0000-4000-8000-00000000000a";
 
 beforeAll(() => {
-  // The consent-revoke path calls the (module-real) CompreFace client; opt in
-  // to its E2E mock so deleteSubject succeeds without Docker — mirroring
-  // face-routes.test.ts. Mock mode is strict opt-in: the harness seam flag
-  // (seam-gate.ts) + the mock flag, exactly like the Playwright webServer env.
+  // The consent-revoke path used to call the (module-real) CompreFace client;
+  // under the InsightFace migration the revoke is a single RPC, so no mock
+  // opt-in is needed anymore. The two-flag seam gate (seam-gate.ts) remains
+  // reserved for the Playwright harness.
   process.env.NEXT_PUBLIC_E2E_FAKE_SEAM = "1";
-  process.env.COMPREFACE_MOCK_ENABLED = "1";
+  process.env.FACE_MOCK_ENABLED = "1";
 });
 
 afterAll(() => {
   delete process.env.NEXT_PUBLIC_E2E_FAKE_SEAM;
-  delete process.env.COMPREFACE_MOCK_ENABLED;
+  delete process.env.FACE_MOCK_ENABLED;
 });
 
 function req(body?: unknown, init?: RequestInit): Request {
@@ -286,7 +286,8 @@ describe("consent — set + revoke", () => {
     const profile = ctx.client.tables["profiles"]!.find((p) => p.id === STUDENT_ID);
     expect(profile?.consent_given_at).toBeNull();
     expect(profile?.face_enrollment_status).toBeNull();
-    expect(profile?.face_deletion_pending).toBe(false);
+    // 0039: the revoke purges the biometric samples in the same transaction.
+    expect(ctx.client.tables["profile_face_samples"] ?? []).toHaveLength(0);
     expect((ctx.client.tables["audit_events"] ?? []).some((a) => a.action === "consent_revoked")).toBe(true);
   });
 });

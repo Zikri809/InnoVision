@@ -119,10 +119,12 @@ test("revocation — unshare kills the link; delete cascades", async ({ browser 
   await creator.goto("/student/my-quizzes");
   await creator.getByText(QUIZ_TITLE, { exact: true }).waitFor();
 
-  // Open the share dialog and stop sharing.
+  // Stop sharing — the dialog auto-closes on unshare (my-quizzes-client
+  // sets shareTarget null; the card flips to Private via refresh).
   await creator.getByRole("button", { name: /^share/i }).click();
   await creator.getByRole("button", { name: /stop sharing/i }).click();
   await expect(creator.getByText(/sharing stopped/i)).toBeVisible();
+  await expect(creator.getByRole("dialog")).toBeHidden({ timeout: 10_000 });
 
   // The player now gets the SAME neutral screen as an unknown code.
   await player.goto(`/s/${shareCode}`);
@@ -138,7 +140,6 @@ test("revocation — unshare kills the link; delete cascades", async ({ browser 
   ).toBeVisible({ timeout: 10_000 });
 
   // Delete cascades — the quiz disappears from the dashboard.
-  await creator.getByRole("dialog").getByRole("button", { name: /close|cancel|×/i }).click();
   const quizCard = creator.locator("li").filter({ hasText: QUIZ_TITLE });
   await quizCard.getByRole("button", { name: /^delete/i }).click();
   await creator.getByRole("dialog").getByRole("button", { name: /delete/i }).last().click();

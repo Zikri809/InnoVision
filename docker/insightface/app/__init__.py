@@ -1,0 +1,1 @@
+"""InnoVision InsightFace sidecar package."""

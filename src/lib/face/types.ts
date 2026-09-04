@@ -76,12 +76,12 @@ export interface IFaceTracker {
  * E2E control surface for scripting fake face behavior. All fields optional —
  * the real tracker never exposes this surface.
  *
- * CompreFace migration (L15): `setVerifyMode('match'|'mismatch')` no longer
+ * InsightFace migration: `setVerifyMode('match'|'mismatch')` no longer
  * produces an embedding vector — it selects which FRAME MARKER string
  * `captureFrame` returns (`FAKE_FRAME_MATCH` vs `FAKE_FRAME_MISMATCH`). The
- * route-level CompreFace mock inspects the frame string (when the harness
- * seam flag `NEXT_PUBLIC_E2E_FAKE_SEAM === '1'` AND
- * `COMPREFACE_MOCK_ENABLED === '1'` — see src/lib/face/seam-gate.ts) and
+ * route-level mock (insightface-client.ts) inspects the frame string (when
+ * the harness seam flag `NEXT_PUBLIC_E2E_FAKE_SEAM === '1'` AND
+ * `FACE_MOCK_ENABLED === '1'` — see src/lib/face/seam-gate.ts) and
  * returns the corresponding canned response.
  */
 export type FakeFaceControl = {

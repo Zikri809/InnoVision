@@ -1,19 +1,19 @@
 import { requireUser } from "@/lib/classes/guards";
 import { createClient } from "@/lib/supabase/server";
 import { rateLimit } from "@/lib/classes/rate-limit";
-import * as compreface from "@/lib/face/server/compreface-client";
+import * as insightface from "@/lib/face/server/insightface-client";
 
 export const dynamic = "force-dynamic";
 
 // Health probe is read-only (no CSRF needed); rate-limited to prevent flooding
-// the CompreFace health endpoint.
+// the sidecar health endpoint.
 const HEALTH_RATE = { limit: 10, windowMs: 60 * 1000 };
 
 /**
- * GET /api/face/health — CompreFace availability probe.
+ * GET /api/face/health — InsightFace sidecar availability probe.
  *
  * Used by `useFaceTracker` at boot (inside the `FACE_BOOT_TIMEOUT_MS` race):
- * if CompreFace is unreachable, the face pipeline reports `unavailable`
+ * if the sidecar is unreachable, the face pipeline reports `unavailable`
  * (click-first passthrough) instead of attempting verifies that would 503.
  *
  * GET — no CSRF (read-only). Student-authenticated (the only caller is the
@@ -32,7 +32,7 @@ export async function GET() {
     );
   }
 
-  const available = await compreface.health();
+  const available = await insightface.health();
   console.info(`[api/face/health] available=${available}`);
   return Response.json(
     { available },

@@ -258,6 +258,8 @@ export class FakeSupabase {
   tables: TableMap = {};
   user: { id: string } | null = null;
   profileRole: "lecturer" | "student" | null = null;
+  // Test seam: force compare_face_baseline to fail (verify-route 503 path).
+  compareRpcError = false;
   rpcResult: { data: unknown; error: { message: string } | null } = {
     data: null,
     error: null,
@@ -321,7 +323,7 @@ export class FakeSupabase {
   //  - face RPCs (enroll_face / record_face_check / self_recover_session /
   //    pause_session / unlock_session / exempt_face_session /
   //    report_face_unavailable / revoke_face_consent): route-mapping stubs —
-  //    must stay in lockstep with migration 0009_face.sql; the authoritative
+  //    must stay in lockstep with migrations 0009_face.sql + 0039_insightface.sql; the authoritative
   //    RPC-semantics checks are scripts/verify-face.mjs.
   //  - reorder_questions / others: return the pre-seeded rpcResult.
   async rpc(name: string, args?: Record<string, unknown>) {
@@ -367,8 +369,11 @@ export class FakeSupabase {
     if (name === "revoke_face_consent") {
       return this._revokeFaceConsent();
     }
-    if (name === "confirm_face_subject_deleted") {
-      return this._confirmFaceSubjectDeleted();
+    if (name === "compare_face_baseline") {
+      return this._compareFaceBaseline(args);
+    }
+    if (name === "face_baseline_status") {
+      return this._faceBaselineStatus();
     }
     if (name === "reject_face_enrollment") {
       return this._rejectFaceEnrollment(args);
@@ -955,7 +960,7 @@ export class FakeSupabase {
 
   // ── Phase 7 face RPC stubs (route-mapping only; see header comment) ──
 
-  /** enroll_face — consent gate + status derive from CompreFace metadata + audit. */
+  /** enroll_face — mirrors 0039_insightface.sql at the level routes branch on. */
   private async _enrollFace(args?: Record<string, unknown>) {
     if (this.rpcResult.data !== null || this.rpcResult.error !== null) return this.rpcResult;
     const studentId = this.user?.id ?? "";
@@ -963,8 +968,42 @@ export class FakeSupabase {
     if (!profile) return { data: { error: "not_student" }, error: null };
     if (!profile.consent_given_at) return { data: { error: "consent_required" }, error: null };
 
-    // live_assessment: ever-enrolled + an in-progress assessment session.
-    const ever = profile.face_enrollment_status != null ||
+    // Strict sample validation (mirror 0039 §2): 3 objects {angle, embedding},
+    // distinct known angles, 512 finite dims.
+    const samples = args?.p_samples;
+    if (!Array.isArray(samples) || samples.length !== 3) {
+      return { data: { error: "invalid_samples" }, error: null };
+    }
+    const angles = new Set<string>();
+    for (const s of samples) {
+      const rec = s as { angle?: unknown; embedding?: unknown };
+      if (
+        typeof rec.angle !== "string" ||
+        !["front", "left", "right"].includes(rec.angle) ||
+        !Array.isArray(rec.embedding) ||
+        rec.embedding.length !== 512 ||
+        !rec.embedding.every((x) => typeof x === "number" && Number.isFinite(x) && Math.abs(x) <= 1000)
+      ) {
+        return { data: { error: "invalid_samples" }, error: null };
+      }
+      // Mirror 0039 §2: exactly the keys {angle, embedding}; non-zero norm.
+      if (Object.keys(rec).length !== 2) {
+        return { data: { error: "invalid_samples" }, error: null };
+      }
+      const emb = rec.embedding as number[];
+      if (emb.reduce((acc, x) => acc + x * x, 0) < 1e-12) {
+        return { data: { error: "invalid_samples" }, error: null };
+      }
+      angles.add(rec.angle);
+    }
+    if (angles.size !== 3) return { data: { error: "invalid_samples" }, error: null };
+
+    // live_assessment: ever-enrolled (samples OR audit rows — 0039 redefines
+    // the marker so cutover students can first-time-enroll mid-session) + an
+    // in-progress assessment session.
+    const hasSamples = (this.tables["profile_face_samples"] ?? []).some((s) => s.profile_id === studentId);
+    const ever =
+      hasSamples ||
       (this.tables["audit_events"] ?? []).some(
         (a) => a.actor_id === studentId && (a.action === "face_enroll" || a.action === "face_reenroll"),
       );
@@ -973,28 +1012,110 @@ export class FakeSupabase {
     );
     if (live && ever) return { data: { error: "live_assessment" }, error: null };
 
-    // Derive status from CompreFace duplicate-check metadata (mirror 0010):
-    // similarity ≥ 0.45 against a DIFFERENT subject → pending_review. SQL uses
-    // `coalesce(p_duplicate_subject,'') <> auth.uid()::text` — a NULL/empty
-    // subject with high similarity is `pending_review` (never self-clean).
-    const dupSim = args?.p_duplicate_similarity == null ? 0 : Number(args?.p_duplicate_similarity);
-    const dupSubject = args?.p_duplicate_subject == null ? "" : String(args?.p_duplicate_subject);
-    const status = dupSim >= 0.45 && dupSubject !== studentId ? "pending_review" : "enrolled";
+    // Attempt throttle (mirror 0039 §4): ≥3 enroll audit rows in 10 min →
+    // rate_limited (attempts, not outcomes — negative probes count).
+    const windowStart = Date.now() - 10 * 60 * 1000;
+    const recentAttempts = (this.tables["audit_events"] ?? []).filter(
+      (a) =>
+        a.actor_id === studentId &&
+        (a.action === "face_enroll" || a.action === "face_reenroll") &&
+        new Date(a.created_at as string).getTime() > windowStart,
+    ).length;
+    if (recentAttempts >= 3) return { data: { error: "rate_limited" }, error: null };
+
+    // Internal duplicate check (0039 §5): max cosine vs OTHER students'
+    // samples ≥ 0.45 → pending_review.
+    let dupSim = 0;
+    let dupProfile: string | null = null;
+    for (const row of this.tables["profile_face_samples"] ?? []) {
+      if (row.profile_id === studentId) continue;
+      for (const s of samples as { angle: string; embedding: number[] }[]) {
+        const stored = row.embedding as number[];
+        let dot = 0;
+        let na = 0;
+        let nb = 0;
+        for (let i = 0; i < 512; i++) {
+          dot += stored[i] * s.embedding[i];
+          na += stored[i] * stored[i];
+          nb += s.embedding[i] * s.embedding[i];
+        }
+        const sim = na === 0 || nb === 0 ? 0 : dot / (Math.sqrt(na) * Math.sqrt(nb));
+        const clamped = Math.max(0, Math.min(1, sim));
+        if (clamped > dupSim) {
+          dupSim = clamped;
+          dupProfile = row.profile_id as string;
+        }
+      }
+    }
+    const status = dupSim >= 0.45 ? "pending_review" : "enrolled";
+
+    // Atomic delete-then-insert storage (0039 §6).
+    this.tables["profile_face_samples"] = (this.tables["profile_face_samples"] ?? []).filter(
+      (s) => s.profile_id !== studentId,
+    );
+    for (const s of samples as { angle: string; embedding: number[] }[]) {
+      this.tables["profile_face_samples"].push({
+        id: randomUuid(),
+        profile_id: studentId,
+        angle: s.angle,
+        embedding: s.embedding,
+        created_at: "2026-01-01T00:00:00Z",
+      });
+    }
 
     profile.face_enrollment_status = status;
-    // Lockstep with 0010_compreface.sql: a successful enroll also clears any
-    // leftover consent-revoke deletion-pending marker.
-    profile.face_deletion_pending = false;
     this.tables["audit_events"] ??= [];
     this.tables["audit_events"].push({
       id: randomUuid(),
       actor_id: studentId,
       subject_id: studentId,
       action: ever ? "face_reenroll" : "face_enroll",
-      metadata: { status },
+      metadata: { status, duplicate_profile: dupProfile, duplicate_similarity: dupSim },
       created_at: "2026-01-01T00:00:00Z",
     });
     return { data: { ok: true, status }, error: null };
+  }
+
+  /** compare_face_baseline — max cosine vs CALLER's own samples, clamped [0,1].
+   * Does NOT consume the global rpcResult seam (see _faceBaselineStatus: the
+   * verify-route error tests seed the seam for record_face_check, which runs
+   * AFTER per-frame compares). */
+  private async _compareFaceBaseline(args?: Record<string, unknown>) {
+    if (this.compareRpcError) return { data: null, error: { message: "boom" } };
+    const studentId = this.user?.id ?? "";
+    const emb = args?.p_embedding as number[] | undefined;
+    if (!Array.isArray(emb) || emb.length !== 512) {
+      return { data: { present: false, similarity: 0 }, error: null };
+    }
+    const own = (this.tables["profile_face_samples"] ?? []).filter((s) => s.profile_id === studentId);
+    let best: number | null = null;
+    for (const row of own) {
+      const stored = row.embedding as number[];
+      let dot = 0;
+      let na = 0;
+      let nb = 0;
+      for (let i = 0; i < 512; i++) {
+        dot += stored[i] * emb[i];
+        na += stored[i] * stored[i];
+        nb += emb[i] * emb[i];
+      }
+      const sim = na === 0 || nb === 0 ? 0 : dot / (Math.sqrt(na) * Math.sqrt(nb));
+      const clamped = Math.max(0, Math.min(1, sim));
+      if (best === null || clamped > best) best = clamped;
+    }
+    if (best === null) return { data: { present: false, similarity: 0 }, error: null };
+    return { data: { present: true, similarity: best }, error: null };
+  }
+
+  /** face_baseline_status — pre-start gate helper ({present, sample_count}).
+   * Does NOT consume the global rpcResult seam: the verify-route tests seed
+   * rpcResult to drive record_face_check errors, and the route's baseline
+   * pre-check runs BEFORE that RPC. (No test needs to force this stub to
+   * fail; transport failures surface through compare_face_baseline instead.) */
+  private async _faceBaselineStatus() {
+    const studentId = this.user?.id ?? "";
+    const count = (this.tables["profile_face_samples"] ?? []).filter((s) => s.profile_id === studentId).length;
+    return { data: { present: count > 0, sample_count: count }, error: null };
   }
 
   /**
@@ -1360,7 +1481,12 @@ export class FakeSupabase {
     if (!profile) return { data: { error: "not_student" }, error: null };
     profile.consent_given_at = null;
     profile.face_enrollment_status = null;
-    profile.face_deletion_pending = true;
+    // 0039: biometric samples are purged INSIDE the revoke transaction (the
+    // two-phase deletion queue is retired).
+    const before = (this.tables["profile_face_samples"] ?? []).filter((s) => s.profile_id === studentId).length;
+    this.tables["profile_face_samples"] = (this.tables["profile_face_samples"] ?? []).filter(
+      (s) => s.profile_id !== studentId,
+    );
     const flagged: Row[] = (this.tables["quiz_sessions"] ?? []).filter(
       (s) => s.student_id === studentId && s.mode === "assessment" && ["active", "paused"].includes(s.status as string),
     );
@@ -1371,20 +1497,10 @@ export class FakeSupabase {
       actor_id: studentId,
       subject_id: studentId,
       action: "consent_revoked",
-      metadata: { flagged_sessions: flagged.map((s) => s.id) },
+      metadata: { flagged_sessions: flagged.map((s) => s.id), samples_deleted: before },
       created_at: "2026-01-01T00:00:00Z",
     });
     return { data: { ok: true, flagged_sessions: flagged.map((s) => s.id) }, error: null };
-  }
-
-  /** confirm_face_subject_deleted — clears face_deletion_pending for the caller. */
-  private async _confirmFaceSubjectDeleted() {
-    if (this.rpcResult.data !== null || this.rpcResult.error !== null) return this.rpcResult;
-    const studentId = this.user?.id ?? "";
-    const profile = (this.tables["profiles"] ?? []).find((p) => p.id === studentId);
-    if (!profile) return { data: { error: "not_authenticated" }, error: null };
-    profile.face_deletion_pending = false;
-    return { data: { ok: true }, error: null };
   }
 
   /** reject_face_enrollment (lecturer-only) — clears a pending_review status. */

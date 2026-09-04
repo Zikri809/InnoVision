@@ -114,6 +114,7 @@ export class FaceTracker implements IFaceTracker {
   private poseListeners: Set<(pose: LivePose) => void> = new Set();
   private errorListeners: Set<(err: unknown) => void> = new Set();
   private errored = false;
+  private loopErrorCount = 0;
   private lastFrameAt = 0;
   private canvas: HTMLCanvasElement | null = null;
   private currentPose: LivePose = { yaw: 0, centered: false, faceDetected: false };
@@ -396,8 +397,12 @@ export class FaceTracker implements IFaceTracker {
     const maxLum = requireIdealLighting ? 195 : 215;
 
     while (Date.now() - startTime < maxWaitMs && !this.disposed) {
-        const isEyesOpen = !requireOpenEyes || (this.currentBlendshapes.left < 0.4 && this.currentBlendshapes.right < 0.4);
+        const isEyesOpen =
+          !requireOpenEyes ||
+          (this.currentBlendshapes.left < 0.45 && this.currentBlendshapes.right < 0.45) ||
+          Math.min(this.currentBlendshapes.left, this.currentBlendshapes.right) < 0.38;
         const isCentered = !requireCentered || this.currentPose.centered;
+        const allowTurned = Math.abs(this.currentPose.yaw) >= 10;
 
         const baseScore = scoreFrameQuality({
           faceDetected: this.currentPose.faceDetected,
@@ -405,6 +410,7 @@ export class FaceTracker implements IFaceTracker {
           yaw: this.currentPose.yaw,
           eyesOpen: isEyesOpen,
           lightingOk: false,
+          allowTurned,
         });
 
         // If geometric quality is strong, verify lighting on canvas
@@ -421,6 +427,7 @@ export class FaceTracker implements IFaceTracker {
                 yaw: this.currentPose.yaw,
                 eyesOpen: isEyesOpen,
                 lightingOk: goodLum || (!requireGoodLighting && !requireIdealLighting),
+                allowTurned,
               });
 
               if (totalScore >= 90) return frame;
@@ -536,9 +543,13 @@ export class FaceTracker implements IFaceTracker {
       }
       if (now - this.lastFrameAt >= FRAME_INTERVAL_MS) {
         this.lastFrameAt = now;
-        if (this.landmarker && this.video.readyState >= 2) {
+        if (
+          this.landmarker &&
+          this.video.readyState >= 2 &&
+          this.video.videoWidth > 0 &&
+          this.video.videoHeight > 0
+        ) {
           const results = this.landmarker.detectForVideo(this.video, now);
-          this.feedLiveness(results);
           let yaw = 0;
           let centered = false;
           let faceDetected = false;
@@ -571,6 +582,8 @@ export class FaceTracker implements IFaceTracker {
             this.currentLandmarks = null;
             this.lastRawRatio = null;
           }
+          const isTurned = Math.abs(yaw) >= 10;
+          this.feedLiveness(results, isTurned);
           let lighting: "good" | "too_dark" | "too_bright" = this.currentLighting;
           if (faceDetected && now - this.lastLuminanceSampleAt >= 250) {
             this.lastLuminanceSampleAt = now;
@@ -590,6 +603,7 @@ export class FaceTracker implements IFaceTracker {
           }
           const pose: LivePose = { yaw, centered, faceDetected, lighting, facesSeen };
           this.currentPose = pose;
+          this.loopErrorCount = 0;
           if (this.poseListeners.size > 0) {
             for (const listener of this.poseListeners) {
               listener(pose);
@@ -599,6 +613,12 @@ export class FaceTracker implements IFaceTracker {
       }
       this.rafId = requestAnimationFrame((t) => this.detectLoop(t));
     } catch (err) {
+      this.loopErrorCount++;
+      if (this.loopErrorCount < 3 && !this.disposed) {
+        console.warn(`[face-tracker] detection loop transient error (${this.loopErrorCount}/3):`, err);
+        this.rafId = requestAnimationFrame((t) => this.detectLoop(t));
+        return;
+      }
       if (this.rafId !== null) cancelAnimationFrame(this.rafId);
       this.rafId = null;
       this.releaseCamera();
@@ -610,9 +630,12 @@ export class FaceTracker implements IFaceTracker {
   }
 
   /** Feed the per-eye blendshape values (eyeBlinkLeft/Right) to the BlinkDetector. */
-  private feedLiveness(results: {
-    faceBlendshapes?: { categories?: { categoryName?: string; score?: number }[] }[];
-  }): void {
+  private feedLiveness(
+    results: {
+      faceBlendshapes?: { categories?: { categoryName?: string; score?: number }[] }[];
+    },
+    isTurned = false,
+  ): void {
     const cats = results.faceBlendshapes?.[0]?.categories ?? [];
     let left = 0;
     let right = 0;
@@ -621,7 +644,7 @@ export class FaceTracker implements IFaceTracker {
       else if (c.categoryName === "eyeBlinkRight") right = c.score ?? 0;
     }
     this.currentBlendshapes = { left, right };
-    const updateResult = this.blinkDetector.update(left, right);
+    const updateResult = this.blinkDetector.update(left, right, isTurned);
     if (updateResult === "passed") {
       this.handleBlinkObserved();
     } else if (updateResult === "failed") {

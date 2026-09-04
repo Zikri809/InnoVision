@@ -1,8 +1,8 @@
-// Phase 7 CompreFace migration: security/RLS/RPC verification harness — runs
+// InsightFace migration (0039): security/RLS/RPC verification harness — runs
 // against live local Supabase. This harness — NOT FakeSupabase — is the SOLE
 // authoritative check for face-RPC semantics (consent gate, guard trigger,
-// nonce rotation, FLAT window, RLS). FakeSupabase branches are route-mapping
-// stubs kept in lockstep with migration 0010_compreface.sql.
+// nonce rotation, FLAT window, RLS, baseline compare). FakeSupabase branches
+// are route-mapping stubs kept in lockstep with migrations 0010 + 0039.
 //
 // Covers gate tests (PLAN_PHASE7_COMPREFACE_MIGRATION §5/§9):
 //   D10  — face_checks owner insert visible / other → not_owner; direct INSERT
@@ -49,11 +49,14 @@
 //   I-quiz-closed / I-class-removal — verify after quiz close / class removal
 //     → quiz_not_live.
 //
-// NOTE: the RPC now receives CompreFace METADATA (subject/similarity) — not an
-// embedding. `record_face_check` computes `matched` itself from SQL constants.
-// A direct caller can forge metadata for their OWN uid (residual risk,
-// documented in PLAN_PHASE7_COMPREFACE_MIGRATION §7); the `p_subject =
-// auth.uid()` check means they can only pass as themselves.
+// NOTE: enroll_face(p_samples jsonb) takes THREE 512-d embeddings (route-
+// derived from the sidecar) and runs the duplicate check INTERNALLY (no
+// cross-student search primitive is callable from authenticated).
+// record_face_check still receives per-frame SIMILARITIES (route-computed vs
+// the caller's own baseline via compare_face_baseline, clamped [0,1]) —
+// `matched` is computed from SQL constants. A direct caller can forge
+// similarities for their OWN uid (pre-existing residual risk); the
+// `p_subject = auth.uid()` check means they can only pass as themselves.
 //
 // NOT a unit test; run manually: node scripts/verify-face.mjs
 import { createClient } from "@supabase/supabase-js";
@@ -161,13 +164,31 @@ function matchProbe(subjectUid, frame = "test-frame-match") {
   };
 }
 
-/** Mismatch probe: CompreFace returns no self reading / low similarity. */
+/** Mismatch probe: the route reports no self reading / low similarity. */
 function mismatchProbe(frame = "test-frame-mismatch") {
   return {
     p_subject: "00000000-0000-0000-0000-000000000000",
     p_similarities: [0.1],
     p_frames: [frame],
   };
+}
+
+/** Deterministic 512-d "embedding" (unit vector at `seed`): the vector SQL
+ * casts are exact, so identical seeds give cosine 1.0 and distinct seeds give
+ * cosine 0.0 — duplicate-detection probes stay deterministic. */
+function vec512(seed) {
+  const v = new Array(512).fill(0);
+  v[seed % 512] = 1;
+  return v;
+}
+
+/** enroll_face(p_samples) payload: 3 distinct angles sharing one embedding. */
+function enrollSamples(seed) {
+  return [
+    { angle: "front", embedding: vec512(seed) },
+    { angle: "left", embedding: vec512(seed) },
+    { angle: "right", embedding: vec512(seed) },
+  ];
 }
 
 async function main() {
@@ -248,10 +269,7 @@ async function main() {
   // ── D11a: enroll requires consent → consent_required ───────────
   {
     const { sessionId } = await makeLiveAssessment("D11a No Consent");
-    const { data } = await clientS1.rpc("enroll_face", {
-      p_duplicate_subject: null,
-      p_duplicate_similarity: 0,
-    });
+    const { data } = await clientS1.rpc("enroll_face", { p_samples: enrollSamples(1) });
     record("D11a enroll without consent → consent_required",
       data?.error === "consent_required", JSON.stringify(data));
     const { data: verifyData } = await clientS1.rpc("record_face_check", {
@@ -305,30 +323,21 @@ async function main() {
 
     // FIRST-TIME enrollment while a live assessment exists is ALLOWED (breaks
     // the start-before-enrolling deadlock); ever-enrolled is still false here.
-    const enroll = await clientS1.rpc("enroll_face", {
-      p_duplicate_subject: null,
-      p_duplicate_similarity: 0,
-    });
+    const enroll = await clientS1.rpc("enroll_face", { p_samples: enrollSamples(1) });
     record("D11b first-time enroll_face (mid-active) → ok + enrolled",
       enroll.data?.ok === true && enroll.data?.status === "enrolled",
       JSON.stringify(enroll.data));
 
-    // A duplicate detected at enroll (similarity ≥ 0.45 against a DIFFERENT
-    // subject) → status = pending_review, not enrolled.
-    const dupEnroll = await clientS3.rpc("enroll_face", {
-      p_duplicate_subject: studentS1.id,
-      p_duplicate_similarity: 0.7,
-    });
+    // A duplicate detected at enroll (internal check: the submitted samples
+    // are cosine 1.0 against S1's STORED samples) → pending_review.
+    const dupEnroll = await clientS3.rpc("enroll_face", { p_samples: enrollSamples(1) });
     record("D11b duplicate-detected enroll → pending_review",
       dupEnroll.data?.ok === true && dupEnroll.data?.status === "pending_review",
       JSON.stringify(dupEnroll.data) + " err=" + JSON.stringify(dupEnroll.error));
 
     // RE-ENROLL while a live assessment exists → live_assessment (the
     // ever-enrolled marker survives; a revoke→re-enroll face swap is blocked).
-    const reEnroll = await clientS1.rpc("enroll_face", {
-      p_duplicate_subject: null,
-      p_duplicate_similarity: 0,
-    });
+    const reEnroll = await clientS1.rpc("enroll_face", { p_samples: enrollSamples(2) });
     record("D11b re-enroll while live → live_assessment",
       reEnroll.data?.error === "live_assessment", JSON.stringify(reEnroll.data));
 
@@ -357,10 +366,7 @@ async function main() {
     // Close the pending-review session so the ever-enrolled gate doesn't block
     // the clean re-enrollment (a live assessment blocks re-enroll by design).
     await clientS3.rpc("submit_session", { p_session_id: pendSession });
-    const reEnroll3 = await clientS3.rpc("enroll_face", {
-      p_duplicate_subject: null,
-      p_duplicate_similarity: 0,
-    });
+    const reEnroll3 = await clientS3.rpc("enroll_face", { p_samples: enrollSamples(3) });
     record("D11b lecturer rejects pending_review → null + re-enroll → enrolled",
       reject.data?.ok === true && s3Profile.face_enrollment_status === null &&
         reEnroll3.data?.ok === true && reEnroll3.data?.status === "enrolled",
@@ -569,7 +575,7 @@ async function main() {
     const { sessionId } = await makeLiveAssessment("Revoke");
     // S1 is already ever-enrolled; this enroll call returns live_assessment
     // (ignored — the point is revocation, not (re)enrollment).
-    await clientS1.rpc("enroll_face", { p_duplicate_subject: null, p_duplicate_similarity: 0 });
+    await clientS1.rpc("enroll_face", { p_samples: enrollSamples(1) });
     const revoke = await clientS1.rpc("revoke_face_consent");
     const row = (await clientS1.from("quiz_sessions").select("status").eq("id", sessionId).single()).data;
     record("revoke mid-session → session flagged",
@@ -596,11 +602,12 @@ async function main() {
     // Re-consent restores consent_given_at only; does NOT un-flag or re-enroll.
     await setConsent(studentS1.id);
     const rowAfter = (await clientS1.from("quiz_sessions").select("status").eq("id", sessionId).single()).data;
-    const profile = (await clientS1.from("profiles").select("consent_given_at, face_enrollment_status, face_deletion_pending").eq("id", studentS1.id).single()).data;
-    record("re-consent restores consent, does NOT un-flag / re-enroll",
+    const samples = (await admin.from("profile_face_samples").select("id").eq("profile_id", studentS1.id)).data;
+    const profile = (await clientS1.from("profiles").select("consent_given_at, face_enrollment_status").eq("id", studentS1.id).single()).data;
+    record("re-consent restores consent, does NOT un-flag / re-enroll; samples purged",
       rowAfter.status === "flagged" && profile.consent_given_at !== null &&
-        profile.face_enrollment_status === null && profile.face_deletion_pending === true,
-      `status=${rowAfter.status} consent=${Boolean(profile.consent_given_at)} status=${profile.face_enrollment_status}`);
+        profile.face_enrollment_status === null && (samples ?? []).length === 0,
+      `status=${rowAfter.status} consent=${Boolean(profile.consent_given_at)} status=${profile.face_enrollment_status} samples=${(samples ?? []).length}`);
   }
 
   // ── not_enrolled / not_assessment ──────────────────────────────

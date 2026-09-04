@@ -16,12 +16,12 @@ import type { IFaceTracker } from "@/lib/face/types";
  * stream). The tracker acquires the SHARED camera stream from `camera.ts`
  * (refcounted; released only on terminal unmount).
  *
- * Availability contract (PLAN_PHASE7 §2 / COMPREFACE_MIGRATION L14): a boot
+ * Availability contract (InsightFace migration): a boot
  * failure / timeout → `{ available: false }` → the caller treats the face
  * pipeline as `'unavailable'` (passthrough, click-first). The CompreFace
  * health probe (`GET /api/face/health`) runs alongside `tracker.start()` —
  * BOTH must succeed within `FACE_BOOT_TIMEOUT_MS` or the pipeline degrades to
- * unavailable. Mid-session CompreFace downtime is NOT detected by a periodic
+ * unavailable. Mid-session sidecar downtime is NOT detected by a periodic
  * probe — the verify route returns 503 and the pipeline's network-error
  * handling covers it. The fake-tracker seam is read ONLY in non-production
  * (mirrors the P6 hand seam).
@@ -174,7 +174,7 @@ export function useFaceTracker(opts?: {
       }, FACE_BOOT_TIMEOUT_MS);
 
       async function probeHealthWithRetry(): Promise<boolean> {
-        for (let attempt = 0; attempt < 2; attempt++) {
+        for (let attempt = 0; attempt < 5; attempt++) {
           try {
             const res = await fetch("/api/face/health", { method: "GET", cache: "no-store" });
             const data = (res.ok ? await res.json() : { available: false }) as { available?: boolean };
@@ -182,7 +182,7 @@ export function useFaceTracker(opts?: {
           } catch {
             // brief retry delay
           }
-          if (attempt === 0) await new Promise((r) => setTimeout(r, 400));
+          if (attempt < 4) await new Promise((r) => setTimeout(r, 500));
         }
         return false;
       }

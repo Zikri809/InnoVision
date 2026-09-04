@@ -73,4 +73,17 @@ describe("BlinkDetector", () => {
     expect(d.update(EYE_OPEN_MAX, EYE_OPEN_MAX)).toBe("pending");
     expect(d.update(EYE_CLOSED_MIN, EYE_CLOSED_MIN)).toBe("passed");
   });
+
+  it("U-F5: turned-pose blink (left/right angle) with far eye foreshortened and soft peak (0.46) → passed", () => {
+    const d = new BlinkDetector();
+    // Turned left: left eye near (0.18), right eye far/foreshortened (0.38)
+    expect(d.update(0.18, 0.38, true)).toBe("pending");
+    // User blinks: near eye peaks at 0.46, far eye reaches 0.38
+    expect(d.update(0.46, 0.38, true)).toBe("passed");
+  });
+
+  it("U-F5: ambiguous initial sample at turned pose stays pending without failing", () => {
+    const d = new BlinkDetector();
+    expect(d.update(0.42, 0.44, true)).toBe("pending");
+  });
 });

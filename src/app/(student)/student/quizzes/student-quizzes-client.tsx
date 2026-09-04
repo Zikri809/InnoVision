@@ -332,7 +332,7 @@ export function StudentQuizzesClient({
                             : t("oneAttempt")}
                       </span>
                     )}
-                    {!isPractice && q.completedSessionId && !q.allow_retake ? (
+                    {!isPractice && q.completedSessionId && !q.resultsRevealed && !q.allow_retake ? (
                       // Completed + unrevealed + no retake: one affordance —
                       // the disabled button itself carries the awaiting state.
                       <Button

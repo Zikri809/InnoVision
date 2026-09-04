@@ -57,8 +57,8 @@ test.describe("E46 — deadline chips + class filter", () => {
     await fast(lecturerPage).toHaveURL(/\/lecturer\/classes\/[^/]+$/);
     await lecturerPage.getByLabel("Quiz title").fill(QUIZ_DATED_A);
     const closes = new Date(Date.now() + 12 * 3600_000);
-    await setDateTime(lecturerPage, lecturerPage.getByLabel("Opens at"), new Date(Date.now() - 3600_000));
-    await setDateTime(lecturerPage, lecturerPage.getByLabel("Closes at"), closes);
+    await setDateTime(lecturerPage, lecturerPage.getByLabel("Opens at", { exact: true }), new Date(Date.now() - 3600_000));
+    await setDateTime(lecturerPage, lecturerPage.getByLabel("Closes at", { exact: true }), closes);
     await lecturerPage.getByRole("button", { name: /create quiz|new quiz/i }).click();
     await fast(lecturerPage.getByText(QUIZ_DATED_A, { exact: true })).toBeVisible();
     await lecturerPage.getByText(QUIZ_DATED_A, { exact: true }).click();

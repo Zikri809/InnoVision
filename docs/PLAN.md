@@ -20,7 +20,7 @@
 |---|---|
 | AI provider | `openai` npm SDK with `baseURL` override → works with OpenAI, OpenRouter, Gemini-compatible endpoint, local vLLM. Config via env: `AI_BASE_URL`, `AI_API_KEY`, `AI_MODEL` |
 | Question types (gesture-friendly) | **`mcq`** (2–5 options → finger count) and **`true_false`** (1 finger = true, 2 = false). Nothing else for MVP |
-| Face stack | **CompreFace (self-hosted Docker, InsightFace/ArcFace)** — server-side detection/alignment/embedding/matching via REST. The browser sends webcam frames to Next.js routes → CompreFace `/recognize`. Subject registry keyed by `auth.uid()`. Threshold + margin rule (0.5 similarity + 0.15 gap) as SQL constants. **Superseded the pre-migration MediaPipe client-side embedding approach** (see `PLAN_PHASE7_COMPREFACE_MIGRATION.md`). |
+| Face stack | **InsightFace sidecar (self-hosted Docker, single stateless container)** — server-side detection/pose/embedding in one `/extract` call. The browser sends webcam frames to Next.js routes → sidecar → similarity vs the student's OWN stored baseline (`profile_face_samples`, pgvector 512). Thresholds (0.5 verify / 0.45 duplicate) as SQL constants. **Superseded CompreFace** (see `PLAN_INSIGHTFACE_MIGRATION.md`; history: `PLAN_PHASE7_COMPREFACE_MIGRATION.md`). |
 | Gesture stack | **MediaPipe Hand Landmarker** (ported from `Sample Code/index.html`) |
 | Liveness | **Face Landmarker blendshapes** — require one blink at enrollment + at assessment start (basic anti-photo-spoof). Also used for self-recovery from `paused` state (see §1) |
 | Verification cadence | At start + **every question transition** + **periodic check every 30–45s (uniform jitter), only while a question is displayed; skipped while `paused`/`flagged`** |
@@ -346,9 +346,9 @@ GLM_BASE_URL=http://localhost:11434      # ROOT URL (no /v1); probe: /v1/models,
                                          # completions: /v1/chat/completions
 OCR_GLM_MODEL=glm-ocr
 OCR_VISION_MODEL=gpt-4o-mini
-COMPREFACE_BASE_URL=http://localhost:8000   # self-hosted CompreFace (Docker)
-COMPREFACE_API_KEY=                          # server-only; see docs/COMPREFACE_SETUP.md
-COMPREFACE_MOCK_ENABLED=0                    # 1 = E2E/unit-test mock mode (never in prod)
+INSIGHTFACE_BASE_URL=http://localhost:8000   # self-hosted sidecar (Docker, loopback)
+FACE_SIDECAR_TOKEN=                          # optional shared secret (set in production)
+FACE_MOCK_ENABLED=0                          # 1 = E2E/unit-test mock mode (never in prod)
 # (no TIMER_GRACE_SEC — grace is a SQL constant; see §Server-side timer)
 ```
 
@@ -365,4 +365,5 @@ Vercel notes: AI quiz-generation routes intentionally run long (per-call timeout
 5. **Sparse slide decks → weak AI questions** — slides are diagrams+bullets, so extracted text can be thin; builder shows a **source-text preview** so the lecturer sees why before blaming the AI.
 6. **Free-tier Supabase pauses after 7 days inactivity** — reopen the project before demo day.
 7. **Demo-room reality** — 20 laptops + fluorescent lighting degrades both hand and face tracking; the click fallback + supervisor override are the safety net.
-8. **Direct-RPC face forgery (CompreFace migration residual).** A student can call `record_face_check` / `enroll_face` directly via PostgREST with forged CompreFace metadata for their OWN uid (`p_subject = auth.uid()`, high similarity) — the RPC trusts the metadata (it cannot call CompreFace). This is the same threat model as the pre-migration embedding-replay risk (a student could forge a matching embedding). **Mitigation:** the `p_subject = auth.uid()` check prevents impersonation; the FLAT window + blink liveness + lecturer review catch sustained forgery; the nonce rotates per check. **Post-MVP:** challenge-response liveness on periodic checks. — (status 2026-08-22: metadata forgery remains possible ONLY for passing AS ONESELF; verdict hardened by majority voting — see PLAN_INTEGRITY_SUITE.md §6)
+8. **Direct-RPC face forgery (CompreFace migration residual).** A student can call `record_face_check` / `enroll_face` directly via PostgREST with forged CompreFace metadata for their OWN uid (`p_subject = auth.uid()`, high similarity) — the RPC trusts the metadata (it cannot call CompreFace). This is the same threat model as the pre-migration embedding-replay risk (a student could forge a matching embedding). **Mitigation:** the `p_subject = auth.uid()` check prevents impersonation; the FLAT window + blink liveness + lecturer review catch sustained forgery; the nonce rotates per check. **Post-MVP:** challenge-response liveness on periodic checks.
+ — (status 2026-08-22: metadata forgery remains possible ONLY for passing AS ONESELF; verdict hardened by majority voting — see PLAN_INTEGRITY_SUITE.md §6)

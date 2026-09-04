@@ -534,11 +534,12 @@ cadence: periodic (30–45s) + on question transitions; nonce-chained:
 POST /api/face/verify {sessionId, frames[≤3], trigger, nonce:Nᵢ}
   route (api/face/verify/route.ts):
     1. guard/CSRF/rate(10/min)/frame-size caps
-    2. consent+enrollment pre-check BEFORE any biometric leaves
-    3. per non-empty frame: compreface.recognizeFaces(frame) (1:N search)
-       selfSimilarity(faces, uid) — extracts CALLER's own similarity, so a
-       lookalike classmate ranking top-1 cannot hurt the score
-       empty frame = FAIL vote (integrity-conservative)
+    2. baseline pre-check (face_baseline_status) BEFORE any biometric leaves
+    3. per non-empty frame: sidecar /extract → pick the ONE primary face
+       (largest bbox, det_score ≥ floor — never max-over-faces) →
+       compare_face_baseline(emb): max cosine vs the student's OWN stored
+       samples (1:1-by-baseline; no gallery search is callable by students)
+       empty frame / no qualifying face = FAIL vote (integrity-conservative)
     4. RPC record_face_check(session, uid, similarities[], trigger, nonce, frame_hashes)
        - verifies nonce == session.verify_nonce → mismatch 409
        - rotates verify_nonce (replay protection)
@@ -554,7 +555,7 @@ catch-up verify on return (nothing recorded while hidden).
 
 **E2E mock seam**: fake tracker emits marker frames
 (`FAKE_FRAME_MATCH/MISMATCH`); when `NEXT_PUBLIC_E2E_FAKE_SEAM === "1"` AND
-`COMPREFACE_MOCK_ENABLED === "1"`, `compreface-client.ts` returns canned responses —
+`FACE_MOCK_ENABLED === "1"`, `insightface-client.ts` returns canned responses —
 harness-only opt-in (`seam-gate.ts`), set only in `playwright.config.ts`'s
 webServer env. Replaced the earlier `NODE_ENV ≠ production` gate, which went
 dead when the suite switched to the production build (5f6b1da).
@@ -811,8 +812,8 @@ See `.env.local.example` for the authoritative annotated list. Summary:
 | `LECTURER_INVITE_CODE` | register promotion | hashed compare; also required by e2e specs |
 | `INSTITUTIONAL_EMAIL_DOMAINS` | `lib/auth/institutional.ts` (SSO callback + login button gating) | comma-separated university domain allowlist; unset = SSO disabled |
 | `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL` | `lib/ai/client.ts` (server) | OpenAI-compatible; e2e points at the mock server |
-| `COMPREFACE_BASE_URL` / `_API_KEY` | `compreface-client.ts` (server) | self-hosted Docker |
-| `COMPREFACE_MOCK_ENABLED` | same | `"1"` opts into canned responses (non-prod only) |
+| `INSIGHTFACE_BASE_URL` / `FACE_SIDECAR_TOKEN` | `insightface-client.ts` (server) | self-hosted sidecar (loopback) |
+| `FACE_MOCK_ENABLED` | same | `"1"` opts into canned responses (non-prod only) |
 | `GLM_*` | extraction dialog config | optional local vLLM OCR |
 | `PLAYWRIGHT_PORT`, `MOCK_AI_PORT` | e2e | defaults 3001 / 8787 |
 

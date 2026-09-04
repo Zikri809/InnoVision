@@ -54,10 +54,15 @@ describe("mapFaceError", () => {
     expect(mapFaceError({ error: "pose_invalid" })?.status).toBe(400);
   });
 
-  it("compreface_unavailable → 503", async () => {
-    const res = mapFaceError({ error: "compreface_unavailable" });
+  it("insightface_unavailable → 503", async () => {
+    const res = mapFaceError({ error: "insightface_unavailable" });
     expect(res?.status).toBe(503);
-    expect((await res?.json())?.error).toBe("compreface_unavailable");
+    expect((await res?.json())?.error).toBe("insightface_unavailable");
+  });
+
+  it("invalid_samples → 400", async () => {
+    const res = mapFaceError({ error: "invalid_samples" });
+    expect(res?.status).toBe(400);
   });
 
   it("unknown payload → 503 internal (never a raw message)", async () => {

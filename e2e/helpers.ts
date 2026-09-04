@@ -250,7 +250,10 @@ export async function createQuizWithQuestions(
     await page.getByRole("option", { name: "Assessment" }).click();
   }
   if (opts.shuffle) {
-    await page.getByLabel(/shuffle question/i).check();
+    // Base UI Switch renders BOTH a role="switch" span and a hidden form
+    // input, so getByLabel().check() strict-violates. The switch role is the
+    // stable target (same pattern as e37).
+    await page.getByRole("switch", { name: /shuffle question/i }).click();
   }
   await page.getByRole("button", { name: /create quiz|new quiz/i }).click();
   await expect(page.getByText(opts.quizTitle, { exact: true })).toBeVisible();

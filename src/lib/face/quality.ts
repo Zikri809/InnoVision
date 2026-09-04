@@ -150,6 +150,7 @@ export function scoreFrameQuality(params: {
   yaw: number;
   eyesOpen: boolean;
   lightingOk: boolean;
+  allowTurned?: boolean;
 }): number {
   let score = 0;
   if (params.faceDetected) score += 30;
@@ -158,6 +159,7 @@ export function scoreFrameQuality(params: {
     const absYaw = Math.abs(params.yaw);
     if (absYaw <= 15) score += 25;
     else if (absYaw <= 25) score += 15;
+    else if (params.allowTurned && absYaw <= 45) score += 20;
   }
   if (params.eyesOpen) score += 20;
   if (params.lightingOk) score += 20;

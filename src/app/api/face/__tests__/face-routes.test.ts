@@ -11,47 +11,28 @@ import * as pauseRoute from "@/app/api/sessions/[id]/pause/route";
 import * as sessionAdvisoryRoute from "@/app/api/sessions/[id]/advisory/route";
 import * as sessionGetRoute from "@/app/api/sessions/[id]/route";
 import * as healthRoute from "@/app/api/face/health/route";
+import { EMBEDDING_DIMS } from "@/lib/face/embedding";
 
 const fakeHolder: { current: FakeSupabase | undefined } = { current: undefined };
 vi.mock("@/lib/supabase/server", () => ({
   createClient: () => fakeHolder.current,
 }));
 
-// Mock the CompreFace client so unit tests never touch Docker. Tests control
-// the responses via the mutable `comprefaceMock`.
-const comprefaceMock = {
-  recognize: vi.fn(),
-  recognizeFaces: vi.fn(),
-  detect: vi.fn(),
-  addSubjectExample: vi.fn(),
-  deleteSubject: vi.fn(),
-  subjectExists: vi.fn(),
+// Mock the InsightFace client so unit tests never touch Docker. Tests control
+// the responses via the mutable `insightfaceMock`.
+const insightfaceMock = {
+  extractFace: vi.fn(),
   health: vi.fn(),
   isMockMatchFrame: (f: string) => f.includes("FAKE_FRAME_MATCH"),
   isMockMismatchFrame: (f: string) => f.includes("FAKE_FRAME_MISMATCH"),
-  isMockModeEnabled: () => process.env.COMPREFACE_MOCK_ENABLED === "1",
+  isMockModeEnabled: () => process.env.FACE_MOCK_ENABLED === "1",
 };
-vi.mock("@/lib/face/server/compreface-client", () => ({
-  recognize: (...a: unknown[]) => comprefaceMock.recognize(...a),
-  recognizeFaces: (...a: unknown[]) => comprefaceMock.recognizeFaces(...a),
-  // Mirror of the real selfSimilarity (max self-subject similarity across faces).
-  selfSimilarity: (faces: { subjects: { subject: string; similarity: number }[] }[], uid: string) => {
-    let best = 0;
-    for (const face of faces) {
-      for (const s of face.subjects) {
-        if (s.subject === uid && s.similarity > best) best = s.similarity;
-      }
-    }
-    return best;
-  },
-  detect: (...a: unknown[]) => comprefaceMock.detect(...a),
-  addSubjectExample: (...a: unknown[]) => comprefaceMock.addSubjectExample(...a),
-  deleteSubject: (...a: unknown[]) => comprefaceMock.deleteSubject(...a),
-  subjectExists: (...a: unknown[]) => comprefaceMock.subjectExists(...a),
-  health: (...a: unknown[]) => comprefaceMock.health(...a),
+vi.mock("@/lib/face/server/insightface-client", () => ({
+  extractFace: (...a: unknown[]) => insightfaceMock.extractFace(...a),
+  health: (...a: unknown[]) => insightfaceMock.health(...a),
   isMockMatchFrame: (f: string) => f.includes("FAKE_FRAME_MATCH"),
   isMockMismatchFrame: (f: string) => f.includes("FAKE_FRAME_MISMATCH"),
-  isMockModeEnabled: () => process.env.COMPREFACE_MOCK_ENABLED === "1",
+  isMockModeEnabled: () => process.env.FACE_MOCK_ENABLED === "1",
 }));
 
 const enroll = enrollRoute;
@@ -71,11 +52,31 @@ const LECTURER_ID = "00000000-0000-4000-8000-00000000000a";
 const NONCE = "11111111-1111-4111-8111-111111111111";
 
 const MATCH_FRAME = "data:image/jpeg;base64,FAKE_FRAME_MATCH";
-// Enroll frames carry the MATCH marker so the route's mock-aware pose-skip /
-// duplicate-skip path is exercised (mirrors the E2E fake tracker).
+// Enroll frames carry the MATCH marker so the route's mock-aware pose-skip
+// path is exercised (mirrors the E2E fake tracker).
 const FRONT_FRAME = "data:image/jpeg;base64,FAKE_FRAME_MATCH_FRONT";
 const LEFT_FRAME = "data:image/jpeg;base64,FAKE_FRAME_MATCH_LEFT";
 const RIGHT_FRAME = "data:image/jpeg;base64,FAKE_FRAME_MATCH_RIGHT";
+
+/** Deterministic 512-vector for tests (unit norm). */
+function testVector(seed: number): number[] {
+  const v = new Array(EMBEDDING_DIMS).fill(0);
+  v[seed % EMBEDDING_DIMS] = 1;
+  return v;
+}
+const SELF_VECTOR = testVector(7);
+
+/** The default mock extraction: one high-confidence centered face. */
+function mockFace(embedding: number[] = SELF_VECTOR) {
+  return {
+    embedding,
+    yaw: 0,
+    pitch: 0,
+    roll: 0,
+    det_score: 0.99,
+    bbox: [160, 96, 480, 432] as [number, number, number, number],
+  };
+}
 
 function req(body?: unknown, init?: RequestInit): Request {
   return new Request("http://localhost", {
@@ -95,6 +96,15 @@ function verifyReq(overrides?: Record<string, unknown>) {
   });
 }
 
+/** Seed the student's biometric baseline (what enroll would have stored). */
+function seedBaseline(ctx: ReturnType<typeof makeOwnerContext>, uid = STUDENT_ID, embedding = SELF_VECTOR) {
+  ctx.client.tables["profile_face_samples"] = [
+    { id: "s1", profile_id: uid, angle: "front", embedding, created_at: "2026-01-01T00:00:00Z" },
+    { id: "s2", profile_id: uid, angle: "left", embedding, created_at: "2026-01-01T00:00:00Z" },
+    { id: "s3", profile_id: uid, angle: "right", embedding, created_at: "2026-01-01T00:00:00Z" },
+  ];
+}
+
 /** A live assessment context with the student enrolled + consented + seeded. */
 function faceContext(opts?: {
   status?: string;
@@ -102,6 +112,7 @@ function faceContext(opts?: {
   consented?: boolean;
   faceExempt?: boolean;
   seedSession?: boolean;
+  withBaseline?: boolean;
 }) {
   const ctx = makeOwnerContext({ quizStatus: "live" });
   const quizRow = ctx.client.tables["quizzes"]![0];
@@ -125,6 +136,9 @@ function faceContext(opts?: {
       face_fail_streak: 0,
     });
   }
+  if (opts?.withBaseline !== false) {
+    seedBaseline(ctx);
+  }
   fakeHolder.current = ctx.client;
   return ctx;
 }
@@ -146,33 +160,26 @@ function lecturerContext() {
 }
 
 beforeAll(() => {
-  // The CompreFace client is module-mocked; these env vars are not strictly
+  // The InsightFace client is module-mocked; these env vars are not strictly
   // needed for the mocked path but keep the routes' env reads from throwing.
-  process.env.COMPREFACE_BASE_URL = "http://localhost:8000";
-  process.env.COMPREFACE_API_KEY = "test-key";
-  process.env.COMPREFACE_MOCK_ENABLED = "1";
+  process.env.INSIGHTFACE_BASE_URL = "http://localhost:8000";
+  process.env.FACE_MOCK_ENABLED = "1";
 });
 
 afterAll(() => {
-  delete process.env.COMPREFACE_BASE_URL;
-  delete process.env.COMPREFACE_API_KEY;
-  delete process.env.COMPREFACE_MOCK_ENABLED;
+  delete process.env.INSIGHTFACE_BASE_URL;
+  delete process.env.FACE_MOCK_ENABLED;
 });
 
 beforeEach(() => {
   fakeHolder.current = undefined;
   _resetRateLimiter();
   vi.clearAllMocks();
-  // Default CompreFace behavior: match frame → self subject, no duplicates,
-  // pose valid.
-  comprefaceMock.recognizeFaces.mockResolvedValue([
-    { subjects: [{ subject: STUDENT_ID, similarity: 0.95 }] },
-  ]);
-  comprefaceMock.detect.mockResolvedValue({ faces: [{ yaw: 0 }] });
-  comprefaceMock.addSubjectExample.mockResolvedValue({ imageId: "img-1" });
-  comprefaceMock.deleteSubject.mockResolvedValue({ ok: true });
-  comprefaceMock.subjectExists.mockResolvedValue(true);
-  comprefaceMock.health.mockResolvedValue(true);
+  // Default InsightFace behavior: match frame → one self face, health ok.
+  insightfaceMock.extractFace.mockImplementation(async () => ({
+    faces: [mockFace()],
+  }));
+  insightfaceMock.health.mockResolvedValue(true);
 });
 
 describe("I1 — enroll requires consent", () => {
@@ -181,24 +188,30 @@ describe("I1 — enroll requires consent", () => {
     const res = await enroll.POST(req({ frames: [FRONT_FRAME, LEFT_FRAME, RIGHT_FRAME] }));
     expect(res.status).toBe(403);
     expect((await res.json()).error).toBe("consent_required");
+    // Frames must never reach the sidecar for a non-consented student.
+    expect(insightfaceMock.extractFace).not.toHaveBeenCalled();
   });
 });
 
-describe("I2 — enroll stores 3 frames + sets enrolled status", () => {
-  it("returns 200 { ok:true, status:enrolled } and writes the status", async () => {
-    const ctx = faceContext({ seedSession: false });
+describe("I2 — enroll stores 3 samples + sets enrolled status", () => {
+  it("returns 200 { ok:true, status:enrolled } and writes the samples", async () => {
+    const ctx = faceContext({ seedSession: false, withBaseline: false });
     const res = await enroll.POST(req({ frames: [FRONT_FRAME, LEFT_FRAME, RIGHT_FRAME] }));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.ok).toBe(true);
     expect(body.status).toBe("enrolled");
-    expect(comprefaceMock.addSubjectExample).toHaveBeenCalledTimes(3);
+    expect(insightfaceMock.extractFace).toHaveBeenCalledTimes(3);
+    const samples = ctx.client.tables["profile_face_samples"]!;
+    expect(samples).toHaveLength(3);
+    expect(new Set(samples.map((s) => s.angle))).toEqual(new Set(["front", "left", "right"]));
+    expect(samples.every((s) => s.profile_id === STUDENT_ID)).toBe(true);
     const profile = ctx.client.tables["profiles"]!.find((p) => p.id === STUDENT_ID);
     expect(profile?.face_enrollment_status).toBe("enrolled");
   });
 });
 
-describe("I3 — enroll rejects invalid frames", () => {
+describe("I3 — enroll rejects invalid frames / poses", () => {
   it("returns 400 for wrong frame count", async () => {
     faceContext({ seedSession: false });
     const res = await enroll.POST(req({ frames: [FRONT_FRAME, LEFT_FRAME] }));
@@ -211,66 +224,55 @@ describe("I3 — enroll rejects invalid frames", () => {
     expect(res.status).toBe(413);
   });
 
-  it("returns 400 pose_invalid when CompreFace detect returns a bad yaw", async () => {
+  it("returns 400 pose_invalid when no face is detected", async () => {
+    faceContext({ seedSession: false });
+    insightfaceMock.extractFace.mockResolvedValue({ faces: [] });
+    const res = await enroll.POST(req({ frames: [FRONT_FRAME, LEFT_FRAME, RIGHT_FRAME] }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("pose_invalid");
+  });
+
+  it("returns 400 pose_invalid when the side yaw is out of range (real mode)", async () => {
     faceContext({ seedSession: false });
     // Real-mode simulation: pose validation only runs OUTSIDE mock mode
-    // (the route skips it entirely while COMPREFACE_MOCK_ENABLED=1 because
-    // the mocked detect() returns yaw 0 for everything).
-    const prevFlag = process.env.COMPREFACE_MOCK_ENABLED;
-    delete process.env.COMPREFACE_MOCK_ENABLED;
+    // (the route skips it entirely while FACE_MOCK_ENABLED=1 because the
+    // mocked frames all carry yaw 0).
+    const prevFlag = process.env.FACE_MOCK_ENABLED;
+    delete process.env.FACE_MOCK_ENABLED;
     try {
-      // Non-match frames so pose validation runs; front yaw 90 is out of range.
-      comprefaceMock.detect.mockResolvedValue({ faces: [{ yaw: 90 }] });
+      insightfaceMock.extractFace.mockImplementation(async (frame: string) => {
+        if (frame.includes("LEFT")) return { faces: [mockFace().yaw !== undefined ? { ...mockFace(), yaw: 5 } : mockFace()] };
+        if (frame.includes("RIGHT")) return { faces: [{ ...mockFace(), yaw: -40 }] };
+        return { faces: [{ ...mockFace(), yaw: 0 }] };
+      });
       const res = await enroll.POST(
         req({ frames: ["data:image/jpeg;base64,PLAIN_F", "data:image/jpeg;base64,PLAIN_L", "data:image/jpeg;base64,PLAIN_R"] }),
       );
       expect(res.status).toBe(400);
       expect((await res.json()).error).toBe("pose_invalid");
     } finally {
-      if (prevFlag === undefined) delete process.env.COMPREFACE_MOCK_ENABLED;
-      else process.env.COMPREFACE_MOCK_ENABLED = prevFlag;
+      if (prevFlag === undefined) delete process.env.FACE_MOCK_ENABLED;
+      else process.env.FACE_MOCK_ENABLED = prevFlag;
     }
   });
 });
 
 describe("I-dup — duplicate identity detected at enroll → pending_review", () => {
-  it("flags pending_review when a different subject matches with high similarity", async () => {
-    const ctx = faceContext({ seedSession: false });
-    // Real-mode simulation: the duplicate check only runs OUTSIDE mock mode
-    // (mirrors the pose-validation skip — see I3 above).
-    const prevFlag = process.env.COMPREFACE_MOCK_ENABLED;
-    delete process.env.COMPREFACE_MOCK_ENABLED;
-    try {
-      // Use NON-match frames so the route's duplicate check (recognize) runs.
-      const nonMatchFrames = [
-        "data:image/jpeg;base64,PLAIN_FRONT",
-        "data:image/jpeg;base64,PLAIN_LEFT",
-        "data:image/jpeg;base64,PLAIN_RIGHT",
-      ];
-      // Pose validation: detect returns yaw 0 for all (front ok, but left/right
-      // would fail pose... so mock detect to return valid yaw per frame).
-      comprefaceMock.detect.mockImplementation(async (frame: string) => {
-        if (frame.includes("PLAIN_LEFT")) return { faces: [{ yaw: 40 }] };
-        if (frame.includes("PLAIN_RIGHT")) return { faces: [{ yaw: -40 }] };
-        return { faces: [{ yaw: 0 }] };
-      });
-      // CompreFace recognize (used for the duplicate check) returns a DIFFERENT
-      // subject with similarity above FACE_SUSPICION_MIN (0.45).
-      comprefaceMock.recognize.mockResolvedValue({
-        subject: "00000000-0000-4000-8000-0000000000aa",
-        similarity: 0.8,
-        subjects: [{ subject: "00000000-0000-4000-8000-0000000000aa", similarity: 0.8 }],
-      });
-      const res = await enroll.POST(req({ frames: nonMatchFrames }));
-      expect(res.status).toBe(200);
-      const body = await res.json();
-      expect(body.status).toBe("pending_review");
-      const profile = ctx.client.tables["profiles"]!.find((p) => p.id === STUDENT_ID);
-      expect(profile?.face_enrollment_status).toBe("pending_review");
-    } finally {
-      if (prevFlag === undefined) delete process.env.COMPREFACE_MOCK_ENABLED;
-      else process.env.COMPREFACE_MOCK_ENABLED = prevFlag;
-    }
+  it("flags pending_review when a DIFFERENT student's stored sample matches ≥ 0.45", async () => {
+    const ctx = faceContext({ seedSession: false, withBaseline: false });
+    // Another student (LECTURER_ID used as a stand-in second profile) has
+    // stored samples identical to the frames being enrolled.
+    const otherId = "00000000-0000-4000-8000-0000000000aa";
+    ctx.client.seedProfile({ id: otherId, role: "student", consent_given_at: "2026-01-01T00:00:00Z" });
+    ctx.client.tables["profile_face_samples"] = [
+      { id: "o1", profile_id: otherId, angle: "front", embedding: SELF_VECTOR, created_at: "2026-01-01T00:00:00Z" },
+    ];
+    const res = await enroll.POST(req({ frames: [FRONT_FRAME, LEFT_FRAME, RIGHT_FRAME] }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.status).toBe("pending_review");
+    const profile = ctx.client.tables["profiles"]!.find((p) => p.id === STUDENT_ID);
+    expect(profile?.face_enrollment_status).toBe("pending_review");
   });
 });
 
@@ -286,17 +288,37 @@ describe("I4 — verify match → active, streak reset, new nonce", () => {
     expect(body.nextNonce).not.toBe(NONCE);
     expect(body.faceFailStreak).toBe(0);
   });
+
+  it("cutover guard: an EMPTY baseline → 403 not_enrolled before any sidecar call", async () => {
+    faceContext({ withBaseline: false });
+    const res = await verify.POST(verifyReq());
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe("not_enrolled");
+    expect(insightfaceMock.extractFace).not.toHaveBeenCalled();
+  });
+
+  it("face-EXEMPT session with NO baseline skips the guard (0020 step-6 order preserved)", async () => {
+    // The exempt short-circuit lives INSIDE record_face_check, BEFORE its
+    // enrollment check — the route's baseline guard must not reorder that
+    // (an exempted student may legitimately have zero stored samples).
+    faceContext({ faceExempt: true, withBaseline: false });
+    const res = await verify.POST(verifyReq());
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.matched).toBe(true);
+    expect(body.distance).toBeNull(); // exempt echo, not a computed verdict
+  });
 });
 
 describe("I5 — 3 flat fails → flagged", () => {
   it("flags on the 3rd mismatch (with blink-recovery between fails)", async () => {
     const ctx = faceContext();
-    // CompreFace returns a mismatch (no self match).
-    comprefaceMock.recognizeFaces.mockResolvedValue([{ subjects: [] }]);
+    // Mismatch marker → 0-vote without a sidecar call.
+    insightfaceMock.extractFace.mockImplementation(async () => ({ faces: [] }));
     let nonce = NONCE;
     let lastBody: { sessionStatus?: string; nextNonce?: string } = {};
     for (let i = 0; i < 3; i++) {
-      const res = await verify.POST(verifyReq({ trigger: "periodic", nonce }));
+      const res = await verify.POST(verifyReq({ trigger: "periodic", nonce, frames: [MATCH_FRAME.replace("FAKE_FRAME_MATCH", "FAKE_FRAME_MISMATCH")] }));
       lastBody = (await res.json()) as { sessionStatus?: string; nextNonce?: string };
       nonce = lastBody.nextNonce as string;
       if (i < 2) {
@@ -308,14 +330,15 @@ describe("I5 — 3 flat fails → flagged", () => {
     }
     expect(lastBody.sessionStatus).toBe("flagged");
     expect(ctx.client.tables["quiz_sessions"]!.find((s) => s.id === SESSION_ID)?.status).toBe("flagged");
+    expect(insightfaceMock.extractFace).not.toHaveBeenCalled();
   });
 });
 
 describe("I5b — single fail → paused", () => {
   it("pauses after one mismatch", async () => {
     const ctx = faceContext();
-    comprefaceMock.recognizeFaces.mockResolvedValue([{ subjects: [] }]);
-    const res = await verify.POST(verifyReq());
+    const mismatch = MATCH_FRAME.replace("FAKE_FRAME_MATCH", "FAKE_FRAME_MISMATCH");
+    const res = await verify.POST(verifyReq({ frames: [mismatch] }));
     const body = await res.json();
     expect(body.sessionStatus).toBe("paused");
     expect(ctx.client.tables["quiz_sessions"]!.find((s) => s.id === SESSION_ID)?.status).toBe("paused");
@@ -325,12 +348,12 @@ describe("I5b — single fail → paused", () => {
 describe("I-vote — multi-frame majority voting", () => {
   it("passes when 2 of 3 frames match, even though one frame failed", async () => {
     faceContext();
-    // Frame 1: strong self-match; frame 2: no self reading (blur/glance);
-    // frame 3: weak-but-passing self-match.
-    comprefaceMock.recognizeFaces.mockImplementation(async (frame: string) => {
-      if (frame === "F1") return [{ subjects: [{ subject: STUDENT_ID, similarity: 0.95 }] }];
-      if (frame === "F2") return [{ subjects: [] }];
-      return [{ subjects: [{ subject: STUDENT_ID, similarity: 0.6 }] }];
+    // Frame 1: strong self-match; frame 2: no face (blur/glance);
+    // frame 3: weak-but-passing self-match (0.6 vs the 0.5 gate).
+    insightfaceMock.extractFace.mockImplementation(async (frame: string) => {
+      if (frame === "F2") return { faces: [] };
+      if (frame === "F3") return { faces: [{ ...mockFace(), embedding: mix(SELF_VECTOR, 0.6) }] };
+      return { faces: [mockFace()] };
     });
     const res = await verify.POST(
       verifyReq({ frames: ["F1", "F2", "F3"] }),
@@ -338,17 +361,15 @@ describe("I-vote — multi-frame majority voting", () => {
     const body = await res.json();
     expect(body.matched).toBe(true);
     expect(body.sessionStatus).toBe("active");
-    // Distance reflects the BEST frame's reading.
-    expect(body.distance).toBeCloseTo(0.05, 5);
+    // Distance reflects the BEST frame's reading (1 - 1.0 = 0).
+    expect(body.distance).toBeCloseTo(0, 5);
   });
 
   it("fails on a 1-of-3 split (no majority)", async () => {
     faceContext();
-    comprefaceMock.recognizeFaces.mockImplementation(async (frame: string) => {
-      return frame === "GOOD"
-        ? [{ subjects: [{ subject: STUDENT_ID, similarity: 0.9 }] }]
-        : [{ subjects: [] }];
-    });
+    insightfaceMock.extractFace.mockImplementation(async (frame: string) =>
+      frame === "GOOD" ? { faces: [mockFace()] } : { faces: [] },
+    );
     const res = await verify.POST(verifyReq({ frames: ["BAD1", "GOOD", "BAD2"] }));
     const body = await res.json();
     expect(body.matched).toBe(false);
@@ -357,36 +378,45 @@ describe("I-vote — multi-frame majority voting", () => {
 
   it("requires BOTH frames to pass when only two were submitted", async () => {
     faceContext();
-    comprefaceMock.recognizeFaces.mockResolvedValue([
-      { subjects: [{ subject: STUDENT_ID, similarity: 0.95 }] },
-    ]);
     const bothPass = await verify.POST(verifyReq({ frames: ["A", "B"] }));
     expect((await bothPass.json()).matched).toBe(true);
 
     faceContext();
-    comprefaceMock.recognizeFaces.mockImplementation(async (frame: string) =>
-      frame === "PASS" ? [{ subjects: [{ subject: STUDENT_ID, similarity: 0.95 }] }] : [{ subjects: [] }],
+    insightfaceMock.extractFace.mockImplementation(async (frame: string) =>
+      frame === "PASS" ? { faces: [mockFace()] } : { faces: [] },
     );
     const oneFails = await verify.POST(verifyReq({ frames: ["PASS", "FAIL"] }));
     expect((await oneFails.json()).matched).toBe(false);
   });
 
-  it("a lookalike ranking top-1 does NOT fail the check (1:1 by lookup)", async () => {
+  it("a second person in frame NEVER drags the score UP (single-face pick)", async () => {
     faceContext();
-    // A classmate outranks the student in the gallery — the old margin rule
-    // would have failed this; the caller's OWN similarity is what counts.
-    comprefaceMock.recognizeFaces.mockResolvedValue([
-      {
-        subjects: [
-          { subject: "00000000-0000-4000-8000-0000000000aa", similarity: 0.8 },
-          { subject: STUDENT_ID, similarity: 0.7 },
-        ],
-      },
-    ]);
+    // A lookalike with a LARGER bbox is in frame; the student's smaller face
+    // is the one that must NOT be used to inflate the score — but more
+    // importantly the lookalike's OWN embedding (near-orthogonal to the
+    // baseline) must not pass either. The primary face is the LARGEST one;
+    // the verdict follows THAT face only.
+    insightfaceMock.extractFace.mockImplementation(async () => ({
+      faces: [
+        { ...mockFace(), embedding: SELF_VECTOR, bbox: [200, 150, 420, 400], det_score: 0.99 }, // student (smaller)
+        { ...mockFace(), embedding: testVector(33), bbox: [0, 0, 640, 480], det_score: 0.99 }, // lookalike (larger)
+      ],
+    }));
     const res = await verify.POST(verifyReq({ frames: ["TWIN1", "TWIN2"] }));
     const body = await res.json();
-    expect(body.matched).toBe(true);
-    expect(body.distance).toBeCloseTo(0.3, 5);
+    // The lookalike's embedding is orthogonal to the baseline → both frames
+    // vote 0 → the check FAILS (integrity-safe; no max-over-faces inflation).
+    expect(body.matched).toBe(false);
+  });
+
+  it("a face below the det_score floor votes 0 (no qualifying face)", async () => {
+    faceContext();
+    insightfaceMock.extractFace.mockImplementation(async () => ({
+      faces: [{ ...mockFace(), det_score: 0.3 }],
+    }));
+    const res = await verify.POST(verifyReq());
+    const body = await res.json();
+    expect(body.matched).toBe(false);
   });
 
   it("an oversized frame → 413", async () => {
@@ -522,33 +552,45 @@ describe("CSRF + rate limit + malformed + transport", () => {
   });
 });
 
-describe("I-compreface-down — CompreFace unavailable → 503", () => {
-  it("verify returns 503 when CompreFace recognize fails", async () => {
+describe("I-sidecar-down — sidecar unavailable → 503", () => {
+  it("verify returns 503 when extractFace fails", async () => {
     faceContext();
-    comprefaceMock.recognizeFaces.mockResolvedValue({ error: "compreface_unavailable" });
-    const res = await verify.POST(verifyReq());
+    insightfaceMock.extractFace.mockResolvedValue({ error: "insightface_unavailable" });
+    const res = await verify.POST(verifyReq({ frames: ["data:image/jpeg;base64,PLAIN"] }));
     expect(res.status).toBe(503);
-    expect((await res.json()).error).toBe("compreface_unavailable");
+    expect((await res.json()).error).toBe("insightface_unavailable");
   });
 
-  it("verify returns 503 comprehend_error (HTTP error) mapped distinctly", async () => {
+  it("verify returns 503 insightface_error (HTTP error) mapped distinctly", async () => {
     faceContext();
-    comprefaceMock.recognizeFaces.mockResolvedValue({ error: "compreface_error" });
-    const res = await verify.POST(verifyReq());
+    insightfaceMock.extractFace.mockResolvedValue({ error: "insightface_error" });
+    const res = await verify.POST(verifyReq({ frames: ["data:image/jpeg;base64,PLAIN"] }));
     expect(res.status).toBe(503);
-    expect((await res.json()).error).toBe("compreface_error");
+    expect((await res.json()).error).toBe("insightface_error");
   });
 
-  it("enroll returns 503 when CompreFace addSubjectExample fails", async () => {
+  it("enroll returns 503 when the sidecar is unavailable", async () => {
     faceContext({ seedSession: false });
-    comprefaceMock.addSubjectExample.mockResolvedValue({ error: "compreface_unavailable" });
+    insightfaceMock.extractFace.mockResolvedValue({ error: "insightface_unavailable" });
     const res = await enroll.POST(req({ frames: [FRONT_FRAME, LEFT_FRAME, RIGHT_FRAME] }));
     expect(res.status).toBe(503);
   });
 });
 
+describe("I-compare-down — compare_face_baseline transport failure → 503", () => {
+  it("verify returns 503 internal when the compare RPC errors", async () => {
+    const ctx = faceContext();
+    ctx.client.compareRpcError = true;
+    const res = await verify.POST(verifyReq({ frames: ["data:image/jpeg;base64,PLAIN"] }));
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.error).toBe("internal");
+    expect(JSON.stringify(body)).not.toContain("boom");
+  });
+});
+
 describe("I4b — no-face sentinel (empty frames) records a FAIL row, never a pass", () => {
-  it("returns 200 with matched:false → sessionStatus paused, and does NOT call CompreFace", async () => {
+  it("returns 200 with matched:false → sessionStatus paused, and does NOT call the sidecar", async () => {
     const ctx = faceContext();
     const res = await verify.POST(verifyReq({ frames: [""] }));
     expect(res.status).toBe(200);
@@ -556,9 +598,8 @@ describe("I4b — no-face sentinel (empty frames) records a FAIL row, never a pa
     expect(body.matched).toBe(false);
     expect(body.sessionStatus).toBe("paused");
     expect(body.nextNonce).not.toBe(NONCE); // nonce still rotates (fail row written)
-    expect(comprefaceMock.recognizeFaces).not.toHaveBeenCalled();
-    const session = ctx.client.tables["quiz_sessions"]!.find((s) => s.id === SESSION_ID);
-    expect(session?.status).toBe("paused");
+    expect(insightfaceMock.extractFace).not.toHaveBeenCalled();
+    expect(ctx.client.tables["quiz_sessions"]!.find((s) => s.id === SESSION_ID)?.status).toBe("paused");
   });
 
   it("an empty-frame start verify does NOT skip the RPC (no silent gate pass)", async () => {
@@ -572,18 +613,18 @@ describe("I4b — no-face sentinel (empty frames) records a FAIL row, never a pa
 describe("I-threshold — FACE_SIMILARITY_MIN boundary (0.5)", () => {
   it("similarity exactly 0.5 → match", async () => {
     faceContext();
-    comprefaceMock.recognizeFaces.mockResolvedValue([
-      { subjects: [{ subject: STUDENT_ID, similarity: 0.5 }] },
-    ]);
+    insightfaceMock.extractFace.mockImplementation(async () => ({
+      faces: [{ ...mockFace(), embedding: mix(SELF_VECTOR, 0.5) }],
+    }));
     const res = await verify.POST(verifyReq());
     expect((await res.json()).matched).toBe(true);
   });
 
   it("similarity 0.49 → no match", async () => {
     faceContext();
-    comprefaceMock.recognizeFaces.mockResolvedValue([
-      { subjects: [{ subject: STUDENT_ID, similarity: 0.49 }] },
-    ]);
+    insightfaceMock.extractFace.mockImplementation(async () => ({
+      faces: [{ ...mockFace(), embedding: mix(SELF_VECTOR, 0.49) }],
+    }));
     const res = await verify.POST(verifyReq());
     const body = await res.json();
     expect(body.matched).toBe(false);
@@ -591,58 +632,22 @@ describe("I-threshold — FACE_SIMILARITY_MIN boundary (0.5)", () => {
   });
 });
 
-describe("deletion-pending lifecycle", () => {
-  it("revoke clears face_deletion_pending when the CompreFace delete succeeds", async () => {
+describe("consent revoke — atomic biometric purge (0039)", () => {
+  it("revoke purges the samples and nulls the status in one step", async () => {
     const ctx = faceContext({ enrolled: true });
     const res = await consent.POST(req({ consent: false }));
     expect(res.status).toBe(200);
-    expect(comprefaceMock.deleteSubject).toHaveBeenCalledWith(STUDENT_ID);
     const profile = ctx.client.tables["profiles"]!.find((p) => p.id === STUDENT_ID);
-    expect(profile?.face_deletion_pending).toBe(false);
     expect(profile?.face_enrollment_status).toBeNull();
-  });
-
-  it("revoke leaves face_deletion_pending true when CompreFace deletion fails", async () => {
-    const ctx = faceContext({ enrolled: true });
-    comprefaceMock.deleteSubject.mockResolvedValue({ error: "compreface_unavailable" });
-    const res = await consent.POST(req({ consent: false }));
-    expect(res.status).toBe(200);
-    const profile = ctx.client.tables["profiles"]!.find((p) => p.id === STUDENT_ID);
-    expect(profile?.face_deletion_pending).toBe(true);
-  });
-
-  it("enroll deletes the pending subject BEFORE adding examples", async () => {
-    const ctx = faceContext({ seedSession: false });
-    const profile = ctx.client.tables["profiles"]!.find((p) => p.id === STUDENT_ID)!;
-    profile.face_deletion_pending = true;
-    const res = await enroll.POST(req({ frames: [FRONT_FRAME, LEFT_FRAME, RIGHT_FRAME] }));
-    expect(res.status).toBe(200);
-    // deleteSubject (pending cleanup) happens before addSubjectExample.
-    expect(comprefaceMock.deleteSubject).toHaveBeenCalledWith(STUDENT_ID);
-    expect(
-      comprefaceMock.deleteSubject.mock.invocationCallOrder[0],
-    ).toBeLessThan(comprefaceMock.addSubjectExample.mock.invocationCallOrder[0]);
-    expect(profile.face_enrollment_status).toBe("enrolled");
-    // The RPC (stub) clears the deletion-pending marker on success.
-    expect(profile.face_deletion_pending).toBe(false);
-  });
-
-  it("enroll aborts (does not add examples) when the pending delete fails", async () => {
-    const ctx = faceContext({ seedSession: false });
-    const profile = ctx.client.tables["profiles"]!.find((p) => p.id === STUDENT_ID)!;
-    profile.face_deletion_pending = true;
-    comprefaceMock.deleteSubject.mockResolvedValue({ error: "compreface_unavailable" });
-    const res = await enroll.POST(req({ frames: [FRONT_FRAME, LEFT_FRAME, RIGHT_FRAME] }));
-    expect(res.status).toBe(503);
-    expect(comprefaceMock.addSubjectExample).not.toHaveBeenCalled();
-    expect(profile.face_deletion_pending).toBe(true); // flag preserved for the cleanup retry
+    expect(profile?.consent_given_at).toBeNull();
+    expect(ctx.client.tables["profile_face_samples"] ?? []).toHaveLength(0);
   });
 });
 
 describe("quiz_not_live — verify on closed quiz → 409", () => {
   it("returns 409 when the quiz is not live", async () => {
-    const ctx = faceContext();
-    ctx.client.tables["quizzes"]![0].status = "closed";
+    faceContext();
+    fakeHolder.current!.tables["quizzes"]![0].status = "closed";
     const res = await verify.POST(verifyReq());
     expect(res.status).toBe(409);
     expect((await res.json()).error).toBe("quiz_not_live");
@@ -742,16 +747,16 @@ describe("route-specific mapFaceError overrides", () => {
 });
 
 describe("I-health — GET /api/face/health", () => {
-  it("returns { available: true } when CompreFace is healthy", async () => {
+  it("returns { available: true } when the sidecar is healthy", async () => {
     faceContext({ seedSession: false });
     const res = await health.GET();
     expect(res.status).toBe(200);
     expect((await res.json()).available).toBe(true);
   });
 
-  it("returns { available: false } when CompreFace is down", async () => {
+  it("returns { available: false } when the sidecar is down", async () => {
     faceContext({ seedSession: false });
-    comprefaceMock.health.mockResolvedValue(false);
+    insightfaceMock.health.mockResolvedValue(false);
     const res = await health.GET();
     expect(res.status).toBe(200);
     expect((await res.json()).available).toBe(false);
@@ -793,7 +798,8 @@ describe("GET /api/sessions/[id]", () => {
   });
 });
 
-describe("revoke-during-live → session flagged + re-consent does not clear", () => {  it("revokes consent, flags the session, and re-consent keeps it flagged", async () => {
+describe("revoke-during-live → session flagged + re-consent does not clear", () => {
+  it("revokes consent, flags the session, and re-consent keeps it flagged", async () => {
     const ctx = faceContext({ enrolled: true });
     ctx.client.seedQuestion({
       id: "00000000-0000-4000-8000-0000000000dd",
@@ -823,8 +829,8 @@ describe("revoke-during-live → session flagged + re-consent does not clear", (
     );
     expect(s?.status).toBe("flagged");
 
-    // The revoke route best-effort deletes the CompreFace subject.
-    expect(comprefaceMock.deleteSubject).toHaveBeenCalledWith(STUDENT_ID);
+    // Biometric samples are purged by the same atomic revoke.
+    expect(ctx.client.tables["profile_face_samples"] ?? []).toHaveLength(0);
 
     // Answer after revocation → 409 session_not_active.
     const answerRoute = await import("@/app/api/sessions/[id]/answer/route");
@@ -834,7 +840,7 @@ describe("revoke-during-live → session flagged + re-consent does not clear", (
     });
     expect(answerRes.status).toBe(409);
 
-    // Re-consent restores consent only — does NOT un-flag.
+    // Re-consent restores consent only — does NOT un-flag or re-enroll.
     const re = await consent.POST(req({ consent: true }));
     expect(re.status).toBe(200);
     const stillFlagged = ctx.client.tables["quiz_sessions"]!.find(
@@ -847,8 +853,8 @@ describe("revoke-during-live → session flagged + re-consent does not clear", (
   });
 });
 
-describe("focus-loss pause � reason escalation (0020)", () => {
-  it("focus_lost ? paused, count accumulates", async () => {
+describe("focus-loss pause — reason escalation (0020)", () => {
+  it("focus_lost → paused, count accumulates", async () => {
     const ctx = faceContext();
     const res = await pause.POST(req({ reason: "focus_lost" }), {
       params: Promise.resolve({ id: SESSION_ID }),
@@ -860,7 +866,7 @@ describe("focus-loss pause � reason escalation (0020)", () => {
     expect(s.focus_pause_count).toBe(1);
   });
 
-  it("3rd confirmed focus loss ? flagged + audit event", async () => {
+  it("3rd confirmed focus loss → flagged + audit event", async () => {
     const ctx = faceContext();
     let last: Response | null = null;
     for (let i = 0; i < 3; i++) {
@@ -879,7 +885,7 @@ describe("focus-loss pause � reason escalation (0020)", () => {
     expect(audits.some((a) => a.action === "auto_flag_focus_loss")).toBe(true);
   });
 
-  it("invalid reason ? 400", async () => {
+  it("invalid reason → 400", async () => {
     faceContext();
     const res = await pause.POST(req({ reason: "party" }), {
       params: Promise.resolve({ id: SESSION_ID }),
@@ -888,14 +894,14 @@ describe("focus-loss pause � reason escalation (0020)", () => {
   });
 });
 
-describe("session advisories � report + accumulate", () => {
+describe("session advisories — report + accumulate", () => {
   const advisory = sessionAdvisoryRoute;
 
   function advisoryReq(body: unknown) {
     return req(body);
   }
 
-  it("records a valid type ? ok:true", async () => {
+  it("records a valid type → ok:true", async () => {
     faceContext();
     const res = await advisory.POST(advisoryReq({ type: "voice_activity" }), {
       params: Promise.resolve({ id: SESSION_ID }),
@@ -920,7 +926,7 @@ describe("session advisories � report + accumulate", () => {
     expect(rows[0].occurrences).toBe(3);
   });
 
-  it("invalid type ? 400", async () => {
+  it("invalid type → 400", async () => {
     faceContext();
     const res = await advisory.POST(advisoryReq({ type: "vibes" }), {
       params: Promise.resolve({ id: SESSION_ID }),
@@ -928,7 +934,7 @@ describe("session advisories � report + accumulate", () => {
     expect(res.status).toBe(400);
   });
 
-  it("non-owner ? 404", async () => {
+  it("non-owner → 404", async () => {
     faceContext();
     fakeHolder.current!.setUser("00000000-0000-4000-8000-0000000000ee", "student");
     const res = await advisory.POST(advisoryReq({ type: "looked_away" }), {
@@ -937,7 +943,7 @@ describe("session advisories � report + accumulate", () => {
     expect(res.status).toBe(404);
   });
 
-  it("rate limit ? 429", async () => {
+  it("rate limit → 429", async () => {
     faceContext();
     _seedRateLimit(`session-advisory:${STUDENT_ID}`, 10);
     const res = await advisory.POST(advisoryReq({ type: "headset_active" }), {
@@ -946,3 +952,13 @@ describe("session advisories � report + accumulate", () => {
     expect(res.status).toBe(429);
   });
 });
+
+/** Blend a unit vector toward a target cosine (for threshold-boundary tests). */
+function mix(base: number[], cosine: number): number[] {
+  // Construct v = cosine*base + sqrt(1-cosine²)*ortho where ortho is any
+  // unit vector orthogonal to base — gives dot(v, base) = cosine exactly.
+  const ortho = new Array(EMBEDDING_DIMS).fill(0);
+  ortho[(base.findIndex((x) => x !== 0) + 1) % EMBEDDING_DIMS] = 1;
+  const s = Math.sqrt(Math.max(0, 1 - cosine * cosine));
+  return base.map((x, i) => cosine * x + s * ortho[i]);
+}

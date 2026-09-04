@@ -1,15 +1,16 @@
 import { forbidden, internalError, jsonError, notFound, unauthorized } from "@/lib/http";
 
 /**
- * Shared RPC-error → HTTP mapping for face routes (Phase 7 — CompreFace migration).
+ * Shared RPC-error → HTTP mapping for face routes (InsightFace migration).
  *
  * The common keys are automatic (single source of truth — route bullets list
  * ONLY overrides): `not_owner`→404, `session_not_active`→409, `not_authenticated`
  * →401, `not_student`→403, `quiz_not_live`→409, transport/unknown→503. A route
  * passes `overrides` for its own keys (e.g. `consent_required`→403 on enroll).
  *
- * CompreFace migration additions: `duplicate_detected`→409,
- * `compreface_unavailable`→503, `invalid_frame`→400, `pose_invalid`→400.
+ * InsightFace migration keys: `duplicate_detected`→409,
+ * `insightface_unavailable`→503, `invalid_frame`/`invalid_samples`→400,
+ * `pose_invalid`→400.
  *
  * Returns `null` when the payload is NOT an error (caller continues to the
  * success mapping).
@@ -44,14 +45,15 @@ export function mapFaceError(
       // Mode mismatch is a client error, not an outage.
       return jsonError(err, undefined, 400);
     case "invalid_frame":
+    case "invalid_samples":
     case "pose_invalid":
       return jsonError(err, undefined, 400);
-    case "compreface_unavailable":
-      return jsonError("compreface_unavailable", "Face recognition service is temporarily unavailable.", 503);
-    case "compreface_error":
-      // CompreFace responded with a non-2xx (bad API key, 500, etc.) — an
-      // outage-ish condition, not a client error. Never leak the upstream body.
-      return jsonError("compreface_error", "Face recognition service returned an error.", 503);
+    case "insightface_unavailable":
+      return jsonError("insightface_unavailable", "Face recognition service is temporarily unavailable.", 503);
+    case "insightface_error":
+      // The sidecar responded with a non-2xx — an outage-ish condition, not a
+      // client error. Never leak the upstream body.
+      return jsonError("insightface_error", "Face recognition service returned an error.", 503);
     case "rate_limited":
       return jsonError("rate_limited", "Too many requests. Try again in a minute.", 429);
     default:

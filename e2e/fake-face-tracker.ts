@@ -8,7 +8,7 @@
  *    whose `captureFrame()` returns a deterministic FRAME MARKER string:
  *    `'match'` → `data:image/jpeg;base64,FAKE_FRAME_MATCH`;
  *    `'mismatch'` → `data:image/jpeg;base64,FAKE_FRAME_MISMATCH`.
- *    The route-level CompreFace mock (`compreface-client.ts`, mock mode)
+ *    The route-level CompreFace mock (`insightface-client.ts`, mock mode)
  *    inspects the frame string and returns the corresponding canned response.
  *  - `window.__INNOVISION_FAKE_FACE_CONTROL__` — `setVerifyMode('match'|
  *    'mismatch')` (default 'match'), `triggerBlink()` (resolves the current

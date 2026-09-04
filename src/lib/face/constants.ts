@@ -15,7 +15,7 @@
  * that disagrees simply fails/succeeds per the server's verdict.
  */
 
-/** Minimum CompreFace self-similarity for a frame vote to count as a hit. */
+/** Minimum baseline similarity (ArcFace cosine) for a frame vote to count as a hit. */
 export const FACE_SIMILARITY_MIN = 0.5;
 
 /**
@@ -62,14 +62,13 @@ export const EYE_OPEN_MAX = 0.4;
 
 /**
  * Blendshape lower bound for "eye closed" (`eyeBlinkLeft/Right`).
- * Tuned DOWN from 0.6 after live testing: a natural-speed blink peaks around
+ * Tuned to 0.46 after live testing: a natural-speed blink peaks around
  * 0.45–0.6 on the blendshape ramp and lasts ~3 frames at the tracker's ~30fps
- * sampling, so requiring ≥0.6 forced users into exaggerated long blinks. At
- * 0.5 a soft/quick blink still crosses while the anti-spoof property is
- * unchanged — a static photo can never produce the required OPEN→closed
- * TRANSITION regardless of where the closed threshold sits.
+ * sampling. At 0.46 soft/quick and turned-pose blinks reliably cross while the
+ * anti-spoof property is unchanged — a static photo can never produce the
+ * required OPEN→closed TRANSITION regardless of where the closed threshold sits.
  */
-export const EYE_CLOSED_MIN = 0.5;
+export const EYE_CLOSED_MIN = 0.46;
 
 /**
  * Minimum interval between face checks (advisory `too_frequent` flag in

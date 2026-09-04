@@ -101,7 +101,7 @@ export default defineConfig({
         // P7: pure face logic (Node-unit-tested, U-F1..U-F7c + I22). The
         // browser MediaPipe glue (face-tracker.ts) is E2E/manual-only — 0-key
         // precedent (mirrors hand-tracker). constants/types have no meaningful
-        // executable surface. The server-only CompreFace client is I/O glue
+        // executable surface. The server-only InsightFace client is I/O glue
         // exercised via route tests (vi.mock) — 0-key.
         "src/lib/face/schemas.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/lib/face/liveness.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
@@ -112,7 +112,7 @@ export default defineConfig({
         "src/lib/face/rpc-mapping.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/lib/face/fake-seam.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/lib/face/face-tracker.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
-        "src/lib/face/server/compreface-client.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
+        "src/lib/face/server/insightface-client.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
         "src/lib/vision/camera.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/app/api/face/**/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
         "src/app/api/sessions/[id]/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },

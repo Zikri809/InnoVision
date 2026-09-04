@@ -7,6 +7,13 @@ import type { Page, Locator } from "@playwright/test";
  * navigate the calendar month grid, click the day cell, type the time.
  * Day buttons carry `data-day="<YYYY-MM-DD>"` (react-day-picker v10), which
  * is stable regardless of locale formatting or "Today, …" label prefixes.
+ *
+ * TIME CONTRACT: the availability-window surface is a datetime-local input
+ * that `lib/format/window.windowLocalInputToIso` parses as UTC wall-clock
+ * ("the lecturer schedules in UTC quiz time"; the edit-dialog labels say
+ * "(UTC)"). The original e38 helper filled getUTC* components accordingly;
+ * keep that here — filling local components would shift every window by the
+ * machine's UTC offset (UTC+8 here) and silently flip window journeys.
  */
 export async function setDateTime(
   page: Page,
@@ -16,9 +23,9 @@ export async function setDateTime(
   await trigger.click();
 
   const pad = (n: number) => String(n).padStart(2, "0");
-  const iso = `${target.getFullYear()}-${pad(target.getMonth() + 1)}-${pad(target.getDate())}`;
-  const year = target.getFullYear();
-  const monthIdx = target.getMonth();
+  const iso = `${target.getUTCFullYear()}-${pad(target.getUTCMonth() + 1)}-${pad(target.getUTCDate())}`;
+  const year = target.getUTCFullYear();
+  const monthIdx = target.getUTCMonth();
 
   // Navigate until the target month is displayed. React-day-picker's prev/next
   // buttons are labeled "Go to the Previous/Next Month".
@@ -48,8 +55,8 @@ export async function setDateTime(
   // label: it can contain regex metacharacters ("Opens at (UTC)").
   const label = (await trigger.getAttribute("aria-label")) ?? "";
   const esc = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const hh = String(target.getHours()).padStart(2, "0");
-  const mm = String(target.getMinutes()).padStart(2, "0");
+  const hh = String(target.getUTCHours()).padStart(2, "0");
+  const mm = String(target.getUTCMinutes()).padStart(2, "0");
   const hoursInput = page.getByRole("textbox", { name: new RegExp(`^${esc} — hours$`) });
   await hoursInput.fill(hh);
   await hoursInput.blur();

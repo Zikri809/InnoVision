@@ -144,7 +144,15 @@ Fine for Playwright tests, but never seed real data with it and keep test creds 
 - **Answer secrecy:** questions must never expose `correct_index` to a client-readable policy/view (planned in PLAN §1). Verify on read.
 - **One-attempt enforcement** relies on a partial unique index + security-definer RPC — the security-definer function must validate its own authorization (caller is a lecturer? session belongs to caller?) rather than trusting RLS, since `security definer` bypasses RLS.
 - **Face endpoints** (`/api/face/enroll|verify|self-recover|unlock`): every mutation must re-check the session owner / lecturer role server-side, since `security definer` and client-callable routes bypass the page-level auth guard.
-- **Storage:** private `quiz-sources` bucket with lecturer-owner RLS only (PLAN §1). Face photos never stored — frames are ephemeral; face data lives only in the self-hosted CompreFace registry (auth.uid() = subject), and consent revocation sets `face_deletion_pending` + best-effort deletion.
+- **Storage:** private `quiz-sources` bucket with lecturer-owner RLS only (PLAN §1). Face photos never stored — frames are ephemeral; face data lives only in the self-hosted registry keyed on auth.uid(), and consent revocation deletes it (retriable via `face_deletion_pending`).
+
+## InsightFace migration additions (2026-09-03)
+
+- **Biometrics moved into Supabase** (`profile_face_samples`, pgvector 512, migration 0039): RLS enabled with ZERO policies and all grants revoked from `anon`/`authenticated` — access is exclusively via security-definer RPCs (`enroll_face(p_samples jsonb)`, `compare_face_baseline`, `face_baseline_status`, `revoke_face_consent`). No student-callable gallery search exists; the enroll-time duplicate check is internal to `enroll_face` (1-bit answer, throttled to 3 attempts / 10 min via the caller's own enroll audit rows).
+- **Consent revocation is atomic**: samples + status + consent purged in ONE transaction, audited with the purge count. The two-phase queue (`face_deletion_pending`, `confirm_face_subject_deleted`, cleanup cron) is retired.
+- **Cosine clamp**: the verify route feeds `compare_face_baseline` output (clamped [0,1]) into `record_face_check` — raw ArcFace cosine can be negative and 0021's validator rejects that as `invalid_frame`.
+- **Residual risk (pre-existing, unchanged):** `record_face_check` trusts route-supplied `p_similarities` and is directly callable by an authenticated session owner (similarity fabrication bypasses the face check; the nonce is readable via the own-session SELECT policy). Documented in `PLAN_INSIGHTFACE_MIGRATION.md` §3.5; realistic mitigation requires server-side frame processing for verify.
+- **Sidecar**: loopback-only publish + optional `FACE_SIDECAR_TOKEN` shared secret; stateless (no biometric data at rest outside Supabase).
 - **Rate limiting / abuse:** no rate limiting exists yet; enrollment and verify endpoints are prime abuse targets at demo/class scale.
 
 ## Phase 2 additions (2026-08-09)

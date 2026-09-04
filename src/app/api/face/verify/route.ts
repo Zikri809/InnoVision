@@ -5,7 +5,8 @@ import { rateLimit } from "@/lib/classes/rate-limit";
 import { VerifySchema } from "@/lib/face/schemas";
 import { MAX_FRAME_BASE64_CHARS, VERIFY_FRAMES_PER_CHECK } from "@/lib/face/constants";
 import { mapFaceError } from "@/lib/face/rpc-mapping";
-import * as compreface from "@/lib/face/server/compreface-client";
+import { selectPrimaryFace } from "@/lib/face/embedding";
+import * as insightface from "@/lib/face/server/insightface-client";
 import {
   checkSameOrigin,
   firstIssueMessage,
@@ -16,31 +17,40 @@ import {
   payloadTooLarge,
 } from "@/lib/http";
 import type { FaceCheckResult } from "@/lib/face/types";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
-// CompreFace /recognize can be slow under load; give the route breathing room
-// so a slow-but-alive container isn't platform-killed into a silent 504. The
-// per-frame calls run in parallel (enroll-route pattern), so the budget is a
-// single recognize + overhead.
+// The sidecar /extract runs in ~100-200ms per frame on CPU and the per-frame
+// calls run in parallel, so the budget is a single extract + overhead.
 export const maxDuration = 20;
 
 // Per-user rate limit on verifies (10/min — cadence is 30–45s + Q-transitions).
 const VERIFY_RATE = { limit: 10, windowMs: 60 * 1000 };
 
+type Db = Awaited<ReturnType<typeof createClient>>;
+
 /**
- * POST /api/face/verify — frames → CompreFace (1:1 by lookup) → record_face_check.
+ * POST /api/face/verify — frames → InsightFace sidecar → compare_face_baseline
+ * → record_face_check.
  *
  * The client sends up to VERIFY_FRAMES_PER_CHECK base64 JPEG frames captured
- * over ~2s. For each NON-EMPTY frame the route runs CompreFace `/recognize`
- * and extracts the CALLER'S OWN subject similarity (`selfSimilarity`) — any
- * nonzero similarity IS a self-similarity by construction, so a lookalike
- * classmate ranking top-1 can no longer fail the check (the old margin rule's
- * entire reason to exist). Empty frames are FAIL votes (the no-face sentinel
- * stays integrity-conservative). The RPC computes `matched` as the STRICT
- * MAJORITY of votes ≥ 0.5 — NO client-supplied verdict.
+ * over ~2s. For each NON-EMPTY frame the route:
+ *   1. E2E mock short-circuit FIRST (marker frames never reach the sidecar —
+ *      without a sidecar in CI a fetch would 503 instead of voting): MATCH →
+ *      the caller's deterministic mock embedding → baseline compare; MISMATCH
+ *      → a 0-vote with no sidecar call and no RPC compare.
+ *   2. Real frames: sidecar `/extract` → pick the ONE primary face (largest
+ *      bbox, det_score ≥ floor — NEVER max-over-faces: a second person's face
+ *      must not drag the score UP; faces[0] is detector-order).
+ *   3. `compare_face_baseline(emb)` — max cosine against the student's OWN
+ *      enrolled samples (1:1-by-baseline; no gallery involvement), clamped to
+ *      [0,1] by the RPC.
+ * Empty frames are FAIL votes (the no-face sentinel stays
+ * integrity-conservative). The RPC computes `matched` as the STRICT MAJORITY
+ * of votes ≥ 0.5 — NO client-supplied verdict.
  *
- * Exempt sessions: the RPC short-circuits BEFORE the verdict computation,
- * returning `{matched:true, distance:null}`.
+ * Cutover guard: an empty baseline (present=false — enrolled pre-migration
+ * with samples never stored) → 403 not_enrolled BEFORE any sidecar call.
  *
  * Mappings (overrides only):
  *  - `nonce_mismatch` → 409
@@ -48,7 +58,7 @@ const VERIFY_RATE = { limit: 10, windowMs: 60 * 1000 };
  *  - `not_enrolled` → 403
  *  - `not_assessment` → 400
  *  - `quiz_not_live` → 409
- *  - `compreface_unavailable` → 503
+ *  - `insightface_unavailable` → 503
  *  - `invalid_frame` / `invalid_trigger` → 400
  *  - success → 200 `FaceCheckResult` (camelCase keys)
  */
@@ -87,35 +97,59 @@ export async function POST(request: Request) {
 
   const { frames } = parsed.data;
 
-  // One CompreFace call per non-empty frame, in parallel (enroll pattern).
+  // Exempt probe BEFORE the baseline guard: 0020's step-6 exempt short-circuit
+  // runs before the enrollment check inside the RPC, and the route-side
+  // baseline guard must not reorder that (an exempted student may legitimately
+  // have no stored samples). Reading the flag here is owner-scoped (RLS) and
+  // only decides whether the guard applies — the verdict itself stays
+  // RPC-computed. not_found → fall through (the RPC re-checks ownership).
+  const sessionRow = await supabase
+    .from("quiz_sessions")
+    .select("face_exempt")
+    .eq("id", parsed.data.sessionId)
+    .eq("student_id", auth.userId)
+    .maybeSingle();
+  const faceExempt = sessionRow.data?.face_exempt === true;
+
+  // Cutover / integrity guard: the student must have a stored baseline
+  // BEFORE any sidecar work. `present=false` covers pre-migration enrollees
+  // (samples never stored); the honest response is not_enrolled (the
+  // pre-start gate makes this unreachable for NEW sessions). Exempt sessions
+  // skip the guard (the RPC short-circuits them before the enrollment check).
+  if (!faceExempt) {
+    const baseline = await supabase.rpc("face_baseline_status");
+    const baselinePayload = baseline.data as Record<string, unknown> | null;
+    if (baseline.error || !baselinePayload || baselinePayload.present !== true) {
+      return mapFaceError({ error: "not_enrolled" }, { not_enrolled: { status: 403 } }) ??
+        internalError("Something went wrong.");
+    }
+  }
+
+  // One extract + compare per non-empty frame, in parallel (enroll pattern).
   // An empty string is the no-face sentinel for that slot → a FAIL vote with
   // similarity 0 (never skipped silently — the row still lands as a fail when
   // the majority fails).
-  const recognitions = await Promise.all(
+  const results = await Promise.all(
     frames.map(async (frame): Promise<number | { error: string }> => {
       if (frame === "") return 0;
-      const faces = await compreface.recognizeFaces(frame);
-      if ("error" in faces) return { error: faces.error };
-      // E2E mock seam: the canned response names "mock-subject" — substitute
-      // the authenticated uid so selfSimilarity reads the marker as a
-      // SELF-match (a fake "match" must be a match against the caller).
-      const effective = compreface.isMockMatchFrame(frame)
-        ? faces.map((f) => ({
-            subjects: f.subjects.map((s) => ({ ...s, subject: auth.userId })),
-          }))
-        : faces;
-      return compreface.selfSimilarity(effective, auth.userId);
+      // MISMATCH marker → 0-vote WITHOUT a sidecar call or RPC compare (no
+      // sidecar exists in CI — a fetch would 503 instead of failing as a
+      // vote, which would kill the pause/streak specs).
+      if (insightface.isMockMismatchFrame(frame)) return 0;
+      const extracted = await insightface.extractFace(frame, auth.userId);
+      if ("error" in extracted) return { error: extracted.error };
+      return comparePrimaryFace(supabase, extracted.faces);
     }),
   );
 
-  // Any CompreFace failure fails the WHOLE check honestly (503 → pipeline
-  // `unavailable` passthrough, never a partial verdict).
-  const firstError = recognitions.find((r): r is { error: string } => typeof r === "object");
+  // Any sidecar/compare failure fails the WHOLE check honestly (503 →
+  // pipeline `unavailable` passthrough, never a partial verdict).
+  const firstError = results.find((r): r is { error: string } => typeof r === "object");
   if (firstError) {
     return mapFaceError(firstError) ?? internalError("Something went wrong.");
   }
 
-  const similarities = recognitions as number[];
+  const similarities = (results as number[]).map((s) => Math.min(1, Math.max(0, s)));
 
   // The subject is ROUTE-derived (always the authenticated uid) — the RPC's
   // `p_subject = auth.uid()` check stays as defense in depth against direct
@@ -160,3 +194,32 @@ export async function POST(request: Request) {
   console.error("record_face_check unexpected payload:", payload);
   return internalError("Could not verify right now.");
 }
+
+/**
+ * Pick the primary face from the extract result and compare it against the
+ * caller's OWN baseline. No qualifying face → 0-vote (FAIL); an RPC failure →
+ * typed error (the whole check fails honestly).
+ */
+async function comparePrimaryFace(
+  supabase: SupabaseClient,
+  faces: insightface.InsightFaceExtractResult["faces"],
+): Promise<number | { error: string }> {
+  const primary = selectPrimaryFace(faces);
+  if (!primary) return 0;
+  const { data, error } = await supabase.rpc("compare_face_baseline", {
+    p_embedding: primary.embedding,
+  });
+  if (error) {
+    console.error("compare_face_baseline error:", error);
+    return { error: "internal" };
+  }
+  const payload = data as Record<string, unknown> | null;
+  if (!payload || typeof payload.similarity !== "number") {
+    return { error: "internal" };
+  }
+  // present=false here would contradict the pre-check; a 0-vote is the safe
+  // resolution either way.
+  return payload.present === true ? Math.min(1, Math.max(0, payload.similarity)) : 0;
+}
+
+export type { Db as VerifyRouteDb };

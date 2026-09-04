@@ -1,4 +1,5 @@
-// Dev script to wipe all face recognition data (CompreFace + Supabase DB)
+// Dev script to wipe all face recognition data (Supabase DB; the InsightFace
+// sidecar is stateless — nothing to wipe there)
 // Run: npm run face:reset
 import { createClient } from "@supabase/supabase-js";
 import fs from "node:fs";
@@ -24,47 +25,30 @@ if (fs.existsSync(envPath)) {
 
 const URL = env.NEXT_PUBLIC_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "http://127.0.0.1:58021";
 const SERVICE = env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
-const CF_BASE = env.COMPREFACE_BASE_URL || process.env.COMPREFACE_BASE_URL || "http://localhost:8000";
-const CF_KEY = env.COMPREFACE_API_KEY || process.env.COMPREFACE_API_KEY || "";
-
 async function main() {
   assertLocalTarget(URL, "face-reset.mjs");
   console.log("🧹 [face:reset] Starting complete face recognition cleanup...\n");
 
-  // 1. Clear CompreFace subjects & image collections
-  if (CF_KEY) {
-    console.log(`Connecting to CompreFace at ${CF_BASE}...`);
-    try {
-      const res = await fetch(`${CF_BASE}/api/v1/recognition/subjects`, {
-        headers: { "x-api-key": CF_KEY },
-        cache: "no-store",
-      });
-      if (res.ok) {
-        const json = await res.json();
-        const subjects = json.subjects || [];
-        console.log(`Found ${subjects.length} subject(s) in CompreFace.`);
-        for (const s of subjects) {
-          const delRes = await fetch(`${CF_BASE}/api/v1/recognition/subjects/${encodeURIComponent(s)}`, {
-            method: "DELETE",
-            headers: { "x-api-key": CF_KEY },
-            cache: "no-store",
-          });
-          console.log(`  - Deleted subject '${s}' (HTTP ${delRes.status})`);
-        }
-      } else {
-        console.warn(`  ⚠️ CompreFace returned status ${res.status}`);
-      }
-    } catch (err) {
-      console.warn(`  ⚠️ Could not connect to CompreFace (${err.message}). Skipping CompreFace wipe.`);
-    }
-  } else {
-    console.log("  ℹ️ COMPREFACE_API_KEY not set. Skipping CompreFace API calls.");
-  }
-
-  // 2. Clear Supabase database records
+  // 1. Clear Supabase database records
   if (SERVICE) {
     console.log(`\nConnecting to Supabase at ${URL}...`);
     const admin = createClient(URL, SERVICE, { auth: { persistSession: false } });
+
+    // Clear enrolled biometric samples (0039) — service_role bypasses the
+    // deny-by-default RLS on profile_face_samples.
+    try {
+      const { error: sErr } = await admin
+        .from("profile_face_samples")
+        .delete()
+        .neq("id", "00000000-0000-0000-0000-000000000000");
+      if (sErr) {
+        console.warn("  ⚠️ Could not clear profile_face_samples:", sErr.message);
+      } else {
+        console.log("  ✓ Cleared profile_face_samples (biometric vectors)");
+      }
+    } catch (err) {
+      console.warn("  ⚠️ profile_face_samples wipe skipped:", err.message);
+    }
 
     // Clear face_checks table
     try {
@@ -129,7 +113,6 @@ async function main() {
         .from("profiles")
         .update({
           consent_given_at: null,
-          face_deletion_pending: false,
         })
         .neq("id", "00000000-0000-0000-0000-000000000000");
       if (pErr) {

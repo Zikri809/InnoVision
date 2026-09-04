@@ -59,8 +59,8 @@ test("window journey: not-open → opened → window-closed → autoclose hides 
   await lecturer.getByText(CLASS_TITLE, { exact: true }).click();
   await expect(lecturer).toHaveURL(/\/lecturer\/classes\/[^/]+$/);
   await lecturer.getByLabel("Quiz title").fill(QUIZ_TITLE);
-  await setDateTime(lecturer, lecturer.getByLabel("Opens at"), opens);
-  await setDateTime(lecturer, lecturer.getByLabel("Closes at"), closes);
+  await setDateTime(lecturer, lecturer.getByLabel("Opens at", { exact: true }), opens);
+  await setDateTime(lecturer, lecturer.getByLabel("Closes at", { exact: true }), closes);
   await lecturer.getByRole("button", { name: /create quiz|new quiz/i }).click();
   await expect(lecturer.getByText(QUIZ_TITLE, { exact: true })).toBeVisible();
   await lecturer.getByText(QUIZ_TITLE, { exact: true }).click();
@@ -114,7 +114,7 @@ test("window journey: not-open → opened → window-closed → autoclose hides 
   await expect(dialog).toBeVisible();
   await setDateTime(
     lecturer,
-    dialog.getByLabel("Opens at (UTC)"),
+    dialog.getByLabel("Opens at (UTC)", { exact: true }),
     new Date(Date.now() - 60_000),
   );
   await dialog.getByRole("button", { name: "Save changes" }).click();
@@ -225,8 +225,8 @@ test("mid-session window close: answer dead-screens with window copy, submit gra
   await lecturer.getByText(`${CLASS_TITLE} B`, { exact: true }).click();
   await expect(lecturer).toHaveURL(/\/lecturer\/classes\/[^/]+$/);
   await lecturer.getByLabel("Quiz title").fill(`${QUIZ_TITLE} B`);
-  await setDateTime(lecturer, lecturer.getByLabel("Opens at"), opens);
-  await setDateTime(lecturer, lecturer.getByLabel("Closes at"), closes);
+  await setDateTime(lecturer, lecturer.getByLabel("Opens at", { exact: true }), opens);
+  await setDateTime(lecturer, lecturer.getByLabel("Closes at", { exact: true }), closes);
   await lecturer.getByRole("button", { name: /create quiz|new quiz/i }).click();
   await expect(lecturer.getByText(`${QUIZ_TITLE} B`, { exact: true })).toBeVisible();
   await lecturer.getByText(`${QUIZ_TITLE} B`, { exact: true }).click();

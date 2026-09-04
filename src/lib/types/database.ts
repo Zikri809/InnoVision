@@ -342,12 +342,43 @@ export type Database = {
           },
         ]
       }
+      profile_face_samples: {
+        Row: {
+          angle: string
+          created_at: string
+          embedding: string
+          id: string
+          profile_id: string
+        }
+        Insert: {
+          angle: string
+          created_at?: string
+          embedding: string
+          id?: string
+          profile_id: string
+        }
+        Update: {
+          angle?: string
+          created_at?: string
+          embedding?: string
+          id?: string
+          profile_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "profile_face_samples_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_path: string | null
           consent_given_at: string | null
           created_at: string
-          face_deletion_pending: boolean
           face_enrollment_status: string | null
           full_name: string | null
           id: string
@@ -359,7 +390,6 @@ export type Database = {
           avatar_path?: string | null
           consent_given_at?: string | null
           created_at?: string
-          face_deletion_pending?: boolean
           face_enrollment_status?: string | null
           full_name?: string | null
           id: string
@@ -371,7 +401,6 @@ export type Database = {
           avatar_path?: string | null
           consent_given_at?: string | null
           created_at?: string
-          face_deletion_pending?: boolean
           face_enrollment_status?: string | null
           full_name?: string | null
           id?: string
@@ -1401,15 +1430,13 @@ export type Database = {
         Args: { p_dest_class_id: string; p_src_quiz_id: string }
         Returns: string
       }
-      confirm_face_subject_deleted: { Args: never; Returns: Json }
-      enroll_face: {
-        Args: { p_duplicate_similarity: number; p_duplicate_subject: string }
-        Returns: Json
-      }
+      compare_face_baseline: { Args: { p_embedding: string }; Returns: Json }
+      enroll_face: { Args: { p_samples: Json }; Returns: Json }
       exempt_face_session: {
         Args: { p_reason: string; p_session_id: string }
         Returns: Json
       }
+      face_baseline_status: { Args: never; Returns: Json }
       grant_face_consent: { Args: never; Returns: Json }
       is_enrolled_in_class: { Args: { p_class_id: string }; Returns: boolean }
       is_lecturer: { Args: never; Returns: boolean }
