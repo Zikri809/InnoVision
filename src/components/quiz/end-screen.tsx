@@ -141,7 +141,7 @@ export function EndScreen({
 
         {revealed && score != null ? (
           <>
-            <p className="mt-6 font-heading text-6xl font-bold text-primary">
+            <p className="mt-6 font-heading text-display font-bold text-primary">
               {score}
               <span className="text-3xl text-muted-foreground"> / {total}</span>
             </p>

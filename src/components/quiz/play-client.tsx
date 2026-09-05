@@ -19,6 +19,9 @@ import { useIntegrityAdvisories } from "@/components/face/use-integrity-advisori
 import { useIncidentRecorder } from "@/components/face/use-incident-recorder";
 import { getFakeFaceTracker } from "@/lib/face/fake-seam";
 import { isFakeFaceSeamEnabled } from "@/lib/face/seam-gate";
+import { useMediaQuery } from "@/hooks/use-media-query";
+import { useWakeLock } from "@/hooks/use-wake-lock";
+import { HAPTIC, haptic } from "@/lib/haptics";
 import type { FaceStatus } from "@/lib/face/types";
 
 
@@ -173,6 +176,17 @@ export function PlayClient({
   const [faceUnavailable, setFaceUnavailable] = useState(false);
   // SQ-3: pending flag for the end-state "Try again" fresh attempt.
   const [retrying, setRetrying] = useState(false);
+  // Submit-failure (plan W3 8th bar state): NOT a new Phase — a client-render
+  // flag set by submitNow()'s failure branches, cleared on submit start and
+  // success. The bar renders the destructive Retry state while
+  // (timeUp || question) && lastSubmitFailed; pause overlays are suppressed
+  // alongside so the retry stays reachable (same treatment as timeUp).
+  const [lastSubmitFailed, setLastSubmitFailed] = useState(false);
+  // Wide gate (plan §2): one media query, comma-OR. Landscape phones get the
+  // desktop split (a portrait composition in 390px of height is unusable);
+  // SSR renders the mobile composition (getServerSnapshot false — the
+  // accepted desktop/landscape hydration flash).
+  const isWide = useMediaQuery("(min-width: 1024px), (orientation: landscape) and (min-width: 640px)");
 
   // Locks: one answer in flight at a time; no submit while answering.
   const submitLock = useRef(false);
@@ -204,6 +218,11 @@ export function PlayClient({
   useEffect(() => {
     if (phase === "feedback") nextButtonRef.current?.focus();
   }, [phase]);
+  // Haptics (plan W3, mode-split): timeUp pattern fires in BOTH modes — no
+  // per-commit buzz in assessments (exam-hall + camera micro-shake).
+  useEffect(() => {
+    if (phase === "timeUp") haptic(HAPTIC.timeUp);
+  }, [phase]);
   // QT-1: in-progress multi-selections, keyed by question id (presented
   // space; committed by the Confirm button via answer()). Keying removes any
   // reset-on-navigation effect: a fresh question simply has no entry, and a
@@ -234,6 +253,17 @@ export function PlayClient({
     enabled: quiz.mode === "assessment" && Boolean(face),
     onUnavailable: () => setFaceUnavailable(true),
   });
+  // Screen wake lock (plan W3): a screen auto-lock mid-assessment cascades
+  // into a focus_lost pause. Acquired once the gate is passed (beginGate),
+  // re-armed on visibilitychange by the hook, released on terminal phases.
+  const wakeLockEnabled =
+    quiz.mode === "assessment" &&
+    Boolean(face) &&
+    faceStatus !== "gate" &&
+    faceStatus !== "off" &&
+    phase !== "submitted" &&
+    phase !== "dead";
+  useWakeLock({ enabled: wakeLockEnabled });
 
   const pipeline = useFacePipeline({
     sessionId,
@@ -603,6 +633,9 @@ export function PlayClient({
             ? t("hud.answerSetConfirmed", { count: set!.length })
             : t("hud.answerConfirmed", { label: scalar! + 1 }),
         );
+        // Haptic (plan W3): practice commits only — no per-commit buzz in
+        // recorded assessments.
+        if (isPractice) haptic(HAPTIC.commit);
       } catch (err) {
         // Abort/network error → surface a retry (endpoints are idempotent).
         if ((err as Error)?.name === "AbortError") {
@@ -629,6 +662,7 @@ export function PlayClient({
     submitLock.current = true;
     setPhaseAndRef("submitting");
     setError(null);
+    setLastSubmitFailed(false);
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -655,6 +689,7 @@ export function PlayClient({
           score: typeof body.score === "number" ? body.score : null,
           total: typeof body.total === "number" ? body.total : questions.length,
         });
+        setLastSubmitFailed(false);
         setPhaseAndRef("submitted");
         router.refresh();
         return;
@@ -691,6 +726,7 @@ export function PlayClient({
               ? body.error
               : tCommon("errorGeneric"),
         );
+        setLastSubmitFailed(true);
         setPhaseAndRef(phaseRef.current === "timeUp" ? "timeUp" : "question");
         return;
       }
@@ -699,6 +735,7 @@ export function PlayClient({
       // null (assessment awaiting release); total defaults to question count.
       if (body.session == null || !("score" in body)) {
         setError(tCommon("errorGeneric"));
+        setLastSubmitFailed(true);
         setPhaseAndRef(phaseRef.current === "timeUp" ? "timeUp" : "question");
         return;
       }
@@ -717,6 +754,7 @@ export function PlayClient({
       } else {
         setError(t("toast.submitError"));
       }
+      setLastSubmitFailed(true);
       // phaseRef, not the render closure: a timeUp auto-submit that failed must
       // stay timeUp (Retry-submit reachable; the remainingMs guard terminates).
       setPhaseAndRef(phaseRef.current === "timeUp" ? "timeUp" : "question");
@@ -863,8 +901,95 @@ export function PlayClient({
     );
   }
 
+  /* Plan W3 8-state matrix, shared by both containers (exactly one renders):
+       question+single unanswered → EMPTY (tap-option is the primary action);
+       multi → Confirm answer (native disabled at 0 — mechanism unchanged) +
+       aria-hidden count pill (sr-only multiSelectedCount span survives);
+       feedback → Next/Finish (exact names); submitting/locked → disabled
+       pre-pressed; timeUp OR failed submit → destructive-tinted Retry-submit;
+       submitted/dead → full-screen takeover (no bar — earlier returns). */
+  const submitFailed = lastSubmitFailed && (phase === "timeUp" || phase === "question");
+  // True when any action-zone branch renders (multi confirm / feedback /
+  // submitting / timeUp-or-failed retry / locked). State 1 (single
+  // unanswered) renders nothing → the mobile bar's chrome collapses.
+  const hasActionButtons =
+    (phase === "question" && question.type === "multi_select" && !answered) ||
+    phase === "feedback" ||
+    phase === "submitting" ||
+    phase === "timeUp" ||
+    submitFailed ||
+    phase === "locked";
+  const actionZoneButtons = (
+    <>
+      {phase === "question" && question.type === "multi_select" && !answered && (
+        <>
+          {/* Pending-selection count (pre-existing SR channel; kept
+              inside the live container which now announces it). */}
+          <span className="sr-only">
+            {t("multiSelectedCount", { count: pendingMulti.length })}
+          </span>
+          <span
+            aria-hidden="true"
+            className="rounded-full bg-primary/15 px-2.5 py-0.5 text-xs font-extrabold tabular-nums text-primary"
+          >
+            {pendingMulti.length}
+          </span>
+          {/* Palm-commit hint (QT-1 gesture amendment): holds toggle
+              options, an open palm commits — always visible while
+              gesture-active so the affordance is discoverable. Plain
+              span: the live container above already announces it. */}
+          {gestureActive && (
+            <span className="text-sm font-bold text-muted-foreground max-sm:text-center">
+              {t("multiPalmCommitHint")}
+            </span>
+          )}
+          <Button
+            size="lg"
+            disabled={pendingMulti.length === 0}
+            onClick={() => void answer([...pendingMulti])}
+          >
+            {t("multiConfirm")}
+          </Button>
+        </>
+      )}
+      {phase === "feedback" && (
+        <div className={`gap-3 ${isWide ? "flex items-center" : "flex w-full flex-col items-stretch"}`}>
+          {gestureActive && question.options.length < MAX_ANSWER_FINGERS && (
+            // Plain span — inside the live container (no nested region).
+            <span className="text-sm font-bold text-muted-foreground max-sm:text-center">
+              {t("feedback.orHold")}
+            </span>
+          )}
+          <Button
+            size="lg"
+            onClick={goNext}
+            ref={nextButtonRef}
+          >
+            {allAnswered || index + 1 >= questions.length
+              ? t("feedback.finish")
+              : t("feedback.next")}
+          </Button>
+        </div>
+      )}
+      {phase === "submitting" && (
+        <Button size="lg" disabled>{t("feedback.submitting")}</Button>
+      )}
+      {(phase === "timeUp" || submitFailed) && (
+        <Button size="lg" variant="destructive" onClick={() => void submitNow()}>
+          {t("feedback.retrySubmit")}
+        </Button>
+      )}
+      {phase === "locked" && (
+        <Button size="lg" disabled>{t("feedback.recording")}</Button>
+      )}
+    </>
+  );
+
   return (
-    <div className="mx-auto w-full max-w-[1600px] min-h-[calc(100vh-3rem)] px-4 py-4 sm:px-6 sm:py-6 lg:px-8">
+    // Mobile plan W3: min-h-dvh (100vh overshoots behind mobile browser
+    // chrome). Overscroll suppression is route-scoped on the scroll root
+    // via html:has(.play-stage) in globals.css.
+    <div className="play-stage mx-auto w-full max-w-[1600px] min-h-dvh px-4 py-4 sm:px-6 sm:py-6 lg:px-8">
       {/* Persistent video node for the FACE tracker (invisible background node) */}
       <video
         ref={faceTracker.videoRef}
@@ -882,6 +1007,13 @@ export function PlayClient({
         consentGiven={face?.consentGiven ?? false}
         remainingMs={remainingMs}
         pausedReason={pipeline.pausedReason}
+        stream={faceTracker.stream ?? null}
+        quizTitle={quiz.title}
+        resume={
+          initialAnswers.length > 0
+            ? { answered: initialAnswers.length, total: questions.length }
+            : null
+        }
         onBegin={() => {
           void pipeline.beginGate();
         }}
@@ -911,7 +1043,7 @@ export function PlayClient({
           nextArmed={phase === "feedback"}
           answerMode={question.type === "multi_select" ? "multi" : "single"}
           hasMultiQuestions={hasMultiQuestions}
-          blockInput={BLOCK_INPUT_PHASES.includes(phase) || faceStatus === "paused" || faceStatus === "recovering" || faceStatus === "flagged"}
+          blockInput={BLOCK_INPUT_PHASES.includes(phase) || lastSubmitFailed || faceStatus === "paused" || faceStatus === "recovering" || faceStatus === "flagged"}
           sessionPaused={faceStatus === "paused" || faceStatus === "recovering" || faceStatus === "flagged"}
           faceStatus={faceStatus}
           onPause={() => {
@@ -934,44 +1066,85 @@ export function PlayClient({
           onHoldProgress={setHoldProgress}
           onStatusChange={(s) => setGestureActive(s === "active")}
         >
-          <div className="flex flex-col gap-6">
-            <div className="flex flex-wrap items-end justify-between gap-4">
-              <div className="min-w-0">
-                <span className={`inline-block rounded-full border-[3px] px-3.5 py-1 text-xs font-extrabold ${
-                  isPractice
-                    ? "border-emerald-300 bg-emerald-100 text-emerald-800"
-                    : "border-accent/40 bg-blue-100 text-accent"
-                }`}>
-                  {isPractice ? tCommon("practice") : tCommon("assessment")}
-                </span>
-                <h1 className="mt-2 font-heading text-2xl font-semibold [text-wrap:balance]">{quiz.title}</h1>
+          <div className={`flex flex-col gap-6 ${isWide ? "" : "pb-[calc(152px+var(--safe-bottom))]"}`}>
+            {isWide ? (
+              /* Desktop: title-in-flow + sidebar HUD (unchanged). */
+              <div className="flex flex-wrap items-end justify-between gap-4">
+                <div className="min-w-0">
+                  <span className={`inline-block rounded-full border-[3px] px-3.5 py-1 text-xs font-extrabold ${
+                    isPractice
+                      ? "border-emerald-300 bg-emerald-100 text-emerald-800 dark:border-emerald-400/40 dark:bg-emerald-500/15 dark:text-emerald-300"
+                      : "border-accent/40 bg-blue-100 text-accent dark:border-accent/40 dark:bg-blue-500/15 dark:text-blue-300"
+                  }`}>
+                    {isPractice ? tCommon("practice") : tCommon("assessment")}
+                  </span>
+                  <h1 className="mt-2 font-heading text-2xl font-semibold [text-wrap:balance]">{quiz.title}</h1>
+                </div>
+                <ProgressHud
+                  current={index + 1}
+                  total={questions.length}
+                  remainingMs={remainingMs}
+                  camStatus={
+                    quiz.mode !== "assessment" || faceStatus === "off" || faceStatus === "exempt" || faceStatus === "unavailable"
+                      ? null
+                      : faceStatus === "ready"
+                      ? "aligned"
+                      : "reposition"
+                  }
+                />
               </div>
-              <ProgressHud
-                current={index + 1}
-                total={questions.length}
-                remainingMs={remainingMs}
-                camStatus={
-                  quiz.mode !== "assessment" || faceStatus === "off" || faceStatus === "exempt" || faceStatus === "unavailable"
-                    ? null
-                    : faceStatus === "ready"
-                    ? "aligned"
-                    : "reposition"
-                }
-              />
-            </div>
+            ) : (
+              /* Mobile (plan W3): sticky compact header — safe-top padded,
+                 opaque, ≤164px. The quiz title appears ONCE in the gate sheet,
+                 never above the question flow. Row 1: mode pill + counter +
+                 timer chip (verbatim role="timer" markup, FIRST
+                 span.tabular-nums in DOM order — e10 contract) + cam dot.
+                 Row 2: progress bar. The gesture PIP anchors top-right below
+                 this header (gesture-layer fixed positioning). */
+              <header className="sticky top-0 z-20 -mx-4 space-y-2 border-b-[3px] border-border bg-background px-4 pb-2 pt-[calc(var(--safe-top)+0.5rem)] sm:-mx-6 sm:px-6">
+                {/* Heading-order anchor: the title lives visually in the gate
+                    (assessments), but practice skips the gate entirely —
+                    every question flow keeps an h1 (R3-A S1). */}
+                <h1 className="sr-only">{quiz.title}</h1>
+                <div className="flex items-center justify-between gap-2">
+                  <span className={`inline-block shrink-0 rounded-full border-[3px] px-3 py-0.5 font-sans text-label font-extrabold uppercase tracking-[0.04em] ${
+                    isPractice
+                      ? "border-emerald-300 bg-emerald-100 text-emerald-800 dark:border-emerald-400/40 dark:bg-emerald-500/15 dark:text-emerald-300"
+                      : "border-accent/40 bg-blue-100 text-accent dark:border-accent/40 dark:bg-blue-500/15 dark:text-blue-300"
+                  }`}>
+                    {isPractice ? tCommon("practice") : tCommon("assessment")}
+                  </span>
+                  <ProgressHud
+                    variant="strip"
+                    current={index + 1}
+                    total={questions.length}
+                    remainingMs={remainingMs}
+                    camStatus={
+                      quiz.mode !== "assessment" || faceStatus === "off" || faceStatus === "exempt" || faceStatus === "unavailable"
+                        ? null
+                        : faceStatus === "ready"
+                        ? "aligned"
+                        : "reposition"
+                    }
+                  />
+                </div>
+              </header>
+            )}
 
-            <div aria-live="polite">
-              {error && (
-                <p className="rounded-2xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-3 text-sm font-bold text-destructive" role="alert">
-                  {error}
-                </p>
-              )}
-              {notice && (
-                <p className="rounded-2xl border-[3px] border-amber-300 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800" role="status">
-                  {notice}
-                </p>
-              )}
-            </div>
+            {isWide && (
+              <div aria-live="polite">
+                {error && (
+                  <p className="rounded-2xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-3 text-sm font-bold text-destructive" role="alert">
+                    {error}
+                  </p>
+                )}
+                {notice && (
+                  <p className="rounded-2xl border-[3px] border-amber-300 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800" role="status">
+                    {notice}
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* AX-3: discrete sr-only announcers. Polite channel carries timer
                 milestones + answer confirmations; the assertive channel fires
@@ -1000,62 +1173,61 @@ export function PlayClient({
                 polite live region on the container is the only SR channel.
                 The inner multi-count span is deliberately NOT itself a live
                 region (no nested aria-live — a nested region would make some
-                SR/VO combos announce both the inner and outer change). */}
-            <div className="flex min-h-12 items-center justify-end" aria-live="polite">
-              {phase === "question" && question.type === "multi_select" && !answered && (
-                <>
-                  {/* Pending-selection count (pre-existing SR channel; kept
-                      inside the live container which now announces it). */}
-                  <span className="sr-only">
-                    {t("multiSelectedCount", { count: pendingMulti.length })}
-                  </span>
-                  {/* Palm-commit hint (QT-1 gesture amendment): holds toggle
-                      options, an open palm commits — always visible while
-                      gesture-active so the affordance is discoverable. Plain
-                      span: the live container above already announces it. */}
-                  {gestureActive && (
-                    <span className="mr-3 text-sm font-bold text-muted-foreground">
-                      {t("multiPalmCommitHint")}
-                    </span>
-                  )}
-                  <Button
-                    size="lg"
-                    disabled={pendingMulti.length === 0}
-                    onClick={() => void answer([...pendingMulti])}
+                SR/VO combos announce both the inner and outer change).
+                Plan W3 8-state matrix: the container STAYS MOUNTED in every
+                non-terminal phase (state 1 renders it EMPTY — a re-inserted
+                live region does not announce); on phones it is the fixed
+                bottom action bar with full-width buttons and safe-area
+                padding; error/notice render ABOVE it (outside the live
+                region). */}
+            {!isWide && (
+              <div className="fixed inset-x-4 bottom-0 z-30 flex flex-col gap-2 pb-[max(0.75rem,var(--safe-bottom))] pt-2">
+                {/* Multi status chip (plan W3 D6): anchored to the bar it
+                    explains, OUTSIDE the action-zone live container,
+                    aria-hidden — the sr-only multiSelectedCount span inside
+                    the container remains the sole count channel. */}
+                {phase === "question" && question.type === "multi_select" && !answered && (
+                  <p
+                    aria-hidden="true"
+                    className="mx-auto w-fit rounded-full bg-background/90 px-3 py-1 text-center text-sm font-bold text-muted-foreground shadow-[0_2px_0_var(--border)]"
                   >
-                    {t("multiConfirm")}
-                  </Button>
-                </>
-              )}
-              {phase === "feedback" && (
-                <div className="flex items-center gap-3">
-                  {gestureActive && question.options.length < MAX_ANSWER_FINGERS && (
-                    // Plain span — inside the live container (no nested region).
-                    <span className="text-sm font-bold text-muted-foreground">
-                      {t("feedback.orHold")}
-                    </span>
-                  )}
-                  <Button
-                    size="lg"
-                    onClick={goNext}
-                    ref={nextButtonRef}
-                  >
-                    {allAnswered || index + 1 >= questions.length
-                      ? t("feedback.finish")
-                      : t("feedback.next")}
-                  </Button>
+                    {t("multiStatusChip", { count: pendingMulti.length })}
+                  </p>
+                )}
+                {(error || notice) && (
+                  <div aria-live="polite">
+                    {error && (
+                      <p className="rounded-2xl border-[3px] border-destructive/30 bg-card px-4 py-3 text-sm font-bold text-destructive" role="alert">
+                        {error}
+                      </p>
+                    )}
+                    {notice && (
+                      <p className="rounded-2xl border-[3px] border-amber-300 bg-card px-4 py-3 text-sm font-bold text-amber-800 dark:border-amber-500/40 dark:text-amber-200" role="status">
+                        {notice}
+                      </p>
+                    )}
+                  </div>
+                )}
+                {/* Chrome collapses when state 1 leaves the container empty
+                    (R2-B: a bordered empty box floating over the question is
+                    dead space); the aria-live div itself stays mounted. */}
+                <div
+                  className={`flex flex-col items-stretch gap-2 transition-[padding] duration-200 [&_button]:w-full ${
+                    hasActionButtons
+                      ? "rounded-[22px] border-[3px] border-border bg-card p-3 shadow-[var(--shadow-clay)]"
+                      : ""
+                  }`}
+                  aria-live="polite"
+                >
+                  {actionZoneButtons}
                 </div>
-              )}
-              {phase === "submitting" && (
-                <Button size="lg" disabled>{t("feedback.submitting")}</Button>
-              )}
-              {phase === "timeUp" && (
-                <Button size="lg" onClick={() => void submitNow()}>{t("feedback.retrySubmit")}</Button>
-              )}
-              {phase === "locked" && (
-                <Button size="lg" disabled>{t("feedback.recording")}</Button>
-              )}
-            </div>
+              </div>
+            )}
+            {isWide && (
+              <div className="flex min-h-12 items-center justify-end" aria-live="polite">
+                {actionZoneButtons}
+              </div>
+            )}
           </div>
         </GestureLayer>
       </FaceVerifier>

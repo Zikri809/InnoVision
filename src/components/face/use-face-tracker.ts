@@ -261,5 +261,21 @@ export function useFaceTracker(opts?: {
     };
   }, [enabled, start]);
 
-  return { videoRef, trackerRef, available, booting, failureReason, start };
+  // Shared camera stream for the recovery self-view (plan W3): kept in
+  // STATE, synced from the booted tracker in an effect — refs must not be
+  // read during render. The overlay only needs it while paused/recovering,
+  // when the tracker is guaranteed booted.
+  const [stream, setStream] = useState<MediaStream | null>(null);
+
+  useEffect(() => {
+    // Post-boot poll: the tracker assigns its stream during start(); by the
+    // time `available` flips true it is set. Sync once per boot cycle.
+    if (available && trackerRef.current) {
+      setStream(trackerRef.current.stream ?? null);
+    } else if (!available) {
+      setStream(null);
+    }
+  }, [available]);
+
+  return { videoRef, trackerRef, available, booting, failureReason, start, stream };
 }

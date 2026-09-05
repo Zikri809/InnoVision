@@ -380,7 +380,7 @@ export function StudentPracticePlayer({
       </div>
 
       <Card className="rounded-[28px] border-[3px] shadow-[var(--shadow-clay)]">
-        <CardContent className="space-y-6 p-6 md:p-8">
+        <CardContent className="space-y-6 p-5 md:p-8">
           <h1
             ref={headingRef}
             tabIndex={-1}
@@ -462,8 +462,8 @@ export function StudentPracticePlayer({
           </div>
 
           {feedback && (
-            <div className="flex justify-end">
-              <Button size="lg" onClick={() => advance(idx)}>
+            <div className="flex max-sm:sticky max-sm:bottom-[max(1rem,var(--safe-bottom))] max-sm:justify-stretch justify-end">
+              <Button size="lg" onClick={() => advance(idx)} className="max-sm:w-full max-sm:justify-center">
                 {resolvedCount >= questions.length ? t("resultsBtn") : t("nextBtn")}
                 <ArrowRight className="h-4 w-4" aria-hidden />
               </Button>

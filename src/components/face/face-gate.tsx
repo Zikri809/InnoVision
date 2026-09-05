@@ -22,6 +22,8 @@ export function FaceGate({
   remainingMs,
   livenessState,
   status,
+  quizTitle,
+  resume = null,
   onBegin,
   onConsent,
 }: {
@@ -30,12 +32,18 @@ export function FaceGate({
   remainingMs: number | null;
   livenessState: "idle" | "waiting" | "passed" | "failed";
   status: FaceStatus;
+  /** Mobile plan W3: the quiz title lives HERE (shown once, before the flow
+      starts) instead of eating vertical space above every question. */
+  quizTitle?: string;
+  /** Resume re-orientation: "N of M answered" when the session is seeded. */
+  resume?: { answered: number; total: number } | null;
   onBegin: () => void;
   onConsent: () => void;
 }) {
   const [consentChecked, setConsentChecked] = useState(consentGiven);
   const router = useRouter();
   const t = useTranslations("face");
+  const tPlay = useTranslations("play");
   const tCommon = useTranslations("common");
 
   const readyToBegin = consentChecked && enrolled;
@@ -46,14 +54,30 @@ export function FaceGate({
       <div aria-hidden className="pointer-events-none absolute -left-6 top-8 h-24 w-24 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-orange-200/50" />
       <div aria-hidden className="pointer-events-none absolute -right-4 bottom-12 h-20 w-20 rounded-[60%_40%_45%_55%/50%_60%_40%_55%] bg-blue-200/50" />
 
-      <div className="relative rounded-[28px] border-[3px] border-border bg-card p-7 shadow-[var(--shadow-clay)] md:p-9">
+      <div className="relative rounded-[28px] border-[3px] border-border bg-card p-5 shadow-[var(--shadow-clay)] sm:p-7 md:p-9">
         <div className="mb-4 grid h-14 w-14 place-items-center rounded-[18px] bg-blue-100 shadow-[0_4px_0_rgba(29,78,216,0.15)]">
           <BotAvatar state={LIVENESS_AVATAR[livenessState]} size={38} />
         </div>
         <h1 className="font-heading text-2xl font-semibold">{t("gateTitle")}</h1>
+        {quizTitle && (
+          <p className="mt-2 font-heading text-xl font-semibold [text-wrap:balance] max-sm:text-lg">
+            {quizTitle}
+          </p>
+        )}
         <p className="mt-2 text-sm font-semibold text-muted-foreground">
           {t("gateSubtitle")}
         </p>
+
+        {resume && resume.answered > 0 && (
+          <div className="mt-4 rounded-2xl border-[3px] border-primary/30 bg-primary/10 px-4 py-3" role="status">
+            <p className="text-sm font-bold text-foreground">
+              {tPlay("resumeTitle", { answered: resume.answered, total: resume.total })}
+            </p>
+            <p className="mt-0.5 text-xs font-semibold text-muted-foreground">
+              {tPlay("resumeHint")}
+            </p>
+          </div>
+        )}
 
         {remainingMs !== null && (
           <p className="mt-4 inline-flex items-center gap-2 rounded-full border-[3px] border-amber-300 bg-amber-50 px-3.5 py-1.5 text-sm font-extrabold text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300" role="status">
@@ -114,11 +138,11 @@ export function FaceGate({
           </p>
         </div>
 
-        <div className="mt-7 flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm font-extrabold text-muted-foreground">
+        <div className="mt-7 flex flex-col-reverse items-stretch justify-between gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+          <p className="text-sm font-extrabold text-muted-foreground sm:order-1">
             {readyToBegin ? tCommon("ok") : t("enrollRequiredBody")}
           </p>
-          <Button size="lg" onClick={onBegin} disabled={!readyToBegin}>
+          <Button size="lg" onClick={onBegin} disabled={!readyToBegin} className="sm:w-auto">
             {t("beginBtn")}
           </Button>
         </div>

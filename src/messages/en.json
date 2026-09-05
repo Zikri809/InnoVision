@@ -108,7 +108,11 @@
     "matricHint": "Visible to your lecturers on class lists and exports.",
     "matricChangeHint": "Need a correction? Email the IT department to change it.",
     "primaryNav": "Primary navigation",
-    "archivedClassesLabel": "Archived"
+    "archivedClassesLabel": "Archived",
+    "mobileNav": "Mobile navigation",
+    "joinYourFirstClass": "Join your first class",
+    "joinFirstHint": "Enter the 6-character code from your lecturer.",
+    "quickSettings": "Settings"
   },
   "landing": {
     "badge": "No clicks needed · Just raise your hand",
@@ -702,6 +706,9 @@
     "questionsLoadError": "Could not load the questions right now. Please refresh."
   },
   "play": {
+    "resumeTitle": "Resuming — {answered} of {total} answered",
+    "resumeHint": "Pick up where you left off.",
+    "multiStatusChip": "{count, plural, =0 {No options selected} other {# selected · open palm to confirm}}",
     "profileSettingUp": "Your profile is still being set up. Please refresh in a moment.",
     "quizNoQuestions": "This quiz has no questions yet. Please try again later.",
     "quizLoadError": "Could not load the quiz right now. Please refresh.",
@@ -791,7 +798,8 @@
     "multiPracticeHolding": "{count, plural, =1 {1 option} other {# options}} switched on — show your open palm ✋ to confirm.",
     "multiPracticeCommitted": "Confirmed {count, plural, =1 {1 option} other {# options}}! Hold different fingers to try again, then palm to confirm.",
     "multiPracticeSuccess": "Nice — that's exactly how answering works.",
-    "multiPracticeCleared": "Hand lost — hold the fingers again."
+    "multiPracticeCleared": "Hand lost — hold the fingers again.",
+    "pipExpand": "\"Expand self view\""
   },
   "face": {
     "gateTitle": "Face verification",

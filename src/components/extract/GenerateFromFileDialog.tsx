@@ -25,13 +25,13 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  ResponsiveModal,
+  ResponsiveModalContent,
+  ResponsiveModalDescription,
+  ResponsiveModalFooter,
+  ResponsiveModalHeader,
+  ResponsiveModalTitle,
+} from "@/components/ui/responsive-modal";
 import { UploadDropzone, type UploadedFileItem } from "./UploadDropzone";
 import { EnginePicker } from "./EnginePicker";
 import { OcrProgress } from "./OcrProgress";
@@ -145,7 +145,7 @@ export function GenerateFromFileDialog({
     setBusy(false);
   }
 
-  // Close-path reset happens in the Dialog's onOpenChange (reset() there);
+  // Close-path reset happens in the ResponsiveModal's onOpenChange (reset() there);
   // this effect only aborts any in-flight generation on unmount.
   useEffect(() => {
     return () => {
@@ -351,28 +351,28 @@ export function GenerateFromFileDialog({
   }
 
   return (
-    <Dialog
+    <ResponsiveModal
       open={open}
       onOpenChange={(next) => {
         if (!next) reset();
         onOpenChange(next);
       }}
     >
-      <DialogContent className="max-h-[94vh] flex flex-col sm:max-w-3xl overflow-hidden p-6 sm:p-7 gap-0">
-        <DialogHeader className="shrink-0 pb-3 border-b-[3px] border-border/40">
+      <ResponsiveModalContent className="max-h-[94vh] flex flex-col sm:max-w-3xl overflow-hidden p-6 sm:p-7 gap-0">
+        <ResponsiveModalHeader className="shrink-0 pb-3 border-b-[3px] border-border/40">
           <div className="flex items-center justify-between gap-2 pr-6">
-            <DialogTitle className="text-xl font-bold font-heading flex items-center gap-2">
+            <ResponsiveModalTitle className="text-xl font-bold font-heading flex items-center gap-2">
               <Sparkles className="size-5 text-primary" />
               {t("dialogTitle")}
-            </DialogTitle>
+            </ResponsiveModalTitle>
             <span className="rounded-full border-[2px] border-primary/30 bg-primary/10 px-2.5 py-0.5 text-xs font-extrabold text-primary">
               {t("stepIndicator", { step, total: 2 })}
             </span>
           </div>
-          <DialogDescription className="text-xs font-semibold text-muted-foreground mt-0.5">
+          <ResponsiveModalDescription className="text-xs font-semibold text-muted-foreground mt-0.5">
             {step === 1 ? t("dialogSubtitle") : t("step2Title")}
-          </DialogDescription>
-        </DialogHeader>
+          </ResponsiveModalDescription>
+        </ResponsiveModalHeader>
 
         <div
           ref={stepContainerRef}
@@ -490,7 +490,7 @@ export function GenerateFromFileDialog({
                         })}
                       </p>
                       {files.length > 0 && (
-                        <p className="text-[11px] font-semibold text-muted-foreground truncate">
+                        <p className="text-2xs font-semibold text-muted-foreground truncate">
                           {files.map((f) => f.file.name).join(" • ")}
                         </p>
                       )}
@@ -513,7 +513,7 @@ export function GenerateFromFileDialog({
                 {previewExpanded && (
                   <pre
                     id="source-text-preview"
-                    className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap rounded-xl bg-muted/60 p-3 text-[11px] font-mono font-medium border-[2px] border-border/40"
+                    className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap rounded-xl bg-muted/60 p-3 text-2xs font-mono font-medium border-[2px] border-border/40"
                   >
                     {extractedText}
                   </pre>
@@ -530,7 +530,7 @@ export function GenerateFromFileDialog({
                     <p className="text-xs font-bold font-heading text-amber-950 dark:text-amber-200">
                       {t("lowDensityTitle")}
                     </p>
-                    <p className="text-[11px] font-semibold text-amber-900/90 dark:text-amber-300/90 leading-relaxed">
+                    <p className="text-2xs font-semibold text-amber-900/90 dark:text-amber-300/90 leading-relaxed">
                       {t("lowDensityDesc")}
                     </p>
                   </div>
@@ -544,7 +544,7 @@ export function GenerateFromFileDialog({
                   <Label htmlFor="steering-prompt" className="text-xs font-extrabold text-foreground">
                     {t("steeringPromptLabel")}
                   </Label>
-                  <span id="steering-prompt-hint" className="text-[11px] font-bold text-muted-foreground bg-muted/60 px-2 py-0.5 rounded-full border border-border/40">
+                  <span id="steering-prompt-hint" className="text-2xs font-bold text-muted-foreground bg-muted/60 px-2 py-0.5 rounded-full border border-border/40">
                     {steeringPrompt.length}/500
                   </span>
                 </div>
@@ -583,7 +583,7 @@ export function GenerateFromFileDialog({
                         role="radio"
                         aria-checked={difficulty === lvl.id}
                         onClick={() => setDifficulty(lvl.id)}
-                        className={`h-full min-h-[46px] rounded-xl border-[3px] py-2 px-2.5 text-[11px] font-extrabold transition-all duration-150 text-center flex items-center justify-center ${
+                        className={`h-full min-h-[46px] rounded-xl border-[3px] py-2 px-2.5 text-2xs font-extrabold transition-all duration-150 text-center flex items-center justify-center ${
                           difficulty === lvl.id
                             ? "border-primary bg-primary text-primary-foreground shadow-[0_3px_0_var(--primary-deep)]"
                             : "border-border bg-card hover:bg-muted text-foreground shadow-[0_3px_0_var(--border)] hover:-translate-y-0.5 active:translate-y-0"
@@ -615,7 +615,7 @@ export function GenerateFromFileDialog({
                         role="radio"
                         aria-checked={formatDistribution === m.id}
                         onClick={() => setFormatDistribution(m.id)}
-                        className={`flex-1 min-h-[36px] rounded-xl border-[3px] py-1.5 px-3 text-[11px] font-extrabold transition-all duration-150 text-left flex items-center justify-between ${
+                        className={`flex-1 min-h-[36px] rounded-xl border-[3px] py-1.5 px-3 text-2xs font-extrabold transition-all duration-150 text-left flex items-center justify-between ${
                           formatDistribution === m.id
                             ? "border-primary bg-primary text-primary-foreground shadow-[0_3px_0_var(--primary-deep)]"
                             : "border-border bg-card hover:bg-muted text-foreground shadow-[0_3px_0_var(--border)] hover:-translate-y-0.5 active:translate-y-0"
@@ -637,7 +637,7 @@ export function GenerateFromFileDialog({
                     <Label htmlFor="question-count" className="text-xs font-extrabold text-foreground">
                       {t("questionCountLabel")}
                     </Label>
-                    <span className="text-[11px] font-extrabold text-primary bg-primary/10 px-2 py-0.5 rounded-full border border-primary/20">
+                    <span className="text-2xs font-extrabold text-primary bg-primary/10 px-2 py-0.5 rounded-full border border-primary/20">
                       3 – 30
                     </span>
                   </div>
@@ -692,7 +692,7 @@ export function GenerateFromFileDialog({
                             setQuestionCount(preset);
                             setQuestionCountInput(String(preset));
                           }}
-                          className={`px-2.5 py-1 text-[11px] font-extrabold rounded-xl border-[2px] transition-all ${
+                          className={`px-2.5 py-1 text-2xs font-extrabold rounded-xl border-[2px] transition-all ${
                             questionCount === preset
                               ? "border-primary bg-primary text-primary-foreground shadow-[0_2px_0_var(--primary-deep)]"
                               : "border-border bg-muted/40 hover:bg-muted text-foreground"
@@ -759,7 +759,7 @@ export function GenerateFromFileDialog({
                         <PlusCircle className="size-4 text-emerald-600 dark:text-emerald-400" />
                         <span>{t("modeAppendTitle")}</span>
                       </div>
-                      <p className="text-[11px] font-semibold text-muted-foreground mt-1">
+                      <p className="text-2xs font-semibold text-muted-foreground mt-1">
                         {t("modeAppendDesc")}
                       </p>
                     </button>
@@ -779,14 +779,14 @@ export function GenerateFromFileDialog({
                         <RefreshCw className="size-4 text-amber-600 dark:text-amber-400" />
                         <span>{t("modeReplaceTitle")}</span>
                       </div>
-                      <p className="text-[11px] font-semibold text-muted-foreground mt-1">
+                      <p className="text-2xs font-semibold text-muted-foreground mt-1">
                         {t("modeReplaceDesc")}
                       </p>
                     </button>
                   </div>
 
                   {generationMode === "replace" && (
-                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-700 dark:text-amber-400 bg-amber-500/10 px-3 py-1.5 rounded-xl border border-amber-500/30">
+                    <div className="flex items-center gap-1.5 text-2xs font-bold text-amber-700 dark:text-amber-400 bg-amber-500/10 px-3 py-1.5 rounded-xl border border-amber-500/30">
                       <AlertTriangle className="size-3.5 shrink-0" />
                       <span>{t("modeReplaceWarning")}</span>
                     </div>
@@ -806,7 +806,7 @@ export function GenerateFromFileDialog({
           </div>
         )}
 
-        <DialogFooter className="shrink-0 pt-3 border-t-[3px] border-border/40 flex items-center justify-between sm:justify-between gap-3">
+        <ResponsiveModalFooter className="shrink-0 pt-3 border-t-[3px] border-border/40 flex items-center justify-between sm:justify-between gap-3">
           {step === 1 ? (
             <>
               <Button
@@ -864,8 +864,8 @@ export function GenerateFromFileDialog({
               </Button>
             </>
           )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </ResponsiveModalFooter>
+      </ResponsiveModalContent>
+    </ResponsiveModal>
   );
 }

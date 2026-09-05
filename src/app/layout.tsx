@@ -23,18 +23,35 @@ const nunito = Nunito({
   variable: "--font-sans",
 });
 
-export const metadata: Metadata = {
-  title: "InnoVision",
-  description: "AI-powered gesture quizzes with face verification",
-};
-
 export const viewport = {
+  // Native-app viewport behavior (mobile redesign plan §3): cover lets
+  // env(safe-area-inset-*) report real notch/home-indicator values;
+  // resizes-content keeps the Android keyboard from overlaying inputs.
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  interactiveWidget: "resizes-content",
   // Matches the clay background so mobile chrome + scrollbars blend in.
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#fff7ed" },
     { media: "(prefers-color-scheme: dark)", color: "#1c0f08" },
   ],
   colorScheme: "light dark",
+};
+
+export const metadata: Metadata = {
+  title: "InnoVision",
+  description: "AI-powered gesture quizzes with face verification",
+  appleWebApp: {
+    capable: true,
+    title: "InnoVision",
+    statusBarStyle: "default",
+  },
+  manifest: "/manifest.webmanifest",
+  icons: {
+    icon: "/icon.svg",
+    apple: "/icon.svg",
+  },
 };
 
 export default async function RootLayout({ children }: { children: ReactNode }) {

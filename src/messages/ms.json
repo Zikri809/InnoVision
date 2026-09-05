@@ -108,7 +108,11 @@
     "matricHint": "Boleh dilihat oleh pensyarah anda dalam senarai kelas dan eksport.",
     "matricChangeHint": "Perlu pembetulan? E-mel jabatan IT untuk menukarnya.",
     "primaryNav": "Navigasi utama",
-    "archivedClassesLabel": "Diarkib"
+    "archivedClassesLabel": "Diarkib",
+    "mobileNav": "Navigasi mudah alih",
+    "joinYourFirstClass": "Sertai kelas pertama anda",
+    "joinFirstHint": "Masukkan kod 6 aksara daripada pensyarah anda.",
+    "quickSettings": "Tetapan"
   },
   "landing": {
     "badge": "Tanpa klik tetikus · Angkat tangan sahaja",
@@ -702,6 +706,9 @@
     "questionsLoadError": "Tidak dapat memuatkan soalan buat masa ini. Sila muat semula."
   },
   "play": {
+    "resumeTitle": "Sambung semula — {answered} daripada {total} dijawab",
+    "resumeHint": "Sambung dari tempat anda berhenti.",
+    "multiStatusChip": "{count, plural, =0 {Tiada pilihan dipilih} other {# dipilih · tapak tangan terbuka untuk sahkan}}",
     "profileSettingUp": "Profil anda sedang disediakan. Sila muat semula sebentar lagi.",
     "quizNoQuestions": "Kuiz ini belum mempunyai soalan. Sila cuba lagi kemudian.",
     "quizLoadError": "Tidak dapat memuatkan kuiz buat masa ini. Sila muat semula.",
@@ -791,7 +798,8 @@
     "multiPracticeHolding": "{count, plural, =1 {1 pilihan} other {# pilihan}} dihidupkan — tunjukkan tapak tangan terbuka ✋ untuk mengesahkan.",
     "multiPracticeCommitted": "Disahkan {count, plural, =1 {1 pilihan} other {# pilihan}}! Tahan jari yang lain untuk mencuba lagi, kemudian tapak tangan untuk mengesahkan.",
     "multiPracticeSuccess": "Bagus — beginilah cara menjawab.",
-    "multiPracticeCleared": "Tangan hilang — tahan jari semula."
+    "multiPracticeCleared": "Tangan hilang — tahan jari semula.",
+    "pipExpand": "\"Besarkan paparan diri\""
   },
   "face": {
     "gateTitle": "Pengesahan wajah",

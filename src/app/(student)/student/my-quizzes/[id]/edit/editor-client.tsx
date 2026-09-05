@@ -14,13 +14,13 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  ResponsiveModal,
+  ResponsiveModalContent,
+  ResponsiveModalDescription,
+  ResponsiveModalFooter,
+  ResponsiveModalHeader,
+  ResponsiveModalTitle,
+} from "@/components/ui/responsive-modal";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -111,8 +111,8 @@ export function QuizEditorClient({
     correctIndex: 0,
   });
   const [savingEdit, setSavingEdit] = useState(false);
-  // Dialog-local error state: the page banner sits BEHIND the modal overlay,
-  // so edit failures must render inside <DialogContent> to be visible.
+  // ResponsiveModal-local error state: the page banner sits BEHIND the modal overlay,
+  // so edit failures must render inside <ResponsiveModalContent> to be visible.
   const [editError, setEditError] = useState<string | null>(null);
   const [editExplanation, setEditExplanation] = useState("");
 
@@ -617,12 +617,12 @@ export function QuizEditorClient({
       />
 
       {/* ── Edit dialog ── */}
-      <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>{t("editQuestion")}</DialogTitle>
-            <DialogDescription>{t("editQuestionHint")}</DialogDescription>
-          </DialogHeader>
+      <ResponsiveModal open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
+        <ResponsiveModalContent className="sm:max-w-lg">
+          <ResponsiveModalHeader>
+            <ResponsiveModalTitle>{t("editQuestion")}</ResponsiveModalTitle>
+            <ResponsiveModalDescription>{t("editQuestionHint")}</ResponsiveModalDescription>
+          </ResponsiveModalHeader>
           {editing && (
             <div className="space-y-4">
               <div aria-live="polite">
@@ -700,7 +700,7 @@ export function QuizEditorClient({
               />
             </div>
           )}
-          <DialogFooter className="gap-2">
+          <ResponsiveModalFooter className="gap-2">
             <Button variant="outline" onClick={() => setEditing(null)}>
               <X className="h-4 w-4" aria-hidden /> {tCommon("cancel")}
             </Button>
@@ -710,9 +710,9 @@ export function QuizEditorClient({
               ) : null}
               {t("saveQuestion")}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </ResponsiveModalFooter>
+        </ResponsiveModalContent>
+      </ResponsiveModal>
 
       {/* ── Delete-question confirmation (replaces window.confirm) ── */}
       <AlertDialog

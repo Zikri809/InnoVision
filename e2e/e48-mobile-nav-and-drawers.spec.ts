@@ -22,7 +22,7 @@ test.describe("E48 — Mobile Bottom Nav, Responsive Drawers, and Password Toggl
 
     // Verify it is now visible text
     await expect(passwordInput).toHaveAttribute("type", "text");
-    await page.screenshot({ path: "C:/Users/mohdz/.gemini/antigravity/brain/f11fa4ea-214c-4fe5-b5b2-8e245a18261c/scratch/screenshots/after_01_login_password_eye.png" });
+    await page.screenshot({ path: "test-results/screenshots/after_01_login_password_eye.png" });
 
     // Click again to hide
     await toggleButton.click();
@@ -41,7 +41,7 @@ test.describe("E48 — Mobile Bottom Nav, Responsive Drawers, and Password Toggl
     // 3. Assert Mobile Navigation bar is visible and desktop horizontal nav is hidden
     const mobileNav = page.getByRole("navigation", { name: /mobile navigation/i });
     await expect(mobileNav).toBeVisible({ timeout: 5_000 });
-    await page.screenshot({ path: "C:/Users/mohdz/.gemini/antigravity/brain/f11fa4ea-214c-4fe5-b5b2-8e245a18261c/scratch/screenshots/after_02_mobile_student_bottom_nav.png" });
+    await page.screenshot({ path: "test-results/screenshots/after_02_mobile_student_bottom_nav.png" });
 
     // 4. Test mobile navigation links
     const myClassesTab = mobileNav.getByRole("link", { name: /my classes|kelas saya/i });
@@ -69,7 +69,7 @@ test.describe("E48 — Mobile Bottom Nav, Responsive Drawers, and Password Toggl
     const modal = page.getByRole("dialog");
     await expect(modal).toBeVisible({ timeout: 5_000 });
     await page.waitForTimeout(500);
-    await page.screenshot({ path: "C:/Users/mohdz/.gemini/antigravity/brain/f11fa4ea-214c-4fe5-b5b2-8e245a18261c/scratch/screenshots/after_03_mobile_drawer.png" });
+    await page.screenshot({ path: "test-results/screenshots/after_03_mobile_drawer.png" });
 
     // Verify matric number or student info is rendered
     await expect(modal.getByText(/matric|student|consent/i).first()).toBeVisible();
@@ -81,10 +81,8 @@ test.describe("E48 — Mobile Bottom Nav, Responsive Drawers, and Password Toggl
 
   test("mobile bottom navigation for lecturer", async ({ page }) => {
     test.skip(!LECTURER_INVITE_CODE, "LECTURER_INVITE_CODE not set");
-    // PAUSED pending the planned mobile redesign: the bottom nav renders the
-    // short "Archived" label, and nav content/layout is expected to change
-    // wholesale — re-pin the label expectations after the redesign lands.
-    test.skip(true, "paused: mobile bottom nav is being redesigned");
+    // Mobile redesign landed (docs/PLAN_MOBILE_REDESIGN.md W1): the lecturer
+    // dock keeps two tabs — Classes and Archived (nav.archivedClassesLabel).
     const email = `lecturer-e48-${Date.now()}@innovision.test`;
 
     await page.setViewportSize({ width: 375, height: 812 });
@@ -93,10 +91,10 @@ test.describe("E48 — Mobile Bottom Nav, Responsive Drawers, and Password Toggl
 
     const mobileNav = page.getByRole("navigation", { name: /mobile navigation/i });
     await expect(mobileNav).toBeVisible({ timeout: 5_000 });
-    await page.screenshot({ path: "C:/Users/mohdz/.gemini/antigravity/brain/f11fa4ea-214c-4fe5-b5b2-8e245a18261c/scratch/screenshots/after_04_mobile_lecturer_bottom_nav.png" });
+    await page.screenshot({ path: "test-results/screenshots/after_04_mobile_lecturer_bottom_nav.png" });
 
     const activeClassesTab = mobileNav.getByRole("link", { name: /my classes|kelas saya/i });
-    const archivedClassesTab = mobileNav.getByRole("link", { name: /archived classes|arkib kelas/i });
+    const archivedClassesTab = mobileNav.getByRole("link", { name: /archived|diarkib/i });
 
     await expect(activeClassesTab).toBeVisible();
     await expect(archivedClassesTab).toBeVisible();

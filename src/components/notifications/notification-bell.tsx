@@ -4,23 +4,23 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import {
-  RiAlarmWarningLine,
-  RiArchiveLine,
-  RiAwardLine,
-  RiCameraOffLine,
-  RiCheckDoubleLine,
-  RiCheckboxCircleLine,
-  RiLockLine,
-  RiLockUnlockLine,
-  RiLiveLine,
-  RiLogoutBoxRLine,
-  RiNotification3Line,
-  RiRefreshLine,
-  RiUserAddLine,
-  RiUserSearchLine,
-  RiVidiconLine,
-  RiFileList3Line,
-} from "@remixicon/react";
+  TriangleAlert,
+  Archive,
+  Award,
+  Bell,
+  CameraOff,
+  CheckCheck,
+  CircleCheck,
+  FileText,
+  Lock,
+  LockOpen,
+  Radio,
+  LogOut,
+  RefreshCw,
+  UserPlus,
+  UserSearch,
+  Video,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -47,25 +47,25 @@ import {
 } from "@/lib/notifications/types";
 
 const TYPE_ICONS: Record<NotificationType, React.ComponentType<{ className?: string }>> = {
-  quiz_live: RiLiveLine,
-  results_revealed: RiAwardLine,
-  session_reset: RiRefreshLine,
-  removed_from_class: RiLogoutBoxRLine,
-  class_archived: RiArchiveLine,
-  student_joined: RiUserAddLine,
-  session_submitted: RiCheckboxCircleLine,
-  session_flagged: RiAlarmWarningLine,
-  quiz_completed_all: RiCheckDoubleLine,
-  incident_clip_recorded: RiVidiconLine,
-  face_unavailable_reported: RiCameraOffLine,
-  face_enrollment_held: RiUserSearchLine,
-  quiz_closed: RiLockLine,
-  session_unlocked: RiLockUnlockLine,
+  quiz_live: Radio,
+  results_revealed: Award,
+  session_reset: RefreshCw,
+  removed_from_class: LogOut,
+  class_archived: Archive,
+  student_joined: UserPlus,
+  session_submitted: CircleCheck,
+  session_flagged: TriangleAlert,
+  quiz_completed_all: CheckCheck,
+  incident_clip_recorded: Video,
+  face_unavailable_reported: CameraOff,
+  face_enrollment_held: UserSearch,
+  quiz_closed: Lock,
+  session_unlocked: LockOpen,
 };
 
 /** Assessments get the exam-paper icon; practice keeps the live dot. */
 function iconFor(type: NotificationType, payload: Record<string, unknown>) {
-  if (type === "quiz_live" && payload.mode === "assessment") return RiFileList3Line;
+  if (type === "quiz_live" && payload.mode === "assessment") return FileText;
   return TYPE_ICONS[type];
 }
 
@@ -193,6 +193,8 @@ export function NotificationBell({
   const homeHref = role === "lecturer" ? "/lecturer/classes" : "/student/classes";
 
   async function openItem(item: NotificationItem) {
+    // Optimistic close BEFORE navigation (plan W1 sheet-close-on-navigate):
+    // the sheet must never hang open over the destination.
     setOpen(false);
     const link = resolveNotificationLink(item.type, item.payload);
     let href = link.href;
@@ -358,7 +360,7 @@ export function NotificationBell({
               />
             }
           >
-            <RiNotification3Line className="h-5 w-5" aria-hidden="true" />
+            <Bell className="h-5 w-5" aria-hidden="true" />
             {badgeDisplay && (
               <span
                 aria-hidden="true"
@@ -368,7 +370,7 @@ export function NotificationBell({
               </span>
             )}
           </PopoverTrigger>
-          <PopoverContent className="w-[380px]">
+          <PopoverContent className="w-[380px] max-w-[calc(100vw-1.5rem)]">
             <div className="flex items-center justify-between gap-2 pb-2">
               <span className="font-heading text-lg font-semibold">
                 {t("panel.title")}
@@ -395,7 +397,7 @@ export function NotificationBell({
             aria-haspopup="dialog"
             onClick={() => setOpen(true)}
           >
-            <RiNotification3Line className="h-5 w-5" aria-hidden="true" />
+            <Bell className="h-5 w-5" aria-hidden="true" />
             {badgeDisplay && (
               <span
                 aria-hidden="true"
@@ -406,7 +408,7 @@ export function NotificationBell({
             )}
           </Button>
           <Dialog open={open} onOpenChange={setOpen}>
-            <DialogContent className="top-auto bottom-0 left-1/2 max-h-[85dvh] max-w-[calc(100%-1.5rem)] -translate-x-1/2 translate-y-0 overflow-y-auto rounded-t-[28px] rounded-b-none sm:max-w-md">
+            <DialogContent className="top-auto bottom-0 left-1/2 max-h-[85dvh] max-w-[calc(100%-1.5rem)] -translate-x-1/2 translate-y-0 overflow-y-auto rounded-t-[28px] rounded-b-none pb-[max(1rem,var(--safe-bottom))] sm:max-w-md">
               <DialogHeader>
                 <DialogTitle>{t("panel.title")}</DialogTitle>
                 <DialogDescription>{t("panel.sheetDescription")}</DialogDescription>

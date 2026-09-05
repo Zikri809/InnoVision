@@ -16,13 +16,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  ResponsiveModal,
+  ResponsiveModalContent,
+  ResponsiveModalDescription,
+  ResponsiveModalFooter,
+  ResponsiveModalHeader,
+  ResponsiveModalTitle,
+} from "@/components/ui/responsive-modal";
 import { cn } from "@/lib/utils";
 import {
   applyOptionDraftOp,
@@ -241,14 +241,14 @@ function EditQuestionForm({
 
   return (
     <>
-      <DialogHeader className="shrink-0 pb-3 border-b-2 border-border/30">
-        <DialogTitle className="text-xl font-bold font-heading">
+      <ResponsiveModalHeader className="shrink-0 pb-3 border-b-[3px] border-border/30">
+        <ResponsiveModalTitle className="text-xl font-bold font-heading">
           {t("editQuestionTitle", { number: questionIndex != null ? questionIndex + 1 : 1 })}
-        </DialogTitle>
-        <DialogDescription className="text-xs font-semibold text-muted-foreground mt-0.5">
+        </ResponsiveModalTitle>
+        <ResponsiveModalDescription className="text-xs font-semibold text-muted-foreground mt-0.5">
           {t("editQuestionSubtitle")}
-        </DialogDescription>
-      </DialogHeader>
+        </ResponsiveModalDescription>
+      </ResponsiveModalHeader>
 
       <form onSubmit={handleSave} className="flex flex-col flex-1 min-h-0 pt-4">
         <div className="flex-1 overflow-y-auto space-y-5 pr-2 -mr-1 py-1">
@@ -566,7 +566,7 @@ function EditQuestionForm({
         </div>
 
         {/* Footer */}
-        <DialogFooter className="shrink-0 pt-4 border-t-2 border-border/40 mt-3 flex items-center justify-end gap-3">
+        <ResponsiveModalFooter className="shrink-0 pt-4 border-t-2 border-border/40 mt-3 flex items-center justify-end gap-3">
           <Button
             type="button"
             variant="outline"
@@ -581,7 +581,7 @@ function EditQuestionForm({
           >
             {saving ? tCommon("saving") : t("saveChanges")}
           </Button>
-        </DialogFooter>
+        </ResponsiveModalFooter>
       </form>
     </>
   );
@@ -598,9 +598,9 @@ export function EditQuestionDialog({
   onImageChanged,
 }: EditQuestionDialogProps) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <ResponsiveModal open={open} onOpenChange={onOpenChange}>
       {question && (
-        <DialogContent className="max-h-[88vh] flex flex-col sm:max-w-2xl p-6 sm:p-7 overflow-hidden gap-0">
+        <ResponsiveModalContent className="max-h-[88vh] flex flex-col sm:max-w-2xl p-6 sm:p-7 overflow-hidden gap-0">
           <EditQuestionForm
             key={question.id}
             quizId={quizId}
@@ -611,8 +611,8 @@ export function EditQuestionDialog({
             hasImageOverride={hasImageOverride}
             onImageChanged={onImageChanged}
           />
-        </DialogContent>
+        </ResponsiveModalContent>
       )}
-    </Dialog>
+    </ResponsiveModal>
   );
 }

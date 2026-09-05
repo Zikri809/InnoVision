@@ -46,6 +46,27 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
+      // m1-* specs exercise the mobile compositions (dock, bottom sheets, PIP
+      // play stage) that only render at phone viewports — running them on the
+      // 1280×720 desktop project would fail every assertion and, with CI's
+      // maxFailures: 1, abort the whole step. They run in the `mobile`
+      // project below.
+      testIgnore: ["**/m1-*.spec.ts"],
+    },
+    {
+      // Mobile project (plan §6): phone viewport + touch + mobile UA so the
+      // coarse-pointer branches (:active press physics, hit-slop, pointer:coarse
+      // rules) are actually exercised. testMatch pins it to the m1 allowlist
+      // so CI cost stays a handful of specs, not a second full run.
+      name: "mobile",
+      use: {
+        ...devices["iPhone X"],
+        // Chromium engine with the iPhone descriptor (375×812, hasTouch,
+        // isMobile, mobile UA): the device's default WebKit would force a
+        // second browser install in CI (ci.yml installs chromium only).
+        browserName: "chromium",
+      },
+      testMatch: ["**/m1-*.spec.ts"],
     },
   ],
   webServer: [

@@ -93,7 +93,7 @@ test("student loses visibility; rejoin attempts hit the archived alert", async (
   // Class absent from /student/classes; empty state shown.
   await student.goto("/student/classes");
   await expect(student.getByText(CLASS_TITLE, { exact: true })).toHaveCount(0);
-  await expect(student.getByText("You haven't joined any classes yet")).toBeVisible();
+  await expect(student.getByText("Join your first class")).toBeVisible();
 
   // Quiz absent from /student/quizzes.
   await student.goto("/student/quizzes");

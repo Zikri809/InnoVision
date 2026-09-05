@@ -126,13 +126,13 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-10">
+    <div className="relative flex min-h-dvh items-center justify-center overflow-hidden px-4 pt-[calc(var(--safe-top)+2.5rem)] pb-[max(2.5rem,var(--safe-bottom))]">
       {/* decorative blobs */}
       <div aria-hidden className="pointer-events-none absolute -left-10 top-20 h-32 w-32 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-orange-200/50" />
       <div aria-hidden className="pointer-events-none absolute -right-8 bottom-24 h-28 w-28 rounded-[60%_40%_45%_55%/50%_60%_40%_55%] bg-blue-200/50" />
 
       {/* Top right language switch */}
-      <div className="absolute right-6 top-6 z-10">
+      <div className="absolute right-6 top-[calc(var(--safe-top)+1.5rem)] z-10">
         <LanguageToggle />
       </div>
 

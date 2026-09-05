@@ -77,23 +77,33 @@ export default async function Home() {
     <div className="flex min-h-screen flex-col overflow-x-hidden">
       <a href="#main" className="skip-link">{tNav("skipToContent")}</a>
       {/* ===== Nav ===== */}
-      <header className="sticky top-0 z-50 border-b-[3px] border-border bg-background/85 backdrop-blur">
-        <div className="mx-auto flex h-[74px] w-full max-w-6xl items-center justify-between px-6">
-          <Link href="/" className="flex items-center gap-2.5">
+      <header className="sticky top-0 z-50 border-b-[3px] border-border bg-background/85 pt-[var(--safe-top)] backdrop-blur">
+        <div className="mx-auto flex h-[74px] w-full max-w-6xl items-center justify-between px-4 sm:px-6">
+          <Link href="/" className="flex shrink-0 items-center gap-2.5">
             <span className="grid h-10 w-10 -rotate-4 place-items-center rounded-[14px] bg-primary font-heading text-lg font-bold text-primary-foreground shadow-[0_4px_0_var(--primary-deep)]">
               IV
             </span>
-            <span className="font-heading text-[23px] font-semibold">{tNav("brand")}</span>
+            <span className="hidden font-heading text-[23px] font-semibold min-[480px]:inline">{tNav("brand")}</span>
           </Link>
           <nav className="hidden items-center gap-7 md:flex">
             <a href="#features" className="text-[15px] font-bold text-muted-foreground transition-colors hover:text-primary">{tNav("features")}</a>
             <a href="#stats" className="text-[15px] font-bold text-muted-foreground transition-colors hover:text-primary">{tNav("whyUs")}</a>
             <a href="#cta" className="text-[15px] font-bold text-muted-foreground transition-colors hover:text-primary">{tNav("joinIn")}</a>
           </nav>
-          <div className="flex items-center gap-3">
+          {/* Anchor chips ≥sm only: at 375px they truncated to "Fe…" and
+              squeezed the auth cluster; phones reach these sections by
+              scrolling and the hero CTAs cover the same destinations. */}
+          <nav aria-label={tNav("primaryNav")} className="hidden min-w-0 items-center gap-2 overflow-x-auto scrollbar-none sm:flex md:hidden">
+            <a href="#features" className="shrink-0 whitespace-nowrap rounded-full border-[3px] border-border bg-card px-3 py-1 text-xs font-extrabold text-muted-foreground transition-colors hover:text-primary">{tNav("features")}</a>
+            <a href="#stats" className="shrink-0 whitespace-nowrap rounded-full border-[3px] border-border bg-card px-3 py-1 text-xs font-extrabold text-muted-foreground transition-colors hover:text-primary">{tNav("whyUs")}</a>
+            <a href="#cta" className="shrink-0 whitespace-nowrap rounded-full border-[3px] border-border bg-card px-3 py-1 text-xs font-extrabold text-muted-foreground transition-colors hover:text-primary">{tNav("joinIn")}</a>
+          </nav>
+          <div className="flex shrink-0 items-center gap-2">
             <LanguageToggle />
-            <Link href="/login" className="clay-btn-ghost px-5 py-2.5 text-sm">{tNav("signIn")}</Link>
-            <Link href="/register" className="clay-btn-primary px-5 py-2.5 text-sm">{tNav("register")}</Link>
+            {/* Brand wordmark hides <sm (app-shell pattern): at 375px the
+                full row overflowed and clipped the Register button off-screen. */}
+            <Link href="/login" className="clay-btn-ghost whitespace-nowrap px-4 py-2.5 text-sm">{tNav("signIn")}</Link>
+            <Link href="/register" className="clay-btn-primary whitespace-nowrap px-4 py-2.5 text-sm">{tNav("register")}</Link>
           </div>
         </div>
       </header>

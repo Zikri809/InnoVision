@@ -329,7 +329,7 @@ export function ResultsDashboardClient({
     <div className="space-y-6">
       {/* ── Hero band ── */}
       <section className="relative overflow-hidden rounded-[28px] border-[3px] border-border bg-gradient-to-br from-orange-100 via-orange-50 to-blue-50 dark:from-orange-950/40 dark:via-card dark:to-blue-950/40 p-7 shadow-[var(--shadow-clay)] md:p-8">
-        <div aria-hidden className="pointer-events-none absolute -right-8 -top-10 h-36 w-36 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-white/50" />
+        <div aria-hidden className="pointer-events-none absolute -right-8 -top-10 h-36 w-36 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-white/50 dark:bg-white/5" />
         <div className="relative">
           <div className="flex items-start justify-between gap-3">
             <Link
@@ -499,16 +499,16 @@ export function ResultsDashboardClient({
                         </p>
                         <div className="flex shrink-0 items-center gap-2">
                           {qi.lowCorrect && (
-                            <span className="rounded-full border-2 border-amber-300 bg-amber-50 px-2.5 py-0.5 text-[11px] font-extrabold uppercase tracking-wide text-amber-800">
+                            <span className="rounded-full border-2 border-amber-300 bg-amber-50 px-2.5 py-0.5 text-2xs font-extrabold uppercase tracking-wide text-amber-800">
                               {t("insightsLowCorrect", { percent: qi.percentCorrect })}
                             </span>
                           )}
                           {qi.hasNeverPickedDistractor && (
-                            <span className="rounded-full border-2 border-sky-300 bg-sky-50 px-2.5 py-0.5 text-[11px] font-extrabold uppercase tracking-wide text-sky-800">
+                            <span className="rounded-full border-2 border-sky-300 bg-sky-50 px-2.5 py-0.5 text-2xs font-extrabold uppercase tracking-wide text-sky-800">
                               {t("insightsNeverPicked")}
                             </span>
                           )}
-                          <span className="rounded-full border-2 border-border bg-muted px-2.5 py-0.5 text-[11px] font-extrabold tabular-nums text-muted-foreground">
+                          <span className="rounded-full border-2 border-border bg-muted px-2.5 py-0.5 text-2xs font-extrabold tabular-nums text-muted-foreground">
                             {t("insightsCorrectStat", { percent: qi.percentCorrect, answered: qi.timesAnswered })}
                           </span>
                         </div>
@@ -522,7 +522,7 @@ export function ResultsDashboardClient({
                           return (
                             <li key={d.optionIndex} className="flex items-center gap-2.5 text-xs font-semibold">
                               <span
-                                className={`grid h-5 w-5 shrink-0 place-items-center rounded-full text-[10px] font-extrabold ${
+                                className={`grid h-5 w-5 shrink-0 place-items-center rounded-full text-2xs font-extrabold ${
                                   onKey
                                     ? "bg-emerald-600 text-white"
                                     : "border border-border bg-muted text-muted-foreground"
@@ -597,22 +597,22 @@ export function ResultsDashboardClient({
                         row.advisorySummary.headsetActive > 0) && (
                         <div className="mt-1 flex flex-wrap gap-1.5">
                           {row.advisorySummary.secondFace > 0 && (
-                            <span className="rounded-full border-[2px] border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-extrabold text-amber-800">
+                            <span className="rounded-full border-[2px] border-amber-300 bg-amber-50 px-2 py-0.5 text-2xs font-extrabold text-amber-800">
                               {t("advisorySecondFace", { count: row.advisorySummary.secondFace })}
                             </span>
                           )}
                           {row.advisorySummary.lookedAway > 0 && (
-                            <span className="rounded-full border-[2px] border-sky-300 bg-sky-50 px-2 py-0.5 text-[11px] font-extrabold text-sky-800">
+                            <span className="rounded-full border-[2px] border-sky-300 bg-sky-50 px-2 py-0.5 text-2xs font-extrabold text-sky-800">
                               {t("advisoryLookedAway", { count: row.advisorySummary.lookedAway })}
                             </span>
                           )}
                           {row.advisorySummary.voiceActivity > 0 && (
-                            <span className="rounded-full border-[2px] border-violet-300 bg-violet-50 px-2 py-0.5 text-[11px] font-extrabold text-violet-800">
+                            <span className="rounded-full border-[2px] border-violet-300 bg-violet-50 px-2 py-0.5 text-2xs font-extrabold text-violet-800">
                               {t("advisoryVoice", { count: row.advisorySummary.voiceActivity })}
                             </span>
                           )}
                           {row.advisorySummary.headsetActive > 0 && (
-                            <span className="rounded-full border-[2px] border-border bg-muted px-2 py-0.5 text-[11px] font-extrabold text-muted-foreground">
+                            <span className="rounded-full border-[2px] border-border bg-muted px-2 py-0.5 text-2xs font-extrabold text-muted-foreground">
                               {t("advisoryHeadset")}
                             </span>
                           )}
@@ -641,7 +641,7 @@ export function ResultsDashboardClient({
                         {getStatusLabel(row.displayStatus)}
                       </span>
                       {(row.attempt ?? 1) > 1 && (
-                        <span className="rounded-full border-[2px] border-border bg-muted px-2 py-0.5 text-[11px] font-extrabold text-muted-foreground">
+                        <span className="rounded-full border-[2px] border-border bg-muted px-2 py-0.5 text-2xs font-extrabold text-muted-foreground">
                           {t("attemptChip", { count: row.attempt ?? 1 })}
                         </span>
                       )}

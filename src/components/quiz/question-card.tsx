@@ -84,7 +84,7 @@ export function QuestionCard({
         )}
       </div>
 
-      <h2 id="question-prompt" className="mb-5 font-heading text-xl font-semibold leading-snug [text-wrap:balance] md:text-2xl">
+      <h2 id="question-prompt" className="mb-5 font-heading text-xl font-semibold leading-snug [text-wrap:balance] max-sm:text-prompt md:text-2xl">
         {question.prompt}
       </h2>
 

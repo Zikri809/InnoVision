@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
@@ -43,6 +44,8 @@ import {
  * default view renders every roster row in enrollment order (the e39 e2e
  * contract).
  */
+import { GradebookMobile } from "./gradebook-mobile";
+
 export function GradebookClient({
   model,
   truncated,
@@ -62,6 +65,10 @@ export function GradebookClient({
   const [statusFilter, setStatusFilter] = useState<GradebookStatusFilter>("all");
   const [sortKey, setSortKey] = useState<GradebookSortKey>("default");
 
+  // Mobile gate (plan W5): below 640px the two-axis table becomes the
+  // GradebookMobile list+sheet composition. Gate lives INSIDE the client —
+  // below the data/filter owner (component-swap boundary rule).
+  const isWide = useMediaQuery("(min-width: 640px)");
   const hasQuizzes = model.quizzes.length > 0;
   const hasStudents = model.rows.length > 0;
   const filtersActive =
@@ -130,7 +137,7 @@ export function GradebookClient({
     <div className="space-y-6">
       {/* ── Hero band ── */}
       <section className="relative overflow-hidden rounded-[28px] border-[3px] border-border bg-gradient-to-br from-emerald-100 via-emerald-50 to-blue-50 dark:from-emerald-950/40 dark:via-card dark:to-blue-950/40 p-7 shadow-[var(--shadow-clay)] md:p-8">
-        <div aria-hidden className="pointer-events-none absolute -right-8 -top-10 h-36 w-36 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-white/50" />
+        <div aria-hidden className="pointer-events-none absolute -right-8 -top-10 h-36 w-36 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-white/50 dark:bg-white/5" />
         <div className="relative">
           <div className="flex items-center justify-between gap-4">
             <Link
@@ -309,6 +316,8 @@ export function GradebookClient({
             {t("emptyNoStudentsSubtitle")}
           </p>
         </section>
+      ) : !isWide ? (
+        <GradebookMobile model={model} visibleRows={visibleRows} />
       ) : (
         <section className="overflow-x-auto rounded-[28px] border-[3px] border-border bg-card shadow-[var(--shadow-clay)]">
           <table className="w-full border-collapse text-sm">

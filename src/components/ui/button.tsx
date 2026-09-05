@@ -25,14 +25,17 @@ const buttonVariants = cva(
         link: "border-transparent bg-transparent text-primary underline-offset-4 hover:underline",
       },
       size: {
-        default: "h-11 px-5 text-base",
-        xs: "h-8 gap-1.5 rounded-xl px-3 text-xs [&_svg:not([class*='size-'])]:size-3",
-        sm: "h-9 gap-1.5 rounded-xl px-4 text-sm [&_svg:not([class*='size-'])]:size-3.5",
-        lg: "h-12 gap-2 rounded-2xl px-7 text-base",
-        icon: "size-11",
-        "icon-xs": "size-8 rounded-xl [&_svg:not([class*='size-'])]:size-3",
-        "icon-sm": "size-9 rounded-xl",
-        "icon-lg": "size-12",
+        // Mobile-first heights (plan W8): default is 48px on phones, 44px on
+        // pointer-precise screens; sm/lg scale up to keep ≥44px targets.
+        default: "h-11 max-sm:h-12 px-5 text-base",
+        xs: "h-8 max-sm:h-10 gap-1.5 rounded-xl px-3 text-xs [&_svg:not([class*='size-'])]:size-3",
+        sm: "h-9 max-sm:h-10 gap-1.5 rounded-xl px-4 text-sm [&_svg:not([class*='size-'])]:size-3.5",
+        lg: "h-12 max-sm:h-13 gap-2 rounded-2xl px-7 text-base",
+        icon: "size-11 max-sm:size-12",
+        "icon-xs":
+          "size-8 max-sm:size-10 rounded-xl [&_svg:not([class*='size-'])]:size-3",
+        "icon-sm": "size-9 max-sm:size-10 rounded-xl",
+        "icon-lg": "size-12 max-sm:size-12",
       },
     },
     defaultVariants: {

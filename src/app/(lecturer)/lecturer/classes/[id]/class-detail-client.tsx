@@ -25,13 +25,13 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  ResponsiveModal,
+  ResponsiveModalContent,
+  ResponsiveModalDescription,
+  ResponsiveModalFooter,
+  ResponsiveModalHeader,
+  ResponsiveModalTitle,
+} from "@/components/ui/responsive-modal";
 import {
   ArrowLeft,
   Copy,
@@ -259,8 +259,8 @@ export function ClassDetailClient({
     <div className="space-y-6">
       {/* ── Hero band ── */}
       <section className="relative overflow-hidden rounded-[28px] border-[3px] border-border bg-gradient-to-br from-orange-100 via-orange-50 to-blue-50 dark:from-orange-950/40 dark:via-card dark:to-blue-950/40 p-7 shadow-[var(--shadow-clay)] md:p-8">
-        <div aria-hidden className="pointer-events-none absolute -right-8 -top-10 h-36 w-36 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-white/50" />
-        <div aria-hidden className="pointer-events-none absolute -bottom-12 left-1/3 h-28 w-28 rounded-[60%_40%_45%_55%/50%_60%_40%_55%] bg-blue-100/60" />
+        <div aria-hidden className="pointer-events-none absolute -right-8 -top-10 h-36 w-36 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-white/50 dark:bg-white/5" />
+        <div aria-hidden className="pointer-events-none absolute -bottom-12 left-1/3 h-28 w-28 rounded-[60%_40%_45%_55%/50%_60%_40%_55%] bg-blue-100/60 dark:bg-blue-500/5" />
         <div className="relative">
           <div className="flex items-center justify-between gap-4">
             <Link
@@ -508,7 +508,7 @@ export function ClassDetailClient({
                   onChange={setOpensAt}
                   disabled={creating}
                   placeholder={t("windowPlaceholder")}
-                  buttonClassName="w-52"
+                  buttonClassName="w-full sm:w-52"
                 />
                 <span aria-hidden className="text-xs font-extrabold text-muted-foreground">–</span>
                 <DateTimePicker
@@ -518,7 +518,7 @@ export function ClassDetailClient({
                   onChange={setClosesAt}
                   disabled={creating}
                   placeholder={t("windowPlaceholder")}
-                  buttonClassName="w-52"
+                  buttonClassName="w-full sm:w-52"
                 />
               </div>
             </div>
@@ -706,25 +706,25 @@ export function ClassDetailClient({
       />
 
       {/* ── Archive class confirmation dialog ── */}
-      <Dialog
+      <ResponsiveModal
         open={archiveDialogOpen}
         onOpenChange={(open) => {
           if (!open && archiving) return;
           setArchiveDialogOpen(open);
         }}
       >
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
+        <ResponsiveModalContent className="sm:max-w-md">
+          <ResponsiveModalHeader>
             <div className="mb-2 grid h-12 w-12 place-items-center rounded-2xl border-[3px] border-amber-600/20 bg-amber-100 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300">
               <Archive className="h-6 w-6" aria-hidden />
             </div>
-            <DialogTitle className="font-heading text-xl font-bold text-foreground">
+            <ResponsiveModalTitle className="font-heading text-xl font-bold text-foreground">
               {t("archiveClassTitle")}
-            </DialogTitle>
-            <DialogDescription className="pt-1 text-sm font-semibold text-muted-foreground">
+            </ResponsiveModalTitle>
+            <ResponsiveModalDescription className="pt-1 text-sm font-semibold text-muted-foreground">
               {t("archiveClassDescription", { title: cls.title })}
-            </DialogDescription>
-          </DialogHeader>
+            </ResponsiveModalDescription>
+          </ResponsiveModalHeader>
 
           {archiveError && (
             <p className="rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm font-bold text-destructive" role="alert">
@@ -732,7 +732,7 @@ export function ClassDetailClient({
             </p>
           )}
 
-          <DialogFooter className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <ResponsiveModalFooter className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <Button
               type="button"
               variant="outline"
@@ -760,30 +760,30 @@ export function ClassDetailClient({
                 </>
               )}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </ResponsiveModalFooter>
+        </ResponsiveModalContent>
+      </ResponsiveModal>
 
       {/* ── Restore class confirmation dialog ── */}
-      <Dialog
+      <ResponsiveModal
         open={restoreDialogOpen}
         onOpenChange={(open) => {
           if (!open && restoring) return;
           setRestoreDialogOpen(open);
         }}
       >
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
+        <ResponsiveModalContent className="sm:max-w-md">
+          <ResponsiveModalHeader>
             <div className="mb-2 grid h-12 w-12 place-items-center rounded-2xl border-[3px] border-primary/20 bg-primary/10 text-primary">
               <RotateCcw className="h-6 w-6" aria-hidden />
             </div>
-            <DialogTitle className="font-heading text-xl font-bold text-foreground">
+            <ResponsiveModalTitle className="font-heading text-xl font-bold text-foreground">
               {t("restoreClassTitle")}
-            </DialogTitle>
-            <DialogDescription className="pt-1 text-sm font-semibold text-muted-foreground">
+            </ResponsiveModalTitle>
+            <ResponsiveModalDescription className="pt-1 text-sm font-semibold text-muted-foreground">
               {t("restoreClassDescription", { title: cls.title })}
-            </DialogDescription>
-          </DialogHeader>
+            </ResponsiveModalDescription>
+          </ResponsiveModalHeader>
 
           {restoreError && (
             <p className="rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm font-bold text-destructive" role="alert">
@@ -791,7 +791,7 @@ export function ClassDetailClient({
             </p>
           )}
 
-          <DialogFooter className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <ResponsiveModalFooter className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <Button
               type="button"
               variant="outline"
@@ -818,9 +818,9 @@ export function ClassDetailClient({
                 </>
               )}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </ResponsiveModalFooter>
+        </ResponsiveModalContent>
+      </ResponsiveModal>
     </div>
   );
 }

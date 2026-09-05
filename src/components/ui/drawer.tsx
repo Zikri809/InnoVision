@@ -4,16 +4,10 @@ import * as React from "react";
 import { Drawer as DrawerPrimitive } from "vaul";
 import { cn } from "@/lib/utils";
 
-function Drawer({
-  shouldScaleBackground = true,
-  ...props
-}: React.ComponentProps<typeof DrawerPrimitive.Root>) {
-  return (
-    <DrawerPrimitive.Root
-      shouldScaleBackground={shouldScaleBackground}
-      {...props}
-    />
-  );
+function Drawer(props: React.ComponentProps<typeof DrawerPrimitive.Root>) {
+  // shouldScaleBackground REMOVED (plan W8): it was a silent no-op — no
+  // [data-vaul-drawer-wrapper] exists anywhere in the app.
+  return <DrawerPrimitive.Root {...props} />;
 }
 
 function DrawerTrigger({
@@ -59,7 +53,7 @@ function DrawerContent({
       <DrawerOverlay />
       <DrawerPrimitive.Content
         className={cn(
-          "fixed inset-x-0 bottom-0 z-50 mt-24 flex h-auto max-h-[88dvh] flex-col rounded-t-[28px] border-t-[3px] border-x-[3px] border-border bg-card shadow-[0_-8px_24px_rgba(194,65,12,0.15)] outline-none",
+          "fixed inset-x-0 bottom-0 z-50 mt-24 flex h-auto max-h-[88dvh] flex-col rounded-t-[28px] border-t-[3px] border-x-[3px] border-border bg-card pb-[max(1rem,var(--safe-bottom))] shadow-[var(--shadow-clay-up)] outline-none",
           className
         )}
         {...props}

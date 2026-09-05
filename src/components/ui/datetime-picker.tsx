@@ -155,9 +155,9 @@ export function DateTimePicker({
               placeholder="HH"
               aria-label={`${ariaLabel} — hours`}
               disabled={disabled}
-              className="h-8 w-12 rounded-xl px-2 text-center text-xs font-bold"
+              className="h-11 max-sm:h-11 w-14 rounded-xl px-2 text-center text-base font-bold"
             />
-            <span aria-hidden="true" className="text-xs font-extrabold text-muted-foreground">:</span>
+            <span aria-hidden="true" className="text-sm font-extrabold text-muted-foreground">:</span>
             <Input
               type="text"
               inputMode="numeric"
@@ -166,7 +166,7 @@ export function DateTimePicker({
               placeholder="MM"
               aria-label={`${ariaLabel} — minutes`}
               disabled={disabled}
-              className="h-8 w-12 rounded-xl px-2 text-center text-xs font-bold"
+              className="h-11 max-sm:h-11 w-14 rounded-xl px-2 text-center text-base font-bold"
             />
           </div>
         </PopoverContent>

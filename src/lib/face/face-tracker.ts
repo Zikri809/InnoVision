@@ -103,7 +103,17 @@ export class FaceTracker implements IFaceTracker {
   private readonly video: HTMLVideoElement;
   private landmarker: MediaPipeFaceLandmarker | null = null;
   private cameraToken: number | null = null;
-  private stream: MediaStream | null = null;
+  private sharedStream: MediaStream | null = null;
+
+  /**
+   * Read-only access to the shared camera stream (mobile redesign plan W3):
+   * the paused/recovering overlay renders a self-view <video> bound to THIS
+   * stream via srcObject — no second acquireCameraStream token, and the
+   * tracker's own bound video element is untouched.
+   */
+  get stream(): MediaStream | null {
+    return this.sharedStream;
+  }
   private rafId: number | null = null;
   private disposed = false;
   private blinkDetector = new BlinkDetector();
@@ -224,7 +234,7 @@ export class FaceTracker implements IFaceTracker {
 
     try {
       const stream = resolveStream(this.cameraToken);
-      this.stream = stream;
+      this.sharedStream = stream;
       this.video.srcObject = stream;
       this.video.muted = true;
       this.video.playsInline = true;
@@ -528,10 +538,10 @@ export class FaceTracker implements IFaceTracker {
       releaseCameraStream(this.cameraToken);
       this.cameraToken = null;
     }
-    if (this.stream && this.video.srcObject === this.stream) {
+    if (this.sharedStream && this.video.srcObject === this.sharedStream) {
       this.video.srcObject = null;
     }
-    this.stream = null;
+    this.sharedStream = null;
   }
 
   private detectLoop(now: number): void {

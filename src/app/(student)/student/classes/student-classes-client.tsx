@@ -30,6 +30,7 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
   const router = useRouter();
   const t = useTranslations("student.classes");
   const tCommon = useTranslations("common");
+  const tNav = useTranslations("nav");
 
   const [code, setCode] = useState("");
   const [joining, setJoining] = useState(false);
@@ -71,12 +72,53 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
 
   const totalQuizzes = classes.reduce((n, c) => n + c.quizCount, 0);
 
+  const joinForm = (
+    <form onSubmit={handleJoin} className="space-y-4">
+      <div>
+        <Label htmlFor="join-code" className="sr-only">
+          {t("joinCardTitle")}
+        </Label>
+        <Input
+          id="join-code"
+          // Stable accessible name for E2E (the sr-only Label follows
+          // i18n copy).
+          aria-label="Join code"
+          placeholder={t("joinCodePlaceholder")}
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          maxLength={12}
+          inputMode="text"
+          autoCapitalize="characters"
+          enterKeyHint="go"
+          className="font-mono uppercase tracking-widest"
+        />
+      </div>
+      <div aria-live="polite">
+        {error && (
+          <p className="rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm font-bold text-destructive" role="alert">
+            {error}
+          </p>
+        )}
+      </div>
+      <Button type="submit" variant="accent" className="w-full" disabled={joining || !code.trim()}>
+        {joining ? (
+          <>
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+            {t("joiningBtn")}
+          </>
+        ) : (
+          t("joinBtn")
+        )}
+      </Button>
+    </form>
+  );
+
   return (
     <div className="space-y-8">
       {/* ── Hero band ── */}
-      <section className="relative overflow-hidden rounded-[28px] border-[3px] border-border bg-gradient-to-br from-blue-100 via-blue-50 to-orange-50 dark:from-blue-950/40 dark:via-card dark:to-orange-950/40 p-7 shadow-[var(--shadow-clay)] md:p-9">
-        <div aria-hidden className="pointer-events-none absolute -right-8 -top-10 h-40 w-40 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-white/50" />
-        <div aria-hidden className="pointer-events-none absolute -bottom-12 left-1/3 h-28 w-28 rounded-[60%_40%_45%_55%/50%_60%_40%_55%] bg-orange-100/70" />
+      <section className="relative overflow-hidden rounded-[28px] border-[3px] border-border bg-gradient-to-br from-blue-100 via-blue-50 to-orange-50 dark:from-blue-950/40 dark:via-card dark:to-orange-950/40 p-5 shadow-[var(--shadow-clay)] sm:p-7 md:p-9">
+        <div aria-hidden className="pointer-events-none absolute -right-8 -top-10 h-40 w-40 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-white/50 dark:bg-white/5" />
+        <div aria-hidden className="pointer-events-none absolute -bottom-12 left-1/3 h-28 w-28 rounded-[60%_40%_45%_55%/50%_60%_40%_55%] bg-orange-100/70 dark:bg-orange-500/5" />
         <div className="relative">
           <span className="inline-flex items-center gap-2 rounded-full border-[3px] border-border bg-card px-3.5 py-1 text-xs font-extrabold text-accent">
             <Sparkles className="h-4 w-4" aria-hidden /> {t("heroTitle")}
@@ -88,83 +130,67 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
             {t("joinCardSubtitle")}
           </p>
 
-          {/* quick stats */}
-          <div className="mt-6 grid max-w-md grid-cols-2 gap-4">
-            <div className="rounded-2xl border-[3px] border-border bg-card px-5 py-4 shadow-[var(--shadow-clay-sm)]">
-              <div className="flex items-center gap-2 text-primary">
-                <Layers className="h-5 w-5" aria-hidden />
-                <span className="font-heading text-2xl font-bold">{classes.length}</span>
+          {/* quick stats — zero-state rule (plan W2): never render zero stat
+              cards as the product's opening statement. Below sm with no
+              classes the strip is replaced by one caption line. */}
+          {classes.length === 0 ? (
+            <></>
+          ) : (
+            <>
+              <div className="mt-6 grid max-w-md grid-cols-2 gap-4 max-sm:hidden">
+                <div className="rounded-2xl border-[3px] border-border bg-card px-5 py-4 shadow-[var(--shadow-clay-sm)]">
+                  <div className="flex items-center gap-2 text-primary">
+                    <Layers className="h-5 w-5" aria-hidden />
+                    <span className="font-heading text-2xl font-bold tabular-nums">{classes.length}</span>
+                  </div>
+                  <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">
+                    {t("classCount", { count: classes.length })}
+                  </p>
+                </div>
+                <Link href="/student/quizzes" className="block rounded-2xl border-[3px] border-border bg-card px-5 py-4 shadow-[var(--shadow-clay-sm)] transition-[transform,box-shadow] duration-200 hover:-translate-y-0.5 hover:shadow-[0_6px_0_var(--border)]">
+                  <div className="flex items-center gap-2 text-accent">
+                    <ClipboardList className="h-5 w-5" aria-hidden />
+                    <span className="font-heading text-2xl font-bold tabular-nums">{totalQuizzes}</span>
+                  </div>
+                  <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">
+                    {t("liveQuizCount", { count: totalQuizzes })} <span aria-hidden="true">→</span>
+                  </p>
+                </Link>
               </div>
-              <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">
-                {t("classCount", { count: classes.length })}
+              <p className="mt-4 text-xs font-extrabold text-muted-foreground sm:hidden">
+                {/* classCount/liveQuizCount already embed the number (ICU
+                    plural) — prefixing it again rendered "8 8 Classes". */}
+                {t("classCount", { count: classes.length })} ·{" "}
+                {t("liveQuizCount", { count: totalQuizzes })}
               </p>
-            </div>
-            <Link href="/student/quizzes" className="block rounded-2xl border-[3px] border-border bg-card px-5 py-4 shadow-[var(--shadow-clay-sm)] transition-[transform,box-shadow] duration-200 hover:-translate-y-0.5 hover:shadow-[0_6px_0_var(--border)]">
-              <div className="flex items-center gap-2 text-accent">
-                <ClipboardList className="h-5 w-5" aria-hidden />
-                <span className="font-heading text-2xl font-bold">{totalQuizzes}</span>
-              </div>
-              <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">
-                {t("liveQuizCount", { count: totalQuizzes })} <span aria-hidden="true">→</span>
-              </p>
-            </Link>
-          </div>
+            </>
+          )}
         </div>
       </section>
 
       {/* ── Join + list ── */}
       <section className="grid items-start gap-6 lg:grid-cols-[340px_1fr]">
-        <Card className="lg:sticky lg:top-6">
-          <CardHeader>
-            <div className="mb-1 grid h-11 w-11 place-items-center rounded-2xl bg-blue-100 text-accent">
-              <KeyRound className="h-5 w-5" aria-hidden />
-            </div>
-            <CardTitle>{t("joinCardTitle")}</CardTitle>
-            <CardDescription>
-              {t("joinCardSubtitle")}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleJoin} className="space-y-4">
-              <div>
-                <Label htmlFor="join-code" className="sr-only">
-                  {t("joinCardTitle")}
-                </Label>
-                <Input
-                  id="join-code"
-                  // Stable accessible name for E2E (the sr-only Label follows
-                  // i18n copy).
-                  aria-label="Join code"
-                  placeholder={t("joinCodePlaceholder")}
-                  value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                  maxLength={12}
-                  className="font-mono uppercase tracking-widest"
-                />
+        {/* Zero-state rule (plan W2): with no classes the empty-state card
+            below owns the join form — this Card renders ONLY once classes
+            exist, so `aria-label="Join code"` is always unique (helpers.joinClass
+            uses getByLabel — two instances would be a strict-mode violation). */}
+        {classes.length > 0 && (
+          <Card className="order-2 lg:order-1 lg:sticky lg:top-6">
+            <CardHeader>
+              <div className="mb-1 grid h-11 w-11 place-items-center rounded-2xl bg-blue-100 text-accent">
+                <KeyRound className="h-5 w-5" aria-hidden />
               </div>
-              <div aria-live="polite">
-                {error && (
-                  <p className="rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm font-bold text-destructive" role="alert">
-                    {error}
-                  </p>
-                )}
-              </div>
-              <Button type="submit" variant="accent" className="w-full" disabled={joining || !code.trim()}>
-                {joining ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
-                    {t("joiningBtn")}
-                  </>
-                ) : (
-                  t("joinBtn")
-                )}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
+              <CardTitle>{t("joinCardTitle")}</CardTitle>
+              <CardDescription>
+                {t("joinCardSubtitle")}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>{joinForm}</CardContent>
+          </Card>
+        )}
 
         {/* Class cards */}
-        <div>
+        <div className={classes.length > 0 ? "order-1 lg:order-2" : "lg:col-start-2 lg:row-start-1"}>
           <div className="mb-4 flex items-baseline justify-between">
             <h2 className="font-heading text-xl font-semibold">{t("myClasses")}</h2>
             {classes.length > 0 && (
@@ -175,21 +201,31 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
           </div>
 
           {classes.length === 0 ? (
-            <EmptyState
-              illustration={GraduationCapIllustration}
-              title={t("emptyTitle")}
-              subtitle={t("emptySubtitle")}
-              className="rounded-[28px] border-[3px] bg-card/60 px-8 py-16"
-            />
+            // Mobile: tight paddings so input + Join button stay in the
+            // first viewport (thumb zone, plan W2) — the desktop rhythm
+            // stacked two py-10 boxes and pushed the button below 812px.
+            <div className="rounded-[28px] border-[3px] bg-card/60 px-5 py-6 sm:px-8 sm:py-16">
+              <EmptyState
+                illustration={GraduationCapIllustration}
+                title={tNav("joinYourFirstClass")}
+                subtitle={tNav("joinFirstHint")}
+                className="border-0 px-0 py-2 sm:border-2 sm:px-6 sm:py-10"
+                iconClassName="h-12 sm:h-16"
+              />
+              {/* First-run thumb zone (plan W2): with no classes this is the
+                  ONLY join form (the sticky Card above renders only when
+                  classes exist) — it serves every viewport. */}
+              <div className="mx-auto mt-4 max-w-sm sm:mt-6">{joinForm}</div>
+            </div>
           ) : (
-            <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(240px,1fr))]">
+            <ul className="grid grid-cols-1 gap-4 sm:gap-6 [grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr))]">
               {classes.map((c) => (
                 <li key={c.id}>
                   <Link
                     // SQ-4: drill-down — the badge now tells the truth; the
                     // quizzes list filters to this class (?class=<id>).
                     href={`/student/quizzes?class=${c.id}`}
-                    className="group flex h-full flex-col rounded-[22px] border-[3px] border-border bg-card p-5 shadow-[var(--shadow-clay)] transition-[transform,box-shadow] duration-200 hover:-translate-y-1 hover:shadow-[8px_10px_0_rgba(194,65,12,0.16)]"
+                    className="group flex h-full flex-col rounded-[22px] border-[3px] border-border bg-card p-5 shadow-[var(--shadow-clay)] transition-[transform,box-shadow] duration-200 hover:-translate-y-1 hover:shadow-[8px_10px_0_rgba(194,65,12,0.16)] active:translate-y-[3px] active:shadow-[0_2px_0_rgba(194,65,12,0.16)] focus-visible:outline-[3px] focus-visible:outline-ring focus-visible:outline-offset-2"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-blue-100 font-heading text-lg font-bold text-accent">
@@ -211,7 +247,9 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
                 </li>
               ))}
 
-              <li>
+              {/* Dashed join tile ≥sm only (plan W2): redundant below sm
+                  where the join card sits right under the list. */}
+              <li className="max-sm:hidden">
                 <button
                   type="button"
                   onClick={() => document.getElementById("join-code")?.focus()}

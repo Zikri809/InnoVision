@@ -45,7 +45,11 @@ export function ResponsiveModal({
   }
 
   return (
-    <Drawer open={open} onOpenChange={onOpenChange}>
+    // vaul input rules (plan W5 A16, binding): handleOnly prevents
+    // drag-dismiss from inside scrolling form content; repositionInputs
+    // keeps inputs above the keyboard. handleOnly on read-only sheets too —
+    // one universal rule beats per-call-site drift.
+    <Drawer open={open} onOpenChange={onOpenChange} handleOnly repositionInputs>
       {children}
     </Drawer>
   );

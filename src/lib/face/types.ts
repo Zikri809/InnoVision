@@ -38,6 +38,8 @@ export type LivePose = {
  */
 export interface IFaceTracker {
   start(): Promise<void> | void;
+  /** Shared camera stream (read-only) — powers the recovery self-view. */
+  readonly stream?: MediaStream | null;
   /** Capture a base64 JPEG frame, or null when no valid face is tracked. */
   captureFrame(): Promise<string | null>;
   /** Capture the highest quality frame available (face detected, centered, open eyes) within a time window. */

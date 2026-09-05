@@ -202,8 +202,12 @@ export function AppUserMenu({
 
   return (
     <div className="flex items-center gap-2">
-      <LanguageToggle />
-      <ThemeToggle />
+      {/* Topbar toggles are desktop-only (plan W1): below sm they move into
+          the account sheet (see the sm:hidden row inside the modal). */}
+      <div className="flex items-center gap-2 max-sm:hidden">
+        <LanguageToggle />
+        <ThemeToggle />
+      </div>
 
       <ResponsiveModal open={open} onOpenChange={setOpen}>
         <ResponsiveModalTrigger
@@ -292,6 +296,19 @@ export function AppUserMenu({
           </ResponsiveModalHeader>
 
           <div className="space-y-3">
+            {/* Mobile-only quick-settings row (plan W1): the topbar toggles
+                move in here below sm to keep the compressed topbar to
+                brand + bell + avatar. Desktop keeps its topbar toggles. */}
+            <div className="flex items-center justify-between gap-2 rounded-2xl border-[3px] border-border bg-muted/60 px-4 py-3 sm:hidden">
+              <span className="font-sans text-label font-extrabold uppercase tracking-[0.04em] text-muted-foreground">
+                {t("quickSettings")}
+              </span>
+              <div className="flex items-center gap-2">
+                <LanguageToggle />
+                <ThemeToggle />
+              </div>
+            </div>
+
             {/* Profile photo (self-only) — upload rides the badge beside the
                 profile badge above; removal lives in here. */}
             {(avatarPresent || avatarError) && (

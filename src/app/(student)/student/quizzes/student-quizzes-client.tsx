@@ -143,9 +143,9 @@ export function StudentQuizzesClient({
   return (
     <div className="space-y-8">
       {/* ── Hero band ── */}
-      <section className="relative overflow-hidden rounded-[28px] border-[3px] border-border bg-gradient-to-br from-orange-100 via-orange-50 to-blue-50 dark:from-orange-950/40 dark:via-card dark:to-blue-950/40 p-7 shadow-[var(--shadow-clay)] md:p-9">
-        <div aria-hidden className="pointer-events-none absolute -right-8 -top-10 h-40 w-40 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-white/50" />
-        <div aria-hidden className="pointer-events-none absolute -bottom-12 left-1/3 h-28 w-28 rounded-[60%_40%_45%_55%/50%_60%_40%_55%] bg-blue-100/60" />
+      <section className="relative overflow-hidden rounded-[28px] border-[3px] border-border bg-gradient-to-br from-orange-100 via-orange-50 to-blue-50 dark:from-orange-950/40 dark:via-card dark:to-blue-950/40 p-5 shadow-[var(--shadow-clay)] sm:p-7 md:p-9">
+        <div aria-hidden className="pointer-events-none absolute -right-8 -top-10 h-40 w-40 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-white/50 dark:bg-white/5" />
+        <div aria-hidden className="pointer-events-none absolute -bottom-12 left-1/3 h-28 w-28 rounded-[60%_40%_45%_55%/50%_60%_40%_55%] bg-blue-100/60 dark:bg-blue-500/5" />
         <div className="relative">
           <span className="inline-flex items-center gap-2 rounded-full border-[3px] border-border bg-card px-3.5 py-1 text-xs font-extrabold text-primary">
             <ClipboardList className="h-4 w-4" aria-hidden /> {t("heroTitle")}
@@ -162,21 +162,21 @@ export function StudentQuizzesClient({
             <div className="rounded-2xl border-[3px] border-border bg-card px-5 py-4 shadow-[var(--shadow-clay-sm)]">
               <div className="flex items-center gap-2 text-emerald-600">
                 <Zap className="h-5 w-5" aria-hidden />
-                <span className="font-heading text-2xl font-bold">{practiceCount}</span>
+                <span className="font-heading text-2xl font-bold tabular-nums">{practiceCount}</span>
               </div>
               <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">{t("statPractice")}</p>
             </div>
             <div className="rounded-2xl border-[3px] border-border bg-card px-5 py-4 shadow-[var(--shadow-clay-sm)]">
               <div className="flex items-center gap-2 text-accent">
                 <ShieldCheck className="h-5 w-5" aria-hidden />
-                <span className="font-heading text-2xl font-bold">{assessmentCount}</span>
+                <span className="font-heading text-2xl font-bold tabular-nums">{assessmentCount}</span>
               </div>
               <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">{t("statAssessment")}</p>
             </div>
             <div className="rounded-2xl border-[3px] border-border bg-card px-5 py-4 shadow-[var(--shadow-clay-sm)] max-sm:col-span-2">
               <div className="flex items-center gap-2 text-primary">
                 <ClipboardList className="h-5 w-5" aria-hidden />
-                <span className="font-heading text-2xl font-bold">{quizzes.length}</span>
+                <span className="font-heading text-2xl font-bold tabular-nums">{quizzes.length}</span>
               </div>
               <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">{t("statLive")}</p>
             </div>
@@ -225,7 +225,7 @@ export function StudentQuizzesClient({
             <Link
               href="/student/quizzes"
               aria-label={t("filterChipRemove")}
-              className="ml-0.5 grid h-4 w-4 place-items-center rounded-full transition-colors hover:bg-blue-200 dark:hover:bg-blue-500/25"
+              className="hit-slop ml-0.5 grid size-7 place-items-center rounded-full transition-colors hover:bg-blue-200 dark:hover:bg-blue-500/25"
             >
               <X className="h-3.5 w-3.5" aria-hidden />
             </Link>
@@ -242,13 +242,13 @@ export function StudentQuizzesClient({
           className="rounded-[28px] border-[3px] bg-card/60 px-8 py-16"
         />
       ) : (
-        <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
+        <ul className="grid grid-cols-1 gap-4 sm:gap-6 [grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr))]">
           {quizzes.map((q) => {
             const isPractice = q.mode === "practice";
             const chip = deadlineChip(q);
             return (
               <li key={q.id}>
-                <Card className="flex h-full flex-col transition-[transform,box-shadow] duration-200 hover:-translate-y-1 hover:shadow-[8px_10px_0_rgba(194,65,12,0.16)]">
+                <Card className="flex h-full flex-col transition-[transform,box-shadow] duration-200 hover:-translate-y-1 hover:shadow-[8px_10px_0_rgba(194,65,12,0.16)] max-sm:active:translate-y-[3px]">
                   <CardHeader>
                     <div className="flex items-start justify-between gap-3">
                       <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-2xl ${
@@ -296,7 +296,7 @@ export function StudentQuizzesClient({
                       </span>
                     )}
                   </CardHeader>
-                  <CardContent className="mt-auto flex items-center justify-between gap-3 pt-1">
+                  <CardContent className="mt-auto flex max-sm:flex-col max-sm:items-stretch max-sm:gap-2 items-center justify-between gap-3 pt-1">
                     {notice[q.id] ? (
                       <p className="text-sm font-bold text-muted-foreground" role="status">
                         {notice[q.id]}
@@ -347,6 +347,7 @@ export function StudentQuizzesClient({
                         variant={isPractice ? "default" : "accent"}
                         onClick={() => handleStart(q.id)}
                         disabled={startingId === q.id}
+                        className="max-sm:w-full max-sm:justify-center"
                       >
                         <Play className="h-4 w-4" aria-hidden />
                         {startingId === q.id ? t("startingBtn") : t("startBtn")}

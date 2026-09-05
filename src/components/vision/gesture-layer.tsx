@@ -21,6 +21,7 @@ import { HandLandmarkerTracker } from "@/lib/gestures/hand-tracker";
 import type { HandFrame, HoldProgress, IHandTracker } from "@/lib/gestures/types";
 import type { FaceStatus } from "@/lib/face/types";
 import { GestureCalibration } from "@/components/vision/gesture-calibration";
+import { useMediaQuery } from "@/hooks/use-media-query";
 
 
 type GestureStatus = "booting" | "calibrating" | "active" | "off";
@@ -520,7 +521,24 @@ export function GestureLayer({
     prevStatusRef.current = status;
   }, [status]);
 
+  // Wide gate (plan W2 §2): one media query, comma-OR. Below it the camera
+  // becomes a picture-in-picture overlay instead of a full-width block that
+  // pushes the question below the fold. Lives INSIDE GestureLayer (the state
+  // owner) per the component-swap boundary rule.
+  const isWide = useMediaQuery("(min-width: 1024px), (orientation: landscape) and (min-width: 640px)");
+  // PIP expansion: manual toggle ONLY when not armed — while a pose is held,
+  // a tap would need a second hand in frame, which finger-count reads as
+  // input. While armed the PIP is glance-only (mirror + status ring).
+  const [pipExpanded, setPipExpanded] = useState(false);
+  const armedRef = useRef(armed);
+  useEffect(() => {
+    armedRef.current = armed;
+  }, [armed]);
+
   // Re-bind DOM elements to tracker on status changes (safeguard for DOM transitions).
+  // isWide dep: the mobile/wide active branches are separate JSX subtrees, so
+  // a mid-session breakpoint cross remounts video/canvas - re-bind here
+  // (plan A9: "extend the re-bind effect dependency to the PIP state").
   useEffect(() => {
     if (videoRef.current && canvasRef.current && trackerRef.current) {
       trackerRef.current.bindDOMElements?.({
@@ -528,7 +546,7 @@ export function GestureLayer({
         canvas: canvasRef.current,
       });
     }
-  }, [status]);
+  }, [status, isWide]);
 
   // Status ring border colors (clay pastel palette)
   const isFlagged = faceStatus === "flagged";
@@ -546,11 +564,40 @@ export function GestureLayer({
   // ── Persistent video/canvas container (always mounted) ─────────────
   let videoContainerClass = "hidden";
   if (status === "calibrating" || status === "booting") {
-    videoContainerClass =
-      "relative mx-auto aspect-video w-full max-w-2xl overflow-hidden rounded-[2rem] border-[3.5px] border-border bg-muted shadow-[var(--shadow-clay)]";
+    videoContainerClass = isWide
+      ? "relative mx-auto aspect-video w-full max-w-2xl overflow-hidden rounded-[2rem] border-[3.5px] border-border bg-muted shadow-[var(--shadow-clay)]"
+      // Calibration stepper (plan W3): portrait camera ~45dvh, finger chips
+      // directly beneath (adjacency), instructions one at a time.
+      : "relative mx-auto aspect-[3/4] h-[45dvh] w-auto max-w-full overflow-hidden rounded-[2rem] border-[3.5px] border-border bg-muted shadow-[var(--shadow-clay)]";
   } else if (status === "active") {
-    videoContainerClass = `relative w-full h-full flex-1 min-h-[350px] lg:min-h-0 overflow-hidden rounded-[2rem] border-[3.5px] ${statusRingClass} bg-[#fff7ed] p-2.5 shadow-[var(--shadow-clay)] transition-all duration-300 pointer-events-none`;
+    videoContainerClass = isWide
+      ? `relative w-full h-full flex-1 min-h-[350px] lg:min-h-0 overflow-hidden rounded-[2rem] border-[3.5px] ${statusRingClass} bg-[#fff7ed] p-2.5 shadow-[var(--shadow-clay)] transition-all duration-300 pointer-events-none`
+      : pipExpanded
+        // Expanded self-check card: centered, tap scrim or PIP to collapse.
+        ? `fixed inset-x-4 top-1/2 z-50 mx-auto aspect-[3/4] max-h-[70dvh] w-auto max-w-[240px] -translate-y-1/2 overflow-hidden rounded-[18px] border-[3px] ${statusRingClass} bg-background p-2 shadow-[var(--shadow-clay)] transition-all duration-200 cursor-pointer`
+        // Glance PIP: top-right under the play header (safe-top + 44px row
+        // + 8px gap), 84×112 (72px below 360px viewports). 3:4 crop of the
+        // 4:3 source keeps the hand visible mid-frame; 1:1 fallback is the
+        // documented fallback if device QA shows cropping (plan ✦A9).
+        : `fixed right-3 top-[calc(var(--safe-top)+4.5rem)] z-40 aspect-[3/4] w-[84px] max-[359px]:w-[72px] overflow-hidden rounded-[18px] border-[3px] ${statusRingClass} bg-background p-1.5 shadow-[var(--shadow-clay)] transition-all duration-200 ${
+            armed ? "pointer-events-none" : "cursor-pointer pointer-events-auto"
+          }`;
   }
+
+  const togglePip = () => {
+    if (armedRef.current) return;
+    setPipExpanded((v) => !v);
+  };
+
+  // Escape collapses the expanded self-check card (R3-A S2).
+  useEffect(() => {
+    if (!pipExpanded) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPipExpanded(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [pipExpanded]);
 
   return (
     <div className="relative w-full min-h-full">
@@ -575,12 +622,16 @@ export function GestureLayer({
             </div>
           </div>
 
+          {/* Mobile stepper (plan W3): controls pinned to the thumb zone;
+              the practice mock card is omitted <sm - the live finger chips
+              plus status line teach toggle/commit with the real hand. */}
+          <div className="max-sm:sticky max-sm:bottom-[calc(1rem+var(--safe-bottom))] max-sm:rounded-[22px] max-sm:bg-background/95 max-sm:p-3 max-sm:shadow-[var(--shadow-clay)]">
           <GestureCalibration
             fingerCount={calibFingerCount}
             handDetected={calibHandDetected}
             lighting={calibLighting}
             notice={t("privacyNotice")}
-            multiPractice={hasMultiQuestions}
+            multiPractice={hasMultiQuestions && isWide}
             onContinue={() => {
               setHandLostState(null);
               lossRef.current.reset();
@@ -596,14 +647,71 @@ export function GestureLayer({
             }}
             continueDisabled={!trackerReady}
           />
+          </div>
         </div>
       )}
 
-      {/* ── Active Quiz Mode: 40/60 Split Layout (Camera Left Full-Height, Quiz Right) ── */}
-      {status === "active" && (
-        <div className="grid w-full grid-cols-1 items-stretch gap-8 lg:grid-cols-[2fr_3fr] lg:gap-12 min-h-[calc(100vh-6rem)]">
-          {/* LEFT COLUMN — CAMERA (~40% full width and full height) */}
-          <div className="flex w-full h-full flex-col items-center lg:sticky lg:top-6 lg:h-[calc(100vh-6rem)]">
+      {/* ── Active Quiz Mode ──
+          Wide (>=lg or landscape phones): 40/60 split - sticky camera column,
+          quiz right. Phones: camera PIP (fixed, classes on the container
+          above), quiz full-width. Two sub-branches = separate JSX; the
+          re-bind effect depends on isWide so a mid-session breakpoint cross
+          re-binds the new video/canvas pair (plan A9 fallback). */}
+      {status === "active" && !isWide && (
+        <div className="mx-auto flex w-full max-w-2xl min-w-0 flex-col">
+          {/* Not-armed PIP is a real button (R3-A S2): keyboard users get
+              the same self-check affordance; Escape collapses the expanded
+              card. The aria-hidden video/canvas stay decorative children. */}
+          <button
+            type="button"
+            onClick={togglePip}
+            aria-label={t("pipExpand")}
+            aria-expanded={pipExpanded}
+            className={videoContainerClass}
+            data-testid="gesture-video-container"
+          >
+            <div className="relative h-full w-full overflow-hidden rounded-[1.5rem] bg-black">
+              <video
+                ref={videoRef}
+                className="absolute inset-0 h-full w-full object-cover -scale-x-100"
+                autoPlay
+                playsInline
+                muted
+                aria-hidden
+              />
+              <canvas ref={canvasRef} className="absolute inset-0 h-full w-full object-cover" aria-hidden />
+
+              {handLost === "warn" && (
+                <div
+                  className="absolute top-2 left-2 z-20 flex items-center gap-1.5 rounded-full bg-[#7c2d12]/75 px-2.5 py-1 animate-pulse"
+                  role="status"
+                >
+                  <span className="size-1.5 rounded-full bg-amber-400" aria-hidden />
+                  <span className="text-2xs font-extrabold tracking-wide text-amber-100">
+                    {t("keepHandVisible")}
+                  </span>
+                </div>
+              )}
+            </div>
+          </button>
+
+          {/* Expanded-PIP scrim: warm, tap to collapse. */}
+          {pipExpanded && (
+            <div
+              className="fixed inset-0 z-40 bg-[#7c2d12]/40"
+              onClick={() => setPipExpanded(false)}
+              aria-hidden="true"
+            />
+          )}
+
+          {children}
+        </div>
+      )}
+
+      {status === "active" && isWide && (
+        <div className="grid w-full grid-cols-[2fr_3fr] items-stretch gap-12 min-h-[calc(100dvh-6rem)]">
+          {/* LEFT COLUMN - CAMERA (~40% full width and full height) */}
+          <div className="flex w-full h-full flex-col items-center lg:sticky lg:top-6 lg:h-[calc(100dvh-6rem)]">
             <div className={videoContainerClass} data-testid="gesture-video-container">
               <div className="relative h-full w-full overflow-hidden rounded-[1.5rem] bg-black">
                 <video
@@ -612,18 +720,17 @@ export function GestureLayer({
                   autoPlay
                   playsInline
                   muted
-                  aria-hidden={status === "active" ? true : undefined}
+                  aria-hidden
                 />
                 <canvas ref={canvasRef} className="absolute inset-0 h-full w-full object-cover" aria-hidden />
 
-                {/* Flashing amber text indicator over top-left of video feed */}
                 {handLost === "warn" && (
                   <div
-                    className="absolute top-4 left-4 z-20 flex items-center gap-2 rounded-full bg-black/45 px-3 py-1.5 backdrop-blur-xs animate-pulse"
+                    className="absolute top-4 left-4 z-20 flex items-center gap-2 rounded-full bg-[#7c2d12]/75 px-3 py-1.5 animate-pulse"
                     role="status"
                   >
                     <span className="size-2 rounded-full bg-amber-400" aria-hidden />
-                    <span className="text-xs font-extrabold tracking-wide text-amber-300 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                    <span className="text-xs font-extrabold tracking-wide text-amber-100">
                       {t("keepHandVisible")}
                     </span>
                   </div>
@@ -632,7 +739,7 @@ export function GestureLayer({
             </div>
           </div>
 
-          {/* RIGHT COLUMN — QUIZ (~60%) */}
+          {/* RIGHT COLUMN - QUIZ (~60%) */}
           <div className="mx-auto flex w-full max-w-2xl min-w-0 flex-col lg:max-w-none">
             {children}
           </div>
@@ -675,7 +782,7 @@ export function GestureLayer({
           className="pointer-events-none fixed inset-0 z-30 flex items-center justify-center"
           data-testid="scan-overlay"
         >
-          <div className="rounded-xl bg-black/70 px-6 py-3 text-2xl font-semibold text-white">
+          <div className="rounded-xl bg-[#7c2d12]/75 px-6 py-3 text-2xl font-semibold text-white">
             {t("scanCountdown")}
           </div>
         </div>

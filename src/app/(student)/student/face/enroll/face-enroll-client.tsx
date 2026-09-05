@@ -4,16 +4,17 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { CircleAlert, CircleCheck, Loader2 } from "lucide-react";
+import { CircleAlert, CircleCheck, Loader2, VideoOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  ResponsiveModal,
+  ResponsiveModalContent,
+  ResponsiveModalDescription,
+  ResponsiveModalHeader,
+  ResponsiveModalTitle,
+} from "@/components/ui/responsive-modal";
+import { useWakeLock } from "@/hooks/use-wake-lock";
 import { useFaceTracker } from "@/components/face/use-face-tracker";
 import type { LivePose } from "@/lib/face/types";
 import {
@@ -52,6 +53,11 @@ export function FaceEnrollClient({
   });
 
   const [captureState, setCaptureState] = useState<CaptureState>(consentGiven && enrolled ? "done" : "idle");
+  // Screen wake lock (plan W4): the capture flow (blink liveness + 3 angles)
+  // must not fight the OS screen-lock mid-capture.
+  useWakeLock({
+    enabled: captureState === "blink" || captureState === "capturing" || captureState === "processing",
+  });
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [revoking, setRevoking] = useState(false);
@@ -284,17 +290,17 @@ export function FaceEnrollClient({
         )}
       </div>
 
-      <div className="relative mx-auto aspect-[4/3] max-w-xl overflow-hidden rounded-[28px] border-[3px] border-border bg-black shadow-[var(--shadow-clay)]">
+      <div className="relative mx-auto aspect-[3/4] max-w-xl overflow-hidden rounded-[28px] border-[3px] border-border bg-[#1c0f08] shadow-[var(--shadow-clay)] sm:aspect-[4/3]">
         <video
           ref={videoRef}
           playsInline
           muted
-          className="h-full w-full object-cover scale-x-[-1]"
+          className="h-full w-full object-contain scale-x-[-1]"
         />
 
         {available && (
           <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-between p-4">
-            <div className="flex gap-2 rounded-full bg-black/60 px-3 py-1.5 backdrop-blur-md">
+            <div className="flex gap-2 rounded-full bg-[#7c2d12]/75 px-3 py-1.5">
               {([
                 { label: t("angleFront"), index: 0 },
                 { label: t("angleLeft"), index: 1 },
@@ -329,7 +335,7 @@ export function FaceEnrollClient({
             {currentInstruction() && (
               <div
                 aria-hidden
-                className="absolute left-1/2 top-[4.5rem] -translate-x-1/2 rounded-full bg-black/80 px-5 py-2.5 text-base sm:text-lg font-extrabold text-white shadow-lg backdrop-blur-md"
+                className="absolute left-1/2 top-[18%] max-w-[92%] -translate-x-1/2 rounded-full bg-[#7c2d12]/85 px-4 py-2 text-center text-base font-extrabold text-white shadow-[0_2px_0_rgba(124,45,18,0.4)] sm:top-[4.5rem] sm:text-lg"
               >
                 <span
                   className={
@@ -357,7 +363,7 @@ export function FaceEnrollClient({
               }`}
             />
 
-            <div className="max-w-[92%] flex flex-wrap items-center justify-center gap-1.5 rounded-2xl sm:rounded-full bg-black/75 px-3 py-1.5 text-[11px] sm:text-xs font-bold text-white text-center backdrop-blur-md">
+            <div className="max-w-[92%] flex flex-wrap items-center justify-center gap-1.5 rounded-2xl sm:rounded-full bg-[#7c2d12]/75 px-3 py-1.5 text-2xs sm:text-xs font-bold text-white text-center">
               {!pose.faceDetected ? (
                 <span className="text-amber-300">{t("posNotCentered")}</span>
               ) : (
@@ -381,8 +387,11 @@ export function FaceEnrollClient({
         )}
 
         {!consent && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/90 px-6 text-center">
-            <p className="text-sm font-semibold text-white/80">{t("cameraOffHint")}</p>
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[#7c2d12]/85 px-6 text-center">
+            <span className="grid h-14 w-14 place-items-center rounded-2xl border-[3px] border-white/25 bg-white/10">
+              <VideoOff className="h-7 w-7 text-white/80" aria-hidden />
+            </span>
+            <p className="max-w-[28ch] text-sm font-semibold text-white/80">{t("cameraOffHint")}</p>
           </div>
         )}
 
@@ -502,35 +511,35 @@ export function FaceEnrollClient({
 
       {/* Result popup — opens as "Processing…" the moment frames are in,
           then transitions in place to success / pending-review. */}
-      <Dialog open={resultOpen} onOpenChange={setResultOpen}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
+      <ResponsiveModal open={resultOpen} onOpenChange={setResultOpen}>
+        <ResponsiveModalContent className="sm:max-w-sm">
+          <ResponsiveModalHeader>
             {captureState === "processing" ? (
               <>
                 <div className="mb-1 grid h-12 w-12 place-items-center rounded-2xl bg-primary/15 text-primary">
                   <Loader2 className="h-6 w-6 animate-spin" aria-hidden />
                 </div>
-                <DialogTitle className="text-base">{t("processingTitle")}</DialogTitle>
-                <DialogDescription>{t("processingBody")}</DialogDescription>
+                <ResponsiveModalTitle className="text-base">{t("processingTitle")}</ResponsiveModalTitle>
+                <ResponsiveModalDescription>{t("processingBody")}</ResponsiveModalDescription>
               </>
             ) : captureState === "pending_review" ? (
               <>
                 <div className="mb-1 grid h-12 w-12 place-items-center rounded-2xl bg-amber-100 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400">
                   <CircleAlert className="h-6 w-6" aria-hidden />
                 </div>
-                <DialogTitle className="text-base">{t("pendingTitle")}</DialogTitle>
-                <DialogDescription>{t("pendingBody")}</DialogDescription>
+                <ResponsiveModalTitle className="text-base">{t("pendingTitle")}</ResponsiveModalTitle>
+                <ResponsiveModalDescription>{t("pendingBody")}</ResponsiveModalDescription>
               </>
             ) : (
               <>
                 <div className="mb-1 grid h-12 w-12 place-items-center rounded-2xl bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400">
                   <CircleCheck className="h-6 w-6" aria-hidden />
                 </div>
-                <DialogTitle className="text-base">{t("successTitle")}</DialogTitle>
-                <DialogDescription>{t("successBody")}</DialogDescription>
+                <ResponsiveModalTitle className="text-base">{t("successTitle")}</ResponsiveModalTitle>
+                <ResponsiveModalDescription>{t("successBody")}</ResponsiveModalDescription>
               </>
             )}
-          </DialogHeader>
+          </ResponsiveModalHeader>
           <Button
             onClick={() => setResultOpen(false)}
             className="w-full"
@@ -538,8 +547,8 @@ export function FaceEnrollClient({
           >
             {captureState === "processing" ? tCommon("loading") : tCommon("ok")}
           </Button>
-        </DialogContent>
-      </Dialog>
+        </ResponsiveModalContent>
+      </ResponsiveModal>
     </div>
   );
 }

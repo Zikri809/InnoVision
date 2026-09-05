@@ -114,6 +114,9 @@ jobs:
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
 
-      - name: E2E (E1a + E1 + E1b regression)
+      - name: E2E (E1a + E1 + E1b regression + mobile m1 allowlist)
         run: npx playwright test
-        timeout-minutes: 15
+        # Desktop suite + the mobile project's m1-*.spec.ts allowlist
+        # (plan §6): the m1 journeys add ~4-7 min at workers:1 on top of the
+        # desktop budget, hence 15 -> 25.
+        timeout-minutes: 25

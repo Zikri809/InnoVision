@@ -10,13 +10,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  ResponsiveModal,
+  ResponsiveModalContent,
+  ResponsiveModalDescription,
+  ResponsiveModalFooter,
+  ResponsiveModalHeader,
+  ResponsiveModalTitle,
+} from "@/components/ui/responsive-modal";
 import {
   parseImportText,
   type ImportProblem,
@@ -175,23 +175,23 @@ export function BulkImportDialog({
   }
 
   return (
-    <Dialog
+    <ResponsiveModal
       open={open}
       onOpenChange={(next) => {
         if (!next) reset();
         onOpenChange(next);
       }}
     >
-      <DialogContent className="max-h-[94vh] flex flex-col sm:max-w-3xl overflow-hidden p-6 sm:p-7 gap-0">
-        <DialogHeader className="shrink-0 pb-3 border-b-[3px] border-border/40">
-          <DialogTitle className="text-xl font-bold font-heading flex items-center gap-2">
+      <ResponsiveModalContent className="max-h-[94vh] flex flex-col sm:max-w-3xl overflow-hidden p-6 sm:p-7 gap-0">
+        <ResponsiveModalHeader className="shrink-0 pb-3 border-b-[3px] border-border/40">
+          <ResponsiveModalTitle className="text-xl font-bold font-heading flex items-center gap-2">
             <ListPlus className="size-5 text-primary" aria-hidden="true" />
             {t("dialogTitle")}
-          </DialogTitle>
-          <DialogDescription className="text-xs font-semibold text-muted-foreground mt-0.5">
+          </ResponsiveModalTitle>
+          <ResponsiveModalDescription className="text-xs font-semibold text-muted-foreground mt-0.5">
             {t("dialogSubtitle", { remaining })}
-          </DialogDescription>
-        </DialogHeader>
+          </ResponsiveModalDescription>
+        </ResponsiveModalHeader>
 
         <div className="flex-1 overflow-y-auto space-y-4 py-4 pr-1">
           <div aria-live="polite">
@@ -242,11 +242,11 @@ export function BulkImportDialog({
                   <FileUp className="mr-1 size-3.5" aria-hidden="true" />
                   {t("fileBtn")}
                 </Button>
-                <span className="text-[11px] font-semibold text-muted-foreground">
+                <span className="text-2xs font-semibold text-muted-foreground">
                   {t("fileHint")}
                 </span>
               </div>
-              <span className="text-[11px] font-bold text-muted-foreground">
+              <span className="text-2xs font-bold text-muted-foreground">
                 {t("remainingChip", { remaining })}
               </span>
             </div>
@@ -294,7 +294,7 @@ export function BulkImportDialog({
           )}
         </div>
 
-        <DialogFooter className="shrink-0 pt-3 border-t-[3px] border-border/40">
+        <ResponsiveModalFooter className="shrink-0 pt-3 border-t-[3px] border-border/40">
           <Button
             type="button"
             variant="outline"
@@ -312,9 +312,9 @@ export function BulkImportDialog({
               ? t("committingBtn")
               : t("commitBtn", { count: parsed.rows.length })}
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </ResponsiveModalFooter>
+      </ResponsiveModalContent>
+    </ResponsiveModal>
   );
 }
 
@@ -327,7 +327,7 @@ function PreviewRow({
 }) {
   return (
     <li className="flex flex-col gap-1.5 rounded-2xl border-[3px] border-border bg-card p-3 shadow-[var(--shadow-clay-sm)] sm:flex-row sm:items-start sm:gap-3">
-      <span className="shrink-0 text-[11px] font-bold text-muted-foreground sm:w-14">
+      <span className="shrink-0 text-2xs font-bold text-muted-foreground sm:w-14">
         {`#${row.line}`}
       </span>
       <div className="min-w-0 flex-1 space-y-1">
@@ -337,10 +337,10 @@ function PreviewRow({
         </p>
       </div>
       <div className="flex shrink-0 flex-wrap items-center gap-1.5 min-w-0">
-        <span className="rounded-full border-2 border-border bg-muted px-2 py-0.5 text-[10px] font-extrabold text-muted-foreground">
+        <span className="rounded-full border-2 border-border bg-muted px-2 py-0.5 text-2xs font-extrabold text-muted-foreground">
           {typeLabel}
         </span>
-        <span className="rounded-full border-2 border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-extrabold text-primary min-w-0 max-w-full [overflow-wrap:anywhere]">
+        <span className="rounded-full border-2 border-primary/30 bg-primary/10 px-2 py-0.5 text-2xs font-extrabold text-primary min-w-0 max-w-full [overflow-wrap:anywhere]">
           {row.type === "multi_select" && row.correctIndices
             ? row.correctIndices.map((i) => row.options[i]).join(" / ")
             : row.options[row.correctIndex ?? 0]}

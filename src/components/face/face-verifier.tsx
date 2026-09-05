@@ -13,19 +13,86 @@ import { BotAvatar } from "@/components/bot/bot-avatar";
  * Full-screen proctoring block. Deliberately NOT a Dialog (no Esc-dismiss;
  * sits above the live camera feed), but it must still capture focus — without
  * the trap a keyboard user could keep operating the quiz behind the backdrop.
+ *
+ * Mobile redesign plan W3: the scrim is OPAQUE clay (no backdrop-filter on
+ * /play), safe-area padded, and the paused/recovering card carries a LIVE
+ * mirrored self-view — the student is usually paused because they moved, so
+ * they must be able to see themselves while repositioning. The viewfinder
+ * binds to the SAME shared MediaStream via srcObject (a second <video> on the
+ * shared stream — the tracker's own bound element is untouched).
  */
-function BlockingOverlay({ children }: { children: ReactNode }) {
+function BlockingOverlay({
+  children,
+  selfViewStream,
+}: {
+  children: ReactNode;
+  /** Shared camera stream for the recovery self-view (paused/recovering only). */
+  selfViewStream?: MediaStream | null;
+}) {
   const ref = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
   useOverlayFocusTrap(ref, true);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (selfViewStream) {
+      if (video.srcObject !== selfViewStream) video.srcObject = selfViewStream;
+      video.play().catch(() => {});
+    } else {
+      video.srcObject = null;
+    }
+  }, [selfViewStream]);
+
   return (
     <div
       ref={ref}
       role="alertdialog"
       aria-modal="true"
       tabIndex={-1}
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-background/80 p-4 outline-none backdrop-blur-sm"
+      className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-background p-4 pt-[calc(var(--safe-top)+1rem)] pb-[max(1rem,var(--safe-bottom))] outline-none"
     >
       {children}
+    </div>
+  );
+}
+
+/**
+ * Mirrored camera viewfinder for the paused/recovering flow: portrait card
+ * with the clay face-oval guide, so the student can reposition with real
+ * feedback instead of guessing. aria-hidden — the alertdialog copy carries
+ * the meaning; the video is decorative self-view.
+ */
+function RecoverySelfView({ stream }: { stream: MediaStream | null }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (stream) {
+      if (video.srcObject !== stream) video.srcObject = stream;
+      video.play().catch(() => {});
+    }
+    return () => {
+      if (video) video.srcObject = null;
+    };
+  }, [stream]);
+
+  if (!stream) return null;
+  return (
+    <div
+      aria-hidden="true"
+      className="relative mx-auto aspect-[3/4] w-60 max-w-full overflow-hidden rounded-[18px] border-[3px] border-border bg-[#1c0f08] shadow-[var(--shadow-clay)]"
+    >
+      <video
+        ref={videoRef}
+        className="absolute inset-0 h-full w-full object-cover -scale-x-100"
+        autoPlay
+        playsInline
+        muted
+      />
+      {/* Face-oval guide — the same affordance the enrollment flow uses. */}
+      <span className="pointer-events-none absolute inset-0 m-auto h-[72%] w-[54%] rounded-[50%] border-[3px] border-dashed border-primary/60" />
     </div>
   );
 }
@@ -82,6 +149,9 @@ export function FaceVerifier({
   consentGiven,
   remainingMs,
   pausedReason = "face",
+  stream = null,
+  quizTitle,
+  resume,
   onBegin,
   onConsent,
   onRecover,
@@ -95,6 +165,12 @@ export function FaceVerifier({
   remainingMs: number | null;
   /** Why the student is paused — focus-loss gets its own overlay copy. */
   pausedReason?: PausedReason;
+  /** Shared camera stream (FaceTracker.stream) — powers the recovery self-view. */
+  stream?: MediaStream | null;
+  /** Quiz title (mobile plan W3): shown once, in the gate — never on the question flow. */
+  quizTitle?: string;
+  /** Resume re-orientation (plan W7): "N of M answered" when resuming a seeded session. */
+  resume?: { answered: number; total: number } | null;
   onBegin: () => void;
   onConsent: () => void;
   onRecover: () => void;
@@ -146,6 +222,8 @@ export function FaceVerifier({
         remainingMs={remainingMs}
         livenessState={livenessState}
         status={status}
+        quizTitle={quizTitle}
+        resume={resume}
         onBegin={onBegin}
         onConsent={onConsent}
       />
@@ -157,8 +235,8 @@ export function FaceVerifier({
       {children}
 
       {(status === "paused" || status === "recovering") && (
-        <BlockingOverlay>
-          <div className="rounded-[28px] border-[3px] border-border bg-card p-8 text-center shadow-[var(--shadow-clay)]">
+        <BlockingOverlay selfViewStream={stream}>
+          <div className="w-full max-w-sm rounded-[28px] border-[3px] border-border bg-card p-5 text-center shadow-[var(--shadow-clay)] sm:p-8">
             <div className="mb-4 grid place-items-center">
               <BotAvatar state="paused" size={112} />
             </div>
@@ -176,8 +254,13 @@ export function FaceVerifier({
                   ? t("focusLostBody")
                   : t("pausedBody")}
             </p>
+            {/* Live self-view (plan W3): reposition with real feedback. The
+                stream comes from the SAME shared MediaStream as the tracker. */}
+            <div className="mt-4">
+              <RecoverySelfView stream={stream} />
+            </div>
             {status === "paused" && (
-              <Button size="lg" className="mt-6" onClick={onRecover}>
+              <Button size="lg" className="mt-6 w-full sm:w-auto" onClick={onRecover}>
                 {pausedReason === "focus_lost" ? t("focusLostBtn") : t("recoverBtn")}
               </Button>
             )}
@@ -185,6 +268,8 @@ export function FaceVerifier({
         </BlockingOverlay>
       )}
 
+      {/* Flagged stays blind (plan W3): a waiting state with no action that
+          needs the camera — no self-view. */}
       {status === "flagged" && (
         <BlockingOverlay>
           <div className="rounded-[28px] border-[3px] border-destructive/40 bg-card p-8 text-center shadow-[var(--shadow-clay)]">
