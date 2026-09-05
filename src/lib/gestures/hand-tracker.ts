@@ -1,5 +1,6 @@
 import type { HandFrame, IHandTracker, Landmark } from "./types";
 import { landmarksToHandFrame } from "./finger-count";
+import { FingerStabilizer } from "./finger-stabilizer";
 import {
   acquireCameraStream,
   releaseCameraStream,
@@ -28,6 +29,12 @@ import {
  *  - The canvas overlay mirrors BOTH the video and the landmark x-coordinates
  *    (`1 - l.x`) so the skeleton stays aligned with the flipped preview. (The
  *    reference sample's overlay is actually flipped — this is the port fix.)
+ *
+ * Detection smoothing: per-frame counts pass through `FingerStabilizer` — a
+ * single-frame MediaPipe flicker must neither flash the wrong finger nor
+ * reset `HoldConfirm` (which restarts on ANY count change). Absence passes
+ * through raw (the hand-loss monitor owns presence latency); the E2E fake
+ * tracker bypasses this class entirely, so scripted frames stay unfiltered.
  *
  * P7 note: hand-loss detection pauses when the tab is hidden (the rAF loop
  * stops). Harmless in P6 (client-side only), but P7's server-side `paused`
@@ -74,6 +81,7 @@ export class HandLandmarkerTracker implements IHandTracker {
   private rafId: number | null = null;
   private disposed = false;
   private lastFrameAt = 0;
+  private stabilizer = new FingerStabilizer();
   private visibilityHandler: (() => void) | null = null;
   private loadedMetadataHandler: (() => void) | null = null;
   private loadedMetadataTimer: ReturnType<typeof setTimeout> | null = null;
@@ -183,6 +191,7 @@ export class HandLandmarkerTracker implements IHandTracker {
 
   stop(): void {
     this.disposed = true;
+    this.stabilizer.reset();
     if (this.rafId !== null) {
       cancelAnimationFrame(this.rafId);
       this.rafId = null;
@@ -284,7 +293,7 @@ export class HandLandmarkerTracker implements IHandTracker {
         if (this.landmarker && this.video.readyState >= 2) {
           const results = this.landmarker.detectForVideo(this.video, now);
           this.renderOverlay(results.landmarks);
-          const frame = landmarksToHandFrame(results);
+          const frame = this.stabilizeFrame(landmarksToHandFrame(results));
           const ctx = this.canvas.getContext("2d");
           if (ctx) {
             frame.lighting = this.computeHandLuminance(
@@ -309,6 +318,16 @@ export class HandLandmarkerTracker implements IHandTracker {
       this.releaseCamera();
       onError?.(err instanceof Error ? err : new Error(String(err)));
     }
+  }
+
+  /**
+   * Debounce the raw per-frame count: a single-frame flicker (e.g. a folded
+   * pinky crossing its PIP joint while the hand tilts) is swallowed instead
+   * of reaching the hold machine, which resets on any count change.
+   */
+  private stabilizeFrame(raw: HandFrame): HandFrame {
+    const fingerCount = this.stabilizer.update(raw.fingerCount, raw.handPresent);
+    return fingerCount === raw.fingerCount ? raw : { ...raw, fingerCount };
   }
 
   /**

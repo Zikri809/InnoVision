@@ -35,7 +35,7 @@
 | U-F7c | single fail → paused, not flagged | one mismatch → status `paused` (self-recoverable), no flag |
 
 ### 2.2 Gestures (`lib/gestures`)
-> **Status: IMPLEMENTED (P6, 2026-08-13)** — `finger-count.test.ts` (U-G1/U-G2 incl. thumb + handedness + full `mapFingersToOption` corner table), `hold-confirm.test.ts` (U-G3/U-G4/U-G5/U-G7 incl. latch + reset-release), `hand-loss.test.ts` (U-G6 incl. once-per-episode + re-arm + practice-never-pauses). Browser glue (`hand-tracker.ts`) is E2E/manual-only (0-key coverage).
+> **Status: IMPLEMENTED (P6, 2026-08-13; M-DETECT revision)** — `finger-count.test.ts` (U-G1/U-G2 incl. thumb + handedness + full `mapFingersToOption` corner table + tilted-hand regression), `finger-stabilizer.test.ts` (single-frame spike suppression, absence passthrough, re-seed), `hold-confirm.test.ts` (U-G3/U-G4/U-G5/U-G7 incl. latch + reset-release), `hand-loss.test.ts` (U-G6 incl. once-per-episode + re-arm + practice-never-pauses). Browser glue (`hand-tracker.ts`) is E2E/manual-only (0-key coverage).
 | # | Case | Expected |
 |---|---|---|
 | U-G1 | finger count from landmarks (1–5 raised) | counts 1..5 correctly |

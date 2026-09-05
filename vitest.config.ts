@@ -94,6 +94,7 @@ export default defineConfig({
         // (mirrors tesseract/vision/glm-ocr). constants/types/fake-seam have no
         // meaningful executable surface (fake-seam is exercised by E2E only).
         "src/lib/gestures/finger-count.ts": { lines: 75, statements: 80, functions: 80, branches: 70 },
+        "src/lib/gestures/finger-stabilizer.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/lib/gestures/hold-confirm.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/lib/gestures/hand-loss.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/lib/gestures/fake-seam.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },

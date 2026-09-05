@@ -9,10 +9,12 @@ import {
 import type { Landmark } from "./types";
 
 /**
- * Build a synthetic 21-point landmark array. Fingers whose `extended` flag is
- * true get `tip.y = 0.3` (raised) vs `pip.y = 0.5` (base); folded get
- * `tip.y = 0.6`. The thumb is driven by x: `thumbRight` uses the "Right"
- * handedness heuristic (tip.x < mcp.x), `thumbLeft` the "Left" one.
+ * Build a synthetic 21-point landmark array (upright hand). Fingers whose
+ * `extended` flag is true get `tip.y = 0.3` (raised) vs `pip.y = 0.5` (base);
+ * folded get `tip.y = 0.6` (curled toward the wrist at y = 0.7). The wrist is
+ * NON-degenerate (distinct from the PIPs) — the wrist-distance extension test
+ * needs a real wrist→PIP baseline. The thumb is driven by x: `thumbRight` uses
+ * the "Right" handedness heuristic (tip.x < mcp.x), `thumbLeft` the "Left" one.
  */
 function buildLandmarks(opts: {
   index?: boolean;
@@ -23,6 +25,7 @@ function buildLandmarks(opts: {
   thumbLeft?: boolean;
 }): Landmark[] {
   const lm: Landmark[] = Array.from({ length: 21 }, () => ({ x: 0.5, y: 0.5, z: 0 }));
+  lm[0] = { x: 0.5, y: 0.7, z: 0 }; // wrist — below the PIPs
   const tips = [8, 12, 16, 20];
   const pips = [6, 10, 14, 18];
   const flags = [opts.index, opts.middle, opts.ring, opts.pinky];
@@ -115,6 +118,55 @@ describe("isFingerExtended / isThumbExtended guards", () => {
     expect(isFingerExtended([], 8, 6)).toBe(false);
     expect(isThumbExtended([], "Right")).toBe(false);
     expect(isThumbExtended([{ x: 0, y: 0, z: 0 }], undefined)).toBe(false);
+  });
+});
+
+describe("tilted-hand regression — folded finger must not read as extended (3→4 misfire)", () => {
+  /**
+   * A hand tilted ~53° (pointing up-right along (0.6, -0.8)): index, middle,
+   * and ring extended along the axis; the pinky FOLDED (tip curled toward the
+   * palm) yet its tip is HIGHER ON SCREEN than its PIP — exactly the pose
+   * where the old `tip.y < pip.y` check counted a folded finger and reported
+   * 4 instead of 3. All points are rotated together; the wrist-distance test
+   * must reject the folded pinky at any tilt.
+   */
+  function buildTiltedHand(): Landmark[] {
+    const lm: Landmark[] = Array.from({ length: 21 }, () => ({ x: 0.5, y: 0.5, z: 0 }));
+    lm[0] = { x: 0.3, y: 0.7, z: 0 }; // wrist
+    // Shared knuckle/PIP positions on the hand axis (wrist + t·(0.6, -0.8)).
+    const mcps = [5, 9, 13, 17];
+    const pips = [6, 10, 14, 18];
+    for (const i of mcps) lm[i] = { x: 0.36, y: 0.62, z: 0 }; // wrist + 0.10u
+    for (const i of pips) lm[i] = { x: 0.42, y: 0.54, z: 0 }; // wrist + 0.20u
+    // Extended tips (index 8, middle 12, ring 16): wrist + ~0.35u.
+    lm[8] = { x: 0.51, y: 0.42, z: 0 };
+    lm[12] = { x: 0.51, y: 0.42, z: 0 };
+    lm[16] = { x: 0.51, y: 0.42, z: 0 };
+    // Folded pinky tip: curled toward the palm but ABOVE its PIP on screen
+    // (y 0.50 < pip 0.54) — the old screen-y check counted it.
+    lm[20] = { x: 0.38, y: 0.5, z: 0 };
+    // Folded thumb (tip right of the IP joint → fails the "Right" heuristic).
+    lm[3] = { x: 0.36, y: 0.62, z: 0 };
+    lm[4] = { x: 0.45, y: 0.6, z: 0 };
+    return lm;
+  }
+
+  it("counts exactly 3 on a tilted hand (old logic would count 4)", () => {
+    expect(countExtendedFingers(buildTiltedHand(), "Right")).toBe(3);
+  });
+
+  it("still counts 3 without handedness (thumb conservative)", () => {
+    expect(countExtendedFingers(buildTiltedHand(), undefined)).toBe(3);
+  });
+
+  it("extension test is rotation-invariant: extended fingers pass at any tilt", () => {
+    const lm = buildTiltedHand();
+    // Index extended along the tilted axis: tip distance from the wrist
+    // (0.35) far exceeds the PIP baseline (0.20) — no screen-y involved.
+    expect(isFingerExtended(lm, 8, 6, 5)).toBe(true);
+    expect(isFingerExtended(lm, 12, 10, 9)).toBe(true);
+    expect(isFingerExtended(lm, 16, 14, 13)).toBe(true);
+    expect(isFingerExtended(lm, 20, 18, 17)).toBe(false);
   });
 });
 

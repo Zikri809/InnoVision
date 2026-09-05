@@ -1,17 +1,25 @@
 import type { Landmark, Handedness, HandFrame } from "./types";
 
 /**
- * Pure finger-counting logic (Phase 6).
+ * Pure finger-counting logic (Phase 6, M-DETECT revision).
  *
  * This module is a testable mirror of the browser/MediaPipe glue in
  * `hand-tracker.ts` — it is NOT an enforcement point; the tracker calls it on
  * raw (non-mirrored) landmark frames. Ported from the reference implementation
- * (`Sample Code/index.html`) with the thumb added:
+ * (`Sample Code/index.html`) with the thumb added, then revised for rotation
+ * robustness:
  *
- *  - index/middle/ring/pinky: `tip.y < pip.y` (indices 8<6, 12<10, 16<14, 20<18)
- *  - thumb: x-comparison `l4.x < l3.x` for "Right", `l4.x > l3.x` for "Left"
- *    (raw frame, non-mirrored); NOT counted when handedness is absent
- *    (conservative — the thumb is the only finger that needs handedness).
+ *  - index/middle/ring/pinky: the reference's `tip.y < pip.y` screen-height
+ *    check assumed an upright hand; when the hand tilts (the natural phone
+ *    posture), a FOLDED finger's tip can rise above its PIP and be counted —
+ *    the reported 3→4 misfire. Replaced with a rotation-invariant wrist
+ *    test: an extended finger's tip is farther from the wrist than its PIP
+ *    joint (a skeleton property, true at any tilt; Euclidean distances are
+ *    rotation- and scale-invariant). The MCP uncurl check stays as backstop.
+ *  - thumb: distance to the pinky MCP base (`4` vs `3` against `17`) with a
+ *    handedness x-comparison fallback; NOT counted when handedness is absent
+ *    AND the geometric check is inconclusive (conservative — the thumb is the
+ *    only finger that needs handedness).
  */
 
 const INDEX_TIP = 8;
@@ -33,6 +41,14 @@ const PINKY_MCP = 17;
 const THUMB_TIP = 4;
 const THUMB_MCP = 3;
 
+/**
+ * Minimum `dist(tip, wrist) / dist(pip, wrist)` for a finger to read as
+ * extended. Real-hand geometry: fully extended ≈ 1.3–1.5, half-curled
+ * (the 3→4 offender) ≈ 1.0–1.1, folded < 1.0 — 1.2 rejects the half-curl
+ * while keeping margin for short fingers (pinky).
+ */
+const WRIST_EXTEND_RATIO = 1.2;
+
 function distSq(a: Landmark, b: Landmark): number {
   const dx = a.x - b.x;
   const dy = a.y - b.y;
@@ -50,13 +66,22 @@ export function isFingerExtended(
   const p = landmarks[pip];
   if (!t || !p) return false;
 
-  // Basic 2D height condition: tip must be higher on the screen (lower y) than PIP
-  if (t.y >= p.y) return false;
+  // Primary, rotation-invariant extension test: the tip must be meaningfully
+  // farther from the wrist than the PIP joint is. True for an extended finger
+  // at ANY hand tilt; a folded/half-curled tip pulls back toward the palm and
+  // fails the ratio. Skipped when the wrist is missing or degenerate
+  // (coincides with the PIP — synthetic fixtures).
+  const wrist = landmarks[0];
+  if (wrist && (wrist.x !== p.x || wrist.y !== p.y)) {
+    if (distSq(t, wrist) <= distSq(p, wrist) * WRIST_EXTEND_RATIO) {
+      return false;
+    }
+  }
 
-  // Geometric uncurl check against MCP knuckle and wrist:
-  // When a finger is curled into the palm (e.g. pinky when showing 3 fingers),
-  // the tip curls back toward the knuckle/wrist, making dist(tip, mcp) <= dist(pip, mcp).
-  // When straight/extended (e.g. showing 4 fingers), dist(tip, mcp) > dist(pip, mcp).
+  // Geometric uncurl check against MCP knuckle (backstop for a degenerate
+  // wrist): when a finger is curled into the palm (e.g. pinky when showing 3
+  // fingers), the tip curls back toward the knuckle, making
+  // dist(tip, mcp) <= dist(pip, mcp). When straight/extended, it is greater.
   if (mcp !== undefined) {
     const m = landmarks[mcp];
     if (m && (m.x !== p.x || m.y !== p.y)) {
@@ -65,15 +90,6 @@ export function isFingerExtended(
       if (distTipMcp <= distPipMcp * 1.1) {
         return false;
       }
-    }
-  }
-
-  const wrist = landmarks[0];
-  if (wrist && (wrist.x !== p.x || wrist.y !== p.y)) {
-    const distTipWrist = distSq(t, wrist);
-    const distPipWrist = distSq(p, wrist);
-    if (distTipWrist <= distPipWrist * 1.05) {
-      return false;
     }
   }
 

@@ -680,18 +680,6 @@ export function GestureLayer({
                 aria-hidden
               />
               <canvas ref={canvasRef} className="absolute inset-0 h-full w-full object-cover" aria-hidden />
-
-              {handLost === "warn" && (
-                <div
-                  className="absolute top-2 left-2 z-20 flex items-center gap-1.5 rounded-full bg-[#7c2d12]/75 px-2.5 py-1 animate-pulse"
-                  role="status"
-                >
-                  <span className="size-1.5 rounded-full bg-amber-400" aria-hidden />
-                  <span className="text-2xs font-extrabold tracking-wide text-amber-100">
-                    {t("keepHandVisible")}
-                  </span>
-                </div>
-              )}
             </div>
           </button>
 
@@ -702,6 +690,21 @@ export function GestureLayer({
               onClick={() => setPipExpanded(false)}
               aria-hidden="true"
             />
+          )}
+
+          {/* Hand-loss warning lives on the MAIN screen on phones (M-DETECT):
+              the 84px PIP is too small to read a chip inside it. Sticky amber
+              banner under the top edge — stays visible while the quiz scrolls. */}
+          {handLost === "warn" && (
+            <div
+              className="sticky top-[calc(var(--safe-top)+0.5rem)] z-30 mb-3 flex items-center gap-2 rounded-2xl border-[3px] border-amber-400/70 bg-amber-50 px-3 py-2 text-amber-900 shadow-[var(--shadow-clay-sm)] dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200"
+              role="status"
+            >
+              <span className="size-2 shrink-0 animate-pulse rounded-full bg-amber-500 dark:bg-amber-400" aria-hidden />
+              <span className="text-xs font-extrabold tracking-wide">
+                {t("keepHandVisible")}
+              </span>
+            </div>
           )}
 
           {children}
