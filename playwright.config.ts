@@ -114,6 +114,10 @@ export default defineConfig({
         AI_BASE_URL: `http://127.0.0.1:${MOCK_AI_PORT}/v1`,
         AI_API_KEY: "test-key",
         AI_MODEL: "gpt-4o-mini",
+        // chatStream's inter-chunk idle abort: the harness uses 3s so the
+        // mock's [MOCK:stall] scenario (silent upstream) resolves in-test
+        // instead of holding the route for the production 90s.
+        AI_STREAM_IDLE_TIMEOUT_MS: "3000",
         OCR_VISION_MODEL: "gpt-4o-mini",
         // InsightFace mock mode — E2E must NOT require a running Docker container.
         INSIGHTFACE_BASE_URL: "http://localhost:8000",

@@ -79,13 +79,14 @@ export function DateTimePicker({
   const locale = localeTag === "ms" ? "ms-MY" : "en-MY"
   const { day, hh, mm } = partsOf(value)
   const [clock, setClock] = React.useState({ hh, mm })
-
   // Keep local time fields in sync when the value changes externally
-  // (e.g. dialog reset or sibling field logic).
-  React.useEffect(() => {
+  // (e.g. dialog reset or sibling field logic) — the react.dev
+  // "adjust state during render" pattern (no effect needed).
+  const [prevValue, setPrevValue] = React.useState(value)
+  if (prevValue !== value) {
+    setPrevValue(value)
     setClock({ hh, mm })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value])
+  }
 
   const emit = (day: Date | undefined, hh: string, mm: string) => {
     if (!day) {

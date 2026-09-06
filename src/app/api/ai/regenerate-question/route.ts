@@ -14,6 +14,7 @@ import {
   internalError,
   invalidBody,
   invalidJson,
+  jsonError,
   notDraft,
   notFound,
   rateLimited,
@@ -107,9 +108,10 @@ export async function POST(request: Request, context?: { params?: Promise<{ id?:
 
   // In-flight guard: prevent double-spend on rapid clicks. In-process only
   // (same mechanism + single-instance caveat as generate-quiz); keyed per
-  // question so unrelated questions can regenerate concurrently.
+  // question so unrelated questions can regenerate concurrently. Distinct
+  // code (generate-route parity): "already running" ≠ quota spent.
   if (inFlight.has(questionId)) {
-    return rateLimited("A regeneration for this question is already in progress.");
+    return jsonError("already_running", "A regeneration for this question is already in progress.", 429);
   }
   inFlight.add(questionId);
 

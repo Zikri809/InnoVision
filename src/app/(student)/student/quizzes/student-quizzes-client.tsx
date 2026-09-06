@@ -242,7 +242,7 @@ export function StudentQuizzesClient({
           className="rounded-[28px] border-[3px] bg-card/60 px-8 py-16"
         />
       ) : (
-        <ul className="grid grid-cols-1 gap-4 sm:gap-6 [grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr))]">
+        <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr))]">
           {quizzes.map((q) => {
             const isPractice = q.mode === "practice";
             const chip = deadlineChip(q);
@@ -335,10 +335,14 @@ export function StudentQuizzesClient({
                     {!isPractice && q.completedSessionId && !q.resultsRevealed && !q.allow_retake ? (
                       // Completed + unrevealed + no retake: one affordance —
                       // the disabled button itself carries the awaiting state.
+                      // sm:ml-auto pins it to the right action column even
+                      // when it's the footer's only child (justify-between
+                      // would otherwise strand a lone child on the LEFT,
+                      // mixing button placements across the grid).
                       <Button
                         variant="outline"
                         disabled
-                        className="cursor-not-allowed opacity-70"
+                        className="cursor-not-allowed opacity-70 sm:ml-auto max-sm:w-full max-sm:justify-center"
                       >
                         {t("cardAwaitingResults")}
                       </Button>
@@ -347,7 +351,7 @@ export function StudentQuizzesClient({
                         variant={isPractice ? "default" : "accent"}
                         onClick={() => handleStart(q.id)}
                         disabled={startingId === q.id}
-                        className="max-sm:w-full max-sm:justify-center"
+                        className="sm:ml-auto max-sm:w-full max-sm:justify-center"
                       >
                         <Play className="h-4 w-4" aria-hidden />
                         {startingId === q.id ? t("startingBtn") : t("startBtn")}

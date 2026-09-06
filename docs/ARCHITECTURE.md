@@ -355,6 +355,30 @@ since they're rendered to rosters.
 `regenerate-question` is the same pipeline scoped to ONE question with an
 in-flight guard keyed by questionId.
 
+**Generation event stream** (Phase 2 of docs/plans/agentic-generation.md): both
+generate routes speak TWO protocols on the same POST. Default stays the legacy
+JSON above. With `Accept: application/x-ndjson` the route responds 200 with an
+NDJSON event stream (`src/lib/ai/events.ts` — stage/ping/reasoning/
+content_delta/error/cancelled/saved_refresh_failed/done). Two-segment error
+contract: guards that run before the stream opens (CSRF, body cap, auth,
+ownership, draft, rate limit, in-flight, validation) keep their JSON statuses;
+everything after the stream opens — INCLUDING parse-phase failures — is an
+`error` event with the same code (contract revision documented in the plan).
+The in-flight guard returns the distinct code `already_running` (vs
+`rate_limited` for quota). Heartbeats (`{"type":"ping"}`, 12s) cover silent
+phases only; the client's dead-stream detector keys on 30s of no bytes.
+Cancelling aborts the upstream call and SKIPS the save (no zombie rows) and
+releases the in-flight slot. `reasoning`/`content_delta` events carry raw,
+unvalidated model text — clients must render them as inert plain text in an
+aria-hidden region (S7 posture). The stream client is the in-dialog
+generating view inside `GenerateFromFileDialog` (`GenerationProgress` +
+`useGenerationStream`): step 2 morphs into a status strip + collapsed
+"Thinking" accordion, the strip morphs into the outcome card at terminal
+states, and the builder refreshes at the `done` EVENT (never at CTA click).
+The former full-page console route (`/lecturer/quizzes/[id]/generating`,
+sessionStorage handoff) is retired. `/api/extract/ocr` is deliberately NOT
+stream-ified (its typed JSON errors are consumed by the dialog step 1).
+
 ### 7.3 File upload → extraction/OCR pipeline
 
 Uploads go straight browser → private bucket via supabase-js storage
@@ -812,6 +836,7 @@ See `.env.local.example` for the authoritative annotated list. Summary:
 | `LECTURER_INVITE_CODE` | register promotion | hashed compare; also required by e2e specs |
 | `INSTITUTIONAL_EMAIL_DOMAINS` | `lib/auth/institutional.ts` (SSO callback + login button gating) | comma-separated university domain allowlist; unset = SSO disabled |
 | `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL` | `lib/ai/client.ts` (server) | OpenAI-compatible; e2e points at the mock server |
+| `AI_STREAM_IDLE_TIMEOUT_MS` | `lib/ai/client.ts` chatStream (server) | inter-chunk abort for streaming generations (default 90000; e2e harness sets 3000 for the stall scenario) |
 | `INSIGHTFACE_BASE_URL` / `FACE_SIDECAR_TOKEN` | `insightface-client.ts` (server) | self-hosted sidecar (loopback) |
 | `FACE_MOCK_ENABLED` | same | `"1"` opts into canned responses (non-prod only) |
 | `GLM_*` | extraction dialog config | optional local vLLM OCR |

@@ -115,6 +115,7 @@ export function buildQuizSystemPrompt(
     difficultyRule,
     langRule,
     "- Keep question prompts concise (under 30 words) and options brief (under 12 words) for fast distance-reading on camera.",
+    "- SELF-CONTAINED QUESTIONS: students answer on camera with NO access to the source material. Every prompt must stand alone — never reference the source as an external document. Forbidden patterns: 'In Task 1…', 'according to the passage…', 'from the figure/diagram…', 'in the lab sheet…'. If the source describes tasks, figures, code, or exercises, either restate the needed context inside the prompt (short inline code/values ARE allowed) or ask about the underlying concept instead.",
     "- The correct answer index must be 0-based and point at an existing option." + multiRule,
     "- Options must be distinct (case-insensitive). Keep options short and unambiguous.",
     "- Provide a concise 1-2 sentence explanation of the correct answer for each question.",
@@ -149,6 +150,7 @@ export function buildRegenerateSystemPrompt(
     "- Return exactly ONE question object.",
     langRule,
     "- Keep question prompts concise (under 30 words) and options brief (under 12 words) for fast distance-reading on camera.",
+    "- SELF-CONTAINED QUESTIONS: students answer on camera with NO access to the source material — the rewritten prompt must stand alone. Never reference the source as an external document ('In Task 1…', 'according to the passage…', 'from the figure…'); restate the needed context inside the prompt or ask about the underlying concept instead.",
     type === "multi_select"
       ? "- The correct answers must be provided as 'correct_indices': a sorted array of 1 to 5 indices of the correct options."
       : "- The correct answer index must be 0-based and point at an existing option.",
@@ -283,6 +285,45 @@ export function parseQuizJson(text: string): ParsedQuiz {
 }
 
 /**
+ * Self-containment audit (quality gate, feeds the retry loop). Students answer
+ * on camera with NO access to the source material, so prompts that point at
+ * the source as an external artifact ("In Task 2…", "the figure…", "the
+ * passage…") are unanswerable — the model was told, but reasoning models
+ * ignore soft instructions, so violations are treated like schema failures:
+ * rejected and fed back as sanitized retry feedback. Also flags leaked
+ * DELIBERATION ("wait", "Let's correct…", "Actually…") — observed live: GLM
+ * revised an answer inside its explanation while correct_index still pointed
+ * at the abandoned draft's option.
+ */
+const SOURCE_REF_PATTERN =
+  /\b(?:in|from|per|according to)\s+(?:the\s+)?(?:task|exercise|question|figure|fig\.|diagram|table|listing|passage|lab\s*(?:sheet|manual)|worksheet|above|provided|given|attached)\b/i;
+
+const DELIBERATION_PATTERN =
+  /\b(?:wait|actually|let'?s\s+(?:correct|re-?evaluate|reconsider|fix)|oops|scratch\s+that|correction:|hmm)\b/i;
+
+export function auditSelfContained(quiz: AiQuiz): string[] {
+  const issues: string[] = [];
+  quiz.questions.forEach((q, i) => {
+    const n = `Q${i + 1}`;
+    if (SOURCE_REF_PATTERN.test(q.prompt)) {
+      issues.push(
+        `${n} references the source material ("${q.prompt.slice(0, 80)}"). Rewrite it self-contained: restate the needed context inside the prompt or ask about the underlying concept. Students cannot see the source.`,
+      );
+    }
+    const fields = [q.prompt, ...(q.explanation ? [q.explanation] : [])];
+    for (const field of fields) {
+      if (DELIBERATION_PATTERN.test(field)) {
+        issues.push(
+          `${n} contains leaked model deliberation ("wait/actually/let's correct"). Re-derive the answer silently and output only the final question — and make sure 'correct_index' matches the FINAL answer.`,
+        );
+        break;
+      }
+    }
+  });
+  return issues;
+}
+
+/**
  * Parse raw model text into a single AiQuestion, accepting either a bare
  * question object or a { title, questions: [...] } wrapper (some providers
  * always return the full quiz shape even for a single-question request).
@@ -339,6 +380,15 @@ export function remainingBudgetMs(deadline: number, safetyMs = 1_000): number {
 }
 
 /**
+ * Lib-level generation milestones (Phase 1). Purely observational: the
+ * default path (onEvent omitted) is byte-identical to the pre-event behavior,
+ * pinned by a mirror test in quiz-prompt.test.ts.
+ */
+export type GenerateQuizLibEvent =
+  | { type: "attempt_start"; attempt: 1 | 2 }
+  | { type: "attempt_retry"; issues: string };
+
+/**
  * Generate a full quiz from extracted text with ONE validation retry. The
  * caller (route) never inserts on failure — so invalid output means ZERO rows.
  */
@@ -360,6 +410,8 @@ export async function generateQuiz(opts: {
   allowMultiSelect?: boolean;
   /** Wall-clock deadline for attempt+retry combined. Defaults to now + 15 min (GENERATION_BUDGET_MS). */
   deadlineMs?: number;
+  /** Optional milestone observer (stream mode). Omitted = byte-identical legacy path. */
+  onEvent?: (event: GenerateQuizLibEvent) => void;
 }): Promise<GenerateQuizResult> {
   const {
     chat,
@@ -371,9 +423,11 @@ export async function generateQuiz(opts: {
     steeringPrompt,
     allowMultiSelect = false,
     deadlineMs = Date.now() + 900_000,
+    onEvent,
   } = opts;
 
   const attempt = async (extra?: string): Promise<GenerateQuizResult> => {
+    onEvent?.({ type: "attempt_start", attempt: extra === undefined ? 1 : 2 });
     const remaining = remainingBudgetMs(deadlineMs);
     const systemContent = buildQuizSystemPrompt({
       language,
@@ -405,6 +459,13 @@ export async function generateQuiz(opts: {
     const parsed = parseQuizJson(res.text);
     if (!parsed.ok) {
       return { ok: false, error: "invalid_ai_output", message: parsed.issues.join("; ") };
+    }
+
+    // Self-containment audit — violations join the same retry channel as
+    // schema/format failures (see auditSelfContained).
+    const auditIssues = auditSelfContained(parsed.quiz);
+    if (auditIssues.length > 0) {
+      return { ok: false, error: "invalid_ai_output", message: auditIssues.join(" ") };
     }
 
     // Format distribution validation (trigger retry on format drift)
@@ -442,6 +503,7 @@ export async function generateQuiz(opts: {
 
   // One retry, feeding sanitized validation feedback back (S7).
   const feedback = sanitizePromptFeedback(first.message ?? "", 500);
+  onEvent?.({ type: "attempt_retry", issues: feedback });
   return attempt(feedback);
 }
 
@@ -493,6 +555,11 @@ export async function regenerateQuestion(opts: {
         error: "invalid_ai_output",
         message: `Question type must remain '${question.type}'.`,
       };
+    }
+    // Self-containment audit (same gate as the full-quiz path).
+    const auditIssues = auditSelfContained({ title: "", questions: [parsed.question] });
+    if (auditIssues.length > 0) {
+      return { ok: false, error: "invalid_ai_output", message: auditIssues.join(" ") };
     }
     return { ok: true, question: parsed.question };
   };

@@ -53,6 +53,38 @@ describe("chatCompletions", () => {
     if (!res.ok) expect(res.error).toBe("ai_error");
   });
 
+  it("salvages the answer from message.reasoning when content is empty (Kenari/GLM reasoning-only)", async () => {
+    const quiz = '{"title":"T","questions":[]}';
+    const client = makeClient(async () => ({
+      choices: [
+        {
+          finish_reason: "stop",
+          message: { content: "", reasoning: `drafting… ${quiz}` },
+        },
+      ],
+    }));
+    const res = await chatCompletions({
+      client,
+      model: "m",
+      messages: [{ role: "user", content: "hi" }],
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.text).toBe(quiz);
+  });
+
+  it("still fails with ai_error when content is empty and reasoning holds no JSON", async () => {
+    const client = makeClient(async () => ({
+      choices: [{ finish_reason: "stop", message: { content: "", reasoning: "pure thoughts" } }],
+    }));
+    const res = await chatCompletions({
+      client,
+      model: "m",
+      messages: [{ role: "user", content: "hi" }],
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toBe("ai_error");
+  });
+
   it("clamps the per-call timeout to the smaller of timeoutMs and the 45s default", async () => {
     let capturedSignal: AbortSignal | undefined;
     const client = makeClient(async (_opts, reqOpts) => {

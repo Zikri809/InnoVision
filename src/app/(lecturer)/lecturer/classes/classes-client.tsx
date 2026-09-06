@@ -235,7 +235,7 @@ export function ClassesPageClient({
               }
             />
           ) : (
-            <ul className="grid grid-cols-1 gap-4 sm:gap-6 [grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr))]">
+            <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr))]">
               {activeClasses.map((c) => (
                 <li key={c.id}>
                   <Link

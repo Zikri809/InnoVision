@@ -16,10 +16,11 @@
 #     vision endpoint is known to 502). The lecturer's browser talks to it over
 #     loopback only (127.0.0.1:11434) — see docs/GLM_OCR_SETUP.md.
 #
-# Rollback note: the CompreFace volumes (compreface-postgres-data) may still
-# exist on hosts that ran the old stack. They contain biometric data — do NOT
-# `docker compose down -v` casually; disposal is a documented security step
-# after the migration stability window (docs/INSIGHTFACE_SETUP.md §Cutover).
+# Rollback note: on this dev host the CompreFace stack (containers, volumes,
+# images) was fully disposed on 2026-09-05 — see docs/INSIGHTFACE_SETUP.md
+# §Cutover. Fresh hosts that ran the old stack elsewhere may still hold
+# compreface volumes containing biometric data — do NOT `docker compose down
+# -v` casually there; disposal is a documented security step.
 name: innovision
 
 services:

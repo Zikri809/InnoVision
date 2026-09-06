@@ -7,6 +7,7 @@ import {
   sanitizePromptFeedback,
   parseQuizJson,
   parseQuestionJson,
+  auditSelfContained,
   remainingBudgetMs,
   generateQuiz,
   regenerateQuestion,
@@ -99,6 +100,150 @@ describe("U-A5/U-A6 — one retry, then fail closed", () => {
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toBe("timeout");
     expect(chat).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("system prompt — self-contained question rule", () => {
+  it("quiz system prompt forbids source-referential prompts ('In Task 1…', figures)", () => {
+    const prompt = buildQuizSystemPrompt();
+    expect(prompt).toContain("SELF-CONTAINED QUESTIONS");
+    expect(prompt).toContain("In Task 1");
+    expect(prompt).toContain("figure");
+  });
+
+  it("quiz system prompt keeps the rule across format/multi-select variants", () => {
+    for (const config of [
+      { formatDistribution: "mcq_only" as const },
+      { formatDistribution: "true_false_only" as const },
+      { allowMultiSelect: true },
+    ]) {
+      expect(buildQuizSystemPrompt(config)).toContain("SELF-CONTAINED QUESTIONS");
+    }
+  });
+
+  it("regenerate system prompt carries the same self-containment rule", () => {
+    for (const type of ["mcq", "true_false", "multi_select"] as const) {
+      expect(buildRegenerateSystemPrompt("en", type)).toContain("SELF-CONTAINED QUESTIONS");
+    }
+  });
+});
+
+describe("auditSelfContained — source-reference and deliberation gate", () => {
+  // AiQuizSchema requires >=3 questions, so fixtures always carry three.
+  const quizWith = (
+    ...questions: Array<{ prompt: string; explanation?: string; options?: string[] }>
+  ) =>
+    JSON.stringify({
+      title: "T",
+      questions: [
+        { type: "mcq", prompt: "Neutral filler one?", options: ["a", "b", "c", "d"], correct_index: 0 },
+        ...questions.map((q) => ({
+          type: "mcq" as const,
+          prompt: q.prompt,
+          options: q.options ?? ["a", "b", "c", "d"],
+          correct_index: 0,
+          ...(q.explanation ? { explanation: q.explanation } : {}),
+        })),
+        { type: "mcq", prompt: "Neutral filler two?", options: ["a", "b", "c", "d"], correct_index: 0 },
+      ],
+    });
+
+  it("accepts self-contained questions (existing fixtures pass)", () => {
+    const parsed = parseQuizJson(validQuizJson);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(auditSelfContained(parsed.quiz)).toEqual([]);
+  });
+
+  it("flags 'In Task N…' prompts (real GLM failure, 2026-09 paste)", () => {
+    const parsed = parseQuizJson(
+      quizWith({ prompt: "In Task 3, for i=3, what happens in the justDoit method?" }),
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const issues = auditSelfContained(parsed.quiz);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toContain("Q2");
+    expect(issues[0]).toContain("self-contained");
+  });
+
+  it("flags figure/passage/according-to references", () => {
+    for (const prompt of [
+      "From the figure above, what is the slope?",
+      "According to the passage, why did the ship sink?",
+      "In the lab sheet exercise 2, what is printed?",
+    ]) {
+      const parsed = parseQuizJson(quizWith({ prompt }));
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) continue;
+      expect(auditSelfContained(parsed.quiz).length).toBe(1);
+    }
+  });
+
+  it("does NOT flag questions that merely use shared nouns (code/task words without reference)", () => {
+    const parsed = parseQuizJson(
+      quizWith(
+        { prompt: "In Java, what does a try block do?" },
+        { prompt: "Which method throws in this code: try { justDoit(); } catch (RuntimeException e) {}?" },
+      ),
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(auditSelfContained(parsed.quiz)).toEqual([]);
+  });
+
+  it("flags leaked deliberation ('wait … actually … let's correct') in prompt or explanation", () => {
+    const parsed = parseQuizJson(
+      quizWith({
+        prompt: "If the user inputs 0, what is the final value of sum?",
+        explanation: "sum becomes 10/10=1. Actually finally: if sum <=0 sum=100. Let's correct: sum = 1.",
+      }),
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const issues = auditSelfContained(parsed.quiz);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toContain("deliberation");
+  });
+});
+
+describe("generateQuiz — self-containment retry integration", () => {
+  const bad = JSON.stringify({
+    title: "Java Quiz",
+    questions: [
+      { type: "mcq", prompt: "In Task 2, what is the final value of sum?", options: ["0", "1", "10", "100"], correct_index: 1 },
+      { type: "mcq", prompt: "From the figure, what is the angle?", options: ["a", "b", "c", "d"], correct_index: 0 },
+      { type: "mcq", prompt: "In the lab sheet, what prints for i=5?", options: ["5", "6", "7", "8"], correct_index: 0 },
+    ],
+  });
+  const good = JSON.stringify({
+    title: "Java Quiz",
+    questions: [
+      { type: "mcq", prompt: "In Java, what does `sum / 0` throw for int division?", options: ["ArithmeticException", "NullPointerException", "IOException", "Error"], correct_index: 0 },
+      { type: "mcq", prompt: "What does a finally block guarantee in Java?", options: ["It always runs", "It never runs", "It runs only on error", "It runs only on success"], correct_index: 0 },
+      { type: "true_false", prompt: "A try block must be followed by catch or finally.", options: ["True", "False"], correct_index: 0 },
+    ],
+  });
+
+  it("retries when the first attempt references the source, accepts a clean second attempt", async () => {
+    const calls: string[] = [];
+    const chat = async (messages: ChatMessage[]): Promise<ChatResult> => {
+      calls.push(messages[messages.length - 1].content);
+      return { ok: true, text: calls.length === 1 ? bad : good };
+    };
+    const res = await generateQuiz({ chat, text: "chapter", questionCount: 3 });
+    expect(res.ok).toBe(true);
+    expect(calls).toHaveLength(2);
+    // The retry feedback names the violation (sanitized, single line).
+    expect(calls[1]).toContain("Previous attempt failed validation");
+    expect(calls[1]).toContain("self-contained");
+  });
+
+  it("fails invalid_ai_output when BOTH attempts violate self-containment", async () => {
+    const chat = async (): Promise<ChatResult> => ({ ok: true, text: bad });
+    const res = await generateQuiz({ chat, text: "chapter", questionCount: 3 });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toBe("invalid_ai_output");
   });
 });
 
@@ -411,5 +556,51 @@ describe("QT-1 — allowMultiSelect gating", () => {
     // The kept-type system prompt must have advertised correct_indices.
     expect(buildRegenerateSystemPrompt("auto", "multi_select")).toContain("correct_indices");
     expect(buildRegenerateSystemPrompt("auto", "mcq")).not.toContain("correct_indices");
+  });
+});
+
+// ── Phase 1 mirror test: onEvent is purely observational ──────────────────
+// The single most safety-critical property of the event refactor: passing
+// onEvent leaves the prompt bytes and outcome IDENTICAL to the omitted path
+// (the code comment in quiz-prompt.ts claims this is pinned HERE).
+describe("U-AE1 — onEvent mirror (byte-identical default path)", () => {
+  const okChatWithCapture = (content: string, captured: ChatMessage[][]) => async (messages: ChatMessage[]) => {
+    captured.push(messages);
+    return { ok: true, text: content } as ChatResult;
+  };
+
+  it("identical prompts + outcome with and without onEvent (success path)", async () => {
+    const without: ChatMessage[][] = [];
+    const withEv: ChatMessage[][] = [];
+    const resA = await generateQuiz({ chat: okChatWithCapture(validQuizJson, without), text: "chapter", questionCount: 10 });
+    const events: unknown[] = [];
+    const resB = await generateQuiz({
+      chat: okChatWithCapture(validQuizJson, withEv),
+      text: "chapter",
+      questionCount: 10,
+      onEvent: (e) => events.push(e),
+    });
+    expect(resA).toEqual(resB);
+    expect(without).toEqual(withEv);
+    expect(events).toEqual([{ type: "attempt_start", attempt: 1 }]);
+  });
+
+  it("identical retry prompts + outcome with and without onEvent (retry path)", async () => {
+    const chatA = vi.fn<(messages: ChatMessage[]) => Promise<ChatResult>>()
+      .mockResolvedValueOnce({ ok: true, text: "not json" })
+      .mockResolvedValueOnce({ ok: true, text: validQuizJson });
+    const chatB = vi.fn<(messages: ChatMessage[]) => Promise<ChatResult>>()
+      .mockResolvedValueOnce({ ok: true, text: "not json" })
+      .mockResolvedValueOnce({ ok: true, text: validQuizJson });
+    const events: unknown[] = [];
+    const resA = await generateQuiz({ chat: chatA, text: "chapter", questionCount: 10 });
+    const resB = await generateQuiz({ chat: chatB, text: "chapter", questionCount: 10, onEvent: (e) => events.push(e) });
+    expect(resA).toEqual(resB);
+    expect(chatA.mock.calls).toEqual(chatB.mock.calls);
+    expect(events).toEqual([
+      { type: "attempt_start", attempt: 1 },
+      { type: "attempt_retry", issues: expect.any(String) },
+      { type: "attempt_start", attempt: 2 },
+    ]);
   });
 });

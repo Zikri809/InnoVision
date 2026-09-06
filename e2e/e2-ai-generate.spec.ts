@@ -73,8 +73,17 @@ test.describe("E2 — AI quiz from a PDF is editable and publishable", () => {
       lecturerPage.getByText(/ready/i),
     ).toBeVisible({ timeout: 20_000 });
 
-    // ── 3. Generate (mock AI) → questions persisted + visible ──
+    // ── 3. Generate (mock AI) → in-dialog stream → questions persisted ──
+    // The dialog's step 2 morphs into the generating view (status strip +
+    // Thinking accordion); the strip morphs into the payoff with the Review
+    // CTA. Review closes the dialog; the builder has refreshed server-side.
     await lecturerPage.getByRole("button", { name: /generate quiz/i }).click();
+    const genDialog = lecturerPage.getByRole("dialog");
+    await expect(
+      genDialog.getByText(/questions forged|soalan dihasilkan/i),
+    ).toBeVisible({ timeout: 30_000 });
+    await genDialog.getByTestId("generation-review-btn").click();
+    await expect(genDialog).toHaveCount(0);
     await expect(
       lecturerPage.getByText("What is velocity?", { exact: true }),
     ).toBeVisible({ timeout: 20_000 });
@@ -187,6 +196,13 @@ test.describe("E2 — AI quiz from a PDF is editable and publishable", () => {
     ).toHaveCount(0);
 
     await page.getByRole("button", { name: /^add questions to quiz$/i }).click();
+    // In-dialog generation: the strip morphs to the payoff → Review closes.
+    const modeDialog = page.getByRole("dialog");
+    await expect(
+      modeDialog.getByText(/questions forged|soalan dihasilkan/i),
+    ).toBeVisible({ timeout: 30_000 });
+    await modeDialog.getByTestId("generation-review-btn").click();
+    await expect(modeDialog).toHaveCount(0);
     await expect(page.getByText("What is velocity?", { exact: true })).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText("Seeded draft question?", { exact: true })).toBeVisible();
   });

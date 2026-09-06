@@ -207,7 +207,7 @@ export function MyQuizzesClient({ quizzes }: { quizzes: MyQuiz[] }) {
           </p>
         </div>
       ) : (
-        <ul className="grid grid-cols-1 gap-4 sm:gap-6 [grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr))]">
+        <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr))]">
           {quizzes.map((q) => (
             <li key={q.id}>
               <Card className="group flex h-full flex-col transition-[transform,box-shadow] duration-200 hover:-translate-y-1 hover:shadow-[8px_10px_0_rgba(194,65,12,0.16)]">

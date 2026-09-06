@@ -83,8 +83,16 @@ test.describe("E2-GLM — GLM-OCR extraction from a scanned image", () => {
       page.getByText(/ready/i),
     ).toBeVisible({ timeout: 120_000 });
 
-    // ── 5. Generate (mock AI) → questions persisted + visible ──
+    // ── 5. Generate (mock AI) → in-dialog stream → questions persisted ──
+    // The dialog's step 2 morphs into the generating view; the strip morphs
+    // into the payoff + Review CTA, which closes back into the builder.
     await page.getByRole("button", { name: /generate quiz/i }).click();
+    const genDialog = page.getByRole("dialog");
+    await expect(
+      genDialog.getByText(/questions forged|soalan dihasilkan/i),
+    ).toBeVisible({ timeout: 30_000 });
+    await genDialog.getByTestId("generation-review-btn").click();
+    await expect(genDialog).toHaveCount(0);
     await expect(
       page.getByText("What is velocity?", { exact: true }),
     ).toBeVisible({ timeout: 20_000 });

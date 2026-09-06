@@ -93,3 +93,8 @@ creates.
   `docker volume rm innovision_compreface-postgres-data
   innovision_compreface-api-logs`). This is a security step, not
   housekeeping — record it.
+  **DONE 2026-09-05** (day 1 of the window — explicit user request): removed
+  all 5 CompreFace containers, the `compreface-postgres-data` and
+  `compreface-api-logs` volumes, and the exadel/* + postgres:12 images.
+  Biometric data destroyed; rollback to CompreFace from local Docker state is
+  no longer possible (would require re-pulling images and re-enrolling).

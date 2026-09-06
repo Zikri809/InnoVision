@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
@@ -35,8 +35,10 @@ import {
 import { UploadDropzone, type UploadedFileItem } from "./UploadDropzone";
 import { EnginePicker } from "./EnginePicker";
 import { OcrProgress } from "./OcrProgress";
+import { GenerationProgress } from "./GenerationProgress";
 import { BotAvatar } from "@/components/bot/bot-avatar";
 import { runExtractionPipeline, type PipelineProgress } from "@/lib/extract/pipeline";
+import { MAX_AGGREGATE_CHARS } from "@/lib/extract/types";
 import type { ExtractEngine, OcrConfig } from "@/lib/extract/types";
 import type {
   QuizDifficulty,
@@ -87,6 +89,13 @@ export function GenerateFromFileDialog({
 
   const [step, setStep] = useState<1 | 2>(1);
   const stepContainerRef = useRef<HTMLDivElement>(null);
+
+  // Lecturer in-dialog generation (Phase 3 pattern adopted for lecturers):
+  // submit flips step 2 into the generating view (status strip + Thinking
+  // accordion) INSTEAD of navigating to the retired /generating console
+  // route. `genRunId` keys the stream engine — bump it for "Try again".
+  const [generating, setGenerating] = useState(false);
+  const [genRunId, setGenRunId] = useState(0);
 
   const [files, setFiles] = useState<UploadedFileItem[]>([]);
   const [pastedText, setPastedText] = useState("");
@@ -141,6 +150,8 @@ export function GenerateFromFileDialog({
     setPreviewExpanded(false);
     setQuestionCount(10);
     setQuestionCountInput("10");
+    setGenerating(false);
+    setGenRunId(0);
     submitLock.current = false;
     setBusy(false);
   }
@@ -257,33 +268,32 @@ export function GenerateFromFileDialog({
     setBusy(true);
     setError(null);
 
+    // Lecturer surface: step 2 morphs into the generating view IN PLACE —
+    // the status strip + Thinking accordion own the POST, the event stream,
+    // and the outcome (the /generating console route is retired). Closing
+    // the dialog mid-run aborts the stream (truthful: nothing keeps running
+    // hidden); a terminal error keeps the trace and offers Try again.
+    if (!isStudent) {
+      setGenerating(true);
+      setGenRunId((n) => n + 1);
+      return;
+    }
+
     const controller = new AbortController();
     activeAbortRef.current = controller;
     const timer = setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
 
     try {
-      const bodyPayload = isStudent
-        ? {
-            extractedText,
-            questionCount,
-            difficulty,
-            language,
-            // Omit when empty — an explicit [] would trip the schema's min(1).
-            ...(files.length > 0 ? { sourcePaths: files.map((f) => f.path) } : {}),
-          }
-        : {
-            quizId,
-            extractedText,
-            questionCount,
-            mode: generationMode,
-            difficulty,
-            formatDistribution,
-            steeringPrompt: steeringPrompt.trim() || undefined,
-            language,
-            // Omit when empty — an explicit [] would trip the schema's min(1)
-            // on the paste-only path.
-            ...(files.length > 0 ? { sourcePaths: files.map((f) => f.path) } : {}),
-          };
+      // Student-only legacy path: the lecturer surface returned above (its
+      // body lives in generationBody for the NDJSON stream).
+      const bodyPayload = {
+        extractedText,
+        questionCount,
+        difficulty,
+        language,
+        // Omit when empty — an explicit [] would trip the schema's min(1).
+        ...(files.length > 0 ? { sourcePaths: files.map((f) => f.path) } : {}),
+      };
 
       const res = await fetch(target, {
         method: "POST",
@@ -298,17 +308,13 @@ export function GenerateFromFileDialog({
         // Student surface: map known error CODES to localized strings (the
         // raw server messages are English-only); unknown codes fall back to
         // the server message, then the generic.
-        if (isStudent) {
-          const codeMap: Record<string, string> = {
-            question_cap_reached: t("errQuestionCap"),
-            rate_limited: t("errRateLimited"),
-            invalid_ai_output: t("errInvalidAi"),
-            ai_unavailable: t("errInvalidAi"),
-          };
-          setError(codeMap[body.error as string] ?? body.message ?? tCommon("errorGeneric"));
-        } else {
-          setError(body.message ?? body.error ?? tCommon("errorGeneric"));
-        }
+        const codeMap: Record<string, string> = {
+          question_cap_reached: t("errQuestionCap"),
+          rate_limited: t("errRateLimited"),
+          invalid_ai_output: t("errInvalidAi"),
+          ai_unavailable: t("errInvalidAi"),
+        };
+        setError(codeMap[body.error as string] ?? body.message ?? tCommon("errorGeneric"));
         return;
       }
 
@@ -316,14 +322,10 @@ export function GenerateFromFileDialog({
         onGenerated(Array.isArray(body.questions) ? body.questions : [], {
           capped: Boolean(body.capped),
         });
+      } else {
         toast.success(t("questionsGenerated"));
-        onOpenChange(false);
-        reset();
-        return;
+        router.refresh();
       }
-
-      toast.success(t("questionsGenerated"));
-      router.refresh();
       onOpenChange(false);
       reset();
     } catch (err) {
@@ -341,6 +343,54 @@ export function GenerateFromFileDialog({
       submitLock.current = false;
       setBusy(false);
     }
+  }
+
+  /** Body for the lecturer NDJSON stream — built at submit AND at retry, so
+   * a "Try again" regenerates byte-identical request config from state.
+   * extractedText is clamped to the 400k aggregate cap (the old sessionStorage
+   * handoff's rule): the server schema REJECTS over-cap text, so five
+   * text-heavy decks must be truncated client-side to keep the old
+   * generate-from-first-400k outcome instead of a validation error. */
+  const generationBody = useMemo(
+    () => ({
+      quizId,
+      extractedText: (extractedText ?? "").slice(0, MAX_AGGREGATE_CHARS),
+      questionCount,
+      mode: generationMode,
+      difficulty,
+      formatDistribution,
+      steeringPrompt: steeringPrompt.trim() || undefined,
+      language,
+      // Omit when empty — an explicit [] would trip the schema's min(1) on
+      // the paste-only path.
+      ...(files.length > 0 ? { sourcePaths: files.map((f) => f.path) } : {}),
+    }),
+    [quizId, extractedText, questionCount, generationMode, difficulty, formatDistribution, steeringPrompt, language, files],
+  );
+
+  /** Terminal outcomes from the in-dialog stream, reported at EVENT time:
+   * done/saved_refresh_failed mean the save is already committed — refresh
+   * the builder NOW (never at CTA click; the plan's merge-at-done rule) and
+   * reset. error/cancelled keep the dialog open (trace + Try again). */
+  function handleGenerationOutcome(kind: string) {
+    if (kind === "done" || kind === "saved_refresh_failed") {
+      toast.success(t("questionsGenerated"));
+      router.refresh();
+      submitLock.current = false;
+      setBusy(false);
+      return;
+    }
+    // error / cancelled: the strip keeps the trace + offers Try again
+    // (already_running shows its distinct no-retry state). Release the
+    // submit lock so a retry can fire; keep the dialog open.
+    submitLock.current = false;
+    setBusy(false);
+  }
+
+  function handleGenerationRetry() {
+    setGenRunId((n) => n + 1);
+    setBusy(true);
+    submitLock.current = true;
   }
 
   function handleQuestionCountBlur() {
@@ -366,7 +416,7 @@ export function GenerateFromFileDialog({
               {t("dialogTitle")}
             </ResponsiveModalTitle>
             <span className="rounded-full border-[2px] border-primary/30 bg-primary/10 px-2.5 py-0.5 text-xs font-extrabold text-primary">
-              {t("stepIndicator", { step, total: 2 })}
+              {generating ? t("generatingBtn") : t("stepIndicator", { step, total: 2 })}
             </span>
           </div>
           <ResponsiveModalDescription className="text-xs font-semibold text-muted-foreground mt-0.5">
@@ -473,7 +523,22 @@ export function GenerateFromFileDialog({
             </div>
           )}
 
-          {step === 2 && extractedText && (
+          {step === 2 && extractedText && generating && (
+            <GenerationProgress
+              key={genRunId}
+              endpoint="/api/ai/generate-quiz"
+              body={generationBody}
+              onOutcome={handleGenerationOutcome}
+              onRetry={handleGenerationRetry}
+              onReview={() => {
+                // Terminal success path already refreshed + reset via
+                // handleGenerationOutcome; this closes the dialog shell.
+                onOpenChange(false);
+              }}
+            />
+          )}
+
+          {step === 2 && extractedText && !generating && (
             <div className="space-y-4">
               {/* Extracted Sources Summary Collapsible */}
               <div className="rounded-2xl border-[3px] border-border bg-card p-3.5 shadow-[var(--shadow-clay-sm)] transition-all">
@@ -797,7 +862,7 @@ export function GenerateFromFileDialog({
           )}
         </div>
 
-        {busy && step === 2 && (
+        {busy && step === 2 && !generating && (
           <div className="flex shrink-0 items-center justify-center gap-2.5 rounded-2xl border-[3px] border-primary/30 bg-primary/5 px-4 py-3">
             <BotAvatar state="thinking" size={32} />
             <span className="text-sm font-extrabold text-primary">
@@ -807,7 +872,7 @@ export function GenerateFromFileDialog({
         )}
 
         <ResponsiveModalFooter className="shrink-0 pt-3 border-t-[3px] border-border/40 flex items-center justify-between sm:justify-between gap-3">
-          {step === 1 ? (
+          {generating ? null : step === 1 ? (
             <>
               <Button
                 type="button"

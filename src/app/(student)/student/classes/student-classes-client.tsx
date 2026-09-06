@@ -218,7 +218,7 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
               <div className="mx-auto mt-4 max-w-sm sm:mt-6">{joinForm}</div>
             </div>
           ) : (
-            <ul className="grid grid-cols-1 gap-4 sm:gap-6 [grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr))]">
+            <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr))]">
               {classes.map((c) => (
                 <li key={c.id}>
                   <Link
