@@ -120,6 +120,7 @@ const WEB_TOPIC_BODY = {
   quizId: QUIZ_C,
   topic: "photosynthesis light and dark reactions",
   useWebSearch: true,
+  extractedText: "Chapter text about photosynthesis and the Calvin cycle.",
   questionCount: 3,
 };
 
@@ -141,15 +142,26 @@ afterAll(() => {
 });
 
 describe("validation: topic XOR sources", () => {
-  it("W-V1: topic + extractedText → 400 invalid_body", async () => {
+  it("W-V1: topic + extractedText = augmentation → passes validation", async () => {
     ownerContext();
+    stubAiContent(JSON.stringify(VALID_AI_BODY));
+    searchStub.impl = () =>
+      Promise.resolve({ ok: true, text: CORPUS, sources: WEB_SOURCES });
     const res = await generateRoute.POST(
-      req({ ...WEB_TOPIC_BODY, extractedText: "some text" }, { stream: false }),
+      req({ ...WEB_TOPIC_BODY }, { stream: false }),
     );
+    expect(res.status).toBe(200);
+  });
+
+  it("W-V1b: topic-only (no material) → 400 (augmentation-only rule)", async () => {
+    ownerContext();
+    const { extractedText: _drop, ...topicOnly } = WEB_TOPIC_BODY;
+    void _drop;
+    const res = await generateRoute.POST(req(topicOnly, { stream: false }));
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toBe("invalid_body");
-    expect(body.message).toMatch(/cannot be combined/i);
+    expect(body.message).toMatch(/augments your material/i);
   });
 
   it("W-V2: useWebSearch without topic → 400", async () => {
@@ -222,39 +234,43 @@ describe("stream protocol: topic mode", () => {
     expect((ctx.client.tables["questions"] ?? []).length).toBe(3);
   });
 
-  it("W-S2: search_failed → error event with the pinned code, zero rows", async () => {
+  it("W-S2: search failure DEGRADES to material-only — done, no error", async () => {
     ownerContext();
+    stubAiContent(JSON.stringify(VALID_AI_BODY));
     searchStub.impl = () =>
       Promise.resolve({ ok: false, error: "search_failed", message: "boom" });
     const res = await generateRoute.POST(req(WEB_TOPIC_BODY));
     const events = await collectStream(res);
-    const err = events.find(
-      (e): e is Extract<GenerationEvent, { type: "error" }> => e.type === "error",
-    );
-    expect(err?.code).toBe("search_failed");
-    expect((fakeHolder.current?.tables["questions"] ?? []).length).toBe(0);
+    // Augmentation contract: the material still grounds the quiz.
+    expect(events.some((e) => e.type === "error")).toBe(false);
+    expect(events.some((e) => e.type === "done")).toBe(true);
+    expect((fakeHolder.current?.tables["questions"] ?? []).length).toBe(3);
   });
 
-  it("W-S3: search_unavailable → error event with the pinned code", async () => {
+  it("W-S3: search_unavailable (key unset) DEGRADES to material-only", async () => {
     ownerContext();
+    stubAiContent(JSON.stringify(VALID_AI_BODY));
     const res = await generateRoute.POST(req(WEB_TOPIC_BODY));
     const events = await collectStream(res);
-    const err = events.find(
-      (e): e is Extract<GenerationEvent, { type: "error" }> => e.type === "error",
-    );
-    expect(err?.code).toBe("search_unavailable");
+    expect(events.some((e) => e.type === "error")).toBe(false);
+    expect(events.some((e) => e.type === "done")).toBe(true);
   });
 
-  it("W-S4: search_corpus_thin → error event with the pinned code", async () => {
+  it("W-S4: search_corpus_thin DEGRADES to material-only", async () => {
     ownerContext();
+    stubAiContent(JSON.stringify(VALID_AI_BODY));
     searchStub.impl = () =>
       Promise.resolve({ ok: false, error: "search_corpus_thin", message: "thin" });
     const res = await generateRoute.POST(req(WEB_TOPIC_BODY));
     const events = await collectStream(res);
-    const err = events.find(
-      (e): e is Extract<GenerationEvent, { type: "error" }> => e.type === "error",
-    );
-    expect(err?.code).toBe("search_corpus_thin");
+    expect(events.some((e) => e.type === "error")).toBe(false);
+    expect(events.some((e) => e.type === "done")).toBe(true);
+    // Degraded save: no web provenance persisted.
+    const quizRow = (fakeHolder.current?.tables["quizzes"] ?? []).find(
+      (q: { id?: string }) => q.id === QUIZ_C,
+    ) as { sources?: unknown[] } | undefined;
+    expect(Array.isArray(quizRow?.sources)).toBe(true);
+    expect(quizRow?.sources).toHaveLength(0);
   });
 
   it("W-S5: skipped fetch reports skipped+reason on the tool_result", async () => {
@@ -310,29 +326,28 @@ describe("legacy protocol: topic mode", () => {
     expect(quizRow?.sources?.[0].url).toBe("https://a.com/photosynthesis");
   });
 
-  it("W-L2: search_failed → JSON 502 with the pinned code", async () => {
+  it("W-L2: search failure DEGRADES — JSON 200 from material only", async () => {
     ownerContext();
+    stubAiContent(JSON.stringify(VALID_AI_BODY));
     searchStub.impl = () => Promise.resolve({ ok: false, error: "search_failed" });
     const res = await generateRoute.POST(req(WEB_TOPIC_BODY, { stream: false }));
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.error).toBe("search_failed");
+    expect(body.questions).toHaveLength(3);
   });
 
-  it("W-L3: search_unavailable → JSON 503", async () => {
+  it("W-L3: search_unavailable DEGRADES — JSON 200", async () => {
     ownerContext();
+    stubAiContent(JSON.stringify(VALID_AI_BODY));
     const res = await generateRoute.POST(req(WEB_TOPIC_BODY, { stream: false }));
-    expect(res.status).toBe(503);
-    const body = await res.json();
-    expect(body.error).toBe("search_unavailable");
+    expect(res.status).toBe(200);
   });
 
-  it("W-L4: search_corpus_thin → JSON 422", async () => {
+  it("W-L4: search_corpus_thin DEGRADES — JSON 200", async () => {
     ownerContext();
+    stubAiContent(JSON.stringify(VALID_AI_BODY));
     searchStub.impl = () => Promise.resolve({ ok: false, error: "search_corpus_thin" });
     const res = await generateRoute.POST(req(WEB_TOPIC_BODY, { stream: false }));
-    expect(res.status).toBe(422);
-    const body = await res.json();
-    expect(body.error).toBe("search_corpus_thin");
+    expect(res.status).toBe(200);
   });
 });

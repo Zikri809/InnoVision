@@ -233,23 +233,36 @@ async function appendCapacityError(
 // ─── Phase 1: source preparation (parse / web search) ────────────────────────
 
 type PreparedSource =
-  | { ok: true; text: string; sourcePathFinal: string | null; parsed: boolean; webSources: WebSourceEntry[] | null }
+  | { ok: true; text: string; sourcePathFinal: string | null; parsed: boolean; webSources: WebSourceEntry[] | null; webAugmented?: boolean }
   | { ok: false; response: NextResponse };
 
-/** The topic-mode branch of source preparation (grounded-search.md §4): runs
- * the grounded TinyFish pipeline and returns the corpus as the generation
- * text. Search-stage events are emitted by the CALLER (stream mode wires
+/** The web-search branch of source preparation (augmentation model): the
+ * web corpus is APPENDED to the material text under its own fence (fresh
+ * real-world knowledge the uploads may lack) and a failed/thin/unconfigured
+ * search DEGRADES to material-only — never fails the generation.
+ * Search-stage events are emitted by the CALLER (stream mode wires
  * onLibEvent → tool events); legacy mode runs silently. */
 async function prepareWebSource(
   ctx: GenerationContext,
-  opts: { onLibEvent?: (event: GroundedSearchLibEvent) => void; signal?: AbortSignal } = {},
+  opts: {
+    onLibEvent?: (event: GroundedSearchLibEvent) => void;
+    signal?: AbortSignal;
+    /** Material base (REQUIRED — web search always augments material). */
+    base: { text: string; sourcePathFinal: string | null; parsed: boolean };
+  },
 ): Promise<PreparedSource> {
+  const augmented = true;
   // createAiClient() throws on missing env OUTSIDE runGroundedSearch's
   // non-throwing internals — map it to the typed unavailable error.
   let ai: ReturnType<typeof createAiClient>;
   try {
     ai = createAiClient();
   } catch {
+    // Augmentation degradation: without an AI client there is no query
+    // planning, but the material alone still works — degrade, don't fail.
+    if (augmented) {
+      return { ok: true, ...opts.base!, webSources: null, webAugmented: true };
+    }
     return {
       ok: false,
       response: jsonError("search_unavailable", "Web search is unavailable right now.", 503),
@@ -263,8 +276,18 @@ async function prepareWebSource(
     deadlineMs: ctx.deadlineMs,
     signal: opts.signal,
     onEvent: opts.onLibEvent,
+    // Augmentation: a thin web corpus is FINE — the material still grounds
+    // the generation; topic-only mode keeps the strict thin rejection.
+    allowThin: augmented,
   });
   if (!result.ok) {
+    // Augmentation degradation: a failed search in material+web mode must
+    // NOT fail the generation — the uploaded material alone is sufficient.
+    // (`search_unavailable` also degrades: the key being absent is a config
+    // problem the lecturer can't fix mid-generation.)
+    if (augmented) {
+      return { ok: true, ...opts.base!, webSources: null, webAugmented: true };
+    }
     const response =
       result.error === "search_corpus_thin"
         ? unprocessable(
@@ -283,6 +306,20 @@ async function prepareWebSource(
               502,
             );
     return { ok: false, response };
+  }
+  if (augmented) {
+    // Merge: material first (primary grounding), then the web corpus under
+    // its own fence header so the model can tell the kinds apart.
+    const merged = `${opts.base!.text}\n\n${result.text}`;
+    const text = merged.length > MAX_AGGREGATE_CHARS ? merged.slice(0, MAX_AGGREGATE_CHARS) : merged;
+    return {
+      ok: true,
+      text,
+      sourcePathFinal: opts.base!.sourcePathFinal,
+      parsed: opts.base!.parsed,
+      webSources: result.sources,
+      webAugmented: true,
+    };
   }
   return {
     ok: true,
@@ -615,11 +652,35 @@ async function saveGeneration(
 
 /** LEGACY (default) protocol — byte-identical behavior to the pre-stream route. */
 async function runLegacyGeneration(ctx: GenerationContext, signal: AbortSignal): Promise<NextResponse> {
-  // Topic mode: the grounded search IS the source preparation (silent —
-  // legacy protocol has no events).
-  const prepared = ctx.body.useWebSearch
-    ? await prepareWebSource(ctx, { signal })
-    : await prepareSource(ctx);
+  // Web search is ALWAYS an augmentation of material (topic-only was
+  // removed): prepareSource first (its no-source rejection is authoritative),
+  // then the web corpus is appended — degrading to material-only when the
+  // search fails or is unconfigured.
+  if (ctx.body.useWebSearch) {
+    const material = await prepareSource(ctx);
+    if (!material.ok) return material.response;
+    const prepared = await prepareWebSource(ctx, {
+      signal,
+      base: { text: material.text, sourcePathFinal: material.sourcePathFinal, parsed: material.parsed },
+    });
+    if (!prepared.ok) return prepared.response;
+
+    const result = await runAiGeneration(ctx, prepared.text, { signal });
+    if (!result.ok) return generationErrorResponse(result);
+    const saved = await saveGeneration(
+      ctx,
+      { text: prepared.text, sourcePathFinal: prepared.sourcePathFinal, webSources: prepared.webSources },
+      result,
+      { signal },
+    );
+    if (saved.kind === "ok") return NextResponse.json(saved.payload);
+    if (saved.kind === "saved_refresh_failed") {
+      return internalError("Could not load the updated quiz right now.");
+    }
+    return saved.response;
+  }
+
+  const prepared = await prepareSource(ctx);
   if (!prepared.ok) return prepared.response;
 
   const result = await runAiGeneration(ctx, prepared.text, { signal });
@@ -627,7 +688,7 @@ async function runLegacyGeneration(ctx: GenerationContext, signal: AbortSignal):
 
   const saved = await saveGeneration(
     ctx,
-    { text: prepared.text, sourcePathFinal: prepared.sourcePathFinal, webSources: prepared.webSources },
+    { text: prepared.text, sourcePathFinal: prepared.sourcePathFinal, webSources: null },
     result,
     { signal },
   );
@@ -680,16 +741,37 @@ function streamGeneration(ctx: GenerationContext, request: Request): Response {
       }, HEARTBEAT_MS);
 
       try {
-        // Topic mode branches BEFORE prepareSource: the parse stage is
-        // skipped up front so the rail stays truthful (search activity must
-        // never appear before parse is marked skipped — critique finding 4),
-        // and the grounded search owns the search stage + tool events.
+        // Web search is ALWAYS an augmentation of material: the material
+        // parses FIRST (real Parse stage), then the search stage appends
+        // fresh web knowledge; a failed/unconfigured search degrades to
+        // material-only (never fails the run). Rail truth rule preserved:
+        // Parse events always precede Search events.
         let prepared: PreparedSource;
         if (ctx.body.useWebSearch) {
-          send({ type: "stage", stage: "parse", status: "skip" });
+          const material = await prepareSource(ctx);
+          if (!material.ok) {
+            await sendError(material.response);
+            return;
+          }
+          if (material.parsed) {
+            send({ type: "stage", stage: "parse", status: "start" });
+            send({
+              type: "stage",
+              stage: "parse",
+              status: "done",
+              detail: String(material.text.length),
+            });
+          } else {
+            send({ type: "stage", stage: "parse", status: "skip" });
+          }
+          if (internal.signal.aborted) {
+            send({ type: "cancelled" });
+            return;
+          }
           send({ type: "stage", stage: "search", status: "start" });
           prepared = await prepareWebSource(ctx, {
             signal: internal.signal,
+            base: { text: material.text, sourcePathFinal: material.sourcePathFinal, parsed: material.parsed },
             onLibEvent: (ev) => {
               if (ev.type === "tool_call") {
                 send({ type: "tool_call", tool: ev.tool, query: ev.query });

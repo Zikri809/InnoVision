@@ -5,33 +5,35 @@ const TEST_TIMESTAMP = Date.now();
 const LECTURER_INVITE_CODE = process.env.LECTURER_INVITE_CODE ?? "";
 
 /**
- * E2F — grounded web-search generation (grounded-search.md §9C, TinyFish
- * topic mode, lecturer surface).
+ * E2F — grounded web-search AUGMENTATION (web knowledge added on top of the
+ * lecturer's material; topic-only mode was removed — every generation is
+ * grounded in material the lecturer chose, with web pages as supplementary
+ * citations).
  *
- * The scenario marker rides INSIDE the topic string ("[MOCK:tf_ok] …"); the
- * route's query planner embeds the topic verbatim, the mock AI echoes the
- * marker into the planned queries, and mock-tinyfish-server sniffs the query
- * statelessly (parallel-worker safe; see its header for the fixture/scorer
- * coupling constraints).
+ * The scenario marker rides INSIDE the focus hint / pasted text
+ * ("[MOCK:tf_*] …"); the route's query planner embeds the topic verbatim,
+ * the mock AI echoes the marker into the planned queries, and
+ * mock-tinyfish-server sniffs statelessly (parallel-worker safe; see its
+ * header for the fixture/scorer coupling constraints).
  *
- * Coverage: happy path (search stage lines → payoff → builder chips with the
- * exact fixture hrefs → injection wall), too-thin corpus, search 5xx / 401
- * (distinct localized strips), cancel mid-search ([MOCK:tf_slow] window),
- * partial fetch errors, mobile-360 overflow, ms locale, legacy sources
- * tolerance, and student-surface absence of the chooser.
- *
- * `request.pollTinyfish` polls the mock's /__requests log — TinyFish is
- * called SERVER-SIDE, invisible to page.route (the reason mock-ai-server.mjs
- * exists at all).
+ * Coverage: happy path (augmented generation → payoff → builder shows BOTH
+ * the storage-less material corpus AND web chips → injection wall), thin web
+ * corpus DEGRADES to material-only (never errors), search 5xx / 401 degrade,
+ * cancel mid-search, partial fetch errors (2 chips), mobile 360 overflow, ms
+ * locale, legacy sources tolerance, student-surface absence of the toggle.
  */
 
-const CLEAN_TOPIC = "[MOCK:tf_ok] photosynthesis basics";
+const CLEAN_TEXT =
+  "Photosynthesis converts light energy into chemical energy in chloroplasts. " +
+  "The Calvin cycle fixes carbon dioxide using ATP and NADPH from the light reactions.";
+const CLEAN_HINT = "[MOCK:tf_ok] photosynthesis basics";
 
-/** Register → class → draft quiz → open the generate dialog in web mode. */
-async function openWebTopicDialog(
+/** Register → class → draft quiz → paste material → toggle web augmentation
+ * → focus hint filled. Returns the dialog (still on step 2 config view). */
+async function openAugmentedDialog(
   page: import("@playwright/test").Page,
   emailPrefix: string,
-  topic: string,
+  hint: string,
 ) {
   await registerUser(page, `${emailPrefix}-${TEST_TIMESTAMP}@innovision.test`, "lecturer", LECTURER_INVITE_CODE);
   await createClass(page, `E2F ${emailPrefix}`);
@@ -43,8 +45,10 @@ async function openWebTopicDialog(
 
   await page.getByRole("button", { name: /generate from file/i }).click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByTestId("source-mode-web").click();
-  await dialog.getByLabel(/quiz topic/i).fill(topic);
+  await dialog.getByLabel(/paste your material/i).fill(CLEAN_TEXT);
+  await dialog.getByRole("button", { name: /use pasted text/i }).click();
+  await dialog.getByTestId("web-augment-toggle").check();
+  await dialog.getByTestId("web-focus-hint").fill(hint);
   return dialog;
 }
 
@@ -57,24 +61,21 @@ async function pollTinyfishLog(
   return (await res.json()).requests as never;
 }
 
-test.describe("E2F — grounded web generation", () => {
+test.describe("E2F — grounded web augmentation", () => {
   test.skip(!LECTURER_INVITE_CODE, "LECTURER_INVITE_CODE not set");
   // register + class + quiz + generation + payoff comfortably exceed the
   // 30s default (e2c's 180s precedent, trimmed to the real budget).
   test.setTimeout(120_000);
 
-  test("happy path: search lines, payoff, builder chips, injection wall", async ({
+  test("happy path: material + web corpus, payoff, builder chips, injection wall", async ({
     page,
     request,
   }) => {
-    const dialog = await openWebTopicDialog(page, "e2f-ok", CLEAN_TOPIC);
+    const dialog = await openAugmentedDialog(page, "e2f-ok", CLEAN_HINT);
 
-    // Submit from step 1 (web mode has no extraction step).
     await dialog.getByRole("button", { name: /generate quiz/i }).click();
 
-    // The generating view shows the search stage + tool lines INSIDE the
-    // dialog (server chrome, query text included — catches a silently
-    // dropped tool_call case in the client switch).
+    // The generating view shows the search stage INSIDE the dialog.
     await expect(
       dialog.getByTestId("generation-thinking-toggle"),
     ).toBeVisible({ timeout: 15_000 });
@@ -85,12 +86,10 @@ test.describe("E2F — grounded web generation", () => {
     ).toBeVisible({ timeout: 30_000 });
 
     // Tool lines carry the real query text (server chrome — catches a
-    // silently dropped tool_call case in the client event switch). Both
-    // planned queries render, so assert the prefix appears at least twice.
+    // silently dropped tool_call case in the client event switch).
     await dialog.getByTestId("generation-thinking-toggle").click();
     const searchLines = dialog.getByText(/Searching the web: /);
     await expect(searchLines.first()).toBeVisible();
-    await expect(searchLines).toHaveCount(2);
 
     // The search actually ran server-side with the marker (stateless sniff).
     await expect
@@ -119,66 +118,68 @@ test.describe("E2F — grounded web generation", () => {
     ).toHaveCount(0);
   });
 
-  test("too-thin corpus: distinct localized strip, topic preserved on retry", async ({
+  test("thin web corpus DEGRADES: payoff from material alone, no chips", async ({
     page,
+    request,
   }) => {
-    const dialog = await openWebTopicDialog(
+    const dialog = await openAugmentedDialog(
       page,
       "e2f-thin",
       "[MOCK:tf_thin] photosynthesis basics",
     );
     await dialog.getByRole("button", { name: /generate quiz/i }).click();
 
-    // The thin-corpus copy — NOT the generic "Generation failed" headline.
+    // Augmentation contract: a failed/thin search NEVER errors — the
+    // material grounds the quiz and the payoff still lands.
     await expect(
-      dialog.getByText(/too little content|terlalu sedikit kandungan/i),
+      dialog.getByText(/grounded in|disokong/i),
     ).toBeVisible({ timeout: 30_000 });
-    await expect(dialog.getByTestId("generation-retry-btn")).toBeEnabled();
+    // The thin fixture fetched 0 usable pages → 0 web sources in the stamp.
+    await expect(dialog.getByText(/0 questions grounded in 0 web pages/i)).toBeVisible();
 
-    // Topic preserved: retry re-posts the same config (fails again).
-    await dialog.getByTestId("generation-retry-btn").click();
-    await expect(
-      dialog.getByText(/too little content|terlalu sedikit kandungan/i),
-    ).toBeVisible({ timeout: 30_000 });
+    const reviewBtn = dialog.getByTestId("generation-review-btn");
+    await expect(reviewBtn).toBeEnabled();
+    await reviewBtn.click();
+    await expect(dialog).toHaveCount(0);
 
-    // Builder untouched: the seed question remains.
-    await page.keyboard.press("Escape");
-    await expect(page.getByText("Seeded draft question?", { exact: true })).toBeVisible();
+    // Material-only provenance: no chips section.
+    await expect(page.getByTestId("web-source-chip")).toHaveCount(0);
+    await expect(page.getByTestId("web-source-chip-section")).toHaveCount(0);
+    // The generated questions ARE there (from the pasted material).
+    await expect(page.getByText("What is velocity?", { exact: true })).toBeVisible();
   });
 
-  test("search 5xx → search_failed strip", async ({ page }) => {
-    const dialog5xx = await openWebTopicDialog(
+  test("search 5xx DEGRADES to material-only", async ({ page }) => {
+    const dialog = await openAugmentedDialog(
       page,
       "e2f-5xx",
       "[MOCK:tf_5xx] photosynthesis basics",
     );
-    await dialog5xx.getByRole("button", { name: /generate quiz/i }).click();
+    await dialog.getByRole("button", { name: /generate quiz/i }).click();
     await expect(
-      dialog5xx.getByText(/web search failed|carian web gagal/i),
+      dialog.getByText(/grounded in|disokong/i),
     ).toBeVisible({ timeout: 30_000 });
+    await expect(dialog.getByText(/0 questions grounded in 0 web pages/i)).toBeVisible();
   });
 
-  test("search 401 → distinct search_unavailable strip", async ({ page }) => {
-    const dialog401 = await openWebTopicDialog(
+  test("search 401 (bad key) DEGRADES to material-only", async ({ page }) => {
+    const dialog = await openAugmentedDialog(
       page,
       "e2f-401",
       "[MOCK:tf_401] photosynthesis basics",
     );
-    await dialog401.getByRole("button", { name: /generate quiz/i }).click();
+    await dialog.getByRole("button", { name: /generate quiz/i }).click();
     await expect(
-      dialog401.getByText(/web search is unavailable|carian web tidak tersedia/i),
+      dialog.getByText(/grounded in|disokong/i),
     ).toBeVisible({ timeout: 30_000 });
-    // The two codes are two DIFFERENT localized strings — assert the copy on
-    // this strip is NOT the search_failed one (they share a landing strip).
-    await expect(
-      dialog401.getByText(/web search failed|carian web gagal/i),
-    ).toHaveCount(0);
+    // The degraded run never surfaces a raw error strip.
+    await expect(dialog.getByText(/generation failed/i)).toHaveCount(0);
   });
 
   test("cancel mid-search: cancelled strip, then a fresh run succeeds (guard released)", async ({
     page,
   }) => {
-    const dialog = await openWebTopicDialog(
+    const dialog = await openAugmentedDialog(
       page,
       "e2f-slow",
       "[MOCK:tf_slow] photosynthesis basics",
@@ -190,14 +191,14 @@ test.describe("E2F — grounded web generation", () => {
       timeout: 15_000,
     });
     await dialog.getByTestId("generation-cancel-btn").click();
-    await expect(dialog.getByTestId("generation-status-strip").getByText(/generation cancelled|penjanaan dibatalkan/i)).toBeVisible();
+    await expect(
+      dialog
+        .getByTestId("generation-status-strip")
+        .getByText(/generation cancelled|penjanaan dibatalkan/i),
+    ).toBeVisible();
 
     // Fresh clean re-run immediately: the in-flight guard was released.
     await dialog.getByTestId("generation-retry-btn").click();
-    // The retry replays the SAME slow scenario; cancel again then accept the
-    // payoff is NOT possible — instead assert the run is live again (strip
-    // pulsing) and cancel once more; the guard is proven released by the
-    // second cancel not showing "already running".
     await expect(dialog.getByTestId("generation-cancel-btn")).toBeVisible({
       timeout: 15_000,
     });
@@ -205,13 +206,17 @@ test.describe("E2F — grounded web generation", () => {
       dialog.getByText(/already running|sedang berjalan/i),
     ).toHaveCount(0);
     await dialog.getByTestId("generation-cancel-btn").click();
-    await expect(dialog.getByTestId("generation-status-strip").getByText(/generation cancelled|penjanaan dibatalkan/i)).toBeVisible();
+    await expect(
+      dialog
+        .getByTestId("generation-status-strip")
+        .getByText(/generation cancelled|penjanaan dibatalkan/i),
+    ).toBeVisible();
   });
 
   test("partial fetch errors: skipped line + exactly 2 chips", async ({
     page,
   }) => {
-    const dialog = await openWebTopicDialog(
+    const dialog = await openAugmentedDialog(
       page,
       "e2f-partial",
       "[MOCK:tf_partial] photosynthesis basics",
@@ -235,10 +240,10 @@ test.describe("E2F — grounded web generation", () => {
     // inside a test callback — UI-critic Blocker 4).
     test.use({ viewport: { width: 360, height: 640 } });
 
-    test("chooser + topic stack, no horizontal overflow at payoff", async ({
+    test("augment toggle + hint stack, no horizontal overflow at payoff", async ({
       page,
     }) => {
-      const dialog = await openWebTopicDialog(page, "e2f-mobile", CLEAN_TOPIC);
+      const dialog = await openAugmentedDialog(page, "e2f-mobile", CLEAN_HINT);
       const body = dialog.locator('[tabindex="-1"]').first();
       await dialog.getByRole("button", { name: /generate quiz/i }).click();
       await expect(
@@ -257,11 +262,10 @@ test.describe("E2F — grounded web generation", () => {
   test("ms locale: Malay payoff copy after the shell language toggle", async ({
     page,
   }) => {
-    const dialog = await openWebTopicDialog(page, "e2f-ms", CLEAN_TOPIC);
-    // Flip the shell to BM (e31 pattern) BEFORE generating — the payoff and
-    // strip copy must come out localized, never the EN by accident. The
-    // toggle navigates/re-renders the shell, so REOPEN the dialog by its BM
-    // name ("Jana daripada fail").
+    const dialog = await openAugmentedDialog(page, "e2f-ms", CLEAN_HINT);
+    // Flip the shell to BM (e31 pattern) BEFORE generating — the payoff must
+    // come out localized. The toggle re-renders the shell; REOPEN the
+    // dialog by its BM name ("Jana daripada fail").
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: /tukar bahasa|switch language/i }).click();
     await page.waitForTimeout(800);
@@ -269,9 +273,10 @@ test.describe("E2F — grounded web generation", () => {
       .getByRole("button", { name: /jana daripada fail|generate from file/i })
       .click();
     const dialog2 = page.getByRole("dialog");
-    await dialog2.getByTestId("source-mode-web").click();
-    await dialog2.getByLabel(/topik kuiz|quiz topic/i).fill(CLEAN_TOPIC);
-    await dialog2.getByRole("button", { name: /jana kuiz|generate quiz/i }).click();
+    await dialog2.getByLabel(/tampal/i).fill(CLEAN_TEXT);
+    await dialog2.getByRole("button", { name: /guna teks ditampal/i }).click();
+    await dialog2.getByTestId("web-augment-toggle").check();
+    await dialog2.getByRole("button", { name: /jana kuiz/i }).click();
     await expect(dialog2.getByText(/disokong/i)).toBeVisible({ timeout: 30_000 });
   });
 
@@ -299,15 +304,15 @@ test.describe("E2F — grounded web generation", () => {
     await expect(page.getByTestId("web-source-chip")).toHaveCount(0);
   });
 
-  test("student surface never shows the source-mode chooser", async ({ page }) => {
+  test("student surface never shows the augmentation toggle", async ({ page }) => {
     await registerUser(
       page,
       `student-e2f-${TEST_TIMESTAMP}@innovision.test`,
       "student",
       LECTURER_INVITE_CODE,
     );
-    // Minimal regression guard: the chooser testids never exist for students.
-    const chooserCount = await page.getByTestId("source-mode-web").count();
-    expect(chooserCount).toBe(0);
+    // Minimal regression guard: the toggle testid never exists for students.
+    const toggleCount = await page.getByTestId("web-augment-toggle").count();
+    expect(toggleCount).toBe(0);
   });
 });

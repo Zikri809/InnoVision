@@ -920,14 +920,10 @@
     "consoleTitle": "Menjana kuiz anda",
     "cancelGeneration": "Batal",
     "consoleWaiting": "Menyambung ke AI…",
-    "sourceModeLabel": "Sumber",
-    "sourceModeMaterial": "Bahan saya",
-    "sourceModeMaterialDesc": "Muat naik fail atau tampal teks sebagai sumber kuiz.",
-    "sourceModeWeb": "Topik web",
-    "sourceModeWebDesc": "Cari topik di web dan jadikan halaman sebenar sebagai sumber kuiz.",
-    "webTopicLabel": "Topik kuiz",
-    "webTopicPlaceholder": "cth. Tindak balas cahaya dan gelap fotosintesis",
-    "webTopicNote": "Kami mencari halaman rujukan di web untuk topik ini, membacanya, dan membina kuiz daripada kandungannya. Halaman yang digunakan muncul sebagai sumber dalam pembina.",
+    "webAugmentLabel": "Tambah pengetahuan web terkini",
+    "webAugmentDesc": "Cari di web dan jadikan kuiz ini bersumber daripada bahan anda DAN halaman baharu — sesuai apabila nota anda mungkin sudah lapuk. Jika carian tidak menjumpai apa-apa yang boleh digunakan, penjanaan hanya menggunakan bahan anda.",
+    "webFocusHintLabel": "Apa yang perlu dicari di web? (pilihan)",
+    "webFocusHintPlaceholder": "cth. statistik 2025, peraturan baharu — kosongkan untuk terbitkan daripada bahan anda",
     "stageParseLabel": "Fahami",
     "stageSearchLabel": "Cari",
     "stageDraftLabel": "Draf",
@@ -966,7 +962,8 @@
     "stageDoneWord": "selesai",
     "stageActiveWord": "sedang berjalan",
     "stageFailedWord": "gagal",
-    "stagePendingWord": "menunggu"
+    "stagePendingWord": "menunggu",
+    "webAugmentNote": "Halaman web baharu yang dijumpai ditambah SELEPAS bahan anda sebagai sokongan tambahan. Jika carian tidak menjumpai apa-apa — atau tidak tersedia — kuiz dijana daripada bahan anda sahaja, tanpa kehilangan apa-apa."
   },
   "errors": {
     "unauthorized": "Anda mesti log masuk untuk melakukan tindakan ini.",

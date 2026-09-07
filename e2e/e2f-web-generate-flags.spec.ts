@@ -36,9 +36,8 @@ test.describe("E2F flags — web search disabled", () => {
     await page.getByRole("button", { name: /generate from file/i }).click();
     const dialog = page.getByRole("dialog");
 
-    // The whole chooser is absent (not just unchecked).
-    await expect(dialog.getByTestId("source-mode-web")).toHaveCount(0);
-    await expect(dialog.getByTestId("source-mode-material")).toHaveCount(0);
+    // The augmentation toggle is absent without the key.
+    await expect(dialog.getByTestId("web-augment-toggle")).toHaveCount(0);
 
     // The classic paste flow still works end-to-end.
     await dialog.getByLabel(/paste your material/i).fill(

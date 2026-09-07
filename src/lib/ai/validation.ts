@@ -85,12 +85,14 @@ export const GenerateQuizSchema = z.object({
     .optional(),
   language: z.enum(["en", "ms", "auto"]).optional().default("auto"),
   /**
-   * Grounded web search (grounded-search.md §3): lecturer-only topic mode.
-   * XOR with the file/text sources — a generation is grounded in EITHER
-   * uploaded material OR fetched web pages, never a mix (the corpus fence
-   * and sources provenance assume exactly one kind). Absence of
-   * `useWebSearch` with a `topic` present is also rejected — the pair
-   * travels together, always.
+   * Grounded web search (augmentation model): `useWebSearch` + `topic` ride
+   * ALONGSIDE material sources (extractedText / sourcePath / sourcePaths) —
+   * web pages are ALWAYS supplementary to material the lecturer chose, never
+   * a replacement (topic-only generation was removed: a quiz grounded in
+   * nothing but web results gives a lecturer nothing to trust). `topic` is
+   * the search FOCUS HINT (or, when empty client-side, derived server-side
+   * from the material text); `extractedText`/`sourcePaths` stay REQUIRED —
+   * the route's prepareSource owns the no-source rejection.
    */
   topic: z
     .string()
@@ -100,15 +102,11 @@ export const GenerateQuizSchema = z.object({
     .optional(),
   useWebSearch: z.boolean().optional().default(false),
 }).superRefine((data, ctx) => {
-  const hasFileOrText =
-    data.extractedText !== undefined ||
-    data.sourcePath !== undefined ||
-    data.sourcePaths !== undefined;
   if (data.useWebSearch && data.topic === undefined) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["topic"],
-      message: "Web search mode requires a topic.",
+      message: "Web search mode requires a topic or focus hint.",
     });
   }
   if (data.topic !== undefined && !data.useWebSearch) {
@@ -118,11 +116,18 @@ export const GenerateQuizSchema = z.object({
       message: "A topic requires web search mode.",
     });
   }
-  if (data.useWebSearch && hasFileOrText) {
+  // Augmentation-only rule: the pair must ride WITH material — topic-only
+  // bodies are rejected at the schema layer (the UI offers web search as a
+  // toggle on the material flow, never as a standalone source).
+  const hasFileOrText =
+    data.extractedText !== undefined ||
+    data.sourcePath !== undefined ||
+    data.sourcePaths !== undefined;
+  if (data.useWebSearch && data.topic !== undefined && !hasFileOrText) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["useWebSearch"],
-      message: "Web search mode cannot be combined with file or text sources.",
+      message: "Web search augments your material — add a file or paste text first.",
     });
   }
 });

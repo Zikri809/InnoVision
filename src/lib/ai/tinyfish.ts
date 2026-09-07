@@ -522,6 +522,10 @@ export async function runGroundedSearch(opts: {
   ai: OpenAI;
   deadlineMs: number;
   signal?: AbortSignal;
+  /** Augmentation mode: a thin/no-result corpus is a NON-error (the caller's
+   * material text still grounds the generation) — returns ok with empty
+   * sources instead of `search_corpus_thin`. */
+  allowThin?: boolean;
   onEvent?: (event: GroundedSearchLibEvent) => void;
 }): Promise<GroundedSearchResult> {
   const { topic, ai, deadlineMs } = opts;
@@ -586,6 +590,7 @@ export async function runGroundedSearch(opts: {
   // 3. Score + select the top sources.
   const selected = selectSources([...hits.values()], topic, SEARCH_MAX_SOURCES);
   if (selected.length === 0) {
+    if (opts.allowThin) return { ok: true, text: "", sources: [] };
     return {
       ok: false,
       error: "search_corpus_thin",
@@ -629,6 +634,7 @@ export async function runGroundedSearch(opts: {
   // errors or bot-blocks: search_failed) from RETRIEVED-BUT-EMPTY pages
   // (a genuinely thin topic: search_corpus_thin).
   if (fetched.pages.length === 0) {
+    if (opts.allowThin) return { ok: true, text: "", sources: [] };
     const emptyOnly =
       fetched.failedUrls.length > 0 &&
       fetched.failedUrls.every((f) => f.error === "empty_content");
@@ -658,6 +664,7 @@ export async function runGroundedSearch(opts: {
     })),
   );
   if (!corpus.ok) {
+    if (opts.allowThin) return { ok: true, text: "", sources: [] };
     return {
       ok: false,
       error: "search_corpus_thin",

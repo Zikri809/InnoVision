@@ -920,14 +920,10 @@
     "consoleTitle": "Generating your quiz",
     "cancelGeneration": "Cancel",
     "consoleWaiting": "Connecting to the AI…",
-    "sourceModeLabel": "Source",
-    "sourceModeMaterial": "My material",
-    "sourceModeMaterialDesc": "Upload files or paste text to ground the quiz.",
-    "sourceModeWeb": "Web topic",
-    "sourceModeWebDesc": "Search the web on a topic and ground the quiz in real pages.",
-    "webTopicLabel": "Quiz topic",
-    "webTopicPlaceholder": "e.g. Photosynthesis light and dark reactions",
-    "webTopicNote": "We search the web for reference pages on this topic, read them, and craft the quiz from what they say. The pages used appear as source chips in the builder.",
+    "webAugmentLabel": "Add up-to-date web knowledge",
+    "webAugmentDesc": "Also search the web and ground the quiz in both your material and fresh pages — useful when your notes may be outdated. If the search finds nothing usable, the generation simply uses your material.",
+    "webFocusHintLabel": "What should the web search focus on? (optional)",
+    "webFocusHintPlaceholder": "e.g. 2025 statistics, recent regulations — leave empty to derive from your material",
     "stageParseLabel": "Parse",
     "stageSearchLabel": "Search",
     "stageDraftLabel": "Draft",
@@ -966,7 +962,8 @@
     "stageDoneWord": "done",
     "stageActiveWord": "in progress",
     "stageFailedWord": "failed",
-    "stagePendingWord": "waiting"
+    "stagePendingWord": "waiting",
+    "webAugmentNote": "Fresh web pages found this way are added AFTER your material as extra grounding. If the search finds nothing usable — or is unavailable — the quiz is generated from your material alone, and nothing is lost."
   },
   "errors": {
     "unauthorized": "You must be signed in to perform this action.",

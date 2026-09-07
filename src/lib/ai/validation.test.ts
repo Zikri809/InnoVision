@@ -155,14 +155,15 @@ describe("QT-1 — allowMultiSelect flag plumbing", () => {
   });
 });
 
-describe("GenerateQuizSchema — grounded web search (topic mode)", () => {
+describe("GenerateQuizSchema — grounded web search (augmentation mode)", () => {
   const BASE = { quizId: "00000000-0000-4000-8000-00000000000c" };
 
-  it("W-XOR1 topic + useWebSearch with no file/text sources passes", () => {
+  it("W-AUG1 topic + useWebSearch + extractedText passes (material + web)", () => {
     const r = GenerateQuizSchema.safeParse({
       ...BASE,
       topic: "photosynthesis basics",
       useWebSearch: true,
+      extractedText: "some text",
     });
     expect(r.success).toBe(true);
     if (r.success) {
@@ -171,27 +172,7 @@ describe("GenerateQuizSchema — grounded web search (topic mode)", () => {
     }
   });
 
-  it("W-XOR2 useWebSearch without topic → rejected", () => {
-    const r = GenerateQuizSchema.safeParse({ ...BASE, useWebSearch: true });
-    expect(r.success).toBe(false);
-  });
-
-  it("W-XOR3 topic without useWebSearch → rejected (pair travels together)", () => {
-    const r = GenerateQuizSchema.safeParse({ ...BASE, topic: "photosynthesis basics" });
-    expect(r.success).toBe(false);
-  });
-
-  it("W-XOR4 topic + extractedText → rejected (XOR with file/text)", () => {
-    const r = GenerateQuizSchema.safeParse({
-      ...BASE,
-      topic: "photosynthesis basics",
-      useWebSearch: true,
-      extractedText: "some text",
-    });
-    expect(r.success).toBe(false);
-  });
-
-  it("W-XOR5 topic + sourcePaths → rejected", () => {
+  it("W-AUG2 topic + useWebSearch + sourcePaths passes", () => {
     const r = GenerateQuizSchema.safeParse({
       ...BASE,
       topic: "photosynthesis basics",
@@ -200,15 +181,39 @@ describe("GenerateQuizSchema — grounded web search (topic mode)", () => {
         "00000000-0000-4000-8000-00000000000a/00000000-0000-4000-8000-00000000000c/chapter.pdf",
       ],
     });
+    expect(r.success).toBe(true);
+  });
+
+  it("W-AUG3 useWebSearch without topic → rejected (pair travels together)", () => {
+    const r = GenerateQuizSchema.safeParse({ ...BASE, useWebSearch: true });
     expect(r.success).toBe(false);
   });
 
-  it("W-XOR6 topic too short → rejected", () => {
-    const r = GenerateQuizSchema.safeParse({ ...BASE, topic: "ab", useWebSearch: true });
+  it("W-AUG4 topic without useWebSearch → rejected", () => {
+    const r = GenerateQuizSchema.safeParse({ ...BASE, topic: "photosynthesis basics" });
     expect(r.success).toBe(false);
   });
 
-  it("W-XOR7 topic over 500 chars → rejected", () => {
+  it("W-AUG5 topic-only (no material) → rejected — web search ALWAYS augments material", () => {
+    const r = GenerateQuizSchema.safeParse({
+      ...BASE,
+      topic: "photosynthesis basics",
+      useWebSearch: true,
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("W-AUG6 topic too short → rejected", () => {
+    const r = GenerateQuizSchema.safeParse({
+      ...BASE,
+      topic: "ab",
+      useWebSearch: true,
+      extractedText: "text",
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("W-AUG7 topic over 500 chars → rejected", () => {
     const r = GenerateQuizSchema.safeParse({
       ...BASE,
       topic: "x".repeat(501),
