@@ -89,6 +89,7 @@
 4. **Polling instead of Supabase Realtime** — no connection limits to manage at this scale.
 5. **Vercel + Supabase free tiers** — zero fixed monthly cost until the product outgrows the demo.
 6. **OpenAI-compatible client everywhere** — point `AI_BASE_URL` at a local vLLM model for quiz generation too, and the entire demo runs at $0 with no internet dependency.
+7. **Grounded web search (TinyFish topic mode) is free-tier** (docs.tinyfish.ai, verified 2026-09): Search API 30 requests/minute/key and Fetch API 150 URLs/minute/key — both **free at any wallet balance** (only TinyFish Agent/Browser draw from the paid wallet, and InnoVision never calls them). Per grounded generation the app makes ~2 search calls + 1 batched fetch of ≤3 URLs, so a full demo day (≤10 generations/user × the hourly generation rate limit) sits far below the free limits; the shared-key 30 rpm ceiling is the real constraint at multi-user scale and surfaces cleanly as a retryable `search_failed`. Corpus is bounded per generation: 12k chars/source × ≤3 sources, then the global 400k aggregate cap (same ceilings as file text), so grounding adds no new token-cost ceiling beyond the one planning call (~300 output tokens).
 
 ---
 

@@ -379,6 +379,31 @@ The former full-page console route (`/lecturer/quizzes/[id]/generating`,
 sessionStorage handoff) is retired. `/api/extract/ocr` is deliberately NOT
 stream-ified (its typed JSON errors are consumed by the dialog step 1).
 
+**Grounded web search (topic mode)** (docs/plans/grounded-search.md —
+`src/lib/ai/tinyfish.ts`, SERVER-ONLY like the AI client): lecturers can
+generate from a TOPIC instead of files. The route's `prepareWebSource`
+orchestrates plan (`planSearchQueries` — one small AI call embedding the
+topic verbatim, falling back to direct-topic search on ANY failure) →
+TinyFish Search (free, `X-API-Key`) → score/select (term overlap + position
+decay, URL dedupe, 2-per-hostname cap) → TinyFish Fetch (free, one batch of
+≤3 pages as markdown, links/images disabled) → fenced UNTRUSTED corpus
+(12k chars/source, `MAX_AGGREGATE_CHARS` aggregate, ``` → ''' escape,
+forged `=== WEB SOURCE` prefixes scrubbed). The stream adds a `search` stage
+(ordered AFTER the parse-skip so the rail stays truthful) and
+`tool_call`/`tool_result` events (server chrome: issued queries, result
+counts, skipped fetches). Error codes: `search_unavailable` (key unset /
+401-class → 503), `search_failed` (network/5xx/429-after-retry/ALL pages
+failed → 502), `search_corpus_thin` (fetches OK but <200 chars → 422) —
+GenerationProgress maps these to localized strip copy. Provenance persists
+via the 7-arg `save_quiz_questions` overload (migration 0040):
+`quizzes.sources` gains `{kind:"web", url, title, retrieved_at, query}`
+entries beside the legacy storage-path shape (permanently mixed — the 0016
+freeze trigger). The builder renders them as external-link chips
+(`SourceChips`); students never see citations (Phase 7 accepted tradeoff).
+Every citation is a URL we actually fetched — fabrication impossible by
+construction. The feature flag `TINYFISH_API_KEY` (empty string counts as
+absent) hides the UI mode and the route rejects with `search_unavailable`.
+
 ### 7.3 File upload → extraction/OCR pipeline
 
 Uploads go straight browser → private bucket via supabase-js storage

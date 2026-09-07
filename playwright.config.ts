@@ -12,6 +12,8 @@ if (existsSync(".env.local")) {
 const PORT = process.env.PLAYWRIGHT_PORT ?? "3001";
 const BASE_URL = `http://localhost:${PORT}`;
 const MOCK_AI_PORT = process.env.MOCK_AI_PORT ?? "8787";
+const MOCK_TINYFISH_PORT = process.env.MOCK_TINYFISH_PORT ?? "8788";
+const NOWEBSEARCH_PORT = process.env.PLAYWRIGHT_NOWEBSEARCH_PORT ?? "3002";
 
 /**
  * Build policy: ALWAYS rebuild fresh before every suite run.
@@ -51,7 +53,7 @@ export default defineConfig({
       // 1280×720 desktop project would fail every assertion and, with CI's
       // maxFailures: 1, abort the whole step. They run in the `mobile`
       // project below.
-      testIgnore: ["**/m1-*.spec.ts"],
+      testIgnore: ["**/m1-*.spec.ts", "**/e2f-web-generate-flags.spec.ts"],
     },
     {
       // Mobile project (plan §6): phone viewport + touch + mobile UA so the
@@ -68,6 +70,17 @@ export default defineConfig({
       },
       testMatch: ["**/m1-*.spec.ts"],
     },
+    {
+      // Flag-off project (grounded-search.md §9C): TINYFISH_API_KEY explicitly
+      // EMPTY so isWebSearchEnabled() is false — proves the "Web topic" mode
+      // is hidden and the file flow is intact without the feature. Runs one
+      // tiny spec against the SAME build on a second port (TINYFISH_* is
+      // server-runtime env, so no second build is needed).
+      name: "chromium-nowebsearch",
+      use: { ...devices["Desktop Chrome"], baseURL: `http://localhost:${NOWEBSEARCH_PORT}` },
+      testMatch: ["**/e2f-web-generate-flags.spec.ts"],
+      testIgnore: ["**/m1-*.spec.ts"],
+    },
   ],
   webServer: [
     {
@@ -77,6 +90,15 @@ export default defineConfig({
       url: `http://127.0.0.1:${MOCK_AI_PORT}/health`,
       reuseExistingServer: !process.env.CI,
       timeout: 30_000,
+    },
+    {
+      // Mock TinyFish Search+Fetch (grounded-search.md §9C) — the route calls
+      // TinyFish server-side, so a real local server is needed the same way.
+      command: `node e2e/mock-tinyfish-server.mjs`,
+      url: `http://127.0.0.1:${MOCK_TINYFISH_PORT}/health`,
+      reuseExistingServer: !process.env.CI,
+      timeout: 30_000,
+      env: { MOCK_TINYFISH_PORT: String(MOCK_TINYFISH_PORT) },
     },
     {
       // PRODUCTION server: rebuilt fresh every run (see the build-policy note
@@ -114,6 +136,12 @@ export default defineConfig({
         AI_BASE_URL: `http://127.0.0.1:${MOCK_AI_PORT}/v1`,
         AI_API_KEY: "test-key",
         AI_MODEL: "gpt-4o-mini",
+        // Grounded web search (grounded-search.md §9C): ALWAYS explicit —
+        // never inherit a real TINYFISH_API_KEY from .env.local (the suite
+        // would silently gain web mode on machines that have one).
+        TINYFISH_API_KEY: "test-tinyfish-key",
+        TINYFISH_SEARCH_URL: `http://127.0.0.1:${MOCK_TINYFISH_PORT}`,
+        TINYFISH_FETCH_URL: `http://127.0.0.1:${MOCK_TINYFISH_PORT}`,
         // chatStream's inter-chunk idle abort: the harness uses 3s so the
         // mock's [MOCK:stall] scenario (silent upstream) resolves in-test
         // instead of holding the route for the production 90s.
@@ -127,6 +155,23 @@ export default defineConfig({
         // explicit harness-only opt-in that survives the build (src/lib/face/
         // seam-gate.ts). NEVER set this outside the Playwright harness.
         NEXT_PUBLIC_E2E_FAKE_SEAM: "1",
+      },
+    },
+    {
+      // Flag-off server instance (chromium-nowebsearch project): serves the
+      // SAME .next build on a second port with TINYFISH_* explicitly cleared —
+      // process.env spread happens FIRST so these overrides win. node -e is
+      // used instead of a shell `while` (webServer commands run under cmd.exe
+      // on Windows).
+      command: `node -e "const fs=require('fs');(function w(){fs.existsSync('.next/BUILD_ID')?require('child_process').execSync('npm run start -- -p ${NOWEBSEARCH_PORT}',{stdio:'inherit'}):setTimeout(w,1000)})()"`,
+      url: `http://localhost:${NOWEBSEARCH_PORT}`,
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+      env: {
+        ...process.env,
+        TINYFISH_API_KEY: "",
+        TINYFISH_SEARCH_URL: "",
+        TINYFISH_FETCH_URL: "",
       },
     },
   ],

@@ -368,10 +368,12 @@ describe("Phase 9 — Append mode, steering, difficulty, and multi-source paths"
     const totalQuestions = ctx.client.tables["questions"]?.filter((q) => q.quiz_id === QUIZ_C);
     expect(totalQuestions).toHaveLength(5);
 
-    // Sources provenance should be tracked
+    // Sources provenance mirrors the real 0025 RPC: a sources entry is
+    // created for a STORAGE file (p_source_file_url) only — this append used
+    // pasted text, so no entry appears (and p_web_sources is null for file
+    // flows, so 0040's web branch is inert here too).
     const quizRow = ctx.client.tables["quizzes"]?.find((q) => q.id === QUIZ_C);
-    expect(quizRow?.sources).toBeDefined();
-    expect(quizRow?.sources as unknown[]).toHaveLength(1);
+    expect(quizRow?.sources).toEqual([]);
   });
 
   it("rejects append when total questions would exceed 30 limit", async () => {

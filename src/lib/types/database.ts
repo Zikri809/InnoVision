@@ -1511,6 +1511,18 @@ export type Database = {
         }
         Returns: undefined
       }
+      save_quiz_questions_web: {
+        Args: {
+          p_mode?: string
+          p_questions: Json
+          p_quiz_id: string
+          p_source_file_url: string
+          p_source_text: string
+          p_title: string
+          p_web_sources?: Json
+        }
+        Returns: undefined
+      }
       save_student_quiz_questions: {
         Args: { p_mode?: string; p_questions: Json; p_quiz_id: string }
         Returns: {

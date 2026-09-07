@@ -154,3 +154,82 @@ describe("QT-1 — allowMultiSelect flag plumbing", () => {
     expect(r.success).toBe(false);
   });
 });
+
+describe("GenerateQuizSchema — grounded web search (topic mode)", () => {
+  const BASE = { quizId: "00000000-0000-4000-8000-00000000000c" };
+
+  it("W-XOR1 topic + useWebSearch with no file/text sources passes", () => {
+    const r = GenerateQuizSchema.safeParse({
+      ...BASE,
+      topic: "photosynthesis basics",
+      useWebSearch: true,
+    });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.topic).toBe("photosynthesis basics");
+      expect(r.data.useWebSearch).toBe(true);
+    }
+  });
+
+  it("W-XOR2 useWebSearch without topic → rejected", () => {
+    const r = GenerateQuizSchema.safeParse({ ...BASE, useWebSearch: true });
+    expect(r.success).toBe(false);
+  });
+
+  it("W-XOR3 topic without useWebSearch → rejected (pair travels together)", () => {
+    const r = GenerateQuizSchema.safeParse({ ...BASE, topic: "photosynthesis basics" });
+    expect(r.success).toBe(false);
+  });
+
+  it("W-XOR4 topic + extractedText → rejected (XOR with file/text)", () => {
+    const r = GenerateQuizSchema.safeParse({
+      ...BASE,
+      topic: "photosynthesis basics",
+      useWebSearch: true,
+      extractedText: "some text",
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("W-XOR5 topic + sourcePaths → rejected", () => {
+    const r = GenerateQuizSchema.safeParse({
+      ...BASE,
+      topic: "photosynthesis basics",
+      useWebSearch: true,
+      sourcePaths: [
+        "00000000-0000-4000-8000-00000000000a/00000000-0000-4000-8000-00000000000c/chapter.pdf",
+      ],
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("W-XOR6 topic too short → rejected", () => {
+    const r = GenerateQuizSchema.safeParse({ ...BASE, topic: "ab", useWebSearch: true });
+    expect(r.success).toBe(false);
+  });
+
+  it("W-XOR7 topic over 500 chars → rejected", () => {
+    const r = GenerateQuizSchema.safeParse({
+      ...BASE,
+      topic: "x".repeat(501),
+      useWebSearch: true,
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("W-STUDENT1 student schema rejects topic (strict — lecturer-only)", () => {
+    const r = GenerateStudentQuizSchema.safeParse({
+      extractedText: "notes",
+      topic: "photosynthesis basics",
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("W-STUDENT2 student schema rejects useWebSearch", () => {
+    const r = GenerateStudentQuizSchema.safeParse({
+      extractedText: "notes",
+      useWebSearch: true,
+    });
+    expect(r.success).toBe(false);
+  });
+});

@@ -593,8 +593,11 @@ describe("U-AE1 — onEvent mirror (byte-identical default path)", () => {
       .mockResolvedValueOnce({ ok: true, text: "not json" })
       .mockResolvedValueOnce({ ok: true, text: validQuizJson });
     const events: unknown[] = [];
-    const resA = await generateQuiz({ chat: chatA, text: "chapter", questionCount: 10 });
-    const resB = await generateQuiz({ chat: chatB, text: "chapter", questionCount: 10, onEvent: (e) => events.push(e) });
+    // A fixed deadline — the default (Date.now()+900_000) can differ by 1ms
+    // between the two runs and fail the prompt-equality mirror spuriously.
+    const deadline = Date.now() + 900_000;
+    const resA = await generateQuiz({ chat: chatA, text: "chapter", questionCount: 10, deadlineMs: deadline });
+    const resB = await generateQuiz({ chat: chatB, text: "chapter", questionCount: 10, deadlineMs: deadline, onEvent: (e) => events.push(e) });
     expect(resA).toEqual(resB);
     expect(chatA.mock.calls).toEqual(chatB.mock.calls);
     expect(events).toEqual([

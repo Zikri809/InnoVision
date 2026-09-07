@@ -11,6 +11,7 @@ import {
   type GenerateQuizLibEvent,
   type GenerateQuizResult,
 } from "@/lib/ai/quiz-prompt";
+import type { GroundedSearchLibEvent } from "@/lib/ai/tinyfish";
 import { aiQuizToRows, GENERATION_BUDGET_MS } from "@/lib/ai/quiz-schema";
 import { normalizePath } from "@/lib/ai/validation";
 import { nativeExtract } from "@/lib/extract/native";
@@ -20,6 +21,10 @@ import {
   wantsStream,
   type GenerationEvent,
 } from "@/lib/ai/events";
+import {
+  runGroundedSearch,
+  type WebSourceEntry,
+} from "@/lib/ai/tinyfish";
 import {
   checkBodyLimit,
   firstIssueMessage,
@@ -225,11 +230,68 @@ async function appendCapacityError(
   return null;
 }
 
-// ─── Phase 1: source preparation (parse) ─────────────────────────────────────
+// ─── Phase 1: source preparation (parse / web search) ────────────────────────
 
 type PreparedSource =
-  | { ok: true; text: string; sourcePathFinal: string | null; parsed: boolean }
+  | { ok: true; text: string; sourcePathFinal: string | null; parsed: boolean; webSources: WebSourceEntry[] | null }
   | { ok: false; response: NextResponse };
+
+/** The topic-mode branch of source preparation (grounded-search.md §4): runs
+ * the grounded TinyFish pipeline and returns the corpus as the generation
+ * text. Search-stage events are emitted by the CALLER (stream mode wires
+ * onLibEvent → tool events); legacy mode runs silently. */
+async function prepareWebSource(
+  ctx: GenerationContext,
+  opts: { onLibEvent?: (event: GroundedSearchLibEvent) => void; signal?: AbortSignal } = {},
+): Promise<PreparedSource> {
+  // createAiClient() throws on missing env OUTSIDE runGroundedSearch's
+  // non-throwing internals — map it to the typed unavailable error.
+  let ai: ReturnType<typeof createAiClient>;
+  try {
+    ai = createAiClient();
+  } catch {
+    return {
+      ok: false,
+      response: jsonError("search_unavailable", "Web search is unavailable right now.", 503),
+    };
+  }
+  const result = await runGroundedSearch({
+    topic: ctx.body.topic!,
+    questionCount: ctx.body.questionCount ?? 10,
+    language: ctx.body.language ?? "auto",
+    ai,
+    deadlineMs: ctx.deadlineMs,
+    signal: opts.signal,
+    onEvent: opts.onLibEvent,
+  });
+  if (!result.ok) {
+    const response =
+      result.error === "search_corpus_thin"
+        ? unprocessable(
+            result.message ?? "The web pages found for this topic contain too little text.",
+            "search_corpus_thin",
+          )
+        : result.error === "search_unavailable"
+          ? jsonError(
+              "search_unavailable",
+              result.message ?? "Web search is unavailable right now. Try again later.",
+              503,
+            )
+          : jsonError(
+              "search_failed",
+              result.message ?? "Web search failed. Try again.",
+              502,
+            );
+    return { ok: false, response };
+  }
+  return {
+    ok: true,
+    text: result.text,
+    sourcePathFinal: null,
+    parsed: false,
+    webSources: result.sources,
+  };
+}
 
 /** Resolve the source text: client-extracted text directly, or a bounded
  * server-side parse of the stored file(s). Errors return the EXACT legacy
@@ -340,7 +402,7 @@ async function prepareSource(ctx: GenerationContext): Promise<PreparedSource> {
     text = text.slice(0, MAX_AGGREGATE_CHARS);
   }
 
-  return { ok: true, text, sourcePathFinal, parsed };
+  return { ok: true, text, sourcePathFinal, parsed, webSources: null };
 }
 
 // ─── Phase 2: AI generation ──────────────────────────────────────────────────
@@ -426,7 +488,7 @@ type SaveOutcome =
 
 async function saveGeneration(
   ctx: GenerationContext,
-  prepared: { text: string; sourcePathFinal: string | null },
+  prepared: { text: string; sourcePathFinal: string | null; webSources: WebSourceEntry[] | null },
   result: Extract<GenerateQuizResult, { ok: true }>,
   opts: { signal?: AbortSignal } = {},
 ): Promise<SaveOutcome> {
@@ -439,7 +501,11 @@ async function saveGeneration(
     return { kind: "error", response: jsonError("cancelled", "Generation cancelled.", 409) };
   }
 
-  // Build the RPC args with a typed boundary.
+  // Build the RPC args with a typed boundary. The WEB overload carries
+  // p_web_sources; file/text flows keep the historical 6-arg call (the 0040
+  // sibling function exists because PostgREST can't resolve named calls
+  // across same-name overloads — see the migration header).
+  const useWebRpc = prepared.webSources !== null && prepared.webSources.length > 0;
   type SaveQuizQuestionsArgs = {
     p_quiz_id: string;
     p_title: string;
@@ -447,6 +513,7 @@ async function saveGeneration(
     p_source_text: string | null;
     p_questions: unknown;
     p_mode: string;
+    p_web_sources?: unknown;
   };
   const rpcArgs: SaveQuizQuestionsArgs = {
     p_quiz_id: quizId,
@@ -455,10 +522,13 @@ async function saveGeneration(
     p_source_text: prepared.text,
     p_questions: rows,
     p_mode: ctx.body.mode,
+    // Grounded-search provenance (grounded-search.md §5): web entries only —
+    // the RPC skips sources assembly for a null/empty web set.
   };
+  if (useWebRpc) rpcArgs.p_web_sources = prepared.webSources;
 
   const { data: questions, error: rpcError } = await supabase.rpc(
-    "save_quiz_questions",
+    useWebRpc ? "save_quiz_questions_web" : "save_quiz_questions",
     rpcArgs as unknown as never,
   );
 
@@ -545,7 +615,11 @@ async function saveGeneration(
 
 /** LEGACY (default) protocol — byte-identical behavior to the pre-stream route. */
 async function runLegacyGeneration(ctx: GenerationContext, signal: AbortSignal): Promise<NextResponse> {
-  const prepared = await prepareSource(ctx);
+  // Topic mode: the grounded search IS the source preparation (silent —
+  // legacy protocol has no events).
+  const prepared = ctx.body.useWebSearch
+    ? await prepareWebSource(ctx, { signal })
+    : await prepareSource(ctx);
   if (!prepared.ok) return prepared.response;
 
   const result = await runAiGeneration(ctx, prepared.text, { signal });
@@ -553,7 +627,7 @@ async function runLegacyGeneration(ctx: GenerationContext, signal: AbortSignal):
 
   const saved = await saveGeneration(
     ctx,
-    { text: prepared.text, sourcePathFinal: prepared.sourcePathFinal },
+    { text: prepared.text, sourcePathFinal: prepared.sourcePathFinal, webSources: prepared.webSources },
     result,
     { signal },
   );
@@ -606,28 +680,76 @@ function streamGeneration(ctx: GenerationContext, request: Request): Response {
       }, HEARTBEAT_MS);
 
       try {
-        const prepared = await prepareSource(ctx);
-        if (!prepared.ok) {
-          await sendError(prepared.response);
-          return;
-        }
-        // Truth rule: Parse stage events ONLY when real parse work happened
-        // (stored-file route). Client-extracted text skips the rail stage —
-        // validation/clamping is real work but is not "Parse".
-        if (prepared.parsed) {
-          send({ type: "stage", stage: "parse", status: "start" });
+        // Topic mode branches BEFORE prepareSource: the parse stage is
+        // skipped up front so the rail stays truthful (search activity must
+        // never appear before parse is marked skipped — critique finding 4),
+        // and the grounded search owns the search stage + tool events.
+        let prepared: PreparedSource;
+        if (ctx.body.useWebSearch) {
+          send({ type: "stage", stage: "parse", status: "skip" });
+          send({ type: "stage", stage: "search", status: "start" });
+          prepared = await prepareWebSource(ctx, {
+            signal: internal.signal,
+            onLibEvent: (ev) => {
+              if (ev.type === "tool_call") {
+                send({ type: "tool_call", tool: ev.tool, query: ev.query });
+              } else {
+                send({
+                  type: "tool_result",
+                  tool: ev.tool,
+                  query: ev.query,
+                  resultCount: ev.resultCount,
+                  ...(ev.skipped !== undefined ? { skipped: ev.skipped } : {}),
+                  ...(ev.reason !== undefined ? { reason: ev.reason } : {}),
+                });
+              }
+            },
+          });
+          if (!prepared.ok) {
+            // A user cancel during search must surface as `cancelled`, not a
+            // search failure (mirror the save-phase pattern).
+            if (internal.signal.aborted) {
+              send({ type: "cancelled" });
+              return;
+            }
+            await sendError(prepared.response);
+            return;
+          }
           send({
             type: "stage",
-            stage: "parse",
+            stage: "search",
             status: "done",
-            detail: String(prepared.text.length),
+            // Truthful payoff figure: pages actually fetched (≤3).
+            detail: String(prepared.webSources?.length ?? 0),
           });
+          if (internal.signal.aborted) {
+            send({ type: "cancelled" });
+            return;
+          }
         } else {
-          send({ type: "stage", stage: "parse", status: "skip" });
-        }
-        if (internal.signal.aborted) {
-          send({ type: "cancelled" });
-          return;
+          prepared = await prepareSource(ctx);
+          if (!prepared.ok) {
+            await sendError(prepared.response);
+            return;
+          }
+          // Truth rule: Parse stage events ONLY when real parse work happened
+          // (stored-file route). Client-extracted text skips the rail stage —
+          // validation/clamping is real work but is not "Parse".
+          if (prepared.parsed) {
+            send({ type: "stage", stage: "parse", status: "start" });
+            send({
+              type: "stage",
+              stage: "parse",
+              status: "done",
+              detail: String(prepared.text.length),
+            });
+          } else {
+            send({ type: "stage", stage: "parse", status: "skip" });
+          }
+          if (internal.signal.aborted) {
+            send({ type: "cancelled" });
+            return;
+          }
         }
 
         send({ type: "stage", stage: "draft", status: "start" });
@@ -666,7 +788,7 @@ function streamGeneration(ctx: GenerationContext, request: Request): Response {
         send({ type: "stage", stage: "save", status: "start" });
         const saved = await saveGeneration(
           ctx,
-          { text: prepared.text, sourcePathFinal: prepared.sourcePathFinal },
+          { text: prepared.text, sourcePathFinal: prepared.sourcePathFinal, webSources: prepared.webSources },
           result,
           { signal: internal.signal },
         );

@@ -64,15 +64,23 @@ const SCENARIOS: { id: Scenario; label: string }[] = [
 
 const STAGE_DOT_LABEL: Record<GenerationStage, string> = {
   parse: "Parse",
+  search: "Search",
   draft: "Draft",
   refine: "Refine",
   save: "Save",
 };
-const IDLE_TRAIL: Trail = { parse: "pending", draft: "pending", refine: "pending", save: "pending" };
+const IDLE_TRAIL: Trail = {
+  parse: "pending",
+  search: "pending",
+  draft: "pending",
+  refine: "pending",
+  save: "pending",
+};
 
 /** Trace-line verb per stage (coding-agent transcript flavor). */
 const STAGE_ACTIVITY: Record<GenerationStage, string> = {
   parse: "reading sources",
+  search: "searching the web",
   draft: "drafting questions",
   refine: "polishing weak questions",
   save: "saving to your quiz",

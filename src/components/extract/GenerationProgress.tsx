@@ -66,6 +66,7 @@ const PULSE_TONE: Record<string, string> = {
 
 const STAGE_LABEL_KEY: Record<GenerationStage, string> = {
   parse: "stageParseLabel",
+  search: "stageSearchLabel",
   draft: "stageDraftLabel",
   refine: "stageRefineLabel",
   save: "stageSaveLabel",
@@ -73,9 +74,22 @@ const STAGE_LABEL_KEY: Record<GenerationStage, string> = {
 
 const STAGE_ACTIVE_KEY: Record<GenerationStage, string> = {
   parse: "stageParseActive",
+  search: "stageSearchActive",
   draft: "stageDraftActive",
   refine: "stageRefineActive",
   save: "stageSaveActive",
+};
+
+/**
+ * Known error codes → localized strip copy. The strip shows the LOCALIZED
+ * headline for these (raw English server messages are never rendered for
+ * them); unknown codes fall back to the generic failure title + server
+ * message. `already_running` keeps its historical distinct no-retry state.
+ */
+const ERROR_CODE_KEY: Record<string, string> = {
+  search_unavailable: "errSearchUnavailable",
+  search_failed: "errSearchFailed",
+  search_corpus_thin: "errSearchThin",
 };
 
 const SUMMARY_THROTTLE_MS = 5_000;
@@ -175,6 +189,11 @@ export function GenerationProgress({
     endpoint,
     body,
     formatStageLine,
+    formatToolLine: (kind, info) => {
+      if (kind === "call") return t("toolSearchCall", { query: info.query });
+      if (kind === "skip") return t("toolSearchSkip", { url: info.query, reason: info.reason ?? "" });
+      return t("toolSearchResult", { count: info.resultCount ?? 0, query: info.query });
+    },
     announceStage: (stage) =>
       announceThrottledInto(setLiveLine, liveKeyRef, t(STAGE_ACTIVE_KEY[stage])),
     announceTerminal: (kind, doneCount) =>
@@ -283,13 +302,17 @@ export function GenerationProgress({
           <div className="min-w-0 flex-1">
             {/* No role="alert": the terminal announce in the polite live
                 region already announces the failure — assertive+polite
-                doubles the SR announcement. */}
+                doubles the SR announcement. Known codes get LOCALIZED
+                headlines (raw server messages are English-only); unknown
+                codes keep the generic title + server message. */}
             <p className="text-sm font-extrabold">
               {stream.errorCode === "already_running"
                 ? t("alreadyRunningTitle")
-                : t("generationFailedTitle")}
+                : stream.errorCode && ERROR_CODE_KEY[stream.errorCode]
+                  ? t(ERROR_CODE_KEY[stream.errorCode])
+                  : t("generationFailedTitle")}
             </p>
-            {stream.errorMessage && (
+            {stream.errorMessage && !ERROR_CODE_KEY[stream.errorCode ?? ""] && (
               <p className="mt-0.5 text-2xs font-semibold text-destructive/90">
                 {stream.errorMessage}
               </p>
@@ -312,16 +335,20 @@ export function GenerationProgress({
         ) : (
           <p className="min-w-0 flex-1 truncate text-sm font-extrabold">
             {phase === "done"
-              ? t("forgedStamp", {
-                  count: stream.doneCount ?? 0,
-                  // Parse renders skip when the text came from the client
-                  // (no server detail) — fall back to the request body so
-                  // the stamp never says "0 characters" on the primary flow.
-                  chars: (
-                    stream.chars ??
-                    (typeof body.extractedText === "string" ? body.extractedText.length : 0)
-                  ).toLocaleString(),
-                })
+              ? typeof body.topic === "string" && body.useWebSearch === true
+                ? // Web mode: sources are the meaningful count (the old
+                  // chars fallback reads "0 characters" here — critique fix).
+                  t("forgedStampWeb", { count: stream.doneCount ?? 0, sources: stream.webSources ?? 0 })
+                : t("forgedStamp", {
+                    count: stream.doneCount ?? 0,
+                    // Parse renders skip when the text came from the client
+                    // (no server detail) — fall back to the request body so
+                    // the stamp never says "0 characters" on the primary flow.
+                    chars: (
+                      stream.chars ??
+                      (typeof body.extractedText === "string" ? body.extractedText.length : 0)
+                    ).toLocaleString(),
+                  })
               : runningCopy}
           </p>
         )}

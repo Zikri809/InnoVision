@@ -84,6 +84,47 @@ export const GenerateQuizSchema = z.object({
     .max(AI_INSTRUCTION_MAX, `Steering prompt must be at most ${AI_INSTRUCTION_MAX} characters.`)
     .optional(),
   language: z.enum(["en", "ms", "auto"]).optional().default("auto"),
+  /**
+   * Grounded web search (grounded-search.md §3): lecturer-only topic mode.
+   * XOR with the file/text sources — a generation is grounded in EITHER
+   * uploaded material OR fetched web pages, never a mix (the corpus fence
+   * and sources provenance assume exactly one kind). Absence of
+   * `useWebSearch` with a `topic` present is also rejected — the pair
+   * travels together, always.
+   */
+  topic: z
+    .string()
+    .trim()
+    .min(3, "Topic must be at least 3 characters.")
+    .max(500, "Topic must be at most 500 characters.")
+    .optional(),
+  useWebSearch: z.boolean().optional().default(false),
+}).superRefine((data, ctx) => {
+  const hasFileOrText =
+    data.extractedText !== undefined ||
+    data.sourcePath !== undefined ||
+    data.sourcePaths !== undefined;
+  if (data.useWebSearch && data.topic === undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["topic"],
+      message: "Web search mode requires a topic.",
+    });
+  }
+  if (data.topic !== undefined && !data.useWebSearch) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["useWebSearch"],
+      message: "A topic requires web search mode.",
+    });
+  }
+  if (data.useWebSearch && hasFileOrText) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["useWebSearch"],
+      message: "Web search mode cannot be combined with file or text sources.",
+    });
+  }
 });
 
 export type GenerateQuizInput = z.infer<typeof GenerateQuizSchema>;
@@ -95,6 +136,8 @@ export type GenerateQuizInput = z.infer<typeof GenerateQuizSchema>;
  *  - NO steeringPrompt / formatDistribution / mode controls (plan §5: student
  *    mode hides steering + format mix; generation is always replace-or-append
  *    decided by the route's save call).
+ *  - NO topic / useWebSearch — grounded search is lecturer-only (Phase 7
+ *    accepted tradeoff); `.strict()` makes the fields a validation error here.
  * questionCount stays within the shared AI bounds; sourcePath(s) reuse the
  * same two-UUID-segment tenant contract (`${uid}/${quizId}/file`).
  */

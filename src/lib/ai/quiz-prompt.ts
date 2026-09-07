@@ -296,7 +296,7 @@ export function parseQuizJson(text: string): ParsedQuiz {
  * at the abandoned draft's option.
  */
 const SOURCE_REF_PATTERN =
-  /\b(?:in|from|per|according to)\s+(?:the\s+)?(?:task|exercise|question|figure|fig\.|diagram|table|listing|passage|lab\s*(?:sheet|manual)|worksheet|above|provided|given|attached)\b/i;
+  /\b(?:in|from|per|according to)\s+(?:the\s+)?(?:task|exercise|question|figure|fig\.|diagram|table|listing|passage|lab\s*(?:sheet|manual)|worksheet|above|provided|given|attached|website|web\s*page|webpage|article|page|source|internet)\b/i;
 
 const DELIBERATION_PATTERN =
   /\b(?:wait|actually|let'?s\s+(?:correct|re-?evaluate|reconsider|fix)|oops|scratch\s+that|correction:|hmm)\b/i;

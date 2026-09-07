@@ -1,6 +1,8 @@
 import { redirect, notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { createClient } from "@/lib/supabase/server";
+import { isWebSearchEnabled } from "@/lib/ai/tinyfish";
+import { parseQuizSources } from "@/lib/quizzes/sources";
 import { QuizBuilderClient } from "./quiz-builder-client";
 import { ProfilePendingPanel } from "@/components/layout/load-state";
 
@@ -43,7 +45,7 @@ export default async function QuizBuilderPage({
   // the explicit eq() on lecturer_id makes the not-found case unambiguous.
   const { data: quiz, error: quizError } = await supabase
     .from("quizzes")
-    .select("id, class_id, title, mode, status, time_limit_sec, opens_at, closes_at, allow_retake, max_attempts, shuffle_questions, results_revealed_at, created_at, source_file_url, source_text")
+    .select("id, class_id, title, mode, status, time_limit_sec, opens_at, closes_at, allow_retake, max_attempts, shuffle_questions, results_revealed_at, created_at, source_file_url, source_text, sources")
     .eq("id", id)
     .maybeSingle();
 
@@ -155,6 +157,8 @@ export default async function QuizBuilderPage({
         source_file_url: quiz.source_file_url,
         source_text: quiz.source_text,
       }}
+      sources={parseQuizSources(quiz.sources)}
+      hasWebSearch={isWebSearchEnabled()}
       questions={questions ?? []}
       userId={user.id}
       classes={ownedClasses ?? []}

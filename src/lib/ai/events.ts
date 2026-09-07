@@ -27,12 +27,37 @@
  *    successful save, so the client must NOT offer "Try again" here.
  */
 
-export type GenerationStage = "parse" | "draft" | "refine" | "save";
+export type GenerationStage = "parse" | "search" | "draft" | "refine" | "save";
 export type StageStatus = "start" | "done" | "skip";
+
+export type ToolCallEvent = {
+  type: "tool_call";
+  /** Currently only the web-search phase of grounded generation. */
+  tool: "web_search";
+  /** The search query being issued (server-derived chrome, not model text). */
+  query: string;
+};
+
+export type ToolResultEvent = {
+  type: "tool_result";
+  tool: "web_search";
+  /** For fetch failures the "query" field carries the page URL. */
+  query: string;
+  /** Search-hit count or 0 for skipped fetches. */
+  resultCount: number;
+  /** Present when this line reports a SKIPPED fetch (per-URL error). */
+  skipped?: number;
+  /** Skip reason / error code (`target_http_error`, `timeout`, …). */
+  reason?: string;
+};
 
 export type GenerationEvent =
   | { type: "stage"; stage: GenerationStage; status: StageStatus; detail?: string }
   | { type: "ping" }
+  /** Server-chrome tool line: a web-search query is being issued. */
+  | ToolCallEvent
+  /** Server-chrome tool line: search result count / skipped fetch report. */
+  | ToolResultEvent
   /** Raw model reasoning text (unvalidated — inert plain text only). */
   | { type: "reasoning"; text: string }
   /** Raw model content text (unvalidated — inert plain text only). */

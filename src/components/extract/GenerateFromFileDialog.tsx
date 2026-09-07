@@ -13,6 +13,7 @@ import {
   ChevronDown,
   ChevronUp,
   FileText,
+  Globe,
   Minus,
   Plus,
   PlusCircle,
@@ -67,6 +68,7 @@ export function GenerateFromFileDialog({
   mode = "lecturer",
   endpoint,
   onGenerated,
+  hasWebSearch = false,
 }: {
   quizId: string;
   userId: string;
@@ -80,6 +82,8 @@ export function GenerateFromFileDialog({
   endpoint?: string;
   /** Student mode only: receives `{questions}` rows on success (+ cap info). */
   onGenerated?: (questions: unknown[], info: { capped: boolean }) => void;
+  /** TinyFish flag (server env) — gates the "Web topic" source mode. */
+  hasWebSearch?: boolean;
 }) {
   const isStudent = mode === "student";
   const target = endpoint ?? "/api/ai/generate-quiz";
@@ -97,8 +101,14 @@ export function GenerateFromFileDialog({
   const [generating, setGenerating] = useState(false);
   const [genRunId, setGenRunId] = useState(0);
 
+  // Source-mode chooser (grounded-search.md §6): "material" = the classic
+  // upload/paste flow; "web" = grounded topic search (lecturer + flag only).
+  const [sourceMode, setSourceMode] = useState<"material" | "web">("material");
+  const webMode = sourceMode === "web" && hasWebSearch && !isStudent;
+
   const [files, setFiles] = useState<UploadedFileItem[]>([]);
   const [pastedText, setPastedText] = useState("");
+  const [topic, setTopic] = useState("");
   // Lazy localStorage read is hydration-safe here: the dialog body (and this
   // state consumer) only mounts client-side when `open` flips true — it never
   // renders during SSR or the hydration pass.
@@ -138,6 +148,8 @@ export function GenerateFromFileDialog({
     setStep(1);
     setFiles([]);
     setPastedText("");
+    setTopic("");
+    setSourceMode("material");
     setExtractedText(null);
     setIsLowDensity(false);
     setProgress(null);
@@ -263,7 +275,10 @@ export function GenerateFromFileDialog({
   }
 
   async function handleGenerate() {
-    if (!extractedText || submitLock.current || busy) return;
+    // Web mode substitutes a topic for extractedText (critique fix: the old
+    // `!extractedText` gate made web mode unreachable).
+    const canSubmit = webMode ? topic.trim().length >= 3 : Boolean(extractedText);
+    if (!canSubmit || submitLock.current || busy) return;
     submitLock.current = true;
     setBusy(true);
     setError(null);
@@ -273,7 +288,10 @@ export function GenerateFromFileDialog({
     // and the outcome (the /generating console route is retired). Closing
     // the dialog mid-run aborts the stream (truthful: nothing keeps running
     // hidden); a terminal error keeps the trace and offers Try again.
+    // Web mode submits from step 1 (no extraction step) — advance to step 2
+    // so the generating view's render gate (`step === 2`) fires.
     if (!isStudent) {
+      if (webMode && step === 1) setStep(2);
       setGenerating(true);
       setGenRunId((n) => n + 1);
       return;
@@ -350,22 +368,37 @@ export function GenerateFromFileDialog({
    * extractedText is clamped to the 400k aggregate cap (the old sessionStorage
    * handoff's rule): the server schema REJECTS over-cap text, so five
    * text-heavy decks must be truncated client-side to keep the old
-   * generate-from-first-400k outcome instead of a validation error. */
+   * generate-from-first-400k outcome instead of a validation error.
+   * Web mode OMITS extractedText/sourcePaths entirely (empty string ≠ absent
+   * to the XOR validation — critique finding 6). */
   const generationBody = useMemo(
-    () => ({
-      quizId,
-      extractedText: (extractedText ?? "").slice(0, MAX_AGGREGATE_CHARS),
-      questionCount,
-      mode: generationMode,
-      difficulty,
-      formatDistribution,
-      steeringPrompt: steeringPrompt.trim() || undefined,
-      language,
-      // Omit when empty — an explicit [] would trip the schema's min(1) on
-      // the paste-only path.
-      ...(files.length > 0 ? { sourcePaths: files.map((f) => f.path) } : {}),
-    }),
-    [quizId, extractedText, questionCount, generationMode, difficulty, formatDistribution, steeringPrompt, language, files],
+    () =>
+      webMode
+        ? {
+            quizId,
+            topic: topic.trim().slice(0, 500),
+            useWebSearch: true,
+            questionCount,
+            mode: generationMode,
+            difficulty,
+            formatDistribution,
+            steeringPrompt: steeringPrompt.trim() || undefined,
+            language,
+          }
+        : {
+            quizId,
+            extractedText: (extractedText ?? "").slice(0, MAX_AGGREGATE_CHARS),
+            questionCount,
+            mode: generationMode,
+            difficulty,
+            formatDistribution,
+            steeringPrompt: steeringPrompt.trim() || undefined,
+            language,
+            // Omit when empty — an explicit [] would trip the schema's min(1) on
+            // the paste-only path.
+            ...(files.length > 0 ? { sourcePaths: files.map((f) => f.path) } : {}),
+          },
+    [webMode, quizId, topic, extractedText, questionCount, generationMode, difficulty, formatDistribution, steeringPrompt, language, files],
   );
 
   /** Terminal outcomes from the in-dialog stream, reported at EVENT time:
@@ -442,6 +475,64 @@ export function GenerateFromFileDialog({
 
           {step === 1 && (
             <div className="space-y-4">
+              {/* Source-mode chooser (lecturer + flag only): material flow vs
+                  grounded web topic. Clay radio pattern (difficulty buttons). */}
+              {!isStudent && hasWebSearch && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-extrabold text-foreground">
+                    {t("sourceModeLabel")}
+                  </Label>
+                  <div
+                    role="radiogroup"
+                    aria-label={t("sourceModeLabel")}
+                    className="grid grid-cols-1 sm:grid-cols-2 gap-2.5"
+                  >
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={sourceMode === "material"}
+                      data-testid="source-mode-material"
+                      onClick={() => setSourceMode("material")}
+                      className={`rounded-xl border-[3px] py-2.5 px-3.5 text-xs font-extrabold text-left transition-all duration-150 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-ring ${
+                        sourceMode === "material"
+                          ? "border-primary bg-primary/10 text-foreground shadow-[0_3px_0_var(--primary-deep)]"
+                          : "border-border bg-card hover:bg-muted/50 text-foreground shadow-[0_3px_0_var(--border)] hover:-translate-y-0.5 active:translate-y-0"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 font-heading">
+                        <FileText className="size-4 text-primary" />
+                        <span>{t("sourceModeMaterial")}</span>
+                      </div>
+                      <p className="text-2xs font-semibold text-muted-foreground mt-1">
+                        {t("sourceModeMaterialDesc")}
+                      </p>
+                    </button>
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={sourceMode === "web"}
+                      data-testid="source-mode-web"
+                      onClick={() => setSourceMode("web")}
+                      className={`rounded-xl border-[3px] py-2.5 px-3.5 text-xs font-extrabold text-left transition-all duration-150 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-ring ${
+                        sourceMode === "web"
+                          ? "border-primary bg-primary/10 text-foreground shadow-[0_3px_0_var(--primary-deep)]"
+                          : "border-border bg-card hover:bg-muted/50 text-foreground shadow-[0_3px_0_var(--border)] hover:-translate-y-0.5 active:translate-y-0"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 font-heading">
+                        <Globe className="size-4 text-primary" />
+                        <span>{t("sourceModeWeb")}</span>
+                      </div>
+                      <p className="text-2xs font-semibold text-muted-foreground mt-1">
+                        {t("sourceModeWebDesc")}
+                      </p>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {!webMode && (
+                <>
               <UploadDropzone
                 userId={userId}
                 quizId={quizId}
@@ -498,6 +589,95 @@ export function GenerateFromFileDialog({
                 files={files}
                 disabled={busy}
               />
+                </>
+              )}
+
+              {webMode && (
+                <div className="space-y-2 rounded-2xl border-[3px] border-border bg-card p-3.5 shadow-[var(--shadow-clay-sm)]">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label htmlFor="web-topic" className="text-xs font-extrabold text-foreground">
+                      {t("webTopicLabel")}
+                    </Label>
+                    <span id="web-topic-hint" className="text-2xs font-bold text-muted-foreground bg-muted/60 px-2 py-0.5 rounded-full border border-border/40">
+                      {topic.length}/500
+                    </span>
+                  </div>
+                  <Input
+                    id="web-topic"
+                    aria-describedby="web-topic-hint"
+                    value={topic}
+                    onChange={(e) => setTopic(e.target.value)}
+                    placeholder={t("webTopicPlaceholder")}
+                    maxLength={500}
+                    disabled={busy}
+                    className="rounded-xl border-[3px] border-border bg-background/50 focus:bg-background focus:border-primary transition-colors text-sm font-semibold"
+                  />
+                  <div className="flex items-start gap-2 rounded-xl border border-border/40 bg-muted/40 px-3 py-2">
+                    <Globe className="size-3.5 shrink-0 text-primary mt-0.5" aria-hidden="true" />
+                    <p className="text-2xs font-semibold text-muted-foreground leading-relaxed">
+                      {t("webTopicNote")}
+                    </p>
+                  </div>
+                  {/* Web mode submits from step 1, so the append/replace
+                      choice must live HERE when the quiz already has
+                      questions (UI-critic MAJOR 5 — silently replacing an
+                      existing question set without offering the choice is a
+                      data-loss trap). */}
+                  {!isStudent && hasQuestions && (
+                    <div className="space-y-2 pt-1">
+                      <Label className="text-xs font-extrabold text-foreground">
+                        {t("modeLabel")}
+                      </Label>
+                      <div role="radiogroup" aria-label={t("modeLabel")} className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={generationMode === "append"}
+                          onClick={() => setGenerationMode("append")}
+                          className={`rounded-xl border-[3px] py-2.5 px-3.5 text-xs font-extrabold text-left transition-all duration-150 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-ring ${
+                            generationMode === "append"
+                              ? "border-emerald-500 bg-emerald-500/15 text-emerald-950 dark:text-emerald-200 shadow-[0_3px_0_#10b981]"
+                              : "border-border bg-card hover:bg-muted/50 text-foreground shadow-[0_3px_0_var(--border)] hover:-translate-y-0.5 active:translate-y-0"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 font-heading">
+                            <PlusCircle className="size-4 text-emerald-600 dark:text-emerald-400" />
+                            <span>{t("modeAppendTitle")}</span>
+                          </div>
+                          <p className="text-2xs font-semibold text-muted-foreground mt-1">
+                            {t("modeAppendDesc")}
+                          </p>
+                        </button>
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={generationMode === "replace"}
+                          onClick={() => setGenerationMode("replace")}
+                          className={`rounded-xl border-[3px] py-2.5 px-3.5 text-xs font-extrabold text-left transition-all duration-150 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-ring ${
+                            generationMode === "replace"
+                              ? "border-amber-500 bg-amber-500/15 text-amber-950 dark:text-amber-200 shadow-[0_3px_0_#f59e0b]"
+                              : "border-border bg-card hover:bg-muted/50 text-foreground shadow-[0_3px_0_var(--border)] hover:-translate-y-0.5 active:translate-y-0"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 font-heading">
+                            <RefreshCw className="size-4 text-amber-600 dark:text-amber-400" />
+                            <span>{t("modeReplaceTitle")}</span>
+                          </div>
+                          <p className="text-2xs font-semibold text-muted-foreground mt-1">
+                            {t("modeReplaceDesc")}
+                          </p>
+                        </button>
+                      </div>
+                      {generationMode === "replace" && (
+                        <div className="flex items-center gap-1.5 text-2xs font-bold text-amber-700 dark:text-amber-400 bg-amber-500/10 px-3 py-1.5 rounded-xl border border-amber-500/30">
+                          <AlertTriangle className="size-3.5 shrink-0" />
+                          <span>{t("modeReplaceWarning")}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {busy && (
                 <div className="space-y-2 rounded-2xl border-[3px] border-border bg-card p-3.5 shadow-[var(--shadow-clay-sm)]">
@@ -523,7 +703,7 @@ export function GenerateFromFileDialog({
             </div>
           )}
 
-          {step === 2 && extractedText && generating && (
+          {step === 2 && (extractedText || webMode) && generating && (
             <GenerationProgress
               key={genRunId}
               endpoint="/api/ai/generate-quiz"
@@ -538,9 +718,11 @@ export function GenerateFromFileDialog({
             />
           )}
 
-          {step === 2 && extractedText && !generating && (
+          {step === 2 && (extractedText || webMode) && !generating && (
             <div className="space-y-4">
-              {/* Extracted Sources Summary Collapsible */}
+              {/* Web mode has no extracted-text summary card — the topic is
+                  the source; everything below applies to both modes. */}
+              {extractedText && (
               <div className="rounded-2xl border-[3px] border-border bg-card p-3.5 shadow-[var(--shadow-clay-sm)] transition-all">
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2.5 min-w-0">
@@ -584,6 +766,7 @@ export function GenerateFromFileDialog({
                   </pre>
                 )}
               </div>
+              )}
 
               {/* Low Density Heuristic Advisory Notice */}
               {isLowDensity && (
@@ -872,7 +1055,40 @@ export function GenerateFromFileDialog({
         )}
 
         <ResponsiveModalFooter className="shrink-0 pt-3 border-t-[3px] border-border/40 flex items-center justify-between sm:justify-between gap-3">
-          {generating ? null : step === 1 ? (
+          {generating ? null : step === 1 && webMode ? (
+            <>
+              {/* Web mode has no extraction step — its CTA lives on step 1
+                  (critique fix: the old flow had no path into the generating
+                  view without extractedText). */}
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => onOpenChange(false)}
+                disabled={busy}
+                className="font-bold rounded-xl"
+              >
+                {tCommon("cancel")}
+              </Button>
+              <Button
+                type="button"
+                onClick={handleGenerate}
+                disabled={busy || topic.trim().length < 3}
+                className="font-bold rounded-xl gap-2 bg-primary text-primary-foreground shadow-[var(--shadow-clay-sm)]"
+              >
+                {busy ? (
+                  <>
+                    <span className="size-4 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" />
+                    <span>{t("generatingBtn")}</span>
+                  </>
+                ) : (
+                  <>
+                    <Wand2 className="size-4" />
+                    <span>{generationMode === "append" ? t("appendBtn") : t("generateBtn")}</span>
+                  </>
+                )}
+              </Button>
+            </>
+          ) : step === 1 ? (
             <>
               <Button
                 type="button"

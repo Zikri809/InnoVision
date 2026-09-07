@@ -190,6 +190,27 @@ const server = http.createServer((req, res) => {
 
       // ── Legacy non-streaming protocol (unchanged behavior) ──
       let content;
+      // Query-planning call (grounded web search): the route asks for search
+      // queries for a topic; the topic carries a [MOCK:tf_*] marker that MUST
+      // be echoed verbatim into the planned queries so mock-tinyfish-server
+      // can sniff the scenario (mock-tinyfish-server.mjs header comment).
+      const systemMsg = [...messages].reverse().find((m) => m.role === "system")?.content ?? "";
+      if (systemMsg.includes("You plan web search queries")) {
+        // The topic is the trailing line of the user message ("Topic for a
+        // N-question quiz: <topic>"). Echo it verbatim into both queries.
+        const topic = userMsg.includes(": ")
+          ? userMsg.slice(userMsg.lastIndexOf(": ") + 2).split("\n")[0].trim()
+          : userMsg.slice(0, 80);
+        const bare = topic.replace(/\[MOCK:tf_[a-z0-9_]+\]\s*/, "").slice(0, 80) || topic.slice(0, 80);
+        const plannedQueries = [topic.slice(0, 120), `${bare} reference`.slice(0, 120)].filter(
+          (q) => q.length >= 3,
+        );
+        content = JSON.stringify({ queries: plannedQueries });
+        res.writeHead(200);
+        res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content } }] }));
+        return;
+      }
+
       switch (scenario) {
         case "invalid":
           content = INVALID_JSON;

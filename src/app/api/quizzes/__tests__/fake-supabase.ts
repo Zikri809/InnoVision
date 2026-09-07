@@ -423,7 +423,7 @@ export class FakeSupabase {
       return { data: row, error: null };
     }
 
-    if (name === "save_quiz_questions" || name === "replace_quiz_questions") {
+    if (name === "save_quiz_questions" || name === "replace_quiz_questions" || name === "save_quiz_questions_web") {
       if (this.rpcError) return { data: null, error: this.rpcError };
       const quizId = String(args?.p_quiz_id);
       const mode = (args?.p_mode as string) ?? "replace";
@@ -474,7 +474,7 @@ export class FakeSupabase {
       const quizRow = (this.tables["quizzes"] ?? []).find((q) => q.id === quizId);
       if (quizRow) {
         const sourceEntry =
-          args?.p_source_file_url || args?.p_source_text
+          args?.p_source_file_url
             ? {
                 file_url: args.p_source_file_url ?? null,
                 added_at: "2026-01-01T00:00:00Z",
@@ -484,13 +484,23 @@ export class FakeSupabase {
             : null;
 
         if (args?.p_title && (mode === "replace" || !quizRow.title)) quizRow.title = String(args.p_title);
+        // 0040 semantics: p_web_sources (array of {kind:"web",url,...}) is the
+        // web provenance set — replace mode REPLACES the sources set with it
+        // (when no storage entry), append mode APPENDS it.
+        const webSources = Array.isArray(args?.p_web_sources)
+          ? (args.p_web_sources as Row[])
+          : [];
         if (mode === "replace") {
           quizRow.source_file_url = args?.p_source_file_url ?? null;
-          quizRow.sources = sourceEntry ? [sourceEntry] : [];
+          quizRow.sources = sourceEntry ? [sourceEntry] : webSources;
         } else {
           if (args?.p_source_file_url) quizRow.source_file_url = args.p_source_file_url;
           const existingSources = Array.isArray(quizRow.sources) ? quizRow.sources : [];
-          quizRow.sources = sourceEntry ? [...existingSources, sourceEntry] : existingSources;
+          quizRow.sources = sourceEntry
+            ? [...existingSources, sourceEntry]
+            : webSources.length > 0
+              ? [...existingSources, ...webSources]
+              : existingSources;
         }
 
         // 0025:161-185 semantics: replace overwrites the source fields

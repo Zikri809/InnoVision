@@ -54,6 +54,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { GenerateFromFileDialog } from "@/components/extract/GenerateFromFileDialog";
 import { SourceTextPreview } from "@/components/extract/SourceTextPreview";
+import { SourceChips } from "@/components/quiz/source-chips";
 import { EditQuestionDialog } from "@/components/quiz/edit-question-dialog";
 import { RegenerateQuestionDialog } from "@/components/quiz/regenerate-question-dialog";
 import { EditQuizDialog } from "@/components/quiz/edit-quiz-dialog";
@@ -61,6 +62,7 @@ import { BulkImportDialog } from "@/components/quiz/bulk-import-dialog";
 import { DuplicateQuizDialog } from "@/components/quiz/duplicate-quiz-dialog";
 import { QuestionImageField } from "@/components/media/question-image-field";
 import type { OcrConfig } from "@/lib/extract/types";
+import type { QuizSourceRow } from "@/lib/quizzes/sources";
 
 export type QuizInfo = {
   id: string;
@@ -119,6 +121,8 @@ export function QuizBuilderClient({
   classes,
   unrevealedCompleted = 0,
   ocrConfig,
+  sources = [],
+  hasWebSearch = false,
 }: {
   quiz: QuizInfo;
   questions: QuestionRow[];
@@ -128,6 +132,10 @@ export function QuizBuilderClient({
   /** QC-2: completed assessment sessions with hidden results (close-dialog warning). */
   unrevealedCompleted?: number;
   ocrConfig: OcrConfig;
+  /** Source provenance (mixed-shape parser output; grounded-search.md §7). */
+  sources?: QuizSourceRow[];
+  /** TinyFish flag from the server env — gates the dialog's Web-topic mode. */
+  hasWebSearch?: boolean;
 }) {
   const router = useRouter();
   const locale = useLocale();
@@ -750,6 +758,8 @@ export function QuizBuilderClient({
 
       <SourceTextPreview text={quiz.source_text} />
 
+      <SourceChips sources={sources} />
+
       <EditQuizDialog
         open={settingsOpen}
         onOpenChange={handleDialogClose}
@@ -775,6 +785,7 @@ export function QuizBuilderClient({
         open={generateOpen}
         onOpenChange={setGenerateOpen}
         hasQuestions={questions.length > 0}
+        hasWebSearch={hasWebSearch}
       />
 
       <BulkImportDialog

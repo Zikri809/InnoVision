@@ -53,7 +53,7 @@ export type TerminalKind =
 /** A trace line: raw model text, or a server-derived stage marker. */
 export type GenerationTraceLine = { kind: "model" | "stage"; text: string };
 
-const STAGE_ORDER: GenerationStage[] = ["parse", "draft", "refine", "save"];
+const STAGE_ORDER: GenerationStage[] = ["parse", "search", "draft", "refine", "save"];
 const MAX_LINE_CHARS = 160;
 const MAX_LINES = 200;
 const DEAD_STREAM_MS = 30_000;
@@ -64,6 +64,8 @@ export type GenerationStreamState = {
   trace: GenerationTraceLine[];
   /** Character count from the parse-done detail (payoff copy). */
   chars: number | null;
+  /** Fetched web-source count from the search-done detail (web payoff). */
+  webSources: number | null;
   /** Question count from the done payload (payoff copy). */
   doneCount: number | null;
   errorCode: string | null;
@@ -76,6 +78,7 @@ export function useGenerationStream({
   endpoint,
   body,
   formatStageLine,
+  formatToolLine,
   announceStage,
   announceTerminal,
   onDone,
@@ -87,6 +90,13 @@ export function useGenerationStream({
   body: Record<string, unknown>;
   /** Localized one-line transcript text for a stage transition. */
   formatStageLine: (stage: GenerationStage, status: string) => string;
+  /** Localized one-line transcript text for tool_call/tool_result events.
+   * kind "call" → issuing query; "result" → resultCount hits;
+   * "skip" → fetch failed for the page at `query` (URL) with `reason`. */
+  formatToolLine: (
+    kind: "call" | "result" | "skip",
+    info: { query: string; resultCount?: number; reason?: string },
+  ) => string;
   /** Throttled polite announcements for stage starts (component localizes). */
   announceStage: (stage: GenerationStage) => void;
   /** Terminal announcements — bypass the throttle (SRs must get endings).
@@ -111,6 +121,7 @@ export function useGenerationStream({
   const [trace, setTrace] = useState<GenerationTraceLine[]>([]);
   const [chars, setChars] = useState<number | null>(null);
   const [doneCount, setDoneCount] = useState<number | null>(null);
+  const [webSources, setWebSources] = useState<number | null>(null);
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -121,6 +132,7 @@ export function useGenerationStream({
   // render (react-hooks/refs rule).
   const cbRef = useRef({
     formatStageLine,
+    formatToolLine,
     announceStage,
     announceTerminal,
     onDone,
@@ -131,6 +143,7 @@ export function useGenerationStream({
   useEffect(() => {
     cbRef.current = {
       formatStageLine,
+      formatToolLine,
       announceStage,
       announceTerminal,
       onDone,
@@ -272,11 +285,31 @@ export function useGenerationStream({
                 if (ev.stage === "parse" && ev.status === "done" && ev.detail) {
                   setChars(Number(ev.detail) || null);
                 }
+                if (ev.stage === "search" && ev.status === "done" && ev.detail) {
+                  // Truthful payoff figure: the route reports the number of
+                  // web pages actually fetched (≤3), mirroring parse's chars.
+                  setWebSources(Number(ev.detail) || null);
+                }
                 break;
               }
               case "reasoning":
               case "content_delta":
                 appendTrace(ev.text);
+                break;
+              case "tool_call":
+                // Server-chrome line: the search query being issued. Always
+                // its own stage-kind line so it survives the model-text merge.
+                pushStageLine(cbRef.current.formatToolLine("call", { query: ev.query }));
+                break;
+              case "tool_result":
+                pushStageLine(
+                  ev.skipped
+                    ? cbRef.current.formatToolLine("skip", { query: ev.query, reason: ev.reason })
+                    : cbRef.current.formatToolLine("result", {
+                        query: ev.query,
+                        resultCount: ev.resultCount,
+                      }),
+                );
                 break;
               case "ping":
                 break;
@@ -362,6 +395,7 @@ export function useGenerationStream({
     trail,
     trace,
     chars,
+    webSources,
     doneCount,
     errorCode,
     errorMessage,
