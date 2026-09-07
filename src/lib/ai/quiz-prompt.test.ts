@@ -593,8 +593,11 @@ describe("U-AE1 — onEvent mirror (byte-identical default path)", () => {
       .mockResolvedValueOnce({ ok: true, text: "not json" })
       .mockResolvedValueOnce({ ok: true, text: validQuizJson });
     const events: unknown[] = [];
-    // A fixed deadline — the default (Date.now()+900_000) can differ by 1ms
-    // between the two runs and fail the prompt-equality mirror spuriously.
+    // Freeze the clock: remainingBudgetMs derives the per-call timeout from
+    // Date.now() at CALL time, so two back-to-back runs with a shared
+    // deadline can differ by 1ms and fail the prompt mirror spuriously.
+    vi.useFakeTimers();
+    try {
     const deadline = Date.now() + 900_000;
     const resA = await generateQuiz({ chat: chatA, text: "chapter", questionCount: 10, deadlineMs: deadline });
     const resB = await generateQuiz({ chat: chatB, text: "chapter", questionCount: 10, deadlineMs: deadline, onEvent: (e) => events.push(e) });
@@ -605,5 +608,8 @@ describe("U-AE1 — onEvent mirror (byte-identical default path)", () => {
       { type: "attempt_retry", issues: expect.any(String) },
       { type: "attempt_start", attempt: 2 },
     ]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
