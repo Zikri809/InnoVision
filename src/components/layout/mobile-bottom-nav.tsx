@@ -1,16 +1,23 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import {
   GraduationCap,
   ClipboardList,
   Zap,
   ScanFace,
-  Archive,
+  LibraryBig,
+  Plus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { DockActionSheet } from "./dock-action-sheet";
+import {
+  CreateClassAction,
+  CreateQuizAction,
+} from "./dock-fab-actions";
 
 type DockLink = {
   href: string;
@@ -19,6 +26,8 @@ type DockLink = {
   /** Student Face tab only: "enrolled" | "pending" | null (hidden). */
   badge?: "enrolled" | "pending" | null;
 };
+
+type LecturerClassOption = { id: string; title: string };
 
 /**
  * Floating clay dock (plan W1): solid card island with a 3px border and hard
@@ -30,6 +39,12 @@ type DockLink = {
  * `truncate` purely as a 320px guard. `data-keyboard-open` on <html>
  * (useKeyboardOcclusion) slides the dock off-screen while text inputs are
  * focused so it never floats over the keyboard.
+ *
+ * Dock FAB (lecturer dock overhaul): a raised center "+" anchors the
+ * lecturer's #1 action — New class / New quiz (Archived was demoted to an
+ * in-page destination; the Quizzes library takes the freed dock slot).
+ * Lecturer-only by design: the student dock keeps its 4 tabs (join lives on
+ * the classes page). The sheet is sm:hidden like the dock itself.
  */
 export function MobileBottomNav({
   role,
@@ -40,6 +55,7 @@ export function MobileBottomNav({
   faceEnrolled?: boolean;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const t = useTranslations("nav");
 
   const studentLinks: DockLink[] = [
@@ -76,75 +92,204 @@ export function MobileBottomNav({
       icon: GraduationCap,
     },
     {
-      href: "/lecturer/classes/archived",
-      label: t("archivedClassesLabel", { defaultValue: "Archived" }),
-      icon: Archive,
+      href: "/lecturer/quizzes",
+      label: t("lecturerQuizzes"),
+      icon: LibraryBig,
     },
   ];
 
-  const links = role === "lecturer" ? lecturerLinks : studentLinks;
+  const isLecturer = role === "lecturer";
+  const links = isLecturer ? lecturerLinks : studentLinks;
+  // FAB sits at the visual center of the lecturer's row: 1 tab | FAB | 1 tab.
+  // Students have no FAB — their 4 tabs span the dock.
+  const hasFab = isLecturer;
+  const fabIndex = Math.ceil(links.length / 2);
+
+  const [fabOpen, setFabOpen] = useState(false);
+  // Sheet panel toggle: New class vs New quiz.
+  const [panel, setPanel] = useState<"class" | "quiz">("class");
+  // Active-class options for the quiz picker — fetched once per mount when
+  // the sheet first opens (GET /api/classes is lecturer-scoped + cheap).
+  const [classOptions, setClassOptions] = useState<LecturerClassOption[] | null>(
+    null,
+  );
+  const [optionsError, setOptionsError] = useState(false);
+
+  useEffect(() => {
+    if (!hasFab || !fabOpen || classOptions || optionsError) return;
+    let cancelled = false;
+    fetch("/api/classes")
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
+      .then((body: { classes?: (LecturerClassOption & { archived_at: string | null })[] }) => {
+        if (cancelled) return;
+        setClassOptions(
+          (body.classes ?? [])
+            .filter((c) => !c.archived_at)
+            .map(({ id, title }) => ({ id, title })),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setOptionsError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasFab, fabOpen, classOptions, optionsError]);
 
   return (
-    <nav
-      aria-label={t("mobileNav")}
-      className="fixed inset-x-3 bottom-[calc(8px+var(--safe-bottom))] z-40 flex items-stretch gap-1 rounded-[24px] border-[3px] border-border bg-card px-2 py-1.5 shadow-[var(--shadow-clay)] transition-transform duration-200 ease-out sm:hidden [[data-keyboard-open]_&]:translate-y-[120%]"
-    >
-      {links.map((link) => {
-        const Icon = link.icon;
-        const active =
-          pathname === link.href ||
-          (link.href !== "/lecturer/classes" &&
-            link.href !== "/student/classes" &&
-            pathname.startsWith(link.href + "/")) ||
-          (link.href === "/lecturer/classes" &&
-            pathname.startsWith("/lecturer/classes") &&
-            !pathname.startsWith("/lecturer/classes/archived")) ||
-          (link.href === "/student/classes" &&
-            pathname === "/student/classes");
+    <>
+      <nav
+        aria-label={t("mobileNav")}
+        className="fixed inset-x-3 bottom-[calc(8px+var(--safe-bottom))] z-40 flex items-stretch gap-1 rounded-[24px] border-[3px] border-border bg-card px-2 py-1.5 shadow-[var(--shadow-clay)] transition-transform duration-200 ease-out sm:hidden [[data-keyboard-open]_&]:translate-y-[120%]"
+      >
+        {links.slice(0, fabIndex).map((link) => (
+          <DockTab key={link.href} link={link} pathname={pathname} />
+        ))}
 
-        return (
-          <Link
-            key={link.href}
-            href={link.href}
-            aria-current={active ? "page" : undefined}
+        {hasFab && (
+          <button
+            type="button"
+            onClick={() => setFabOpen(true)}
+            aria-label={t("createFabAria")}
+            aria-expanded={fabOpen}
             className={cn(
-              "relative flex min-w-0 flex-1 cursor-pointer flex-col items-center justify-center gap-1 rounded-[18px] py-1.5 transition-[transform,colors] duration-150 active:translate-y-[2px] focus-visible:outline-[3px] focus-visible:outline-ring focus-visible:outline-offset-2",
-              active
-                ? "text-primary-deep dark:text-primary"
-                : "text-muted-foreground hover:text-foreground"
+              // Warm white icon (#fff7ed) — matches the default Button
+              // variant's on-primary color, reads crisper at FAB size than
+              // the brown --primary-foreground token.
+              "relative -mt-4 flex size-14 shrink-0 cursor-pointer items-center justify-center self-start rounded-full border-[3px] border-border bg-primary text-[#fff7ed]",
+              "shadow-[0_5px_0_var(--primary-deep)] transition-[transform,box-shadow] duration-150",
+              "active:translate-y-[3px] active:shadow-[0_2px_0_var(--primary-deep)]",
+              "focus-visible:outline-[3px] focus-visible:outline-ring focus-visible:outline-offset-2",
             )}
           >
-            <span
-              className={cn(
-                "relative grid h-8 min-w-12 place-items-center rounded-full transition-[background-color,box-shadow,border-color] duration-200",
-                active
-                  ? "border-2 border-primary/40 bg-primary/15 shadow-[0_2px_0_var(--border)]"
-                  : "border-2 border-transparent bg-transparent"
-              )}
-            >
-              <Icon
-                className="size-[var(--icon-nav)] shrink-0"
-                aria-hidden="true"
-              />
-              {link.badge === "enrolled" && (
-                <span
-                  aria-hidden="true"
-                  className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full border-2 border-card bg-emerald-500"
-                />
-              )}
-              {link.badge === "pending" && (
-                <span
-                  aria-hidden="true"
-                  className="absolute -right-0.5 -top-0.5 size-2.5 animate-pulse rounded-full border-2 border-card bg-amber-500"
-                />
-              )}
-            </span>
-            <span className="w-full truncate px-1 text-center font-sans text-2xs font-extrabold">
-              {link.label}
-            </span>
-          </Link>
-        );
-      })}
-    </nav>
+            <Plus className="size-7" aria-hidden />
+          </button>
+        )}
+
+        {links.slice(fabIndex).map((link) => (
+          <DockTab key={link.href} link={link} pathname={pathname} />
+        ))}
+      </nav>
+
+      <DockActionSheet
+        open={fabOpen}
+        onOpenChange={setFabOpen}
+        label={t("createFab")}
+      >
+        <div className="space-y-3">
+          {/* Segmented panel toggle (clay pressed-state pattern). */}
+          <div className="grid grid-cols-2 gap-2" role="tablist" aria-label={t("createFab")}>
+            {(
+              [
+                ["class", t("createNewClass")],
+                ["quiz", t("createNewQuiz")],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={panel === key}
+                onClick={() => setPanel(key)}
+                className={cn(
+                  "h-10 cursor-pointer rounded-xl border-[3px] px-2 text-sm font-extrabold transition-all duration-150",
+                  panel === key
+                    ? "border-primary bg-primary text-primary-foreground shadow-[0_2px_0_var(--primary-deep)]"
+                    : "border-border bg-card text-muted-foreground shadow-[0_2px_0_var(--border)] hover:border-primary/40 hover:text-foreground",
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {panel === "class" ? (
+            <CreateClassAction onDone={() => setFabOpen(false)} />
+          ) : optionsError ? (
+            <p role="alert" className="rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-3 py-2 text-xs font-bold text-destructive">
+              {t("createNewQuizHint")}
+            </p>
+          ) : classOptions === null ? (
+            <div className="space-y-1.5" aria-hidden="true">
+              <div className="clay-skeleton h-11 rounded-xl border-[3px] border-border bg-muted" />
+              <div className="clay-skeleton h-11 rounded-xl border-[3px] border-border bg-muted" />
+            </div>
+          ) : (
+            <CreateQuizAction
+              classes={classOptions}
+              onPick={(url) => {
+                setFabOpen(false);
+                router.push(url);
+              }}
+            />
+          )}
+        </div>
+      </DockActionSheet>
+    </>
+  );
+}
+
+/**
+ * One dock tab. Extracted so the FAB can split the row without duplicating
+ * the active-state logic. Active semantics per tab kind:
+ *  - "/…/classes" roots stay active across their subtree EXCEPT the archived
+ *    child route (lecturer), which is an in-page destination now.
+ *  - leaf tabs ("/student/quizzes" etc.) match by prefix.
+ */
+function DockTab({
+  link,
+  pathname,
+}: {
+  link: DockLink;
+  pathname: string;
+}) {
+  const Icon = link.icon;
+  const active =
+    pathname === link.href ||
+    (link.href !== "/lecturer/classes" &&
+      link.href !== "/student/classes" &&
+      pathname.startsWith(link.href + "/")) ||
+    (link.href === "/lecturer/classes" &&
+      pathname.startsWith("/lecturer/classes") &&
+      !pathname.startsWith("/lecturer/classes/archived")) ||
+    (link.href === "/student/classes" && pathname === "/student/classes");
+
+  return (
+    <Link
+      href={link.href}
+      aria-current={active ? "page" : undefined}
+      className={cn(
+        "relative flex min-w-0 flex-1 cursor-pointer flex-col items-center justify-center gap-1 rounded-[18px] py-1.5 transition-[transform,colors] duration-150 active:translate-y-[2px] focus-visible:outline-[3px] focus-visible:outline-ring focus-visible:outline-offset-2",
+        active
+          ? "text-primary-deep dark:text-primary"
+          : "text-muted-foreground hover:text-foreground",
+      )}
+    >
+      <span
+        className={cn(
+          "relative grid h-8 min-w-12 place-items-center rounded-full transition-[background-color,box-shadow,border-color] duration-200",
+          active
+            ? "border-2 border-primary/40 bg-primary/15 shadow-[0_2px_0_var(--border)]"
+            : "border-2 border-transparent bg-transparent",
+        )}
+      >
+        <Icon className="size-[var(--icon-nav)] shrink-0" aria-hidden="true" />
+        {link.badge === "enrolled" && (
+          <span
+            aria-hidden="true"
+            className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full border-2 border-card bg-emerald-500"
+          />
+        )}
+        {link.badge === "pending" && (
+          <span
+            aria-hidden="true"
+            className="absolute -right-0.5 -top-0.5 size-2.5 animate-pulse rounded-full border-2 border-card bg-amber-500"
+          />
+        )}
+      </span>
+      <span className="w-full truncate px-1 text-center font-sans text-2xs font-extrabold" title={link.label}>
+        {link.label}
+      </span>
+    </Link>
   );
 }

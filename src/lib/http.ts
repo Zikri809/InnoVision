@@ -101,22 +101,65 @@ export function invalidOrigin(): NextResponse {
 
 /**
  * Cheap CSRF defense for state-changing JSON routes. Rejects when an `Origin`
- * header is present and its host differs from the request's own host. Same-
- * site Lax cookies + this check closes the realistic CSRF surface (the
- * classic Lax-only gap is same-site subdomain attacks). Returns a typed 403
+ * header is present and its host differs from this app's host. Same-site Lax
+ * cookies + this check closes the realistic CSRF surface (the classic
+ * Lax-only gap is same-site subdomain attacks). Returns a typed 403
  * NextResponse if rejected, or `null` if the origin is acceptable (or absent
  * — non-browser callers won't send Origin).
+ *
+ * "This app's host" resolves in order:
+ *   1. `x-forwarded-host` — what a well-behaved reverse proxy sets
+ *   2. the literal request host (direct access)
+ *   3. `TRUSTED_ORIGINS` (comma-separated, scheme included) — proxies like
+ *      cloudflared rewrite `Host` to the upstream service address and strip
+ *      forwarding headers, so neither 1 nor 2 matches the public origin.
+ *      Full origin match (scheme + host): an `http://` entry must not admit
+ *      the `https://` variant of the same host. An empty list keeps the
+ *      original direct-access behavior.
  */
 export function checkSameOrigin(request: Request): NextResponse | null {
   const origin = request.headers.get("origin");
   if (!origin) return null;
+  let originHost: string;
   try {
-    const originHost = new URL(origin).host.toLowerCase();
+    originHost = new URL(origin).host.toLowerCase();
+  } catch {
+    return invalidOrigin();
+  }
+
+  const forwardedHost = request.headers
+    .get("x-forwarded-host")
+    ?.split(",")[0]
+    ?.trim()
+    .toLowerCase();
+  if (forwardedHost && originHost === forwardedHost) return null;
+
+  try {
     const reqHost = new URL(request.url).host.toLowerCase();
     if (originHost === reqHost) return null;
   } catch {
     return invalidOrigin();
   }
+
+  const trusted = (process.env.TRUSTED_ORIGINS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  for (const entry of trusted) {
+    try {
+      const entryUrl = new URL(entry);
+      const originUrl = new URL(origin);
+      if (
+        originHost === entryUrl.host.toLowerCase() &&
+        originUrl.protocol === entryUrl.protocol
+      ) {
+        return null;
+      }
+    } catch {
+      // Malformed TRUSTED_ORIGINS entry — skip it rather than crash routes.
+    }
+  }
+
   return invalidOrigin();
 }
 

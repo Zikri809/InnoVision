@@ -19,8 +19,11 @@ import {
   Camera,
   CircleCheck,
   CircleAlert,
+  Globe,
+  GraduationCap,
   LogOut,
   Presentation,
+  Sun,
   Trash2,
   UserRound,
 } from "lucide-react";
@@ -241,81 +244,103 @@ export function AppUserMenu({
         />
 
         <ResponsiveModalContent className="sm:max-w-sm">
-          <ResponsiveModalHeader>
-            <div className="relative mb-1 h-12 w-12">
-              <div className="relative grid h-full w-full place-items-center overflow-hidden rounded-2xl bg-primary/15 text-primary">
-                {shownAvatarUrl ? (
-                  <Image
-                    src={shownAvatarUrl}
-                    alt=""
-                    fill
-                    sizes="48px"
-                    className="object-cover"
-                    referrerPolicy="no-referrer"
-                    unoptimized
-                  />
-                ) : (
-                  <UserRound className="h-6 w-6" aria-hidden />
-                )}
+          <ResponsiveModalHeader className="border-b-2 border-border/40 pb-4 pt-1 text-left">
+            <div className="flex items-center gap-3.5">
+              <div className="relative h-14 w-14 shrink-0">
+                <div className="relative grid h-full w-full place-items-center overflow-hidden rounded-2xl border-[3px] border-border bg-primary/15 text-primary shadow-[0_3px_0_var(--border)]">
+                  {shownAvatarUrl ? (
+                    <Image
+                      src={shownAvatarUrl}
+                      alt=""
+                      fill
+                      sizes="56px"
+                      className="object-cover"
+                      referrerPolicy="no-referrer"
+                      unoptimized
+                    />
+                  ) : (
+                    <UserRound className="h-7 w-7" aria-hidden />
+                  )}
+                </div>
+
+                {/* Upload/replace badge — opens the file picker DIRECTLY (one
+                    click, no menu detour). Overlaid on the profile badge. */}
+                <button
+                  type="button"
+                  aria-label={tMedia("upload")}
+                  title={tMedia("upload")}
+                  onClick={() => avatarInputRef.current?.click()}
+                  disabled={avatarBusy}
+                  className="hit-slop absolute -bottom-1 -right-1 z-10 grid size-6 cursor-pointer place-items-center rounded-full border-2 border-background bg-primary text-primary-foreground shadow-[0_2px_0_var(--primary-deep)] transition-transform duration-150 ease-out hover:scale-110 active:translate-y-0.5 disabled:opacity-50"
+                >
+                  {avatarBusy ? (
+                    <span className="size-3 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" />
+                  ) : (
+                    <Camera className="size-3" aria-hidden />
+                  )}
+                </button>
               </div>
 
-              {/* Upload/replace badge — opens the file picker DIRECTLY (one
-                  click, no menu detour). Overlaid on the profile badge. */}
-              <button
-                type="button"
-                aria-label={tMedia("upload")}
-                title={tMedia("upload")}
-                onClick={() => avatarInputRef.current?.click()}
-                disabled={avatarBusy}
-                className="absolute -bottom-1.5 -right-1.5 z-10 grid size-6 cursor-pointer place-items-center rounded-full border-2 border-background bg-primary text-primary-foreground shadow-[0_2px_0_var(--primary-deep)] transition-transform duration-150 ease-out hover:scale-110 active:translate-y-0.5 disabled:opacity-50"
-              >
-                {avatarBusy ? (
-                  <span className="size-3 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" />
-                ) : (
-                  <Camera className="size-3" aria-hidden />
-                )}
-              </button>
+              <div className="min-w-0 flex-1 space-y-0.5">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <ResponsiveModalTitle className="break-words font-heading text-lg font-bold text-foreground">
+                    {displayName}
+                  </ResponsiveModalTitle>
+                  {!isStudent && (
+                    <span className="inline-flex w-fit items-center gap-1 rounded-full border-2 border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-primary">
+                      <Presentation className="h-3 w-3" aria-hidden />
+                      {t("roleLecturer")}
+                    </span>
+                  )}
+                </div>
+
+                <ResponsiveModalDescription className="flex flex-col gap-0.5 text-xs">
+                  {fullName?.trim() ? <span className="break-all font-semibold text-muted-foreground">{email}</span> : null}
+                  {memberSinceLabel && (
+                    <span className="font-semibold text-muted-foreground/80">
+                      {t("memberSince", { date: memberSinceLabel })}
+                    </span>
+                  )}
+                </ResponsiveModalDescription>
+              </div>
             </div>
-            <ResponsiveModalTitle className="break-all text-base">{displayName}</ResponsiveModalTitle>
-            <ResponsiveModalDescription className="flex flex-col gap-1">
-              {/* Role chip — lecturers only; students are identified by the
-                  matric card below instead. */}
-              {!isStudent && (
-                <span className="inline-flex w-fit items-center gap-1.5 rounded-full border-2 border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] font-extrabold uppercase tracking-wide text-primary">
-                  <Presentation className="h-3 w-3" aria-hidden />
-                  {t("roleLecturer")}
-                </span>
-              )}
-              {fullName?.trim() ? <span className="break-all">{email}</span> : null}
-              {memberSinceLabel && (
-                <span className="text-muted-foreground">
-                  {t("memberSince", { date: memberSinceLabel })}
-                </span>
-              )}
-            </ResponsiveModalDescription>
           </ResponsiveModalHeader>
 
           <div className="space-y-3">
-            {/* Mobile-only quick-settings row (plan W1): the topbar toggles
-                move in here below sm to keep the compressed topbar to
-                brand + bell + avatar. Desktop keeps its topbar toggles. */}
-            <div className="flex items-center justify-between gap-2 rounded-2xl border-[3px] border-border bg-muted/60 px-4 py-3 sm:hidden">
-              <span className="font-sans text-label font-extrabold uppercase tracking-[0.04em] text-muted-foreground">
+            {/* Quick Settings Grouped Inset Card (Option 3) */}
+            <div className="space-y-1.5">
+              <div className="px-1 pt-1 text-xs font-extrabold uppercase tracking-wider text-muted-foreground">
                 {t("quickSettings")}
-              </span>
-              <div className="flex items-center gap-2">
-                <LanguageToggle />
-                <ThemeToggle />
+              </div>
+
+              <div className="divide-y-2 divide-border/60 overflow-hidden rounded-2xl border-[3px] border-border bg-card shadow-[0_4px_0_var(--border)]">
+                {/* Language Row */}
+                <div className="flex items-center justify-between gap-3 px-3.5 py-2.5">
+                  <div className="flex items-center gap-2.5 font-heading text-sm font-bold text-foreground">
+                    <Globe className="h-4 w-4 text-primary" aria-hidden />
+                    <span>{t("language")}</span>
+                  </div>
+                  <LanguageToggle variant="pill" />
+                </div>
+
+                {/* Appearance Row */}
+                <div className="flex items-center justify-between gap-3 px-3.5 py-2.5">
+                  <div className="flex items-center gap-2.5 font-heading text-sm font-bold text-foreground">
+                    <Sun className="h-4 w-4 text-primary" aria-hidden />
+                    <span>{t("theme")}</span>
+                  </div>
+                  <ThemeToggle variant="pill" />
+                </div>
               </div>
             </div>
 
             {/* Profile photo (self-only) — upload rides the badge beside the
                 profile badge above; removal lives in here. */}
             {(avatarPresent || avatarError) && (
-              <div className="rounded-2xl border-[3px] border-border bg-muted/60 px-4 py-3">
-                <div className="flex items-center justify-between gap-2">
+              <div className="rounded-2xl border-[3px] border-border bg-card p-3.5 shadow-[0_4px_0_var(--border)]">
+                <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0 space-y-0.5">
-                    <p className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">
+                    <p className="font-heading text-xs font-extrabold uppercase tracking-wide text-foreground">
                       {tMedia("profilePhoto")}
                     </p>
                     <p className="text-xs font-semibold leading-relaxed text-muted-foreground">
@@ -327,9 +352,10 @@ export function AppUserMenu({
                     aria-label={tMedia("remove")}
                     onClick={() => void handleAvatarRemove()}
                     disabled={avatarBusy}
-                    className="grid h-8 w-8 shrink-0 place-items-center rounded-xl border-2 border-border bg-card text-muted-foreground shadow-[0_2px_0_var(--border)] transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:text-destructive active:translate-y-0 disabled:opacity-50"
+                    className="hit-slop inline-flex h-8 shrink-0 items-center gap-1.5 rounded-xl border-2 border-destructive/30 bg-destructive/10 px-2.5 font-heading text-xs font-extrabold text-destructive shadow-[0_2px_0_theme(colors.destructive.DEFAULT/20)] transition-transform duration-150 ease-out hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-50"
                   >
-                    <Trash2 className="h-4 w-4" aria-hidden />
+                    <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                    <span>{tMedia("remove")}</span>
                   </button>
                 </div>
                 {avatarError && (
@@ -341,11 +367,12 @@ export function AppUserMenu({
             )}
 
             {(matricNo != null || isStudent) && (
-              <div className="rounded-2xl border-[3px] border-border bg-muted/60 px-4 py-3.5">
+              <div className="rounded-2xl border-[3px] border-border bg-card p-3.5 shadow-[0_4px_0_var(--border)]">
                 <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">
-                    {t("matricNumber")}
-                  </p>
+                  <div className="flex items-center gap-1.5 font-heading text-xs font-extrabold uppercase tracking-wide text-muted-foreground">
+                    <GraduationCap className="h-3.5 w-3.5 text-primary" aria-hidden />
+                    <span>{t("matricNumber")}</span>
+                  </div>
                   {matricNo != null && isSystemAssignedMatric(matricNo) && (
                     <span className="shrink-0 rounded-full border-2 border-amber-300/60 bg-amber-100 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-amber-700 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-400">
                       {t("matricTemporary")}
@@ -353,7 +380,7 @@ export function AppUserMenu({
                   )}
                 </div>
 
-                <p className="mt-2 break-all font-mono text-xl font-extrabold leading-tight tracking-[0.12em] text-foreground">
+                <p className="mt-1.5 break-all font-mono text-xl font-extrabold leading-tight tracking-[0.12em] text-foreground">
                   {matricNo ?? "—"}
                 </p>
 
@@ -372,7 +399,7 @@ export function AppUserMenu({
                 and quiz face checks; lecturers are auto-consented at signup
                 and never hit those flows, so the card is hidden for them. */}
             {isStudent && (
-              <div className="flex items-center gap-2.5 rounded-2xl border-[3px] border-border bg-muted/60 px-4 py-3 text-sm font-bold">
+              <div className="flex items-center gap-2.5 rounded-2xl border-[3px] border-border bg-card px-4 py-3 text-sm font-bold shadow-[0_4px_0_var(--border)]">
                 {consentGiven ? (
                   <>
                     <CircleCheck className="h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden />
@@ -391,17 +418,17 @@ export function AppUserMenu({
                 {t("signOutFailed")}
               </p>
             )}
-          </div>
 
-          <Button
-            onClick={handleLogout}
-            variant="outline"
-            className="w-full"
-            disabled={signingOut}
-          >
-            <LogOut className="h-4 w-4" aria-hidden />
-            {signingOut ? t("signingOut") : t("signOut")}
-          </Button>
+            <Button
+              onClick={handleLogout}
+              variant="outline"
+              className="w-full font-heading text-sm font-extrabold"
+              disabled={signingOut}
+            >
+              <LogOut className="h-4 w-4" aria-hidden />
+              {signingOut ? t("signingOut") : t("signOut")}
+            </Button>
+          </div>
         </ResponsiveModalContent>
       </ResponsiveModal>
     </div>

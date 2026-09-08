@@ -17,6 +17,11 @@ export const config = {
     // `updateSession()` auth round-trip per file (~8 per student) on the
     // gesture-boot critical path. Any future ROUTE under these prefixes must
     // self-authenticate — do not rely on the middleware to protect it.
-    "/((?!api/|mediapipe/|models/|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|mjs|wasm|task)$).*)",
+    // `/sb/*` is the same-origin rewrite prefix to the local Supabase Kong
+    // gateway (next.config.ts rewrites). Excluded like `/api`: supabase-js
+    // attaches the JWT itself and Kong enforces auth, so the middleware's
+    // getUser() round-trip is pointless — and worse, its unauthenticated
+    // redirect to /login would break the browser client's REST polling.
+    "/((?!api/|sb/|mediapipe/|models/|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|mjs|wasm|task)$).*)",
   ],
 };

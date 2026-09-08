@@ -111,6 +111,7 @@ export function GenerateFromFileDialog({
 
   const [files, setFiles] = useState<UploadedFileItem[]>([]);
   const [pastedText, setPastedText] = useState("");
+  const [inputMode, setInputMode] = useState<"file" | "text">("file");
   // Lazy localStorage read is hydration-safe here: the dialog body (and this
   // state consumer) only mounts client-side when `open` flips true — it never
   // renders during SSR or the hydration pass.
@@ -148,6 +149,7 @@ export function GenerateFromFileDialog({
     activeAbortRef.current?.abort();
     activeAbortRef.current = null;
     setStep(1);
+    setInputMode("file");
     setFiles([]);
     setPastedText("");
     setWebAugment(false);
@@ -433,19 +435,20 @@ export function GenerateFromFileDialog({
   return (
     <ResponsiveModal
       open={open}
+      mobileSurface="sheet"
       onOpenChange={(next) => {
         if (!next) reset();
         onOpenChange(next);
       }}
     >
-      <ResponsiveModalContent className="max-h-[94vh] flex flex-col sm:max-w-3xl overflow-hidden p-6 sm:p-7 gap-0">
+      <ResponsiveModalContent className="h-auto max-h-[92dvh] sm:max-h-[94vh] flex flex-col sm:max-w-3xl overflow-hidden p-4 sm:p-7 gap-0">
         <ResponsiveModalHeader className="shrink-0 pb-3 border-b-[3px] border-border/40">
-          <div className="flex items-center justify-between gap-2 pr-6">
-            <ResponsiveModalTitle className="text-xl font-bold font-heading flex items-center gap-2">
-              <Sparkles className="size-5 text-primary" />
-              {t("dialogTitle")}
+          <div className="flex items-center justify-between gap-2 sm:pr-6">
+            <ResponsiveModalTitle className="text-lg sm:text-xl font-bold font-heading flex items-center gap-2">
+              <Sparkles className="size-5 text-primary shrink-0" />
+              <span>{t("dialogTitle")}</span>
             </ResponsiveModalTitle>
-            <span className="rounded-full border-[2px] border-primary/30 bg-primary/10 px-2.5 py-0.5 text-xs font-extrabold text-primary">
+            <span className="rounded-full border-[2px] border-primary/30 bg-primary/10 px-2.5 py-0.5 text-xs font-extrabold text-primary shrink-0">
               {generating ? t("generatingBtn") : t("stepIndicator", { step, total: 2 })}
             </span>
           </div>
@@ -457,7 +460,7 @@ export function GenerateFromFileDialog({
         <div
           ref={stepContainerRef}
           tabIndex={-1}
-          className="flex-1 overflow-y-auto space-y-4 py-4 pr-1 outline-none"
+          className="flex-1 overflow-y-auto space-y-4 py-4 pr-1 outline-none overscroll-contain"
         >
           <div aria-live="polite">
             {error && (
@@ -471,63 +474,84 @@ export function GenerateFromFileDialog({
           </div>
 
           {step === 1 && (
-            <div className="space-y-4">
-              <UploadDropzone
-                userId={userId}
-                quizId={quizId}
-                files={files}
-                onFilesChanged={handleFilesChanged}
-                onError={setError}
-                disabled={busy}
-              />
+            <div className="space-y-3.5">
+              {inputMode === "file" ? (
+                <div className="space-y-3">
+                  <UploadDropzone
+                    userId={userId}
+                    quizId={quizId}
+                    files={files}
+                    onFilesChanged={handleFilesChanged}
+                    onError={setError}
+                    disabled={busy}
+                  />
 
-              {/* Paste-text leg (plan G1/F1: "pasting text or uploading") —
-                  bypasses extraction entirely. */}
-              <div className="space-y-2 rounded-2xl border-[3px] border-border bg-card p-3.5 shadow-[var(--shadow-clay-sm)]">
-                <Label htmlFor="paste-source" className="text-xs font-extrabold text-foreground">
-                  {t("pasteLabel")}
-                </Label>
-                <Textarea
-                  id="paste-source"
-                  value={pastedText}
-                  onChange={(e) => setPastedText(e.target.value)}
-                  placeholder={t("pastePlaceholder")}
-                  rows={4}
-                  maxLength={400000}
-                  disabled={busy}
-                  className="resize-y text-xs font-medium rounded-xl border-[3px] border-border bg-background/50 focus:bg-background focus:border-primary transition-colors"
-                />
-                <div className="flex justify-end">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      const text = pastedText.trim();
-                      if (!text) {
-                        setError(t("emptyTextError"));
-                        return;
-                      }
-                      setExtractedText(text);
-                      setIsLowDensity(false);
-                      setError(null);
-                      setStep(2);
-                    }}
-                    disabled={busy || pastedText.trim().length === 0}
-                    className="gap-1.5 rounded-xl text-xs font-bold"
-                  >
-                    {t("pasteUseBtn")}
-                    <ArrowRight className="size-3.5" />
-                  </Button>
+                  {/* Subtle inline switch to paste notes instead */}
+                  <div className="flex items-center justify-center gap-2 py-0.5">
+                    <span className="h-[1px] w-12 bg-border/60" />
+                    <span className="text-2xs font-bold text-muted-foreground uppercase tracking-wider">
+                      {t("orDivider")}
+                    </span>
+                    <span className="h-[1px] w-12 bg-border/60" />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setInputMode("text");
+                        setError(null);
+                      }}
+                      className="hit-slop inline-flex items-center gap-1.5 text-xs font-bold text-primary hover:underline hover:text-primary-deep transition-colors ml-1"
+                    >
+                      <FileText className="size-3.5" />
+                      <span>{t("pasteNotesInstead")}</span>
+                    </button>
+                  </div>
+
+                  <EnginePicker
+                    value={engine}
+                    onChange={setEngine}
+                    files={files}
+                    disabled={busy}
+                  />
                 </div>
-              </div>
+              ) : (
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setInputMode("file");
+                        setError(null);
+                      }}
+                      className="hit-slop inline-flex items-center gap-1.5 text-xs font-bold text-primary hover:underline"
+                    >
+                      <ArrowLeft className="size-3.5" />
+                      <span>{t("backToFileUpload")}</span>
+                    </button>
+                    <span className="text-2xs font-bold text-muted-foreground">
+                      {pastedText.length.toLocaleString()} / 400,000
+                    </span>
+                  </div>
 
-              <EnginePicker
-                value={engine}
-                onChange={setEngine}
-                files={files}
-                disabled={busy}
-              />
+                  <div className="space-y-2 rounded-2xl border-[3px] border-border bg-card p-3.5 shadow-[var(--shadow-clay-sm)]">
+                    <Label htmlFor="paste-source" className="text-xs font-extrabold text-foreground font-heading">
+                      {t("pasteLabel")}
+                    </Label>
+                    <Textarea
+                      id="paste-source"
+                      value={pastedText}
+                      onChange={(e) => setPastedText(e.target.value)}
+                      placeholder={t("pastePlaceholder")}
+                      rows={6}
+                      maxLength={400000}
+                      disabled={busy}
+                      className="resize-y text-xs font-medium rounded-xl border-[3px] border-border bg-background/50 focus:bg-background focus:border-primary transition-colors min-h-[150px]"
+                    />
+                    <p className="text-2xs font-semibold text-muted-foreground leading-relaxed">
+                      {t("pasteHint")}
+                    </p>
+                  </div>
+                </div>
+              )}
 
               {/* Web-augmentation focus-hint card (replaces the removed
                   topic-only card): shown on step 1 when the toggle is on so
@@ -602,7 +626,7 @@ export function GenerateFromFileDialog({
               {/* Web mode has no extracted-text summary card — the topic is
                   the source; everything below applies to both modes. */}
               {extractedText && (
-              <div className="rounded-2xl border-[3px] border-border bg-card p-3.5 shadow-[var(--shadow-clay-sm)] transition-all">
+              <div className="rounded-2xl border-[3px] border-border bg-card p-3.5 shadow-[var(--shadow-clay-sm)] transition-[border-color,background-color,box-shadow]">
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2.5 min-w-0">
                     <div className="rounded-xl bg-primary/10 p-2 text-primary shrink-0">
@@ -758,7 +782,7 @@ export function GenerateFromFileDialog({
                         role="radio"
                         aria-checked={difficulty === lvl.id}
                         onClick={() => setDifficulty(lvl.id)}
-                        className={`h-full min-h-[46px] rounded-xl border-[3px] py-2 px-2.5 text-2xs font-extrabold transition-all duration-150 text-center flex items-center justify-center ${
+                        className={`h-full min-h-[46px] rounded-xl border-[3px] py-2 px-2.5 text-2xs font-extrabold transition-[border-color,background-color,box-shadow,transform] duration-150 text-center flex items-center justify-center ${
                           difficulty === lvl.id
                             ? "border-primary bg-primary text-primary-foreground shadow-[0_3px_0_var(--primary-deep)]"
                             : "border-border bg-card hover:bg-muted text-foreground shadow-[0_3px_0_var(--border)] hover:-translate-y-0.5 active:translate-y-0"
@@ -790,7 +814,7 @@ export function GenerateFromFileDialog({
                         role="radio"
                         aria-checked={formatDistribution === m.id}
                         onClick={() => setFormatDistribution(m.id)}
-                        className={`flex-1 min-h-[36px] rounded-xl border-[3px] py-1.5 px-3 text-2xs font-extrabold transition-all duration-150 text-left flex items-center justify-between ${
+                        className={`flex-1 min-h-[36px] rounded-xl border-[3px] py-1.5 px-3 text-2xs font-extrabold transition-[border-color,background-color,box-shadow,transform] duration-150 text-left flex items-center justify-between ${
                           formatDistribution === m.id
                             ? "border-primary bg-primary text-primary-foreground shadow-[0_3px_0_var(--primary-deep)]"
                             : "border-border bg-card hover:bg-muted text-foreground shadow-[0_3px_0_var(--border)] hover:-translate-y-0.5 active:translate-y-0"
@@ -827,7 +851,7 @@ export function GenerateFromFileDialog({
                         setQuestionCountInput(String(next));
                       }}
                       disabled={questionCount <= 3}
-                      className="size-9 shrink-0 flex items-center justify-center rounded-xl border-[3px] border-border bg-card hover:bg-muted font-bold text-foreground disabled:opacity-40 transition-all shadow-[0_2px_0_var(--border)] active:translate-y-0.5"
+                      className="size-9 shrink-0 flex items-center justify-center rounded-xl border-[3px] border-border bg-card hover:bg-muted font-bold text-foreground disabled:opacity-40 transition-[box-shadow,transform] shadow-[0_2px_0_var(--border)] active:translate-y-0.5"
                     >
                       <Minus className="size-4" />
                     </button>
@@ -853,7 +877,7 @@ export function GenerateFromFileDialog({
                         setQuestionCountInput(String(next));
                       }}
                       disabled={questionCount >= 30}
-                      className="size-9 shrink-0 flex items-center justify-center rounded-xl border-[3px] border-border bg-card hover:bg-muted font-bold text-foreground disabled:opacity-40 transition-all shadow-[0_2px_0_var(--border)] active:translate-y-0.5"
+                      className="size-9 shrink-0 flex items-center justify-center rounded-xl border-[3px] border-border bg-card hover:bg-muted font-bold text-foreground disabled:opacity-40 transition-[box-shadow,transform] shadow-[0_2px_0_var(--border)] active:translate-y-0.5"
                     >
                       <Plus className="size-4" />
                     </button>
@@ -867,7 +891,7 @@ export function GenerateFromFileDialog({
                             setQuestionCount(preset);
                             setQuestionCountInput(String(preset));
                           }}
-                          className={`px-2.5 py-1 text-2xs font-extrabold rounded-xl border-[2px] transition-all ${
+                          className={`px-2.5 py-1 text-2xs font-extrabold rounded-xl border-[2px] transition-[border-color,background-color,box-shadow] ${
                             questionCount === preset
                               ? "border-primary bg-primary text-primary-foreground shadow-[0_2px_0_var(--primary-deep)]"
                               : "border-border bg-muted/40 hover:bg-muted text-foreground"
@@ -898,7 +922,7 @@ export function GenerateFromFileDialog({
                         role="radio"
                         aria-checked={language === lang.id}
                         onClick={() => setLanguage(lang.id)}
-                        className={`h-9 rounded-xl border-[3px] px-1 text-xs font-extrabold transition-all duration-150 text-center flex items-center justify-center ${
+                        className={`h-9 rounded-xl border-[3px] px-1 text-xs font-extrabold transition-[border-color,background-color,box-shadow] duration-150 text-center flex items-center justify-center ${
                           language === lang.id
                             ? "border-primary bg-primary text-primary-foreground shadow-[0_3px_0_var(--primary-deep)]"
                             : "border-border bg-card hover:bg-muted text-foreground shadow-[0_3px_0_var(--border)] hover:-translate-y-0.5 active:translate-y-0"
@@ -924,7 +948,7 @@ export function GenerateFromFileDialog({
                       role="radio"
                       aria-checked={generationMode === "append"}
                       onClick={() => setGenerationMode("append")}
-                      className={`rounded-xl border-[3px] py-2.5 px-3.5 text-xs font-extrabold text-left transition-all duration-150 ${
+                      className={`rounded-xl border-[3px] py-2.5 px-3.5 text-xs font-extrabold text-left transition-[border-color,background-color,box-shadow,transform] duration-150 ${
                         generationMode === "append"
                           ? "border-emerald-500 bg-emerald-500/15 text-emerald-950 dark:text-emerald-200 shadow-[0_3px_0_#10b981]"
                           : "border-border bg-card hover:bg-muted/50 text-foreground shadow-[0_3px_0_var(--border)] hover:-translate-y-0.5 active:translate-y-0"
@@ -944,7 +968,7 @@ export function GenerateFromFileDialog({
                       role="radio"
                       aria-checked={generationMode === "replace"}
                       onClick={() => setGenerationMode("replace")}
-                      className={`rounded-xl border-[3px] py-2.5 px-3.5 text-xs font-extrabold text-left transition-all duration-150 ${
+                      className={`rounded-xl border-[3px] py-2.5 px-3.5 text-xs font-extrabold text-left transition-[border-color,background-color,box-shadow,transform] duration-150 ${
                         generationMode === "replace"
                           ? "border-amber-500 bg-amber-500/15 text-amber-950 dark:text-amber-200 shadow-[0_3px_0_#f59e0b]"
                           : "border-border bg-card hover:bg-muted/50 text-foreground shadow-[0_3px_0_var(--border)] hover:-translate-y-0.5 active:translate-y-0"
@@ -981,7 +1005,7 @@ export function GenerateFromFileDialog({
           </div>
         )}
 
-        <ResponsiveModalFooter className="shrink-0 pt-3 border-t-[3px] border-border/40 flex items-center justify-between sm:justify-between gap-3">
+        <ResponsiveModalFooter className="shrink-0 pt-3 border-t-[3px] border-border/40 flex items-center justify-between sm:justify-between gap-3 bg-card pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           {generating ? null : step === 1 ? (
             <>
               <Button
@@ -993,19 +1017,41 @@ export function GenerateFromFileDialog({
               >
                 {tCommon("cancel")}
               </Button>
-              <Button
-                type="button"
-                onClick={handleExtractAll}
-                disabled={files.length === 0 || busy}
-                className="font-bold rounded-xl gap-2"
-              >
-                {busy ? tCommon("loading") : (
-                  <>
-                    <span>{t("extractAndContinue")}</span>
-                    <ArrowRight className="size-4" />
-                  </>
-                )}
-              </Button>
+              {inputMode === "file" ? (
+                <Button
+                  type="button"
+                  onClick={handleExtractAll}
+                  disabled={files.length === 0 || busy}
+                  className="font-bold rounded-xl gap-2"
+                >
+                  {busy ? tCommon("loading") : (
+                    <>
+                      <span>{t("extractAndContinue")}</span>
+                      <ArrowRight className="size-4" />
+                    </>
+                  )}
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  onClick={() => {
+                    const text = pastedText.trim();
+                    if (!text) {
+                      setError(t("emptyTextError"));
+                      return;
+                    }
+                    setExtractedText(text);
+                    setIsLowDensity(false);
+                    setError(null);
+                    setStep(2);
+                  }}
+                  disabled={busy || pastedText.trim().length === 0}
+                  className="font-bold rounded-xl gap-2 bg-primary text-primary-foreground shadow-[var(--shadow-clay-sm)]"
+                >
+                  <span>{t("continueWithText")}</span>
+                  <ArrowRight className="size-4" />
+                </Button>
+              )}
             </>
           ) : (
             <>

@@ -151,7 +151,7 @@ export default async function Home() {
                       return (
                         <div
                           key={opt}
-                          className={`flex items-center gap-3 rounded-2xl border-[3px] px-4 py-4 font-extrabold transition-all ${
+                          className={`flex items-center gap-3 rounded-2xl border-[3px] px-4 py-4 font-extrabold transition-[border-color,background-color,box-shadow] ${
                             selected
                               ? "border-accent bg-blue-50 text-accent shadow-[0_4px_0_#bfdbfe]"
                               : "border-border bg-card text-muted-foreground shadow-[0_4px_0_var(--border)]"

@@ -52,6 +52,7 @@ export function MatricCaptureForm() {
           name="matricNo"
           inputMode="numeric"
           autoComplete="off"
+          spellCheck={false}
           placeholder="123456"
           value={matricNo}
           onChange={(e) => {

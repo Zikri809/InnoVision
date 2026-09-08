@@ -59,7 +59,11 @@ test.describe("E23 — builder mutations", () => {
     const row = builder.locator("li").filter({ hasText: "Pick the second?" });
     await expect(row).toBeVisible();
     await expect(row.getByText(/Correct answer: Option 1/)).toBeVisible(); // clamped to Bb
-    await expect(row.getByText(/Bb · Cc/)).toBeVisible(); // old Aa is gone
+    // Options render as per-option rows (A/B/C letters) — assert the pair and
+    // that the deleted first option is gone.
+    await expect(row.getByText("Bb", { exact: true })).toBeVisible();
+    await expect(row.getByText("Cc", { exact: true })).toBeVisible();
+    await expect(row.getByText("Aa", { exact: true })).toHaveCount(0);
   });
 
   test("reorder up/down persists after reload and disables at the ends", async () => {

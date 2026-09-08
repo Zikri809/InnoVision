@@ -56,7 +56,33 @@ const nextConfig: NextConfig = {
   // exceljs is a heavy CJS Node module used only inside the export route —
   // keep it out of the bundler (runtime require, no client impact).
   serverExternalPackages: ["exceljs"],
+  // Same-origin proxy to the local Supabase Kong gateway. The client bundle
+  // bakes NEXT_PUBLIC_SUPABASE_URL (127.0.0.1:58021 here), which a REMOTE
+  // browser would resolve to its own machine — so supabase/client.ts re-points
+  // loopback URLs at this /sb prefix instead. Same-origin also means cookies
+  // flow and CORS never applies. Note: HTTP routes proxy fine; the realtime
+  // WebSocket does NOT upgrade through Next — use-notifications treats
+  // postgres_changes as a latency accelerator (polling is the backbone), so
+  // remote clients just fall back to the 20s poll cadence.
+  async rewrites() {
+    const LOCAL_SUPABASE = "http://127.0.0.1:58021";
+    return [
+      { source: "/sb/rest/v1/:path*", destination: `${LOCAL_SUPABASE}/rest/v1/:path*` },
+      { source: "/sb/auth/v1/:path*", destination: `${LOCAL_SUPABASE}/auth/v1/:path*` },
+      { source: "/sb/realtime/v1/:path*", destination: `${LOCAL_SUPABASE}/realtime/v1/:path*` },
+      { source: "/sb/storage/v1/:path*", destination: `${LOCAL_SUPABASE}/storage/v1/:path*` },
+    ];
+  },
+  // Cloudflare tunnel (innovision.zikr-i.uk): Next's server-action CSRF check
+  // compares the browser Origin against Host/X-Forwarded-Host — behind the
+  // tunnel they differ, and a mismatched action is silently aborted (the login
+  // form appears to just reset). Allowlist the tunnel host for actions; dev
+  // also needs allowedDevOrigins so /_next/* assets + HMR socket aren't 403'd.
+  allowedDevOrigins: ["innovision.zikr-i.uk"],
   experimental: {
+    serverActions: {
+      allowedOrigins: ["innovision.zikr-i.uk"],
+    },
     optimizePackageImports: [
       "lucide-react",
       "@remixicon/react",

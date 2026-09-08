@@ -576,15 +576,20 @@ export class FaceTracker implements IFaceTracker {
               if (span > 0.01) {
                 const ratio = (nose.x - leftCheek.x) / span;
                 this.lastRawRatio = ratio;
-                // SCREEN-space yaw RELATIVE to the user's calibrated neutral
-                // (or the geometric midpoint when uncalibrated): positive =
-                // the on-screen face turns toward SCREEN-left, negative =
-                // screen-right. The mirrored display (`scale-x-[-1]`) flips
-                // raw nose travel, so negate here to match what the user
-                // SEES. All other consumers use |yaw| (attention advisories,
-                // quality score, getFaceHealth).
+                // USER-space yaw RELATIVE to the user's calibrated neutral
+                // (or the geometric midpoint when uncalibrated): POSITIVE =
+                // the user turns toward THEIR OWN left, negative = their
+                // right. In the raw camera image a left turn moves the nose
+                // toward the image-right cheek (ratio rises), so no mirror
+                // negation here — the mirrored preview (`scale-x-[-1]`)
+                // already shows that same turn drifting toward the left edge
+                // of the screen, matching the "turn LEFT" instruction. All
+                // other consumers (attention advisories, quality score,
+                // getFaceHealth, server pose gate) use |yaw|; the only
+                // signed consumers are the enroll client's Left/Right gates,
+                // which mean USER left/right.
                 const neutral = this.ratioBaseline ?? 0.5;
-                yaw = Math.round((neutral - ratio) * 100);
+                yaw = Math.round((ratio - neutral) * 100);
               }
               centered = nose.x >= 0.30 && nose.x <= 0.70 && nose.y >= 0.20 && nose.y <= 0.80;
             }

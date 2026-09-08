@@ -122,7 +122,7 @@ export function GestureCalibration({
             return (
               <span
                 key={n}
-                className={`inline-flex size-9 items-center justify-center rounded-xl border-[3px] font-heading text-sm font-extrabold transition-all duration-150 ${
+                className={`inline-flex size-9 items-center justify-center rounded-xl border-[3px] font-heading text-sm font-extrabold transition-[border-color,background-color] duration-150 ${
                   active
                     ? "border-primary bg-primary text-primary-foreground shadow-[0_3px_0_var(--primary-deep)] scale-105"
                     : "border-border bg-muted text-muted-foreground"
@@ -152,7 +152,7 @@ export function GestureCalibration({
                   <span
                     key={letter}
                     aria-hidden
-                    className={`inline-flex items-center gap-1.5 rounded-xl border-[3px] px-3 py-1.5 text-xs font-extrabold transition-all duration-150 ${
+                    className={`inline-flex items-center gap-1.5 rounded-xl border-[3px] px-3 py-1.5 text-xs font-extrabold transition-[border-color,background-color] duration-150 ${
                       on
                         ? "border-accent bg-blue-50 text-accent dark:border-accent/60 dark:bg-blue-950/30"
                         : "border-border bg-muted text-muted-foreground"

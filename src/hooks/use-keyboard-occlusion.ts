@@ -38,7 +38,11 @@ export function useKeyboardOcclusion() {
 
     // Safety net (m1 e2e finding): when the FOCUSED element unmounts (e.g.
     // the join form after router.refresh), no focusout fires — sync the
-    // flag to document.activeElement periodically.
+    // flag to document.activeElement. Polish round (W4 A12): the old 500ms
+    // interval polled every authenticated page at 2Hz forever; focusin/
+    // focusout already cover the common cases, so we sync on blur (fires on
+    // the removed element in most browsers) and on visibilitychange (tab
+    // return) instead of a permanent interval.
     const sync = () => {
       if (isOpen(document.activeElement)) {
         root.setAttribute("data-keyboard-open", "");
@@ -46,12 +50,18 @@ export function useKeyboardOcclusion() {
         root.removeAttribute("data-keyboard-open");
       }
     };
-    const iv = window.setInterval(sync, 500);
+    const onBlur = () => sync();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") sync();
+    };
+    document.addEventListener("blur", onBlur, true);
+    document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
       document.removeEventListener("focusin", onFocusIn);
       document.removeEventListener("focusout", onFocusOut);
-      window.clearInterval(iv);
+      document.removeEventListener("blur", onBlur, true);
+      document.removeEventListener("visibilitychange", onVisibility);
       root.removeAttribute("data-keyboard-open");
     };
   }, []);

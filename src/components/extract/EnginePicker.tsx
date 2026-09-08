@@ -57,7 +57,7 @@ export function EnginePicker({
   }, [value]);
 
   return (
-    <div className="space-y-2 rounded-2xl border-[3px] border-border bg-card p-4 shadow-[var(--shadow-clay-sm)]">
+    <div className="space-y-1.5 rounded-2xl border-[2px] border-border/70 bg-card/60 p-3 shadow-[var(--shadow-clay-sm)]">
       <div className="flex items-center justify-between">
         <Label htmlFor="ocr-engine" className="text-xs font-extrabold text-foreground font-heading">
           {t("engineLabel")}
@@ -75,7 +75,7 @@ export function EnginePicker({
         onValueChange={(v) => onChange(v as ExtractEngine)}
         disabled={isPickerDisabled}
       >
-        <SelectTrigger id="ocr-engine" className={`w-full rounded-xl border-[3px] font-bold text-xs ${allOfficeFiles ? "opacity-75 bg-muted/40 cursor-not-allowed" : ""}`}>
+        <SelectTrigger id="ocr-engine" className={`w-full rounded-xl border-[2px] font-bold text-xs h-9 ${allOfficeFiles ? "opacity-75 bg-muted/40 cursor-not-allowed" : ""}`}>
           <SelectValue placeholder={t("engineLabel")}>
             {(v) =>
               allOfficeFiles

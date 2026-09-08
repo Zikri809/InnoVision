@@ -69,6 +69,7 @@ export function GestureLayer({
   onCommit,
   onNext,
   onHoldProgress,
+  onWarnChange,
   onStatusChange,
   children,
 }: {
@@ -94,6 +95,10 @@ export function GestureLayer({
   faceStatus?: FaceStatus;
   /** P7: called when the hand-loss monitor fires `pause` (server-side pause). */
   onPause?: () => void;
+  /** Polish round (W2 C4): mirrors the warn state upward so the play screen
+   * can render the "keep your hand visible" chip INSIDE the fixed action bar
+   * instead of a fourth sticky floating layer. Fires on warn↔cleared only. */
+  onWarnChange?: (warning: boolean) => void;
   onSelect: (index: number) => void;
   /** QT-1 multi mode: a latch TOGGLES presented option `index` in the
    * pending set (never submits). */
@@ -172,7 +177,17 @@ export function GestureLayer({
   function setHandLostState(v: HandLost) {
     handLostRef.current = v;
     setHandLost(v);
+    const warn = v === "warn";
+    if (warn !== warnMirroredRef.current) {
+      warnMirroredRef.current = warn;
+      onWarnChangeRef.current?.(warn);
+    }
   }
+
+  // Polish round (W2 C4): warn↔cleared mirrors to the parent (play screen
+  // renders the warn chip inside its action bar). Fires on transitions only.
+  const onWarnChangeRef = useRef(onWarnChange);
+  const warnMirroredRef = useRef(false);
 
   /** Quantized hold-progress emission (5% steps — no per-frame render storm). */
   function emitHold(p: HoldProgress | null) {
@@ -200,6 +215,7 @@ export function GestureLayer({
     onNextRef.current = onNext;
     onHoldRef.current = onHoldProgress;
     onStatusChangeRef.current = onStatusChange;
+    onWarnChangeRef.current = onWarnChange;
     sessionPausedRef.current = Boolean(sessionPaused);
     onPauseRef.current = onPause;
     stateRef.current = { optionCount, questionId, armed, nextArmed, answerMode, scanning, status };
@@ -529,6 +545,10 @@ export function GestureLayer({
   // PIP expansion: manual toggle ONLY when not armed — while a pose is held,
   // a tap would need a second hand in frame, which finger-count reads as
   // input. While armed the PIP is glance-only (mirror + status ring).
+  // Polish round (C1): the DEFAULT is the collapsed ~24px status dot — the
+  // always-open 84px self-view was a floating layer that never earned its
+  // pixels; the ring color carries live face status at a glance and a tap
+  // expands the full self-check card (44px hit target via the -8px inset).
   const [pipExpanded, setPipExpanded] = useState(false);
   const armedRef = useRef(armed);
   useEffect(() => {
@@ -561,6 +581,16 @@ export function GestureLayer({
     ? "border-emerald-300 ring-[3.5px] ring-emerald-400/40"
     : "border-[#fed7aa] ring-[3.5px] ring-orange-200/50";
 
+  // Collapsed-PIP dot ring (polish C1): same live status semantics, scaled to
+  // a 24px element — solid border color + soft halo instead of the fat ring.
+  const pipDotRingClass = isFlagged
+    ? "border-rose-400 shadow-[0_0_0_3px_rgba(251,113,133,0.35)]"
+    : isVerifying
+    ? "border-amber-400 shadow-[0_0_0_3px_rgba(251,191,36,0.4)] animate-pulse"
+    : isVerified
+    ? "border-emerald-400 shadow-[0_0_0_3px_rgba(52,211,153,0.3)]"
+    : "border-orange-300 shadow-[0_0_0_3px_rgba(253,186,116,0.35)]";
+
   // ── Persistent video/canvas container (always mounted) ─────────────
   let videoContainerClass = "hidden";
   if (status === "calibrating" || status === "booting") {
@@ -571,15 +601,15 @@ export function GestureLayer({
       : "relative mx-auto aspect-[3/4] h-[45dvh] w-auto max-w-full overflow-hidden rounded-[2rem] border-[3.5px] border-border bg-muted shadow-[var(--shadow-clay)]";
   } else if (status === "active") {
     videoContainerClass = isWide
-      ? `relative w-full h-full flex-1 min-h-[350px] lg:min-h-0 overflow-hidden rounded-[2rem] border-[3.5px] ${statusRingClass} bg-[#fff7ed] p-2.5 shadow-[var(--shadow-clay)] transition-all duration-300 pointer-events-none`
+      ? `relative w-full h-full flex-1 min-h-[350px] lg:min-h-0 overflow-hidden rounded-[2rem] border-[3.5px] ${statusRingClass} bg-[#fff7ed] p-2.5 shadow-[var(--shadow-clay)] transition-[border-color,box-shadow] duration-300 pointer-events-none`
       : pipExpanded
         // Expanded self-check card: centered, tap scrim or PIP to collapse.
-        ? `fixed inset-x-4 top-1/2 z-50 mx-auto aspect-[3/4] max-h-[70dvh] w-auto max-w-[240px] -translate-y-1/2 overflow-hidden rounded-[18px] border-[3px] ${statusRingClass} bg-background p-2 shadow-[var(--shadow-clay)] transition-all duration-200 cursor-pointer`
-        // Glance PIP: top-right under the play header (safe-top + 44px row
-        // + 8px gap), 84×112 (72px below 360px viewports). 3:4 crop of the
-        // 4:3 source keeps the hand visible mid-frame; 1:1 fallback is the
-        // documented fallback if device QA shows cropping (plan ✦A9).
-        : `fixed right-3 top-[calc(var(--safe-top)+4.5rem)] z-40 aspect-[3/4] w-[84px] max-[359px]:w-[72px] overflow-hidden rounded-[18px] border-[3px] ${statusRingClass} bg-background p-1.5 shadow-[var(--shadow-clay)] transition-all duration-200 ${
+        ? `fixed inset-x-4 top-1/2 z-50 mx-auto aspect-[3/4] max-h-[70dvh] w-auto max-w-[240px] -translate-y-1/2 overflow-hidden rounded-[18px] border-[3px] ${statusRingClass} bg-background p-2 shadow-[var(--shadow-clay)] transition-[border-color,box-shadow] duration-200 cursor-pointer`
+        // Collapsed PIP (polish round C1): a ~24px status dot whose RING
+        // carries the live face status; tap expands the full self-check card
+        // (44px+ hit target via the hit-slop ::after inset). The 84px
+        // always-open self-view never earned its pixels.
+        : `hit-slop fixed right-4 top-[calc(var(--safe-top)+5.5rem)] z-40 grid size-6 place-items-center rounded-full border-2 ${pipDotRingClass} bg-background shadow-[0_2px_0_var(--border)] transition-[border-color,box-shadow] duration-200 ${
             armed ? "pointer-events-none" : "cursor-pointer pointer-events-auto"
           }`;
   }
@@ -661,16 +691,18 @@ export function GestureLayer({
         <div className="mx-auto flex w-full max-w-2xl min-w-0 flex-col">
           {/* Not-armed PIP is a real button (R3-A S2): keyboard users get
               the same self-check affordance; Escape collapses the expanded
-              card. The aria-hidden video/canvas stay decorative children. */}
+              card. Collapsed (polish C1) it is a ~24px status dot — the
+              video/canvas stay mounted inside and are merely clipped. The
+              aria-hidden video/canvas remain decorative children. */}
           <button
             type="button"
             onClick={togglePip}
-            aria-label={t("pipExpand")}
+            aria-label={pipExpanded ? t("pipCollapse") : t("pipExpand")}
             aria-expanded={pipExpanded}
             className={videoContainerClass}
             data-testid="gesture-video-container"
           >
-            <div className="relative h-full w-full overflow-hidden rounded-[1.5rem] bg-black">
+            <div className={`relative ${pipExpanded ? "h-full w-full" : "size-full"} overflow-hidden rounded-[1.5rem] bg-black`}>
               <video
                 ref={videoRef}
                 className="absolute inset-0 h-full w-full object-cover -scale-x-100"
@@ -692,20 +724,10 @@ export function GestureLayer({
             />
           )}
 
-          {/* Hand-loss warning lives on the MAIN screen on phones (M-DETECT):
-              the 84px PIP is too small to read a chip inside it. Sticky amber
-              banner under the top edge — stays visible while the quiz scrolls. */}
-          {handLost === "warn" && (
-            <div
-              className="sticky top-[calc(var(--safe-top)+0.5rem)] z-30 mb-3 flex items-center gap-2 rounded-2xl border-[3px] border-amber-400/70 bg-amber-50 px-3 py-2 text-amber-900 shadow-[var(--shadow-clay-sm)] dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200"
-              role="status"
-            >
-              <span className="size-2 shrink-0 animate-pulse rounded-full bg-amber-500 dark:bg-amber-400" aria-hidden />
-              <span className="text-xs font-extrabold tracking-wide">
-                {t("keepHandVisible")}
-              </span>
-            </div>
-          )}
+          {/* Hand-loss warning (polish C4): no longer a sticky floating band
+              — the warn state mirrors up via onWarnChange and the play screen
+              renders the chip INSIDE its fixed action bar (status, not a
+              fourth layer). The wide layout keeps its in-camera chip. */}
 
           {children}
         </div>

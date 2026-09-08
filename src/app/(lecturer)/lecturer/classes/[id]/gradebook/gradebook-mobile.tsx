@@ -24,8 +24,21 @@ type OpenState =
 function scoreTone(percent: number | null): string {
   if (percent === null) return "border-border bg-muted text-muted-foreground";
   if (percent >= 75) return "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-300";
-  if (percent >= 50) return "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300";
+  if (percent >= 50) return "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200";
   return "border-destructive/40 bg-destructive/10 text-destructive";
+}
+
+/**
+ * Option A (de-slop pass): the list is neutral by default — meter fill only
+ * takes a semantic color below the pass band (amber 50-64, red <50). Green
+ * as a celebration color on every passing row turned the screen into
+ * semantic color soup; scanning works by fill LENGTH, not hue.
+ */
+function meterFill(percent: number | null): string {
+  if (percent === null) return "bg-transparent";
+  if (percent < 50) return "bg-destructive";
+  if (percent < 65) return "bg-amber-400";
+  return "bg-primary";
 }
 
 export function GradebookMobile({
@@ -48,12 +61,59 @@ export function GradebookMobile({
     [open, model.quizzes],
   );
 
+  // Overall class average = mean of attempted students' cumulative %.
+  // (Desktop footer only shows per-quiz averages; this is the mobile summary.)
+  const classAverage = useMemo(() => {
+    const attempted = model.rows
+      .map((r) => r.cumulativePercent)
+      .filter((p): p is number => p !== null);
+    if (attempted.length === 0) return null;
+    return Math.round(attempted.reduce((sum, p) => sum + p, 0) / attempted.length);
+  }, [model.rows]);
+
   if (visibleRows.length === 0 || model.quizzes.length === 0) {
     return null; // empty states render in the shared flow above
   }
 
   return (
     <div className="space-y-4">
+      {/* Class summary: one clay meter + caption. Counts are a caption, not
+          three stat ovals; the avg is the only headline number worth showing. */}
+      <section
+        aria-label={t("classAvgLabel")}
+        className="rounded-[22px] border-[3px] border-border bg-card px-5 py-4 shadow-[var(--shadow-clay)]"
+      >
+        <div className="flex items-center gap-4">
+          <p className="font-heading text-3xl font-bold tabular-nums leading-none text-foreground">
+            {classAverage === null ? (
+              <span className="text-base font-bold text-muted-foreground">{t("noAttemptsYet")}</span>
+            ) : (
+              <>
+                {classAverage}
+                <span className="text-lg text-muted-foreground">%</span>
+              </>
+            )}
+          </p>
+          <div className="min-w-0">
+            <h2 className="text-xs font-extrabold uppercase tracking-wider text-muted-foreground">
+              {t("classAvgLabel")}
+            </h2>
+            <p className="mt-0.5 text-2xs font-bold text-muted-foreground">
+              {t("rosterCount", { count: model.rows.length })} · {t("quizCount", { count: model.quizzes.length })}
+            </p>
+          </div>
+        </div>
+        <div
+          className="mt-3 h-4 overflow-hidden rounded-full border-[3px] border-border bg-muted shadow-[inset_0_2px_0_rgba(0,0,0,0.05)]"
+          aria-hidden="true"
+        >
+          <div
+            className={cn("h-full rounded-full transition-[width] duration-500", meterFill(classAverage))}
+            style={{ width: `${classAverage ?? 0}%` }}
+          />
+        </div>
+      </section>
+
       {/* Quiz strip: per-quiz average chips → per-quiz sheet */}
       <div className="flex gap-2 overflow-x-auto pb-1 [scroll-snap-type:x_mandatory]">
         {model.quizzes.map((quiz) => (
@@ -76,7 +136,8 @@ export function GradebookMobile({
         ))}
       </div>
 
-      {/* Student list */}
+      {/* Student list: meter per row — scan by fill length, not hue. Plain
+          tabular numeral; no capsule around a bare number. */}
       <ul className="overflow-hidden rounded-[22px] border-[3px] border-border bg-card shadow-[var(--shadow-clay)]">
         {visibleRows.map((row, i) => (
           <li key={row.studentId}>
@@ -84,65 +145,104 @@ export function GradebookMobile({
               type="button"
               onClick={() => setOpen({ kind: "student", studentId: row.studentId })}
               className={cn(
-                "flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left transition-colors hover:bg-muted/60 active:bg-muted focus-visible:outline-[3px] focus-visible:outline-ring focus-visible:outline-offset-2",
+                "flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/60 active:bg-muted focus-visible:outline-[3px] focus-visible:outline-ring focus-visible:outline-offset-2",
                 i > 0 && "border-t-[3px] border-border/50",
               )}
             >
-              <span className="min-w-0">
+              <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm font-extrabold text-foreground">
                   {row.fullName ?? row.matricNo ?? row.studentId}
                 </span>
                 {row.fullName && row.matricNo && (
                   <span className="block text-2xs font-bold text-muted-foreground">{row.matricNo}</span>
                 )}
+                <span
+                  className="mt-1.5 block h-2.5 overflow-hidden rounded-full border-2 border-border bg-muted"
+                  aria-hidden="true"
+                >
+                  <span
+                    className={cn("block h-full rounded-full", meterFill(row.cumulativePercent))}
+                    style={{ width: `${row.cumulativePercent ?? 0}%` }}
+                  />
+                </span>
               </span>
-              <span
-                className={cn(
-                  "shrink-0 rounded-full border-[3px] px-2.5 py-0.5 font-heading text-sm font-bold tabular-nums",
-                  scoreTone(row.cumulativePercent),
-                )}
-              >
-                {row.cumulativePercent === null ? "—" : `${row.cumulativePercent}%`}
+              <span className="shrink-0 text-right">
+                <span
+                  className={cn(
+                    "block font-heading text-base font-bold tabular-nums",
+                    row.cumulativePercent === null && "text-muted-foreground",
+                    row.cumulativePercent !== null &&
+                      row.cumulativePercent < 50 &&
+                      "text-destructive",
+                    row.cumulativePercent !== null &&
+                      row.cumulativePercent >= 50 &&
+                      row.cumulativePercent < 65 &&
+                      "text-amber-600 dark:text-amber-400",
+                  )}
+                >
+                  {row.cumulativePercent === null ? "—" : `${row.cumulativePercent}%`}
+                </span>
               </span>
             </button>
           </li>
         ))}
       </ul>
 
-      {/* Per-student sheet */}
+      {/* Per-student sheet — same language as the list: overall meter in the
+          header, neutral meter cards per quiz (color only below pass band). */}
       <ResponsiveModal open={openStudent !== null} onOpenChange={(o) => !o && setOpen(null)}>
         <ResponsiveModalContent>
           <ResponsiveModalHeader>
             <ResponsiveModalTitle className="break-words font-heading text-lg">
               {openStudent?.fullName ?? openStudent?.matricNo}
             </ResponsiveModalTitle>
-            <ResponsiveModalDescription>
-              {t("colCumulative")}:{" "}
-              <span className="font-bold tabular-nums">
-                {openStudent?.cumulativePercent === null || openStudent == null ? "—" : `${openStudent.cumulativePercent}%`}
+            <ResponsiveModalDescription className="mt-1 flex items-center gap-2.5">
+              <span
+                className="block h-2.5 w-24 shrink-0 overflow-hidden rounded-full border-2 border-border bg-muted"
+                aria-hidden="true"
+              >
+                <span
+                  className={cn("block h-full rounded-full", meterFill(openStudent?.cumulativePercent ?? null))}
+                  style={{
+                    width: `${openStudent?.cumulativePercent ?? 0}%`,
+                  }}
+                />
+              </span>
+              <span
+                className={cn(
+                  "font-bold tabular-nums",
+                  openStudent?.cumulativePercent == null && "text-muted-foreground",
+                )}
+              >
+                {t("colCumulative")}:{" "}
+                {openStudent?.cumulativePercent == null ? "—" : `${openStudent.cumulativePercent}%`}
               </span>
             </ResponsiveModalDescription>
           </ResponsiveModalHeader>
-          <ul className="mt-3 flex gap-2 overflow-x-auto pb-2 [scroll-snap-type:x_mandatory]">
+          <ul className="mt-3 divide-y divide-border/60">
             {openStudent?.cells.map((cell, i) => {
               const quiz = model.quizzes[i];
+              const percent = cell?.percent ?? null;
               return (
-                <li
-                  key={quiz.id}
-                  className={cn(
-                    "w-28 shrink-0 [scroll-snap-align:start] rounded-2xl border-[3px] p-3 text-center",
-                    scoreTone(cell?.percent ?? null),
-                  )}
-                >
-                  <span className="block truncate text-2xs font-bold" title={quiz.title}>
+                <li key={quiz.id} className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
+                  <span className="min-w-0 truncate text-sm font-bold text-foreground" title={quiz.title}>
                     {quiz.title}
                   </span>
-                  <span className="mt-1 block font-heading text-xl font-bold tabular-nums">
-                    {cell?.percent === null || cell == null ? "—" : `${cell.percent}%`}
-                  </span>
-                  <span className="mt-0.5 block text-2xs font-bold tabular-nums">
-                    {cell?.score === null || cell == null ? "" : `${cell.score}/${cell.total}`}
-                    {cell?.attempt != null && cell.attempt > 1 ? ` ·#${cell.attempt}` : ""}
+                  <span
+                    className={cn(
+                      "shrink-0 text-sm font-extrabold tabular-nums",
+                      percent === null && "text-muted-foreground",
+                      percent !== null && percent < 50 && "text-destructive",
+                      percent !== null && percent >= 50 && percent < 65 && "text-amber-600 dark:text-amber-400",
+                    )}
+                  >
+                    {percent === null ? "—" : `${percent}%`}
+                    {cell?.score != null && (
+                      <span className="ml-1.5 text-2xs font-bold text-muted-foreground">
+                        {cell.score}/{cell.total}
+                        {cell.attempt != null && cell.attempt > 1 ? ` ·#${cell.attempt}` : ""}
+                      </span>
+                    )}
                   </span>
                 </li>
               );

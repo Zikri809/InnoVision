@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
+import { VList } from "virtua";
 import { Button } from "@/components/ui/button";
 import { BotAvatar } from "@/components/bot/bot-avatar";
 import { QuestionImage } from "@/components/media/question-image";
@@ -104,7 +105,7 @@ export function EndScreen({
   }
 
   return (
-    <div className="relative mx-auto max-w-2xl px-4 py-12">
+    <div className="relative mx-auto max-w-2xl px-4 py-6 sm:py-12">
       {/* decorative blobs */}
       <div aria-hidden className="pointer-events-none absolute -left-6 top-10 h-24 w-24 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-orange-200/50" />
       <div aria-hidden className="pointer-events-none absolute -right-4 bottom-16 h-20 w-20 rounded-[60%_40%_45%_55%/50%_60%_40%_55%] bg-blue-200/50" />
@@ -172,7 +173,16 @@ export function EndScreen({
       {revealed && breakdown.length > 0 && (
         <div className="mt-6">
           <h2 className="mb-3 font-heading text-lg font-semibold">{t("answerBreakdown")}</h2>
-          <ol className="space-y-3">
+          {/* VList (polish W4 A10): same virtualization as the practice review —
+              an assessment with 200 questions must not mount every card at
+              once. Height is explicit (virtua computes height:100% inline;
+              a max-h alone collapses to 0) and sizes to the question count.
+              List semantics preserved via role="list"/"listitem". */}
+          <VList
+            style={{ height: `min(${breakdown.length * 220 + 12}px, 100dvh)` }}
+            role="list"
+            aria-label={t("answerBreakdown")}
+          >
             {breakdown.map((b) => {
               const isCorrect = b.is_correct === true;
               // QT-1: multi rows carry their selections/key as SETS
@@ -183,9 +193,10 @@ export function EndScreen({
               const correctSet = isMulti ? (b.correct_indices ?? []) : [];
               const answered = isMulti ? selectedSet.length > 0 : b.selected_index != null;
               return (
-                <li
+                <div
                   key={b.question_id}
-                  className={`overflow-hidden rounded-[22px] border-2 bg-card shadow-[var(--shadow-clay-sm)] ${
+                  role="listitem"
+                  className={`mb-3 overflow-hidden rounded-[22px] border-2 bg-card shadow-[var(--shadow-clay-sm)] ${
                     isCorrect ? "border-[#C9D9B4]" : "border-[#E6B3A8]"
                   }`}
                 >
@@ -259,10 +270,10 @@ export function EndScreen({
                       {b.explanation}
                     </div>
                   )}
-                </li>
+                </div>
               );
             })}
-          </ol>
+          </VList>
         </div>
       )}
     </div>

@@ -330,7 +330,6 @@ export default async function LecturerQuizResultsPage({
       rows={rows}
       incidentClips={incidentClips}
       questionInsights={insights}
-      insightsTruncated={answersTruncated}
     />
   );
 }

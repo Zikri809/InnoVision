@@ -295,12 +295,16 @@ export function FaceEnrollClient({
           ref={videoRef}
           playsInline
           muted
+          aria-label={t("cameraPreview")}
           className="h-full w-full object-contain scale-x-[-1]"
         />
 
         {available && (
           <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-between p-4">
-            <div className="flex gap-2 rounded-full bg-[#7c2d12]/75 px-3 py-1.5">
+            {/* Angle progress chips — desktop restores the original in-frame
+                HUD (W2 C7 kept the merged below-video line for mobile only).
+                hidden sm:flex keeps it out of the mobile layout entirely. */}
+            <div className="hidden sm:flex gap-2 rounded-full bg-[#7c2d12]/75 px-3 py-1.5">
               {([
                 { label: t("angleFront"), index: 0 },
                 { label: t("angleLeft"), index: 1 },
@@ -329,9 +333,9 @@ export function FaceEnrollClient({
             </div>
 
             {/* BIG instruction overlay — mirrors currentInstruction() so the
-                prompt is readable at arm's length, not just in the tiny
-                bottom chip. aria-hidden: the bottom chip stays the live
-                region so screen readers announce it exactly once. */}
+                prompt is readable at arm's length. aria-hidden: the status
+                line under the video stays the live region so screen readers
+                announce it exactly once. */}
             {currentInstruction() && (
               <div
                 aria-hidden
@@ -352,7 +356,7 @@ export function FaceEnrollClient({
             )}
 
             <div
-              className={`h-40 w-32 sm:h-48 sm:w-36 rounded-[50%] border-4 transition-all duration-300 ${
+              className={`h-40 w-32 sm:h-48 sm:w-36 rounded-[50%] border-4 transition-[border-color,border-style,background-color,box-shadow,transform] duration-300 ${
                 !pose.faceDetected
                   ? "border-dashed border-white/50"
                   : (currentAngle === 0 && Math.abs(pose.yaw) <= 15 && pose.centered) ||
@@ -363,7 +367,10 @@ export function FaceEnrollClient({
               }`}
             />
 
-            <div className="max-w-[92%] flex flex-wrap items-center justify-center gap-1.5 rounded-2xl sm:rounded-full bg-[#7c2d12]/75 px-3 py-1.5 text-2xs sm:text-xs font-bold text-white text-center">
+            {/* Pose/lighting status chip — desktop-only in-frame HUD, original
+                design. hidden below sm: the merged below-video line covers
+                mobile (W2 C7). */}
+            <div className="hidden sm:flex max-w-[92%] flex-wrap items-center justify-center gap-1.5 rounded-full bg-[#7c2d12]/75 px-3 py-1.5 text-xs font-bold text-white text-center">
               {!pose.faceDetected ? (
                 <span className="text-amber-300">{t("posNotCentered")}</span>
               ) : (
@@ -402,8 +409,66 @@ export function FaceEnrollClient({
         )}
       </div>
 
+      {/* Polish round (W2 C7): the angle chips, pose/lighting chip, and the
+          lighting tip line collapse into ONE status line under the video —
+          mobile-only since the desktop restore brought back the in-frame
+          HUD. This line is the mobile live region (aria-live) so AT
+          announces it once; on desktop the status card (role="status")
+          plays that role, as before. */}
       {available && (
-        <p className="text-center text-xs font-bold text-muted-foreground">
+        <div
+          aria-live="polite"
+          className="mt-3 flex flex-wrap items-center justify-center gap-1.5 rounded-2xl border-[3px] border-border bg-card px-3 py-2 text-2xs font-bold text-muted-foreground shadow-[var(--shadow-clay-sm)] sm:hidden sm:text-xs"
+        >
+          <span className="flex items-center gap-1.5">
+            {([
+              { label: t("angleFront"), index: 0 },
+              { label: t("angleLeft"), index: 1 },
+              { label: t("angleRight"), index: 2 },
+            ] as const).map(({ label, index }) => {
+              const complete =
+                captureState === "done" || captureState === "pending_review" || currentAngle > index;
+              const active = !complete && currentAngle === index;
+              return (
+                <span
+                  key={index}
+                  className={`rounded-full px-2 py-0.5 ${
+                    complete
+                      ? "bg-emerald-500 text-white"
+                      : active
+                      ? "bg-amber-400 text-black"
+                      : "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  {index + 1}. {label} {complete && "✓"}
+                </span>
+              );
+            })}
+          </span>
+          <span className="text-white/0" aria-hidden>|</span>
+          {!pose.faceDetected ? (
+            <span className="text-amber-600 dark:text-amber-400">{t("posNotCentered")}</span>
+          ) : (
+            <>
+              <span className={pose.centered ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}>
+                {pose.centered ? t("posCentered") : t("posNotCentered")}
+              </span>
+              <span className="text-border" aria-hidden>|</span>
+              <span className={pose.lighting === "good" ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}>
+                {getLightingText(pose.lighting)}
+              </span>
+              <span className="text-border" aria-hidden>|</span>
+              <span>{t("angleStatus", { deg: Math.abs(pose.yaw) })}</span>
+            </>
+          )}
+          <span className="text-border" aria-hidden>|</span>
+          <span>💡 {getLightingTipText()}</span>
+        </div>
+      )}
+
+      {/* Desktop tip line — restored original, pairs with the in-frame HUD. */}
+      {available && (
+        <p className="hidden text-center text-xs font-bold text-muted-foreground sm:block">
           💡 {getLightingTipText()}
         </p>
       )}

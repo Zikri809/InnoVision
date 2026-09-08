@@ -136,42 +136,45 @@ export function GradebookClient({
   return (
     <div className="space-y-6">
       {/* ── Hero band ── */}
-      <section className="relative overflow-hidden rounded-[28px] border-[3px] border-border bg-gradient-to-br from-emerald-100 via-emerald-50 to-blue-50 dark:from-emerald-950/40 dark:via-card dark:to-blue-950/40 p-7 shadow-[var(--shadow-clay)] md:p-8">
+      <section className="relative overflow-hidden rounded-[28px] border-[3px] border-border bg-gradient-to-br from-emerald-100 via-emerald-50 to-blue-50 dark:from-emerald-950/40 dark:via-card dark:to-blue-950/40 p-4 sm:p-7 md:p-8 shadow-[var(--shadow-clay)]">
         <div aria-hidden className="pointer-events-none absolute -right-8 -top-10 h-36 w-36 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-white/50 dark:bg-white/5" />
         <div className="relative">
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center justify-between gap-3 min-h-8">
             <Link
               href={archived ? "/lecturer/classes/archived" : `/lecturer/classes/${classId}`}
-              className="inline-flex items-center gap-1.5 text-sm font-extrabold text-muted-foreground transition-colors hover:text-primary"
+              className="hit-slop inline-flex items-center gap-1.5 h-8 max-sm:h-8 px-3 rounded-xl border-[2.5px] border-border bg-card/90 text-xs font-extrabold text-muted-foreground hover:text-foreground hover:border-primary/40 shadow-[0_2px_0_var(--border)] transition-all hover:-translate-y-0.5 active:translate-y-0.5"
             >
-              <ArrowLeft className="h-4 w-4" aria-hidden /> {t("backToClass")}
+              <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
+              <span>{t("backToClass")}</span>
             </Link>
             {hasQuizzes && hasStudents && (
               <Button
                 type="button"
                 variant="outline"
-                size="sm"
+                size="xs"
                 onClick={handleExport}
                 disabled={exporting}
-                className="border-[3px] border-primary/40 bg-card/90 text-xs font-extrabold text-primary hover:bg-primary hover:text-primary-foreground hover:border-primary transition-all shadow-[var(--shadow-clay-sm)]"
+                className="hit-slop h-8 max-sm:h-8 px-3 rounded-xl border-[2.5px] border-primary/40 bg-card/90 text-xs font-extrabold text-primary hover:bg-primary hover:text-primary-foreground hover:border-primary shadow-[0_2px_0_var(--border)] transition-all hover:-translate-y-0.5 active:translate-y-0.5"
               >
                 {exporting ? (
-                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" aria-hidden />
                 ) : (
-                  <Download className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                  <Download className="mr-1 h-3.5 w-3.5" aria-hidden />
                 )}
                 {exporting ? t("exporting") : t("exportButton")}
               </Button>
             )}
           </div>
-          <h1 className="mt-4 font-heading text-3xl font-semibold [text-wrap:balance]">
+          {/* Mobile-compressed hero: 24px title ceiling, explainer line is
+              desktop-only — the band must not eat the first viewport. */}
+          <h1 className="mt-2 sm:mt-4 font-heading text-2xl sm:text-3xl font-semibold [text-wrap:balance]">
             {t("title")}
           </h1>
-          <p className="mt-1.5 text-sm font-semibold text-muted-foreground">
+          <p className="mt-1 sm:mt-1.5 text-sm font-semibold text-muted-foreground">
             {model.className} · {t("rosterCount", { count: model.rows.length })} ·{" "}
             {t("quizCount", { count: model.quizzes.length })}
           </p>
-          <p className="mt-1 text-xs text-muted-foreground">{t("subtitle")}</p>
+          <p className="mt-1 hidden text-xs text-muted-foreground sm:block">{t("subtitle")}</p>
         </div>
       </section>
 
@@ -212,8 +215,8 @@ export function GradebookClient({
               )}
             </div>
 
-            <div className="flex shrink-0 flex-wrap items-center gap-3">
-              <div className="flex items-center gap-1.5">
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:shrink-0 sm:items-center sm:gap-3">
+              <div className="flex items-center gap-1.5 min-w-0">
                 <ListFilter
                   className="hidden h-4 w-4 shrink-0 text-muted-foreground sm:block"
                   aria-hidden
@@ -225,7 +228,7 @@ export function GradebookClient({
                   <SelectTrigger
                     id="gradebook-status-filter"
                     aria-label={t("filterStatusLabel")}
-                    className="h-12 w-44 rounded-2xl border-[3px] border-border bg-card text-sm font-bold shadow-[var(--shadow-clay-sm)]"
+                    className="h-11 sm:h-12 w-full sm:w-44 rounded-2xl border-[3px] border-border bg-card text-xs sm:text-sm font-bold shadow-[var(--shadow-clay-sm)] truncate"
                   >
                     <SelectValue>
                       {(v) => statusLabels[v as GradebookStatusFilter] ?? String(v)}
@@ -239,7 +242,7 @@ export function GradebookClient({
                 </Select>
               </div>
 
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5 min-w-0">
                 <ArrowUpDown
                   className="hidden h-4 w-4 shrink-0 text-muted-foreground sm:block"
                   aria-hidden
@@ -251,7 +254,7 @@ export function GradebookClient({
                   <SelectTrigger
                     id="gradebook-sort"
                     aria-label={t("sortLabel")}
-                    className="h-12 w-44 rounded-2xl border-[3px] border-border bg-card text-sm font-bold shadow-[var(--shadow-clay-sm)]"
+                    className="h-11 sm:h-12 w-full sm:w-44 rounded-2xl border-[3px] border-border bg-card text-xs sm:text-sm font-bold shadow-[var(--shadow-clay-sm)] truncate"
                   >
                     <SelectValue>
                       {(v) => sortLabels[v as GradebookSortKey] ?? String(v)}

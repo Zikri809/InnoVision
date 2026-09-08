@@ -22,36 +22,72 @@ import {
   DrawerTrigger,
   DrawerClose,
 } from "@/components/ui/drawer";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+  SheetClose,
+} from "@/components/ui/sheet";
+
+/**
+ * Responsive modal context: shares both the screen size decision and the
+ * desired mobile surface type ("drawer" vs "sheet") down the component tree.
+ */
+interface ResponsiveModalContextType {
+  isDesktop: boolean;
+  mobileSurface: "drawer" | "sheet";
+}
+
+const ResponsiveModalContext = React.createContext<ResponsiveModalContextType>({
+  isDesktop: false,
+  mobileSurface: "drawer",
+});
+
+function useResponsiveModalState() {
+  return React.useContext(ResponsiveModalContext);
+}
 
 interface ResponsiveModalProps {
   children: React.ReactNode;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /** Choose mobile surface: "drawer" (default pull-up sheet with handle) or "sheet" (full-height page sheet). */
+  mobileSurface?: "drawer" | "sheet";
 }
 
 export function ResponsiveModal({
   children,
   open,
   onOpenChange,
+  mobileSurface = "drawer",
 }: ResponsiveModalProps) {
   const isDesktop = useMediaQuery("(min-width: 640px)");
 
-  if (isDesktop) {
-    return (
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        {children}
-      </Dialog>
-    );
-  }
-
-  return (
+  const surface = isDesktop ? (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      {children}
+    </Dialog>
+  ) : mobileSurface === "sheet" ? (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      {children}
+    </Sheet>
+  ) : (
     // vaul input rules (plan W5 A16, binding): handleOnly prevents
     // drag-dismiss from inside scrolling form content; repositionInputs
-    // keeps inputs above the keyboard. handleOnly on read-only sheets too —
-    // one universal rule beats per-call-site drift.
+    // keeps inputs above the keyboard.
     <Drawer open={open} onOpenChange={onOpenChange} handleOnly repositionInputs>
       {children}
     </Drawer>
+  );
+
+  return (
+    <ResponsiveModalContext.Provider value={{ isDesktop, mobileSurface }}>
+      {surface}
+    </ResponsiveModalContext.Provider>
   );
 }
 
@@ -65,13 +101,21 @@ export function ResponsiveModalTrigger({
   children,
   ...props
 }: ResponsiveModalTriggerProps) {
-  const isDesktop = useMediaQuery("(min-width: 640px)");
+  const { isDesktop, mobileSurface } = useResponsiveModalState();
 
   if (isDesktop) {
     return (
       <DialogTrigger className={className} {...props}>
         {children}
       </DialogTrigger>
+    );
+  }
+
+  if (mobileSurface === "sheet") {
+    return (
+      <SheetTrigger className={className} {...props}>
+        {children}
+      </SheetTrigger>
     );
   }
 
@@ -92,13 +136,21 @@ export function ResponsiveModalClose({
   children,
   ...props
 }: ResponsiveModalCloseProps) {
-  const isDesktop = useMediaQuery("(min-width: 640px)");
+  const { isDesktop, mobileSurface } = useResponsiveModalState();
 
   if (isDesktop) {
     return (
       <DialogClose className={className} {...props}>
         {children}
       </DialogClose>
+    );
+  }
+
+  if (mobileSurface === "sheet") {
+    return (
+      <SheetClose className={className} {...props}>
+        {children}
+      </SheetClose>
     );
   }
 
@@ -109,25 +161,44 @@ export function ResponsiveModalClose({
   );
 }
 
-export type ResponsiveModalContentProps = React.HTMLAttributes<HTMLDivElement>;
+export type ResponsiveModalContentProps = React.HTMLAttributes<HTMLDivElement> & {
+  showCloseButton?: boolean;
+  /** Drawer mode only: pinned footer row (CTA) that never scrolls away. */
+  footer?: React.ReactNode;
+};
 
 export function ResponsiveModalContent({
   className,
   children,
+  showCloseButton,
+  footer,
   ...props
 }: ResponsiveModalContentProps) {
-  const isDesktop = useMediaQuery("(min-width: 640px)");
+  const { isDesktop, mobileSurface } = useResponsiveModalState();
 
   if (isDesktop) {
     return (
-      <DialogContent className={className} {...props}>
+      <DialogContent className={className} showCloseButton={showCloseButton} {...props}>
         {children}
       </DialogContent>
     );
   }
 
+  if (mobileSurface === "sheet") {
+    return (
+      <SheetContent
+        side="bottom"
+        showCloseButton={showCloseButton ?? false}
+        className={className}
+        {...props}
+      >
+        {children}
+      </SheetContent>
+    );
+  }
+
   return (
-    <DrawerContent className={className} {...props}>
+    <DrawerContent className={className} footer={footer} {...props}>
       {children}
     </DrawerContent>
   );
@@ -140,13 +211,21 @@ export function ResponsiveModalHeader({
   children,
   ...props
 }: ResponsiveModalHeaderProps) {
-  const isDesktop = useMediaQuery("(min-width: 640px)");
+  const { isDesktop, mobileSurface } = useResponsiveModalState();
 
   if (isDesktop) {
     return (
       <DialogHeader className={className} {...props}>
         {children}
       </DialogHeader>
+    );
+  }
+
+  if (mobileSurface === "sheet") {
+    return (
+      <SheetHeader className={className} {...props}>
+        {children}
+      </SheetHeader>
     );
   }
 
@@ -164,13 +243,21 @@ export function ResponsiveModalFooter({
   children,
   ...props
 }: ResponsiveModalFooterProps) {
-  const isDesktop = useMediaQuery("(min-width: 640px)");
+  const { isDesktop, mobileSurface } = useResponsiveModalState();
 
   if (isDesktop) {
     return (
       <DialogFooter className={className} {...props}>
         {children}
       </DialogFooter>
+    );
+  }
+
+  if (mobileSurface === "sheet") {
+    return (
+      <SheetFooter className={className} {...props}>
+        {children}
+      </SheetFooter>
     );
   }
 
@@ -188,13 +275,21 @@ export function ResponsiveModalTitle({
   children,
   ...props
 }: ResponsiveModalTitleProps) {
-  const isDesktop = useMediaQuery("(min-width: 640px)");
+  const { isDesktop, mobileSurface } = useResponsiveModalState();
 
   if (isDesktop) {
     return (
       <DialogTitle className={className} {...props}>
         {children}
       </DialogTitle>
+    );
+  }
+
+  if (mobileSurface === "sheet") {
+    return (
+      <SheetTitle className={className} {...props}>
+        {children}
+      </SheetTitle>
     );
   }
 
@@ -212,13 +307,21 @@ export function ResponsiveModalDescription({
   children,
   ...props
 }: ResponsiveModalDescriptionProps) {
-  const isDesktop = useMediaQuery("(min-width: 640px)");
+  const { isDesktop, mobileSurface } = useResponsiveModalState();
 
   if (isDesktop) {
     return (
       <DialogDescription className={className} {...props}>
         {children}
       </DialogDescription>
+    );
+  }
+
+  if (mobileSurface === "sheet") {
+    return (
+      <SheetDescription className={className} {...props}>
+        {children}
+      </SheetDescription>
     );
   }
 

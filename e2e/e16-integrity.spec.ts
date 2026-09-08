@@ -185,7 +185,8 @@ test.describe("E16 — integrity suite", () => {
       await advisoryPosted;
 
       // Lecturer opens the quiz RESULTS (the "View results" path from the
-      // class page — NOTE: /lecturer/quizzes does not exist as a route).
+      // class page — /lecturer/quizzes is the library hub; detail lives in
+      // /lecturer/quizzes/[id]/…).
       await expect(studentPage.url()).toMatch(/\/play\/[0-9a-f-]+/);
       await lecturerPage.goto(`/lecturer/quizzes/${quizId}/results`);
       await expect(

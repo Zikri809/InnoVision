@@ -123,8 +123,11 @@ export function StudentQuizzesClient({
 
   // SQ-1: deadline chip state per card. The view is LIVE-only, so "closed"
   // (past closes_at but still listed) only happens under cron lag — styled
-  // grey and truthful. A `Date.now()` read in a client component is fine
-  // (the render is not SSR-stable-critical; chips re-render per visit).
+  // grey and truthful. Polish round (C6): far-future "Due in N days" chips
+  // are DELETED — grey passive chips on every card were noise; only the
+  // actionable amber (<24h) chip and the rare closed state remain. A
+  // `Date.now()` read in a client component is fine (the render is not
+  // SSR-stable-critical; chips re-render per visit).
   // eslint-disable-next-line react-hooks/purity
   const nowMs = Date.now();
   function deadlineChip(q: QuizRow): {
@@ -134,31 +137,47 @@ export function StudentQuizzesClient({
     if (!q.closes_at) return null;
     const ts = Date.parse(q.closes_at);
     if (Number.isNaN(ts)) return null;
+    if (ts <= nowMs) return { label: t("chipClosed"), tone: "grey" };
+    if (ts - nowMs >= CLOSING_SOON_MS) return null;
     const due = formatDue(q.closes_at, locale);
     if (!due) return null;
-    if (ts <= nowMs) return { label: t("chipClosed"), tone: "grey" };
-    return { label: t("chipDue", { due }), tone: ts - nowMs < CLOSING_SOON_MS ? "amber" : "grey" };
+    return { label: t("chipDue", { due }), tone: "amber" };
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 sm:space-y-8">
       {/* ── Hero band ── */}
-      <section className="relative overflow-hidden rounded-[28px] border-[3px] border-border bg-gradient-to-br from-orange-100 via-orange-50 to-blue-50 dark:from-orange-950/40 dark:via-card dark:to-blue-950/40 p-5 shadow-[var(--shadow-clay)] sm:p-7 md:p-9">
-        <div aria-hidden className="pointer-events-none absolute -right-8 -top-10 h-40 w-40 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-white/50 dark:bg-white/5" />
-        <div aria-hidden className="pointer-events-none absolute -bottom-12 left-1/3 h-28 w-28 rounded-[60%_40%_45%_55%/50%_60%_40%_55%] bg-blue-100/60 dark:bg-blue-500/5" />
+      <section className="relative overflow-hidden rounded-[28px] border-[3px] border-border bg-gradient-to-br from-orange-100 via-orange-50 to-blue-50 dark:from-orange-950/40 dark:via-card dark:to-blue-950/40 p-4 shadow-[var(--shadow-clay)] sm:p-7 md:p-9">
+        <div aria-hidden className="pointer-events-none absolute -right-8 -top-10 h-40 w-40 max-sm:hidden rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-white/50 dark:bg-white/5" />
+        <div aria-hidden className="pointer-events-none absolute -bottom-12 left-1/3 h-28 w-28 max-sm:hidden rounded-[60%_40%_45%_55%/50%_60%_40%_55%] bg-blue-100/60 dark:bg-blue-500/5" />
         <div className="relative">
-          <span className="inline-flex items-center gap-2 rounded-full border-[3px] border-border bg-card px-3.5 py-1 text-xs font-extrabold text-primary">
+          <span className="inline-flex max-sm:hidden items-center gap-2 rounded-full border-[3px] border-border bg-card px-3.5 py-1 text-xs font-extrabold text-primary">
             <ClipboardList className="h-4 w-4" aria-hidden /> {t("heroTitle")}
           </span>
-          <h1 className="mt-4 font-heading text-3xl font-semibold [text-wrap:balance] md:text-4xl">
+          <h1 className="mt-4 max-sm:mt-0 font-heading text-2xl font-semibold [text-wrap:balance] sm:text-3xl md:text-4xl">
             {t("heroSubtitle")}
           </h1>
-          <p className="mt-2 max-w-xl text-sm font-semibold text-muted-foreground md:text-base">
+          <p className="mt-1.5 max-w-xl text-sm font-semibold text-muted-foreground md:text-base">
             {t("unlimitedTries")}
           </p>
 
-          {/* quick stats */}
-          <div className="mt-6 grid max-w-lg grid-cols-2 gap-4 sm:grid-cols-3">
+          {/* quick stats — compact strip on mobile, cards on sm+ */}
+          <div className="mt-3 flex flex-wrap items-center gap-2 sm:hidden">
+            <span className="inline-flex items-center gap-1.5 rounded-full border-2 border-border bg-card px-3 py-1 text-xs font-bold text-emerald-600 shadow-[var(--shadow-clay-sm)]">
+              <Zap className="h-3.5 w-3.5" aria-hidden />
+              <span>{practiceCount} {t("statPractice")}</span>
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full border-2 border-border bg-card px-3 py-1 text-xs font-bold text-accent shadow-[var(--shadow-clay-sm)]">
+              <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
+              <span>{assessmentCount} {t("statAssessment")}</span>
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full border-2 border-border bg-card px-3 py-1 text-xs font-bold text-primary shadow-[var(--shadow-clay-sm)]">
+              <ClipboardList className="h-3.5 w-3.5" aria-hidden />
+              <span>{quizzes.length} {t("statLive")}</span>
+            </span>
+          </div>
+
+          <div className="mt-6 hidden grid-cols-2 gap-4 sm:grid max-w-lg sm:grid-cols-3">
             <div className="rounded-2xl border-[3px] border-border bg-card px-5 py-4 shadow-[var(--shadow-clay-sm)]">
               <div className="flex items-center gap-2 text-emerald-600">
                 <Zap className="h-5 w-5" aria-hidden />
@@ -173,7 +192,7 @@ export function StudentQuizzesClient({
               </div>
               <p className="mt-0.5 text-xs font-extrabold text-muted-foreground">{t("statAssessment")}</p>
             </div>
-            <div className="rounded-2xl border-[3px] border-border bg-card px-5 py-4 shadow-[var(--shadow-clay-sm)] max-sm:col-span-2">
+            <div className="rounded-2xl border-[3px] border-border bg-card px-5 py-4 shadow-[var(--shadow-clay-sm)]">
               <div className="flex items-center gap-2 text-primary">
                 <ClipboardList className="h-5 w-5" aria-hidden />
                 <span className="font-heading text-2xl font-bold tabular-nums">{quizzes.length}</span>

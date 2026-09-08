@@ -18,26 +18,34 @@ const ICONS: Record<ThemePreference, typeof Sun> = {
  * label reflect the CURRENT preference so the next click's outcome is
  * predictable.
  */
-export function ThemeToggle({ className }: { className?: string }) {
+export function ThemeToggle({
+  className,
+  variant = "default",
+}: {
+  className?: string;
+  variant?: "default" | "pill";
+}) {
   const { preference, resolved, cycle } = useTheme();
   const t = useTranslations("nav");
   const Icon = ICONS[preference];
+
+  const baseStyles =
+    variant === "pill"
+      ? "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-xl border-2 border-border bg-muted/60 px-2.5 font-heading text-xs font-extrabold text-foreground shadow-[0_2px_0_var(--border)] transition-[transform,box-shadow,background-color] duration-[150ms] ease-out hover:-translate-y-0.5 hover:bg-card hover:shadow-[0_3px_0_var(--border)] active:translate-y-0.5 active:shadow-[0_1px_0_var(--border)]"
+      : "inline-flex h-11 cursor-pointer items-center gap-2 rounded-2xl border-[3px] border-border bg-card px-3.5 font-heading text-sm font-extrabold text-foreground shadow-[0_4px_0_var(--border)] transition-[transform,box-shadow] duration-[180ms] ease-out hover:-translate-y-0.5 hover:shadow-[0_6px_0_var(--border)] active:translate-y-0.5 active:shadow-[0_1px_0_var(--border)]";
 
   return (
     <button
       type="button"
       onClick={cycle}
-      className={cn(
-        "inline-flex h-11 cursor-pointer items-center gap-2 rounded-2xl border-[3px] border-border bg-card px-3.5 font-heading text-sm font-extrabold text-foreground shadow-[0_4px_0_var(--border)] transition-[transform,box-shadow] duration-[180ms] ease-out hover:-translate-y-0.5 hover:shadow-[0_6px_0_var(--border)] active:translate-y-0.5 active:shadow-[0_1px_0_var(--border)]",
-        className,
-      )}
+      className={cn(baseStyles, className)}
       title={t("toggleTheme")}
       aria-label={t("themeAria", { mode: t(`theme_${preference}`) })}
       data-testid="theme-toggle"
       data-theme-preference={preference}
       data-theme-resolved={resolved}
     >
-      <Icon className="h-4 w-4 text-primary" aria-hidden />
+      <Icon className={cn("text-primary", variant === "pill" ? "h-3.5 w-3.5" : "h-4 w-4")} aria-hidden />
       <span>{t(`theme_${preference}`)}</span>
     </button>
   );

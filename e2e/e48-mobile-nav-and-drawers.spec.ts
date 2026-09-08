@@ -81,8 +81,9 @@ test.describe("E48 — Mobile Bottom Nav, Responsive Drawers, and Password Toggl
 
   test("mobile bottom navigation for lecturer", async ({ page }) => {
     test.skip(!LECTURER_INVITE_CODE, "LECTURER_INVITE_CODE not set");
-    // Mobile redesign landed (docs/PLAN_MOBILE_REDESIGN.md W1): the lecturer
-    // dock keeps two tabs — Classes and Archived (nav.archivedClassesLabel).
+    // Dock overhaul: the lecturer dock now holds two tabs — Classes and the
+    // Quizzes library (nav.lecturerQuizzes) — plus a center create FAB.
+    // Archived lost its dock slot (demoted to an in-page destination).
     const email = `lecturer-e48-${Date.now()}@innovision.test`;
 
     await page.setViewportSize({ width: 375, height: 812 });
@@ -94,13 +95,21 @@ test.describe("E48 — Mobile Bottom Nav, Responsive Drawers, and Password Toggl
     await page.screenshot({ path: "test-results/screenshots/after_04_mobile_lecturer_bottom_nav.png" });
 
     const activeClassesTab = mobileNav.getByRole("link", { name: /my classes|kelas saya/i });
-    const archivedClassesTab = mobileNav.getByRole("link", { name: /archived|diarkib/i });
+    const quizzesTab = mobileNav.getByRole("link", { name: /quizzes|kuiz/i });
+    const createFab = mobileNav.getByRole("button", { name: /create|cipta/i });
 
     await expect(activeClassesTab).toBeVisible();
-    await expect(archivedClassesTab).toBeVisible();
+    await expect(quizzesTab).toBeVisible();
+    await expect(createFab).toBeVisible();
 
-    // Navigate to Archived Classes
-    await archivedClassesTab.click();
-    await page.waitForURL(/\/lecturer\/classes\/archived/, { timeout: 10_000 });
+    // The archived tab is gone from the dock…
+    await expect(
+      mobileNav.getByRole("link", { name: /archived|diarkib/i })
+    ).toHaveCount(0);
+
+    // Navigate to the Quizzes library
+    await quizzesTab.click();
+    await page.waitForURL(/\/lecturer\/quizzes/, { timeout: 10_000 });
   });
+
 });

@@ -64,10 +64,10 @@
   --text-lg--line-height: 1.4;
   --text-label: 0.75rem;
   --text-label--line-height: 1.3;
-  --text-prompt: 1.1875rem;
+  --text-prompt: 1.0625rem;
   --text-prompt--line-height: 1.35;
-  --text-display: clamp(1.75rem, 8vw, 2.125rem);
-  --text-display--line-height: 1.1;
+  --text-display: clamp(1.5rem, 7vw, 1.75rem);
+  --text-display--line-height: 1.15;
 
   /* Desktop type-scale restore (leak fix): see the unlayered @media block
      after this @theme — Tailwind inlines literal values into compiled

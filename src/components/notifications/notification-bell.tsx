@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import {
   Dialog,
   DialogContent,
@@ -31,6 +32,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+} from "@/components/ui/drawer";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
@@ -169,17 +177,14 @@ export function NotificationBell({
 
   const [open, setOpen] = React.useState(false);
   const [confirmClear, setConfirmClear] = React.useState(false);
-  const [isDesktop, setIsDesktop] = React.useState(true);
   const [announce, setAnnounce] = React.useState("");
   const prevUnread = React.useRef(initialCount);
 
-  React.useEffect(() => {
-    const mq = window.matchMedia("(min-width: 640px)");
-    const apply = () => setIsDesktop(mq.matches);
-    apply();
-    mq.addEventListener("change", apply);
-    return () => mq.removeEventListener("change", apply);
-  }, []);
+  // Polish round (W3 A2): derive the surface from the same media query the
+  // modal hoist uses, read in the render pass. The old `useState(true)` +
+  // effect correction painted the desktop popover on every mobile first
+  // render — a real flicker on each load.
+  const isDesktop = useMediaQuery("(min-width: 640px)");
 
   // aria-live announces poll/realtime deltas only, suppressed while open.
   React.useEffect(() => {
@@ -260,26 +265,21 @@ export function NotificationBell({
         <button
           type="button"
           onClick={() => void openItem(item)}
-          className={cn(
-            "flex w-full items-start gap-3 rounded-[16px] p-3 text-left transition-colors hover:bg-muted/70 focus-visible:outline-2 focus-visible:outline-ring",
-            unread && "bg-primary/5",
-          )}
+          className="flex w-full items-start gap-2.5 p-2.5 text-left transition-colors hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-ring"
         >
-          <span
+          <Icon
             className={cn(
-              "mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-[12px]",
-              unread ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground",
+              "mt-0.5 h-5 w-5 shrink-0",
+              unread ? "text-primary/70" : "text-muted-foreground/60",
             )}
             aria-hidden="true"
-          >
-            <Icon className="h-5 w-5" />
-          </span>
+          />
           <span className="min-w-0 flex-1">
-            <span className="flex items-center gap-2">
+            <span className="flex items-center gap-1.5">
               <span
                 className={cn(
-                  "min-w-0 flex-1 truncate font-semibold",
-                  !unread && "text-muted-foreground",
+                  "min-w-0 flex-1 truncate text-sm font-bold text-foreground",
+                  !unread && "font-semibold text-muted-foreground",
                 )}
               >
                 {title}
@@ -290,12 +290,12 @@ export function NotificationBell({
                   aria-hidden="true"
                 />
               )}
+              <span className="shrink-0 text-[11px] font-semibold text-muted-foreground/75">
+                {relativeTime(item.createdAt, locale)}
+              </span>
             </span>
-            <span className="line-clamp-2 text-sm text-muted-foreground">
+            <span className="mt-0.5 line-clamp-2 text-xs font-semibold text-muted-foreground leading-relaxed">
               {t(copy.bodyKey, bodyParams(item.payload, t("fallback.studentName")))}
-            </span>
-            <span className="mt-0.5 block text-xs text-muted-foreground/80">
-              {relativeTime(item.createdAt, locale)}
             </span>
           </span>
         </button>
@@ -319,15 +319,15 @@ export function NotificationBell({
       <>
         {pinned.length > 0 && (
           <section aria-label={t("panel.pinnedLabel")} className="mb-2">
-            <p className="px-3 pt-1 pb-1 text-xs font-bold tracking-wide text-amber-700 uppercase dark:text-amber-400">
+            <p className="px-2 pt-1 pb-1 text-xs font-bold tracking-wide text-amber-700 uppercase dark:text-amber-400">
               {t("panel.pinnedLabel")}
             </p>
-            <ul className="grid gap-1">
+            <ul className="divide-y divide-border">
               {pinned.map((n) => renderRow({ key: n.id, item: n }))}
             </ul>
           </section>
         )}
-        {recent.length > 0 && <ul className="grid gap-1">{recent.map(renderRow)}</ul>}
+        {recent.length > 0 && <ul className="divide-y divide-border">{recent.map(renderRow)}</ul>}
         {hasMore && (
           <div className="pt-2 pb-1 text-center">
             <Button
@@ -371,13 +371,19 @@ export function NotificationBell({
             )}
           </PopoverTrigger>
           <PopoverContent className="w-[380px] max-w-[calc(100vw-1.5rem)]">
-            <div className="flex items-center justify-between gap-2 pb-2">
-              <span className="font-heading text-lg font-semibold">
+            <div className="flex items-center gap-2 pb-3">
+              <span className="font-heading text-lg font-bold">
                 {t("panel.title")}
               </span>
+              {unreadCount > 0 && (
+                <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs font-extrabold text-primary">
+                  {unreadCount}
+                </span>
+              )}
               <Button
                 variant="ghost"
-                size="sm"
+                size="xs"
+                className="ml-auto font-bold text-primary"
                 onClick={() => void onMarkAll()}
                 disabled={unreadCount === 0}
               >
@@ -395,6 +401,7 @@ export function NotificationBell({
             className="relative h-11 w-11 rounded-[14px]"
             aria-label={badgeLabel}
             aria-haspopup="dialog"
+            aria-expanded={open}
             onClick={() => setOpen(true)}
           >
             <Bell className="h-5 w-5" aria-hidden="true" />
@@ -407,25 +414,31 @@ export function NotificationBell({
               </span>
             )}
           </Button>
-          <Dialog open={open} onOpenChange={setOpen}>
-            <DialogContent className="top-auto bottom-0 left-1/2 max-h-[85dvh] max-w-[calc(100%-1.5rem)] -translate-x-1/2 translate-y-0 overflow-y-auto rounded-t-[28px] rounded-b-none pb-[max(1rem,var(--safe-bottom))] sm:max-w-md">
-              <DialogHeader>
-                <DialogTitle>{t("panel.title")}</DialogTitle>
-                <DialogDescription>{t("panel.sheetDescription")}</DialogDescription>
-              </DialogHeader>
-              <div className="flex items-center justify-end">
+          <Drawer open={open} onOpenChange={setOpen} handleOnly>
+            <DrawerContent innerClassName="p-3 pb-6 flex flex-col max-h-[85dvh]">
+              <DrawerHeader className="flex-row items-center gap-2 px-1 pt-1 pb-2 text-left">
+                <DrawerTitle className="font-heading text-lg font-bold">{t("panel.title")}</DrawerTitle>
+                {unreadCount > 0 && (
+                  <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs font-extrabold text-primary">
+                    {unreadCount}
+                  </span>
+                )}
                 <Button
                   variant="ghost"
-                  size="sm"
+                  size="xs"
+                  className="ml-auto font-bold text-primary"
                   onClick={() => void onMarkAll()}
                   disabled={unreadCount === 0}
                 >
                   {t("panel.markAllRead")}
                 </Button>
-              </div>
+                <DrawerDescription className="sr-only">
+                  {t("panel.sheetDescription")}
+                </DrawerDescription>
+              </DrawerHeader>
               <div className={listScroll}>{renderBody()}</div>
-            </DialogContent>
-          </Dialog>
+            </DrawerContent>
+          </Drawer>
         </>
       )}
 

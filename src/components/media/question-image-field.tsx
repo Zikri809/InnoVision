@@ -199,7 +199,7 @@ export function QuestionImageField({
   const shownError =
     pickError ?? (variant === "committed" ? errorText : null);
 
-  const dropzoneClasses = `flex w-full cursor-pointer flex-col items-center justify-center gap-1.5 rounded-2xl border-[3px] border-dashed p-5 py-6 text-center text-sm transition-all duration-150 outline-none focus-visible:ring-4 focus-visible:ring-primary/20 disabled:pointer-events-none disabled:opacity-60 disabled:cursor-not-allowed ${
+  const dropzoneClasses = `flex w-full cursor-pointer flex-col items-center justify-center gap-1.5 rounded-2xl border-[3px] border-dashed p-5 py-6 text-center text-sm transition-[border-color,background-color,box-shadow] duration-150 outline-none focus-visible:ring-4 focus-visible:ring-primary/20 disabled:pointer-events-none disabled:opacity-60 disabled:cursor-not-allowed ${
     dragOver
       ? "border-primary bg-primary/10 scale-[1.01]"
       : "border-border bg-card/60 hover:bg-card shadow-[var(--shadow-clay-sm)]"

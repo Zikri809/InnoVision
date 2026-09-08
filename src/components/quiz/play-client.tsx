@@ -22,6 +22,14 @@ import { isFakeFaceSeamEnabled } from "@/lib/face/seam-gate";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useWakeLock } from "@/hooks/use-wake-lock";
 import { HAPTIC, haptic } from "@/lib/haptics";
+import { Info } from "lucide-react";
+import {
+  ResponsiveModal,
+  ResponsiveModalContent,
+  ResponsiveModalHeader,
+  ResponsiveModalTitle,
+  ResponsiveModalDescription,
+} from "@/components/ui/responsive-modal";
 import type { FaceStatus } from "@/lib/face/types";
 
 
@@ -141,6 +149,9 @@ export function PlayClient({
   const router = useRouter();
   const t = useTranslations("play");
   const tCommon = useTranslations("common");
+  // Polish round (W2 C4): the hand-loss warn chip copy lives in the vision
+  // namespace (single source — the same phrase the wide layout renders).
+  const tVision = useTranslations("vision");
 
   const [index, setIndex] = useState(initialIndex < 0 ? 0 : initialIndex);
   const [answers, setAnswers] = useState<Record<string, AnswerState>>(() => {
@@ -182,6 +193,13 @@ export function PlayClient({
   // (timeUp || question) && lastSubmitFailed; pause overlays are suppressed
   // alongside so the retry stays reachable (same treatment as timeUp).
   const [lastSubmitFailed, setLastSubmitFailed] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
+  // Polish round (W2 C4): hand-loss warn mirrors from GestureLayer so the
+  // chip renders INSIDE the fixed action bar instead of a fourth sticky
+  // floating layer on the play screen. The SR channel is the existing polite
+  // announcer (warnAnnouncement) — no new live region, contract kept.
+  const [handWarn, setHandWarn] = useState(false);
+  const [warnAnnouncement, setWarnAnnouncement] = useState<string | null>(null);
   // Wide gate (plan §2): one media query, comma-OR. Landscape phones get the
   // desktop split (a portrait composition in 390px of height is unusable);
   // SSR renders the mobile composition (getServerSnapshot false — the
@@ -203,6 +221,22 @@ export function PlayClient({
   const isPractice = quiz.mode === "practice";
   const question = questions[Math.min(index, questions.length - 1)];
   const answered = answers[question?.id];
+
+  // Polish round (W2 C2): cam status for the quiz-info sheet — mirrors the
+  // ProgressHud camStatus derivation so a phone can check camera state
+  // without the header dot.
+  const camStatusForInfo =
+    quiz.mode !== "assessment" || faceStatus === "off" || faceStatus === "exempt" || faceStatus === "unavailable"
+      ? null
+      : faceStatus === "ready"
+        ? "aligned"
+        : "reposition";
+
+  function formatTimeLimit(sec: number): string {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  }
 
   // SQ-3 dead-end: when the seed is the all-answered state (initialIndex -1 →
   // feedback on Q1), "Next" would strand the student — advancing into an
@@ -838,7 +872,7 @@ export function PlayClient({
         ? Math.round((result.score / result.total) * 100)
         : 0;
     return (
-      <div className="mx-auto max-w-2xl px-4 py-12">
+      <div className="mx-auto max-w-2xl px-4 py-6 sm:py-12">
         <div className="rounded-[28px] border-[3px] border-border bg-card p-8 text-center shadow-[var(--shadow-clay)] md:p-10" role="status">
           <p className="text-sm font-extrabold uppercase tracking-wide text-muted-foreground">
             {isPractice ? t("end.practiceTitle") : result.score != null ? t("end.assessmentTitle") : t("end.submittedTitle")}
@@ -882,7 +916,7 @@ export function PlayClient({
   // Terminal dead-end: session no longer active / quiz no longer available.
   if (phase === "dead") {
     return (
-      <div className="mx-auto max-w-2xl px-4 py-12">
+      <div className="mx-auto max-w-2xl px-4 py-6 sm:py-12">
         <div className="rounded-[28px] border-[3px] border-destructive/40 bg-card p-8 text-center shadow-[var(--shadow-clay)] md:p-10" role="alert">
           <h1 className="font-heading text-2xl font-semibold">{quiz.title}</h1>
           <p className="mt-1 text-sm font-extrabold uppercase tracking-wide text-muted-foreground">
@@ -1064,6 +1098,12 @@ export function PlayClient({
           }}
           onNext={() => goNext()}
           onHoldProgress={setHoldProgress}
+          onWarnChange={(warning) => {
+            setHandWarn(warning);
+            // Announce the transition once; clear the message when resolved
+            // so a re-warn re-announces (node content must change to fire).
+            setWarnAnnouncement(warning ? tVision("keepHandVisible") : null);
+          }}
           onStatusChange={(s) => setGestureActive(s === "active")}
         >
           <div className={`flex flex-col gap-6 ${isWide ? "" : "pb-[calc(152px+var(--safe-bottom))]"}`}>
@@ -1094,41 +1134,107 @@ export function PlayClient({
                 />
               </div>
             ) : (
-              /* Mobile (plan W3): sticky compact header — safe-top padded,
-                 opaque, ≤164px. The quiz title appears ONCE in the gate sheet,
-                 never above the question flow. Row 1: mode pill + counter +
-                 timer chip (verbatim role="timer" markup, FIRST
-                 span.tabular-nums in DOM order — e10 contract) + cam dot.
-                 Row 2: progress bar. The gesture PIP anchors top-right below
-                 this header (gesture-layer fixed positioning). */
+              /* Mobile (plan W3 + polish W2 C2): sticky compact header —
+                 safe-top padded, opaque. The quiz title appears ONCE in the
+                 gate sheet, never above the question flow. Row 1: an "info"
+                 trigger (opens the quiz-info sheet: mode + time limit + cam
+                 status) + counter + timer chip (verbatim role="timer"
+                 markup, FIRST span.tabular-nums in DOM order — e10
+                 contract, so the sheet is mounted outside the header).
+                 Row 2: progress bar. The gesture PIP anchors top-right
+                 below this header (gesture-layer fixed positioning). */
               <header className="sticky top-0 z-20 -mx-4 space-y-2 border-b-[3px] border-border bg-background px-4 pb-2 pt-[calc(var(--safe-top)+0.5rem)] sm:-mx-6 sm:px-6">
                 {/* Heading-order anchor: the title lives visually in the gate
                     (assessments), but practice skips the gate entirely —
                     every question flow keeps an h1 (R3-A S1). */}
                 <h1 className="sr-only">{quiz.title}</h1>
                 <div className="flex items-center justify-between gap-2">
-                  <span className={`inline-block shrink-0 rounded-full border-[3px] px-3 py-0.5 font-sans text-label font-extrabold uppercase tracking-[0.04em] ${
-                    isPractice
-                      ? "border-emerald-300 bg-emerald-100 text-emerald-800 dark:border-emerald-400/40 dark:bg-emerald-500/15 dark:text-emerald-300"
-                      : "border-accent/40 bg-blue-100 text-accent dark:border-accent/40 dark:bg-blue-500/15 dark:text-blue-300"
-                  }`}>
-                    {isPractice ? tCommon("practice") : tCommon("assessment")}
-                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="shrink-0 gap-1 rounded-full border-[3px] border-border bg-card px-2.5 py-1 text-label font-extrabold uppercase tracking-[0.04em] text-muted-foreground"
+                    aria-label={t("infoOpen")}
+                    aria-expanded={infoOpen}
+                    onClick={() => setInfoOpen(true)}
+                  >
+                    <Info className="size-3.5" aria-hidden="true" />
+                    {t("infoOpen")}
+                  </Button>
                   <ProgressHud
                     variant="strip"
                     current={index + 1}
                     total={questions.length}
                     remainingMs={remainingMs}
-                    camStatus={
-                      quiz.mode !== "assessment" || faceStatus === "off" || faceStatus === "exempt" || faceStatus === "unavailable"
-                        ? null
-                        : faceStatus === "ready"
-                        ? "aligned"
-                        : "reposition"
-                    }
+                    camStatus={null}
                   />
                 </div>
               </header>
+            )}
+
+            {/* Polish round (W2 C2): the mode pill + cam dot fold into a
+                tap-to-open "quiz info" sheet on phones. Mounted OUTSIDE the
+                header row so the timer chip stays the FIRST span.tabular-nums
+                in DOM order (e10 contract). */}
+            {!isWide && (
+              <ResponsiveModal open={infoOpen} onOpenChange={setInfoOpen}>
+                <ResponsiveModalContent className="sm:max-w-sm">
+                  <ResponsiveModalHeader>
+                    <ResponsiveModalTitle className="font-heading text-lg">
+                      {t("info.title")}
+                    </ResponsiveModalTitle>
+                    <ResponsiveModalDescription>
+                      {quiz.title}
+                    </ResponsiveModalDescription>
+                  </ResponsiveModalHeader>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-3 rounded-2xl border-[3px] border-border bg-muted/60 px-4 py-3">
+                      <span className="font-sans text-label font-extrabold uppercase tracking-[0.04em] text-muted-foreground">
+                        {t("info.mode")}
+                      </span>
+                      <span className={`rounded-full border-[3px] px-3 py-0.5 font-sans text-label font-extrabold uppercase tracking-[0.04em] ${
+                        isPractice
+                          ? "border-emerald-300 bg-emerald-100 text-emerald-800 dark:border-emerald-400/40 dark:bg-emerald-500/15 dark:text-emerald-300"
+                          : "border-accent/40 bg-blue-100 text-accent dark:border-accent/40 dark:bg-blue-500/15 dark:text-blue-300"
+                      }`}>
+                        {isPractice ? tCommon("practice") : tCommon("assessment")}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 rounded-2xl border-[3px] border-border bg-muted/60 px-4 py-3">
+                      <span className="font-sans text-label font-extrabold uppercase tracking-[0.04em] text-muted-foreground">
+                        {t("info.timeLimit")}
+                      </span>
+                      <span className="font-heading text-base font-bold tabular-nums">
+                        {quiz.timeLimitSec != null
+                          ? formatTimeLimit(quiz.timeLimitSec)
+                          : t("hud.noTimeLimit")}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 rounded-2xl border-[3px] border-border bg-muted/60 px-4 py-3">
+                      <span className="font-sans text-label font-extrabold uppercase tracking-[0.04em] text-muted-foreground">
+                        {t("info.camStatus")}
+                      </span>
+                      <span className="flex items-center gap-1.5 font-heading text-base font-bold">
+                        <span
+                          className={`inline-block h-2 w-2 rounded-full ${
+                            camStatusForInfo === "aligned"
+                              ? "bg-emerald-500"
+                              : camStatusForInfo === "reposition"
+                              ? "bg-amber-400 animate-pulse"
+                              : "bg-muted-foreground/40"
+                          }`}
+                          aria-hidden="true"
+                        />
+                        {camStatusForInfo === "aligned"
+                          ? t("info.camAligned")
+                          : camStatusForInfo === "reposition"
+                          ? t("info.camReposition")
+                          : t("info.camOff")}
+                      </span>
+                    </div>
+                  </div>
+                </ResponsiveModalContent>
+              </ResponsiveModal>
             )}
 
             {isWide && (
@@ -1153,6 +1259,7 @@ export function PlayClient({
             <div className="sr-only" aria-live="polite" role="status">
               {milestoneAnnouncement}
               {answerAnnouncement}
+              {warnAnnouncement}
             </div>
             <div className="sr-only" aria-live="assertive" role="alert">
               {assertiveAnnouncement}
@@ -1182,18 +1289,6 @@ export function PlayClient({
                 region). */}
             {!isWide && (
               <div className="fixed inset-x-4 bottom-0 z-30 flex flex-col gap-2 pb-[max(0.75rem,var(--safe-bottom))] pt-2">
-                {/* Multi status chip (plan W3 D6): anchored to the bar it
-                    explains, OUTSIDE the action-zone live container,
-                    aria-hidden — the sr-only multiSelectedCount span inside
-                    the container remains the sole count channel. */}
-                {phase === "question" && question.type === "multi_select" && !answered && (
-                  <p
-                    aria-hidden="true"
-                    className="mx-auto w-fit rounded-full bg-background/90 px-3 py-1 text-center text-sm font-bold text-muted-foreground shadow-[0_2px_0_var(--border)]"
-                  >
-                    {t("multiStatusChip", { count: pendingMulti.length })}
-                  </p>
-                )}
                 {(error || notice) && (
                   <div aria-live="polite">
                     {error && (
@@ -1219,6 +1314,32 @@ export function PlayClient({
                   }`}
                   aria-live="polite"
                 >
+                  {/* Hand-loss warn chip (polish W2 C4): mirrors GestureLayer's
+                      warn state — visual status inside the action bar, not a
+                      fourth floating layer. aria-hidden + text identical to
+                      the sr-only announcer above (which is the sole live
+                      channel — no nested live regions in this container). */}
+                  {handWarn && (
+                    <p
+                      aria-hidden="true"
+                      className="mx-auto flex w-fit items-center gap-2 rounded-full border-[3px] border-amber-400/70 bg-amber-50 px-3 py-1 text-xs font-extrabold tracking-wide text-amber-900 shadow-[0_2px_0_var(--border)] dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200"
+                    >
+                      <span className="size-2 shrink-0 animate-pulse rounded-full bg-amber-500 dark:bg-amber-400" aria-hidden />
+                      {tVision("keepHandVisible")}
+                    </p>
+                  )}
+                  {/* Multi status chip (plan W3 D6 + polish W2 C3): moved
+                      INSIDE the action card so the fixed bottom area stays a
+                      single layer. OUTSIDE the sr-only count span (which
+                      remains the sole count channel — contract), aria-hidden. */}
+                  {phase === "question" && question.type === "multi_select" && !answered && (
+                    <p
+                      aria-hidden="true"
+                      className="mx-auto w-fit rounded-full bg-background px-3 py-1 text-center text-sm font-bold text-muted-foreground shadow-[0_2px_0_var(--border)]"
+                    >
+                      {t("multiStatusChip", { count: pendingMulti.length })}
+                    </p>
+                  )}
                   {actionZoneButtons}
                 </div>
               </div>

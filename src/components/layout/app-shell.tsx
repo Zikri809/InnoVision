@@ -53,7 +53,10 @@ export function AppShell({
 
   const links =
     role === "lecturer"
-      ? [{ href: "/lecturer/classes", label: t("myClasses") }]
+      ? [
+          { href: "/lecturer/classes", label: t("myClasses") },
+          { href: "/lecturer/quizzes", label: t("lecturerQuizzes") },
+        ]
       : [
           { href: "/student/classes", label: t("myClasses") },
           { href: "/student/quizzes", label: t("quizzes") },
@@ -67,11 +70,11 @@ export function AppShell({
         {t("skipToContent")}
       </a>
 
-      <header className="sticky top-0 z-50 border-b-[3px] border-border bg-background/85 pt-[var(--safe-top)] backdrop-blur">
-        <div className="mx-auto flex h-[74px] w-full max-w-6xl items-center justify-between gap-3 px-3 sm:px-6">
+      <header className="sticky top-0 z-50 border-b-[3px] border-border bg-background pt-[var(--safe-top)]">
+        <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between gap-3 px-3 sm:px-6">
           <div className="flex min-w-0 items-center gap-2 sm:gap-6 md:gap-8">
             <Link href="/dashboard" aria-label={t("brand")} className="flex shrink-0 items-center gap-2.5">
-              <span className="grid h-10 w-10 -rotate-4 place-items-center rounded-[14px] bg-primary font-heading text-lg font-bold text-primary-foreground shadow-[0_4px_0_var(--primary-deep)]">
+              <span className="grid h-8 w-8 -rotate-4 place-items-center rounded-[12px] bg-primary font-heading text-base font-bold text-primary-foreground shadow-[0_3px_0_var(--primary-deep)]">
                 IV
               </span>
               <span className="hidden font-heading text-[21px] font-semibold sm:inline">
@@ -103,7 +106,7 @@ export function AppShell({
 
       <main
         id="main"
-        className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 sm:py-8 md:py-10 pb-[calc(96px+var(--safe-bottom))] sm:pb-10"
+        className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 sm:py-8 md:py-10 pb-[calc(92px+var(--safe-bottom))] sm:pb-10"
       >
         {children}
       </main>

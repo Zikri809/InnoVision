@@ -23,6 +23,14 @@ import {
   Archive,
   Loader2,
 } from "lucide-react";
+import {
+  ResponsiveModal,
+  ResponsiveModalTrigger,
+  ResponsiveModalContent,
+  ResponsiveModalHeader,
+  ResponsiveModalTitle,
+  ResponsiveModalDescription,
+} from "@/components/ui/responsive-modal";
 import type { LecturerClassCard } from "@/lib/types/aliases";
 import { EmptyState } from "@/components/ui/empty-state";
 import { EmptyBoxIllustration } from "@/components/illustrations/empty-box";
@@ -45,6 +53,8 @@ export function ClassesPageClient({
   const [title, setTitle] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [mobileCreateOpen, setMobileCreateOpen] = useState(false);
 
   // Ref lock guards against a fast double-click before React re-renders.
   const submitLock = useRef(false);
@@ -69,6 +79,7 @@ export function ClassesPageClient({
         return;
       }
       setTitle("");
+      setMobileCreateOpen(false);
       router.refresh();
     } catch {
       setError(tCommon("errorGeneric"));
@@ -80,25 +91,81 @@ export function ClassesPageClient({
 
   const totalQuizzes = activeClasses.reduce((n, c) => n + c.quizCount, 0);
 
+  const createForm = (
+    <form onSubmit={handleCreate} className="space-y-4">
+      <div>
+        <Label htmlFor="class-title" className="sr-only">
+          {t("classTitleLabel")}
+        </Label>
+        <Input
+          id="class-title"
+          placeholder={t("classTitlePlaceholder")}
+          value={title}
+          disabled={creating}
+          onChange={(e) => setTitle(e.target.value)}
+          required
+          maxLength={200}
+        />
+      </div>
+      <div aria-live="polite">
+        {error && (
+          <p className="rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm font-bold text-destructive" role="alert">
+            {error}
+          </p>
+        )}
+      </div>
+      <Button type="submit" className="w-full font-bold" disabled={creating || !title.trim()}>
+        {creating ? (
+          <>
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+            {t("creatingBtn")}
+          </>
+        ) : (
+          t("createBtn")
+        )}
+      </Button>
+    </form>
+  );
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 sm:space-y-8">
       {/* ── Hero band ── */}
-      <section className="relative overflow-hidden rounded-[28px] border-[3px] border-border bg-gradient-to-br from-orange-100 via-orange-50 to-blue-50 dark:from-orange-950/40 dark:via-card dark:to-blue-950/40 p-5 shadow-[var(--shadow-clay)] sm:p-7 md:p-9">
-        <div aria-hidden className="pointer-events-none absolute -right-8 -top-10 h-40 w-40 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-white/50 dark:bg-white/5" />
-        <div aria-hidden className="pointer-events-none absolute -bottom-12 left-1/3 h-28 w-28 rounded-[60%_40%_45%_55%/50%_60%_40%_55%] bg-blue-100/60 dark:bg-blue-500/5" />
+      <section className="relative overflow-hidden rounded-[28px] border-[3px] border-border bg-gradient-to-br from-orange-100 via-orange-50 to-blue-50 dark:from-orange-950/40 dark:via-card dark:to-blue-950/40 p-4 shadow-[var(--shadow-clay)] sm:p-7 md:p-9">
+        <div aria-hidden className="pointer-events-none absolute -right-8 -top-10 h-40 w-40 max-sm:hidden rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-white/50 dark:bg-white/5" />
+        <div aria-hidden className="pointer-events-none absolute -bottom-12 left-1/3 h-28 w-28 max-sm:hidden rounded-[60%_40%_45%_55%/50%_60%_40%_55%] bg-blue-100/60 dark:bg-blue-500/5" />
         <div className="relative">
-          <span className="inline-flex items-center gap-2 rounded-full border-[3px] border-border bg-card px-3.5 py-1 text-xs font-extrabold text-primary">
+          <span className="inline-flex max-sm:hidden items-center gap-2 rounded-full border-[3px] border-border bg-card px-3.5 py-1 text-xs font-extrabold text-primary">
             <GraduationCap className="h-4 w-4" aria-hidden /> {t("heroTitle")}
           </span>
-          <h1 className="mt-4 font-heading text-3xl font-semibold [text-wrap:balance] md:text-4xl">
+          <h1 className="mt-4 max-sm:mt-0 font-heading text-2xl font-semibold [text-wrap:balance] sm:text-3xl md:text-4xl">
             {t("heroSubtitle")}
           </h1>
-          <p className="mt-2 max-w-xl text-sm font-semibold text-muted-foreground md:text-base">
+          <p className="mt-1.5 max-w-xl text-sm font-semibold text-muted-foreground md:text-base">
             {t("createCardSubtitle")}
           </p>
 
-          {/* quick stats */}
-          <div className="mt-6 grid max-w-lg grid-cols-2 gap-4 sm:grid-cols-3">
+          {/* quick stats (desktop: cards, mobile: compact inline strip) */}
+          <div className="mt-3 flex flex-wrap items-center gap-2 sm:hidden">
+            <span className="inline-flex items-center gap-1.5 rounded-full border-2 border-border bg-card px-3 py-1 text-xs font-bold text-primary shadow-[var(--shadow-clay-sm)]">
+              <Layers className="h-3.5 w-3.5" aria-hidden />
+              <span>{t("classCount", { count: activeClasses.length })}</span>
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full border-2 border-border bg-card px-3 py-1 text-xs font-bold text-accent shadow-[var(--shadow-clay-sm)]">
+              <ClipboardList className="h-3.5 w-3.5" aria-hidden />
+              <span>{t("quizCount", { count: totalQuizzes })}</span>
+            </span>
+            {archivedCount > 0 && (
+              <Link
+                href="/lecturer/classes/archived"
+                className="inline-flex items-center gap-1.5 rounded-full border-2 border-border bg-card px-3 py-1 text-xs font-bold text-muted-foreground shadow-[var(--shadow-clay-sm)] hover:text-primary"
+              >
+                <Archive className="h-3.5 w-3.5" aria-hidden />
+                <span>{t("archivedClassesLabel")}: {archivedCount}</span>
+              </Link>
+            )}
+          </div>
+
+          <div className="mt-6 hidden grid-cols-2 gap-4 sm:grid max-w-lg sm:grid-cols-3">
             <div className="rounded-2xl border-[3px] border-border bg-card px-5 py-4 shadow-[var(--shadow-clay-sm)]">
               <div className="flex items-center gap-2 text-primary">
                 <Layers className="h-5 w-5" aria-hidden />
@@ -143,8 +210,8 @@ export function ClassesPageClient({
 
       {/* ── Create + list ── */}
       <section className="grid items-start gap-6 lg:grid-cols-[340px_1fr]">
-        {/* Create card — compact sidebar card that sticks comfortably on scroll */}
-        <Card className="lg:sticky lg:top-6">
+        {/* Create card — visible only on desktop as a sticky sidebar */}
+        <Card className="hidden lg:block lg:sticky lg:top-6">
           <CardHeader>
             <div className="mb-1 grid h-11 w-11 place-items-center rounded-2xl bg-orange-100 text-primary">
               <Plus className="h-5 w-5" aria-hidden />
@@ -155,64 +222,55 @@ export function ClassesPageClient({
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleCreate} className="space-y-4">
-              <div>
-                <Label htmlFor="class-title" className="sr-only">
-                  {t("classTitleLabel")}
-                </Label>
-                <Input
-                  id="class-title"
-                  placeholder={t("classTitlePlaceholder")}
-                  value={title}
-                  disabled={creating}
-                  onChange={(e) => setTitle(e.target.value)}
-                  required
-                  maxLength={200}
-                />
-              </div>
-              <div aria-live="polite">
-                {error && (
-                  <p className="rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm font-bold text-destructive" role="alert">
-                    {error}
-                  </p>
-                )}
-              </div>
-              <Button type="submit" className="w-full" disabled={creating || !title.trim()}>
-                {creating ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
-                    {t("creatingBtn")}
-                  </>
-                ) : (
-                  t("createBtn")
-                )}
-              </Button>
-            </form>
+            {createForm}
           </CardContent>
         </Card>
 
         {/* Class cards */}
         <div>
-          <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
-            <div className="flex items-center gap-2.5">
+          <div className="mb-4 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
               <h2 className="font-heading text-xl font-semibold">{t("myClasses")}</h2>
               {activeClasses.length > 0 && (
-                <span className="text-sm font-extrabold text-muted-foreground">
-                  {t("classCount", { count: activeClasses.length })}
+                <span className="rounded-full bg-primary/15 px-2.5 py-0.5 text-xs font-extrabold text-primary">
+                  {activeClasses.length}
                 </span>
               )}
             </div>
 
-            {archivedCount > 0 && activeClasses.length === 0 && (
-              <Link
-                href="/lecturer/classes/archived"
-                className="inline-flex items-center gap-1.5 rounded-full border-[3px] border-border bg-card px-3.5 py-1 text-xs font-extrabold text-muted-foreground shadow-[var(--shadow-clay-sm)] transition-[transform,border-color,color] duration-180 hover:-translate-y-0.5 hover:border-primary hover:text-primary active:translate-y-0 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/40"
-              >
-                <Archive className="h-3.5 w-3.5" aria-hidden />
-                <span>{t("viewArchivedClasses", { count: archivedCount })}</span>
-                <ArrowRight className="h-3 w-3" aria-hidden />
-              </Link>
-            )}
+            <div className="flex items-center gap-2">
+              <ResponsiveModal open={mobileCreateOpen} onOpenChange={setMobileCreateOpen}>
+                <ResponsiveModalTrigger asChild>
+                  <Button
+                    size="xs"
+                    className="hit-slop h-8 max-sm:h-8 gap-1.5 rounded-xl px-3 text-xs font-bold lg:hidden shadow-[0_2px_0_var(--primary-deep)]"
+                  >
+                    <Plus className="h-3.5 w-3.5" aria-hidden />
+                    <span>{t("newClassBtn")}</span>
+                  </Button>
+                </ResponsiveModalTrigger>
+                <ResponsiveModalContent className="sm:max-w-md">
+                  <ResponsiveModalHeader>
+                    <ResponsiveModalTitle>{t("createCardTitle")}</ResponsiveModalTitle>
+                    <ResponsiveModalDescription>
+                      {t("createCardSubtitle")}
+                    </ResponsiveModalDescription>
+                  </ResponsiveModalHeader>
+                  <div className="pt-2">{createForm}</div>
+                </ResponsiveModalContent>
+              </ResponsiveModal>
+
+              {archivedCount > 0 && activeClasses.length === 0 && (
+                <Link
+                  href="/lecturer/classes/archived"
+                  className="inline-flex items-center gap-1.5 rounded-full border-[3px] border-border bg-card px-3.5 py-1 text-xs font-extrabold text-muted-foreground shadow-[var(--shadow-clay-sm)] transition-[transform,border-color,color] duration-180 hover:-translate-y-0.5 hover:border-primary hover:text-primary active:translate-y-0 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/40"
+                >
+                  <Archive className="h-3.5 w-3.5" aria-hidden />
+                  <span>{t("viewArchivedClasses", { count: archivedCount })}</span>
+                  <ArrowRight className="h-3 w-3" aria-hidden />
+                </Link>
+              )}
+            </div>
           </div>
 
           {activeClasses.length === 0 ? (

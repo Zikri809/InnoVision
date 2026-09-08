@@ -85,32 +85,34 @@ export function ArchivedClassesClient({ classes }: { classes: ArchivedClassCard[
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 max-sm:space-y-5">
       {/* ── Hero band ── */}
-      <section className="relative overflow-hidden rounded-[28px] border-[3px] border-border bg-gradient-to-br from-orange-100 via-orange-50 to-blue-50 dark:from-orange-950/40 dark:via-card dark:to-blue-950/40 p-6 shadow-[var(--shadow-clay)] md:p-8">
-        <div aria-hidden className="pointer-events-none absolute -right-8 -top-10 h-40 w-40 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-white/50 dark:bg-white/5" />
-        <div aria-hidden className="pointer-events-none absolute -bottom-12 left-1/3 h-28 w-28 rounded-[60%_40%_45%_55%/50%_60%_40%_55%] bg-blue-100/60 dark:bg-blue-500/5" />
-        <div className="relative space-y-4">
+      {/* Below sm the hero drops its card chrome (gradient/blobs/badge) — the
+          dock tab + ARCHIVED badges already say what this page is. */}
+      <section className="relative overflow-hidden rounded-[28px] border-[3px] border-border bg-gradient-to-br from-orange-100 via-orange-50 to-blue-50 dark:from-orange-950/40 dark:via-card dark:to-blue-950/40 p-6 shadow-[var(--shadow-clay)] md:p-8 max-sm:border-0 max-sm:bg-none max-sm:p-0 max-sm:shadow-none">
+        <div aria-hidden className="pointer-events-none absolute -right-8 -top-10 h-40 w-40 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-white/50 dark:bg-white/5 max-sm:hidden" />
+        <div aria-hidden className="pointer-events-none absolute -bottom-12 left-1/3 h-28 w-28 rounded-[60%_40%_45%_55%/50%_60%_40%_55%] bg-blue-100/60 dark:bg-blue-500/5 max-sm:hidden" />
+        <div className="relative space-y-4 max-sm:space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <Link
               href="/lecturer/classes"
-              className="inline-flex items-center gap-2 rounded-2xl border-[3px] border-border bg-card px-4 py-2 text-xs font-extrabold text-foreground shadow-[var(--shadow-clay-sm)] transition-[transform,box-shadow] duration-180 hover:-translate-y-0.5 active:translate-y-0.5 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/40 md:text-sm"
+              className="hit-slop inline-flex items-center gap-2 rounded-2xl border-[3px] border-border bg-card px-4 py-2 text-xs font-extrabold text-foreground shadow-[var(--shadow-clay-sm)] transition-[transform,box-shadow] duration-180 hover:-translate-y-0.5 active:translate-y-0.5 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/40 md:text-sm"
             >
               <ArrowLeft className="h-4 w-4" aria-hidden />
               <span>{t("backToClasses")}</span>
             </Link>
 
-            <span className="inline-flex items-center gap-1.5 rounded-full border-[3px] border-border bg-card px-3.5 py-1 text-xs font-extrabold text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5 rounded-full border-[3px] border-border bg-card px-3.5 py-1 text-xs font-extrabold text-muted-foreground max-sm:hidden">
               <Archive className="h-3.5 w-3.5 text-primary" aria-hidden />
               {t("heroBadge")}
             </span>
           </div>
 
           <div>
-            <h1 className="font-heading text-3xl font-semibold [text-wrap:balance] md:text-4xl">
+            <h1 className="font-heading text-3xl font-semibold [text-wrap:balance] md:text-4xl max-sm:text-2xl">
               {t("heroTitle")}
             </h1>
-            <p className="mt-2 max-w-2xl text-sm font-semibold text-muted-foreground md:text-base">
+            <p className="mt-2 max-w-2xl text-sm font-semibold text-muted-foreground md:text-base max-sm:line-clamp-2">
               {t("heroSubtitle")}
             </p>
           </div>
@@ -244,7 +246,7 @@ export function ArchivedClassesClient({ classes }: { classes: ArchivedClassCard[
               <div className="mt-5 flex items-center justify-between gap-2 border-t-[3px] border-border pt-4">
                 <Link
                   href={`/lecturer/classes/${c.id}`}
-                  className="inline-flex items-center gap-1 text-xs font-extrabold text-primary hover:underline"
+                  className="hit-slop -my-2 inline-flex items-center gap-1 py-2 text-xs font-extrabold text-primary hover:underline"
                   aria-label={t("viewAuditAria", { title: c.title })}
                 >
                   {t("viewAuditBtn")} <ArrowRight className="h-3.5 w-3.5" aria-hidden />
@@ -254,6 +256,7 @@ export function ArchivedClassesClient({ classes }: { classes: ArchivedClassCard[
                   type="button"
                   variant="outline"
                   size="xs"
+                  className="max-sm:h-11"
                   disabled={restoringId !== null}
                   onClick={() => {
                     setRestoreError(null);

@@ -166,7 +166,7 @@ export function UploadDropzone({
           setDragOver(false);
           handleFiles(e.dataTransfer.files);
         }}
-        className={`cursor-pointer rounded-2xl border-[3px] border-dashed p-6 text-center text-sm transition-all duration-150 outline-none focus-visible:ring-4 focus-visible:ring-primary/20 ${
+        className={`cursor-pointer rounded-2xl border-[3px] border-dashed p-6 text-center text-sm transition-[border-color,background-color,box-shadow] duration-150 outline-none focus-visible:ring-4 focus-visible:ring-primary/20 ${
           disabled
             ? "opacity-60 cursor-not-allowed border-border bg-muted/30"
             : dragOver

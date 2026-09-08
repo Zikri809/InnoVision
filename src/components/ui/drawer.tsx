@@ -45,9 +45,15 @@ function DrawerOverlay({
 
 function DrawerContent({
   className,
+  innerClassName,
+  footer,
   children,
   ...props
-}: React.ComponentProps<typeof DrawerPrimitive.Content>) {
+}: React.ComponentProps<typeof DrawerPrimitive.Content> & {
+  innerClassName?: string;
+  /** Pinned under the scroll area (never scrolls away) — CTA row, alerts. */
+  footer?: React.ReactNode;
+}) {
   return (
     <DrawerPortal>
       <DrawerOverlay />
@@ -59,7 +65,12 @@ function DrawerContent({
         {...props}
       >
         <div className="mx-auto mt-3 h-1.5 w-12 shrink-0 rounded-full bg-muted-foreground/30" />
-        <div className="flex-1 overflow-y-auto p-6">{children}</div>
+        <div className={cn("flex-1 overflow-y-auto p-6", innerClassName)}>{children}</div>
+        {footer ? (
+          <div className="flex shrink-0 flex-col gap-2 border-t-[3px] border-border/40 bg-card px-6 pt-3">
+            {footer}
+          </div>
+        ) : null}
       </DrawerPrimitive.Content>
     </DrawerPortal>
   );

@@ -58,6 +58,61 @@ describe("checkSameOrigin", () => {
   it("rejects malformed Origin values", () => {
     expect(checkSameOrigin(req(url, { origin: "::not-a-url" }))).not.toBeNull();
   });
+
+  it("allows requests whose Origin matches x-forwarded-host (reverse proxy)", () => {
+    expect(
+      checkSameOrigin(
+        req(url, {
+          origin: "https://app.example.com",
+          "x-forwarded-host": "app.example.com",
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("uses the first entry of a comma-separated x-forwarded-host", () => {
+    expect(
+      checkSameOrigin(
+        req(url, {
+          origin: "https://app.example.com",
+          "x-forwarded-host": "app.example.com, inner.example.com",
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("allows Origins listed in TRUSTED_ORIGINS (host-blind proxy)", async () => {
+    const prev = process.env.TRUSTED_ORIGINS;
+    process.env.TRUSTED_ORIGINS = "https://tunnel.example.org, http://other.example.net";
+    try {
+      expect(
+        checkSameOrigin(req(url, { origin: "https://tunnel.example.org" })),
+      ).toBeNull();
+      expect(
+        checkSameOrigin(req(url, { origin: "http://other.example.net" })),
+      ).toBeNull();
+      // Scheme matters: the https variant of an http entry must NOT pass.
+      const res = checkSameOrigin(req(url, { origin: "https://other.example.net" }));
+      expect(res).not.toBeNull();
+      expect(res!.status).toBe(403);
+    } finally {
+      if (prev === undefined) delete process.env.TRUSTED_ORIGINS;
+      else process.env.TRUSTED_ORIGINS = prev;
+    }
+  });
+
+  it("skips malformed TRUSTED_ORIGINS entries instead of crashing", () => {
+    const prev = process.env.TRUSTED_ORIGINS;
+    process.env.TRUSTED_ORIGINS = "::bad, https://good.example.org";
+    try {
+      expect(
+        checkSameOrigin(req(url, { origin: "https://good.example.org" })),
+      ).toBeNull();
+    } finally {
+      if (prev === undefined) delete process.env.TRUSTED_ORIGINS;
+      else process.env.TRUSTED_ORIGINS = prev;
+    }
+  });
 });
 
 describe("checkBodyLimit", () => {

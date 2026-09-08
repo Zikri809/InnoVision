@@ -49,7 +49,7 @@ export function FaceGate({
   const readyToBegin = consentChecked && enrolled;
 
   return (
-    <div className="relative mx-auto max-w-2xl px-4 py-10">
+    <div className="relative mx-auto max-w-2xl px-4 py-6 sm:py-10">
       {/* decorative blobs */}
       <div aria-hidden className="pointer-events-none absolute -left-6 top-8 h-24 w-24 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-orange-200/50" />
       <div aria-hidden className="pointer-events-none absolute -right-4 bottom-12 h-20 w-20 rounded-[60%_40%_45%_55%/50%_60%_40%_55%] bg-blue-200/50" />

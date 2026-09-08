@@ -16,13 +16,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  ResponsiveModal,
+  ResponsiveModalContent,
+  ResponsiveModalDescription,
+  ResponsiveModalFooter,
+  ResponsiveModalHeader,
+  ResponsiveModalTitle,
+} from "@/components/ui/responsive-modal";
 import { TITLE_MAX } from "@/lib/quizzes/validation";
 import { HOURS_MAX, MINUTES_MAX, hmToSeconds, secondsToHm } from "@/lib/quizzes/time-limit";
 import {
@@ -42,6 +42,14 @@ export interface EditQuizDialogProps {
   onError?: (status: number, message: string) => void;
 }
 
+/**
+ * "Edit quiz settings" surface — same ResponsiveModal shell as the
+ * class-detail create-quiz drawer: pull-up drawer with a pinned CTA footer
+ * on mobile, centered dialog on desktop. Rendered only while `open` so the
+ * draft state re-seeds from `quiz` each time (fields are gated on the
+ * portal-mounting child, mirroring the create drawer's `{open && form}`).
+ * Field ids/labels/aria are load-bearing for e2e (e15/e37/e38).
+ */
 function EditQuizForm({
   quiz,
   onClose,
@@ -257,19 +265,63 @@ function EditQuizForm({
   // management (QC-3) and stay editable on ANY status.
   const metadataLocked = quiz.status !== "draft";
 
-  return (
+  // Shared CTA pair: on the mobile drawer they sit in the PINNED footer
+  // (ResponsiveModalContent `footer` prop — never scrolls away) and submit
+  // via the form= association; the same nodes render in the desktop dialog's
+  // footer row (the drawer-only footer prop is dropped by DialogContent).
+  const actionButtons = (
     <>
-      <DialogHeader>
-        <DialogTitle className="font-heading text-xl font-bold">
-          {t("editQuizTitle")}
-        </DialogTitle>
-        <DialogDescription>
-          {t("editQuizSubtitle")}
-        </DialogDescription>
-      </DialogHeader>
+      <Button
+        type="button"
+        variant="outline"
+        onClick={onClose}
+        disabled={saving}
+      >
+        {tCommon("cancel")}
+      </Button>
+      <Button
+        type="submit"
+        form="edit-quiz-form"
+        disabled={saving || !title.trim()}
+        className="flex-1 font-extrabold sm:flex-none"
+      >
+        {saving ? tCommon("saving") : t("saveChanges")}
+      </Button>
+    </>
+  );
 
-      <form onSubmit={handleSubmit} className="space-y-4 pt-2">
+  return (
+    <ResponsiveModalContent
+      className="sm:max-w-lg"
+      footer={
+        /* Pinned drawer footer (mobile): Save stays reachable while the body
+           scrolls; submits via form="edit-quiz-form". */
+        <div className="flex items-center justify-end gap-2 pb-[max(0.25rem,var(--safe-bottom))]">
+          {actionButtons}
+        </div>
+      }
+    >
+      <ResponsiveModalHeader>
+        <ResponsiveModalTitle className="font-heading text-xl font-bold">
+          {t("editQuizTitle")}
+        </ResponsiveModalTitle>
+        <ResponsiveModalDescription>
+          {t("editQuizSubtitle")}
+        </ResponsiveModalDescription>
+      </ResponsiveModalHeader>
+
+      <form id="edit-quiz-form" onSubmit={handleSubmit} className="space-y-4 pt-2">
         <div className="space-y-3.5">
+          {error && (
+            <p
+              id="edit-quiz-dialog-error"
+              className="rounded-2xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-3 text-sm font-bold text-destructive"
+              role="alert"
+            >
+              {error}
+            </p>
+          )}
+
           {/* Title */}
           <div className="space-y-1.5">
             <Label htmlFor="edit-quiz-title" className="text-xs font-extrabold text-foreground">
@@ -395,7 +447,8 @@ function EditQuizForm({
 
           {/* Availability window (QC-3): editable on ANY status — scheduling
               is live-quiz management; the route bypasses the draft lock for
-              window-only payloads. */}
+              window-only payloads. Stacked full-width on the drawer (like the
+              create drawer), inline with the dash separator on desktop. */}
           <fieldset className="space-y-2.5" disabled={saving}>
             <legend className="w-full">
               <span className="text-xs font-extrabold text-foreground">
@@ -403,7 +456,7 @@ function EditQuizForm({
               </span>
             </legend>
 
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
               <DateTimePicker
                 id="edit-quiz-opens-at"
                 ariaLabel={t("windowOpensLabel")}
@@ -411,9 +464,9 @@ function EditQuizForm({
                 onChange={setOpensAt}
                 disabled={saving}
                 placeholder={t("windowPlaceholder")}
-                buttonClassName="w-52"
+                buttonClassName="w-full sm:w-52"
               />
-              <span aria-hidden="true" className="text-xs font-extrabold text-muted-foreground">
+              <span aria-hidden="true" className="hidden text-xs font-extrabold text-muted-foreground sm:inline">
                 –
               </span>
               <DateTimePicker
@@ -423,7 +476,7 @@ function EditQuizForm({
                 onChange={setClosesAt}
                 disabled={saving}
                 placeholder={t("windowPlaceholder")}
-                buttonClassName="w-52"
+                buttonClassName="w-full sm:w-52"
               />
             </div>
 
@@ -501,33 +554,16 @@ function EditQuizForm({
             </label>
             <p className="text-xs font-semibold text-muted-foreground">{t("shuffleQuestionsHelper")}</p>
           </fieldset>
-
-          {error && (
-            <p
-              id="edit-quiz-dialog-error"
-              className="rounded-2xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-3 text-sm font-bold text-destructive"
-              role="alert"
-            >
-              {error}
-            </p>
-          )}
         </div>
-
-        <DialogFooter className="pt-2">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={onClose}
-            disabled={saving}
-          >
-            {tCommon("cancel")}
-          </Button>
-          <Button type="submit" disabled={saving || !title.trim()}>
-            {saving ? tCommon("saving") : t("saveChanges")}
-          </Button>
-        </DialogFooter>
       </form>
-    </>
+
+      {/* Desktop dialog footer (≥640px): the pinned `footer` prop above is
+          drawer-only, so dialog mode submits from here instead. Hidden on
+          mobile where the pinned drawer footer takes over. */}
+      <ResponsiveModalFooter className="max-sm:hidden pt-2">
+        {actionButtons}
+      </ResponsiveModalFooter>
+    </ResponsiveModalContent>
   );
 }
 
@@ -539,15 +575,15 @@ export function EditQuizDialog({
   onError,
 }: EditQuizDialogProps) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+    <ResponsiveModal open={open} onOpenChange={onOpenChange}>
+      {open && (
         <EditQuizForm
           quiz={quiz}
           onClose={() => onOpenChange(false)}
           onSuccess={onSuccess}
           onError={onError}
         />
-      </DialogContent>
-    </Dialog>
+      )}
+    </ResponsiveModal>
   );
 }

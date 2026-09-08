@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
+import { VList } from "virtua";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { BotAvatar } from "@/components/bot/bot-avatar";
@@ -227,7 +228,7 @@ export function StudentPracticePlayer({
   if (done && !feedback) {
     const pct = Math.round((score / questions.length) * 100);
     return (
-      <div className="relative mx-auto max-w-2xl px-4 py-12">
+      <div className="relative mx-auto max-w-2xl px-4 py-6 sm:py-12">
         <div className="relative rounded-[28px] border-[3px] border-border bg-card p-8 text-center shadow-[var(--shadow-clay)] md:p-10">
           <div className="mx-auto mb-5 grid h-16 w-16 place-items-center rounded-[20px] bg-orange-100 shadow-[0_4px_0_rgba(194,65,12,0.15)]">
             <BotAvatar state="celebrate" size={46} />
@@ -260,13 +261,25 @@ export function StudentPracticePlayer({
         {/* ── Review ── */}
         <div className="mt-6">
           <h2 className="mb-3 font-heading text-lg font-semibold">{t("reviewTitle")}</h2>
-          <ol className="space-y-3">
+          {/* VList (polish W4 A10): variable-height rows are measured, so a
+              200-question review doesn't mount every card at once. virtua
+              computes height:100% inline — an explicit height is required
+              (max-h alone collapses to 0); it sizes to the question count so
+              short reviews don't get a blank scroll area. List semantics
+              preserved via role="list"/"listitem" (the virtualized root is a
+              div). */}
+          <VList
+            style={{ height: `min(${questions.length * 220 + 12}px, 100dvh)` }}
+            role="list"
+            aria-label={t("reviewTitle")}
+          >
             {questions.map((q, i) => {
               const r = results[q.id];
               return (
-                <li
+                <div
                   key={q.id}
-                  className={`overflow-hidden rounded-[22px] border-2 bg-card shadow-[var(--shadow-clay-sm)] ${
+                  role="listitem"
+                  className={`mb-3 overflow-hidden rounded-[22px] border-2 bg-card shadow-[var(--shadow-clay-sm)] ${
                     !r || unavailableIds.has(q.id)
                       ? "border-border opacity-70"
                       : r.isCorrect
@@ -343,10 +356,10 @@ export function StudentPracticePlayer({
                       )}
                     </ul>
                   )}
-                </li>
+                </div>
               );
             })}
-          </ol>
+          </VList>
         </div>
       </div>
     );
@@ -367,7 +380,7 @@ export function StudentPracticePlayer({
   const currentResult = results[current.id];
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8 md:py-12">
+    <div className="mx-auto max-w-2xl px-4 py-5 sm:py-8 md:py-12">
       <div className="mb-4 flex items-center justify-between gap-3">
         <p aria-live="polite" className="text-sm font-extrabold uppercase tracking-wide text-muted-foreground">
           {t("progress", { current: idx + 1, total: questions.length })}

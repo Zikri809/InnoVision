@@ -378,7 +378,7 @@ export default function DevGenerationPrototypePage() {
             aria-checked={scenario === s.id}
             disabled={phase === "running"}
             onClick={() => setScenario(s.id)}
-            className={`rounded-xl border-[3px] px-3 py-1.5 text-2xs font-extrabold transition-all duration-150 disabled:opacity-50 ${
+            className={`rounded-xl border-[3px] px-3 py-1.5 text-2xs font-extrabold transition-[border-color,background-color] duration-150 disabled:opacity-50 ${
               scenario === s.id
                 ? "border-primary bg-primary text-primary-foreground shadow-[0_3px_0_var(--primary-deep)]"
                 : "border-border bg-card text-foreground shadow-[0_3px_0_var(--border)] hover:-translate-y-0.5 hover:bg-muted active:translate-y-0"

@@ -11,13 +11,13 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "border-transparent bg-primary text-primary-foreground shadow-[0_4px_0_var(--primary-deep)] hover:-translate-y-0.5 hover:shadow-[0_6px_0_var(--primary-deep)] active:translate-y-0.5 active:shadow-[0_1px_0_var(--primary-deep)]",
+          "border-transparent bg-primary text-[#fff7ed] shadow-[0_4px_0_var(--primary-deep)] hover:-translate-y-0.5 hover:shadow-[0_6px_0_var(--primary-deep)] active:translate-y-0.5 active:shadow-[0_1px_0_var(--primary-deep)]",
         accent:
           "border-transparent bg-accent text-accent-foreground shadow-[0_4px_0_var(--accent-deep)] hover:-translate-y-0.5 hover:shadow-[0_6px_0_var(--accent-deep)] active:translate-y-0.5 active:shadow-[0_1px_0_var(--accent-deep)]",
         outline:
           "border-border bg-card text-foreground shadow-[0_4px_0_var(--border)] hover:-translate-y-0.5 hover:shadow-[0_6px_0_var(--border)] active:translate-y-0.5 active:shadow-[0_1px_0_var(--border)]",
         secondary:
-          "border-transparent bg-secondary text-secondary-foreground shadow-[0_4px_0_var(--primary-deep)] hover:-translate-y-0.5 hover:shadow-[0_6px_0_var(--primary-deep)] active:translate-y-0.5 active:shadow-[0_1px_0_var(--primary-deep)]",
+          "border-transparent bg-secondary text-[#fff7ed] shadow-[0_4px_0_var(--primary-deep)] hover:-translate-y-0.5 hover:shadow-[0_6px_0_var(--primary-deep)] active:translate-y-0.5 active:shadow-[0_1px_0_var(--primary-deep)]",
         ghost:
           "border-transparent bg-transparent text-foreground hover:bg-muted active:translate-y-0.5",
         destructive:
