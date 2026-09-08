@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Class Quizzes — Design A refined · 3 row flavors</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  /* Design A (iOS list) kept as the winner; rows get brand personality.
+     Three switchable row flavors: F1 clay-glyph, F2 overline, F3 tilt-glyph. */
+  :root{
+    --primary:#F97316; --primary-deep:#c2410c;
+    --accent:#2563EB; --accent-deep:#1d4fd7;
+    --bg:#FFF7ED; --fg:#7C2D12; --card:#FFFFFF;
+    --text:#57341E; --text-2:#8A6A55; --text-3:#B09480;
+    --line:#F5E3D3;
+    --ok:#0E9F6E; --ok-bg:#DFF5EC; --ok-deep:#059669;
+    --blue-bg:#E3EDFF; --blue:#2563EB;
+    --amber:#B45309; --amber-bg:#FDE9C8; --amber-border:#FCD34D;
+    --r:14px;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{font-family:'Nunito',sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased}
+  h1,h2,h3{font-family:'Fredoka',sans-serif;letter-spacing:-.01em}
+  button{font-family:inherit;cursor:pointer;background:none;border:none;color:inherit}
+  a{color:inherit;text-decoration:none}
+  .icn{display:inline-flex;width:1em;height:1em;flex:none}
+  .icn svg{display:block;width:100%;height:100%}
+
+  .wrap{max-width:1240px;margin:0 auto;padding:56px 24px 120px}
+  .eyebrow{font:800 12px 'Nunito';letter-spacing:.1em;text-transform:uppercase;color:var(--primary-deep)}
+  h1{font-size:clamp(30px,4vw,46px);font-weight:600;line-height:1.1;margin:14px 0 10px}
+  .lede{font-size:16px;font-weight:600;color:var(--text-2);max-width:680px}
+  .lede b{color:var(--fg)}
+
+  .trio{margin-top:52px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:36px;align-items:start}
+  @media(max-width:1100px){.trio{grid-template-columns:1fr;max-width:480px;margin:52px auto 0}}
+  .col h2{font-size:20px;font-weight:600;display:flex;align-items:center;gap:10px}
+  .num{flex:none;width:28px;height:28px;border-radius:9px;background:var(--primary);color:#fff;display:grid;place-items:center;font:600 14px 'Fredoka'}
+  .tagline{margin:8px 0 20px;font-size:13.5px;font-weight:700;color:var(--text-2);line-height:1.5}
+  .tagline b{color:var(--fg)}
+
+  .why{margin-top:18px;border-top:1px solid var(--line);padding-top:14px}
+  .why p{font-size:12.5px;font-weight:700;color:var(--text-2);line-height:1.55;padding-left:14px;position:relative;margin-bottom:6px}
+  .why p::before{content:"—";position:absolute;left:0;color:var(--text-3)}
+
+  /* ══════════ PHONE ══════════ */
+  .phone{width:min(370px,100%);margin:0 auto;border-radius:54px;background:#1D1712;padding:10px;box-shadow:0 24px 48px -24px rgba(29,23,18,.35)}
+  .screen{position:relative;height:760px;border-radius:44px;overflow:hidden;background:var(--bg)}
+  .island{position:absolute;top:10px;left:50%;transform:translateX(-50%);width:100px;height:25px;background:#1D1712;border-radius:999px;z-index:60}
+  .sbar{position:relative;height:48px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 5px;font:800 12.5px 'Nunito';color:var(--fg);z-index:50}
+  .sbar .right{display:flex;align-items:center;gap:5px}
+  .sig{display:flex;align-items:flex-end;gap:1.5px}
+  .sig i{width:3px;background:var(--fg);border-radius:1px;display:block}
+  .sig i:nth-child(1){height:4px}.sig i:nth-child(2){height:6px}.sig i:nth-child(3){height:8px}.sig i:nth-child(4){height:10px}
+  .batt{width:22px;height:11px;border:1.8px solid rgba(124,45,18,.45);border-radius:4px;position:relative;padding:1.5px}
+  .batt::before{content:"";display:block;height:100%;width:72%;background:var(--fg);border-radius:1.5px}
+  .batt::after{content:"";position:absolute;right:-4px;top:2.5px;width:2px;height:5px;background:rgba(124,45,18,.45);border-radius:0 2px 2px 0}
+  .homebar{position:absolute;bottom:7px;left:50%;transform:translateX(-50%);width:104px;height:4px;background:rgba(29,23,18,.25);border-radius:999px;z-index:70;pointer-events:none}
+
+  .schead{position:sticky;top:0;z-index:40;background:var(--bg);padding:8px 20px 12px;display:flex;align-items:center;justify-content:space-between}
+  .schead .tools{display:flex;align-items:center;gap:14px}
+  .bell{position:relative;width:36px;height:36px;display:grid;place-items:center;color:var(--fg)}
+  .bell .icn{width:22px;height:22px}
+  .badge-n{position:absolute;top:2px;right:1px;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:#DC2626;color:#fff;font:800 9.5px 'Nunito';display:grid;place-items:center;border:2px solid var(--bg)}
+  .avatar{width:34px;height:34px;border-radius:999px;background:#FDBA74;display:grid;place-items:center;font:800 12px 'Nunito';color:var(--on-primary)}
+  .logo{width:34px;height:34px;border-radius:11px;background:var(--primary);display:grid;place-items:center;font:600 15px 'Fredoka';color:#fff}
+
+  .scroll{height:calc(100% - 48px);overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none}
+  .scroll::-webkit-scrollbar{display:none}
+  .scroll-pad{padding:0 20px 120px}
+
+  .dock{position:absolute;left:16px;right:16px;bottom:14px;z-index:45;background:rgba(255,255,255,.92);backdrop-filter:blur(10px);border-radius:24px;box-shadow:0 8px 28px -12px rgba(29,23,18,.28);display:grid;grid-template-columns:repeat(4,1fr);padding:8px 6px}
+  .dock a{display:flex;flex-direction:column;align-items:center;gap:3px;color:var(--text-3);font:700 9.5px 'Nunito';padding:5px 2px;border-radius:14px}
+  .dock a .icn{width:21px;height:21px}
+  .dock a.on{color:var(--primary-deep)}
+  .dock .dot{position:relative}
+  .dock .dot::after{content:"";position:absolute;top:0;right:14px;width:7px;height:7px;border-radius:999px;background:var(--amber);border:1.5px solid #fff}
+
+  /* ══ atoms ══ */
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;font:800 13px 'Nunito';border-radius:13px;padding:0 15px;height:42px;border:none;transition:transform 140ms ease,opacity 140ms}
+  .btn:active{transform:scale(.95)}
+  .btn-primary{background:var(--primary);color:#fff}
+  .btn-accent{background:var(--accent);color:#fff}
+  .btn-soft-ok{background:var(--ok-bg);color:var(--ok)}
+  .btn .icn{width:13px;height:13px}
+  .btn.sm{height:40px;padding:0 13px;font-size:12.5px;border-radius:12px}
+
+  .pill{display:inline-flex;align-items:center;gap:4px;border-radius:999px;font:800 10.5px 'Nunito';padding:3px 9px}
+  .pill .icn{width:10px;height:10px}
+  .pill.practice{background:var(--ok-bg);color:var(--ok)}
+  .pill.assessment{background:var(--blue-bg);color:var(--blue)}
+  .pill.amber{background:var(--amber-bg);color:var(--amber)}
+
+  .bigzone{padding:2px 0 18px}
+  .bigzone h3{font-size:30px;font-weight:600}
+  .bigzone p{font:700 13px 'Nunito';color:var(--text-2);margin-top:3px}
+  .bigzone p b{color:var(--primary-deep)}
+  .bigzone .pulse{display:inline-block;width:7px;height:7px;border-radius:999px;background:var(--ok);margin-right:5px;animation:pulse 2.4s ease infinite}
+  @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.8)}}
+
+  .seg{display:grid;grid-template-columns:repeat(3,1fr);background:#F8E8D8;border-radius:14px;padding:3px;margin:0 0 18px}
+  .seg button{border-radius:11px;padding:8px 2px;font:800 12.5px 'Nunito';color:var(--text-2);transition:all 200ms ease}
+  .seg button[aria-selected="true"]{background:#fff;color:var(--fg);box-shadow:0 1px 4px rgba(87,52,30,.12)}
+  .seg .ct{margin-left:4px;font-size:10.5px;opacity:.65}
+
+  .facepill{display:flex;align-items:center;gap:9px;width:100%;text-align:left;padding:11px 4px;margin:0 0 16px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+  .facepill .fic{flex:none;color:var(--amber);display:grid;place-items:center}
+  .facepill .fic .icn{width:20px;height:20px}
+  .facepill .ft{flex:1;min-width:0}
+  .facepill .ft b{display:block;font-size:13px;font-weight:800;color:var(--fg)}
+  .facepill .ft span{display:block;font-size:11px;font-weight:700;color:var(--text-2)}
+  .facepill .go{flex:none;font:800 12.5px 'Nunito';color:var(--primary-deep);padding:8px 2px 8px 10px}
+
+  /* ══════════ SHARED ROW ANATOMY ══════════
+     glyph | main(overline · title · meta) | action                    */
+  .rows{list-style:none}
+  .rows li{display:flex;align-items:center;gap:12px;padding:15px 2px;border-bottom:1px solid var(--line)}
+  .rows li:last-child{border-bottom:none}
+  .rmain{flex:1;min-width:0}
+  .rtitle{display:block;font-family:'Fredoka',sans-serif;font-weight:500;font-size:16.5px;color:var(--fg);line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .rmeta{display:block;font:700 11.5px 'Nunito';color:var(--text-2);margin-top:3px}
+  .rmeta .due-t{color:var(--amber);font-weight:800;white-space:nowrap}
+
+  /* flavor 1 — CLAY GLYPH: chunky pressed icon w/ hard offset shadow */
+  .f1 .ric{flex:none;width:44px;height:44px;border-radius:14px;display:grid;place-items:center}
+  .f1 .ric .icn{width:21px;height:21px}
+  .f1 .ric.practice{background:var(--ok-bg);color:var(--ok-deep);box-shadow:0 3px 0 #B7E8D4}
+  .f1 .ric.assessment{background:var(--blue-bg);color:var(--blue);box-shadow:0 3px 0 #C3D6FA}
+  .f1{overflow-x:visible}
+
+  /* flavor 2 — OVERLINE: tiny mode label above Fredoka title */
+  .f2 .ric{flex:none;width:40px;height:40px;border-radius:12px;display:grid;place-items:center}
+  .f2 .ric .icn{width:19px;height:19px}
+  .f2 .ric.practice{background:var(--ok-bg);color:var(--ok)}
+  .f2 .ric.assessment{background:var(--blue-bg);color:var(--blue)}
+  .f2 .over{display:block;font:800 9.5px 'Nunito';letter-spacing:.12em;text-transform:uppercase;margin-bottom:2px}
+  .f2 .over.practice{color:var(--ok)}
+  .f2 .over.assessment{color:var(--blue)}
+
+  /* flavor 3 — TILT GLYPH: playful rotated tile, clay press */
+  .f3 .ric{flex:none;width:44px;height:44px;border-radius:14px;display:grid;place-items:center;transform:rotate(-6deg);transition:transform 200ms var(--spring, cubic-bezier(.34,1.56,.64,1))}
+  .f3 li:active .ric{transform:rotate(-6deg) scale(.92)}
+  .f3 .ric .icn{width:21px;height:21px}
+  .f3 .ric.practice{background:var(--ok);color:#fff;box-shadow:2px 3px 0 rgba(14,159,110,.35)}
+  .f3 .ric.assessment{background:var(--accent);color:#fff;box-shadow:2px 3px 0 rgba(37,99,235,.35)}
+  .f3 li{border-bottom-style:dashed;border-bottom-color:#EAD9C6}
+  .f3 .rtitle{font-size:17px}
+
+  /* due-soon left accent (F1) / small due badge (F2, F3) */
+  .duebadge{display:inline-flex;align-items:center;gap:4px;border-radius:999px;background:var(--amber-bg);color:var(--amber);font:800 10px 'Nunito';padding:2.5px 8px;margin-left:5px;vertical-align:1px;white-space:nowrap}
+  .duebadge .icn{width:10px;height:10px}
+
+  /* ── compare + rec ── */
+  .compare{margin-top:76px;max-width:860px}
+  .compare h2{font-size:24px;font-weight:600;margin-bottom:14px}
+  .cmp{width:100%;border-collapse:collapse;background:#fff;border-radius:18px;overflow:hidden;box-shadow:0 2px 12px rgba(87,52,30,.07);font-size:13.5px}
+  .cmp th,.cmp td{padding:11px 16px;text-align:left;font-weight:600;color:var(--text-2);border-bottom:1px solid var(--line)}
+  .cmp tr:last-child td{border-bottom:none}
+  .cmp thead th{font:600 13.5px 'Fredoka';color:var(--fg);background:#FFF1E2}
+  .cmp td:first-child{font-weight:800;color:var(--fg)}
+  .rec{margin-top:16px;background:#fff;border-radius:18px;box-shadow:0 2px 12px rgba(87,52,30,.07);padding:20px 22px}
+  .rec h3{font-size:16px;color:var(--primary-deep)}
+  .rec p{font-size:13.5px;font-weight:600;color:var(--text-2);margin-top:6px;line-height:1.6}
+  .rec p b{color:var(--fg)}
+  code{font:700 11px ui-monospace,Consolas,monospace;background:#FFF1E2;border-radius:5px;padding:1px 5px;color:var(--primary-deep)}
+
+  @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2 4.8 12.6a.5.5 0 0 0 .4.8H11l-1 8.6a.5.5 0 0 0 .88.36l8.9-10.76a.5.5 0 0 0-.38-.8H13z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1 1 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></g></symbol>
+    <symbol id="i-timer" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="10" x2="10" y1="2" y2="6"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="12" x2="15" y1="14" y2="11"/><circle cx="12" cy="14" r="8"/></g></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></g></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="m6 3 14 9-14 9V3z" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+    <symbol id="i-scan" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="10" r="2"/><path d="M8.5 14.5s1.5 2 3.5 2 3.5-2 3.5-2"/></g></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></g></symbol>
+    <symbol id="i-chr" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-cap" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.42 10.922a1 1 0 0 0-.019-1.838L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.832l8.57 3.908a2 2 0 0 0 1.66 0z"/><path d="M22 10v6"/><path d="M6 12.5V16a6 3 0 0 0 12 0v-3.5"/></g></symbol>
+    <symbol id="i-clip" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></g></symbol>
+    <symbol id="i-infinity" viewBox="0 0 24 24"><path d="M6 16c5 0 7-8 12-8a4 4 0 0 1 0 8c-5 0-7-8-12-8a4 4 0 0 0 0 8Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-award" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="6"/><path d="M15.477 12.89 17 22l-5-3-5 3 1.523-9.11"/></g></symbol>
+  </defs>
+</svg>
+
+<div class="wrap">
+  <p class="eyebrow">Design A · refined — three row flavors</p>
+  <h1>The list you picked, <span style="color:var(--primary)">with a soul</span></h1>
+  <p class="lede">Same minimal iOS list. The genericness is fixed inside the row itself: <b>Fredoka titles</b> (your heading font, not another Nunito blob), <b>clay-pressed glyph tiles</b>, a live pulse in the title line, and real clay press feedback. Three flavors below — every phone is live.</p>
+
+  <div class="trio">
+
+    <!-- ═══════ F1 · CLAY GLYPH ═══════ -->
+    <div class="col" id="cA">
+      <h2><span class="num">1</span>Clay glyph</h2>
+      <p class="tagline">Brand-est choice: <b>chunky clay tiles with hard offset shadows</b>, Fredoka titles, pulse dot on the live line. Playful without adding a single box.</p>
+
+      <div class="phone">
+        <div class="screen" id="A-screen">
+          <div class="island" aria-hidden="true"></div>
+          <div class="sbar"><span>9:41</span><span class="right"><span class="sig" aria-hidden="true"><i></i><i></i><i></i><i></i></span><svg width="14" height="11" viewBox="0 0 24 18" aria-hidden="true"><path d="M12 15.5a1.6 1.6 0 1 0 0 .1zM2.6 6.4a13.5 13.5 0 0 1 18.8 0l-2.3 2.4a10 10 0 0 0-14.2 0zM6.2 10.1a8 8 0 0 1 11.6 0l-2.3 2.4a4.8 4.8 0 0 0-7 0z" fill="#7C2D12"/></svg><span class="batt" aria-hidden="true"></span></span></div>
+          <div class="scroll" data-collapse="A-screen">
+            <header class="schead">
+              <span class="logo">N</span>
+              <div class="tools">
+                <button class="bell" aria-label="Notifications, 4 unread"><span class="icn"><svg><use href="#i-bell"/></svg></span><span class="badge-n">4</span></button>
+                <button class="avatar" aria-label="Account menu">MD</button>
+              </div>
+            </header>
+            <div class="scroll-pad">
+              <div class="bigzone">
+                <h3>Class Quizzes</h3>
+                <p><span class="pulse" aria-hidden="true"></span><b>4 live</b> · 1 due today</p>
+              </div>
+
+              <div class="seg" role="tablist" aria-label="Filter quizzes">
+                <button role="tab" aria-selected="true" data-seg="all">All<span class="ct">4</span></button>
+                <button role="tab" aria-selected="false" data-seg="practice">Practice<span class="ct">2</span></button>
+                <button role="tab" aria-selected="false" data-seg="assessment">Test<span class="ct">2</span></button>
+              </div>
+
+              <button class="facepill">
+                <span class="fic"><span class="icn"><svg><use href="#i-scan"/></svg></span></span>
+                <span class="ft"><b>Face check recommended</b><span>Be ready for test day</span></span>
+                <span class="go">Enroll ›</span>
+                <span style="display:none">.</span>
+              </button>
+
+              <ul class="rows f1" id="A-rows">
+                <li data-mode="assessment">
+                  <span class="ric assessment"><span class="icn"><svg><use href="#i-shield"/></svg></span></span>
+                  <span class="rmain">
+                    <span class="rtitle">Networks Quiz 3<span class="duebadge"><span class="icn"><svg><use href="#i-clock"/></svg></span>Due 5:00 PM</span></span>
+                    <span class="rmeta">Assessment · CS102 · 15m</span>
+                  </span>
+                  <button class="btn btn-accent sm"><span class="icn"><svg><use href="#i-play"/></svg></span>Start</button>
+                </li>
+                <li data-mode="practice">
+                  <span class="ric practice"><span class="icn"><svg><use href="#i-zap"/></svg></span></span>
+                  <span class="rmain">
+                    <span class="rtitle">Data Structures Basics</span>
+                    <span class="rmeta">Practice · CS101 · Unlimited</span>
+                  </span>
+                  <button class="btn btn-primary sm"><span class="icn"><svg><use href="#i-play"/></svg></span>Start</button>
+                </li>
+                <li data-mode="assessment">
+                  <span class="ric assessment"><span class="icn"><svg><use href="#i-shield"/></svg></span></span>
+                  <span class="rmain">
+                    <span class="rtitle">Midterm – Algorithms</span>
+                    <span class="rmeta">Assessment · CS101 · 10m · Awaiting results</span>
+                  </span>
+                  <span class="chev" style="color:var(--text-3)"><span class="icn" style="width:16px;height:16px"><svg><use href="#i-chr"/></svg></span></span>
+                </li>
+                <li data-mode="practice">
+                  <span class="ric practice"><span class="icn"><svg><use href="#i-award"/></svg></span></span>
+                  <span class="rmain">
+                    <span class="rtitle">Sorting Speedrun</span>
+                    <span class="rmeta">Practice · CS101 · <span style="color:var(--ok);font-weight:800">Completed</span></span>
+                  </span>
+                  <button class="btn btn-soft-ok sm">Results</button>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <nav class="dock" aria-label="Mobile navigation">
+            <a href="#cA"><span class="icn"><svg><use href="#i-cap"/></svg></span>Classes</a>
+            <a href="#cA" class="on" aria-current="page"><span class="icn"><svg><use href="#i-clip"/></svg></span>Quizzes</a>
+            <a href="#cA"><span class="icn"><svg><use href="#i-zap"/></svg></span>My Quizzes</a>
+            <a href="#cA" class="dot"><span class="icn"><svg><use href="#i-scan"/></svg></span>Face</a>
+          </nav>
+          <div class="homebar" aria-hidden="true"></div>
+        </div>
+      </div>
+
+      <div class="why">
+        <p>Titles switch to <b>Fredoka</b> — the heading font of the brand — so rows read like the rest of InnoVision, not a settings app.</p>
+        <p>Clay glyph tiles (hard 3px offset shadow) carry the mode with real charm.</p>
+        <p>Due-soon becomes a tiny amber badge inline with the title; meta line stays clean.</p>
+      </div>
+    </div>
+
+    <!-- ═══════ F2 · OVERLINE ═══════ -->
+    <div class="col" id="cB">
+      <h2><span class="num">2</span>Overline</h2>
+      <p class="tagline">Quietest of the three: <b>tiny uppercase mode label</b> above the title, soft tile, cleanest meta. Editorial and grown-up.</p>
+
+      <div class="phone">
+        <div class="screen" id="B-screen">
+          <div class="island" aria-hidden="true"></div>
+          <div class="sbar"><span>9:41</span><span class="right"><span class="sig" aria-hidden="true"><i></i><i></i><i></i><i></i></span><svg width="14" height="11" viewBox="0 0 24 18" aria-hidden="true"><path d="M12 15.5a1.6 1.6 0 1 0 0 .1zM2.6 6.4a13.5 13.5 0 0 1 18.8 0l-2.3 2.4a10 10 0 0 0-14.2 0zM6.2 10.1a8 8 0 0 1 11.6 0l-2.3 2.4a4.8 4.8 0 0 0-7 0z" fill="#7C2D12"/></svg><span class="batt" aria-hidden="true"></span></span></div>
+          <div class="scroll" data-collapse="B-screen">
+            <header class="schead">
+              <span class="logo">N</span>
+              <div class="tools">
+                <button class="bell" aria-label="Notifications, 4 unread"><span class="icn"><svg><use href="#i-bell"/></svg></span><span class="badge-n">4</span></button>
+                <button class="avatar" aria-label="Account menu">MD</button>
+              </div>
+            </header>
+            <div class="scroll-pad">
+              <div class="bigzone">
+                <h3>Class Quizzes</h3>
+                <p><span class="pulse" aria-hidden="true"></span><b>4 live</b> · 1 due today</p>
+              </div>
+
+              <div class="seg" role="tablist" aria-label="Filter quizzes">
+                <button role="tab" aria-selected="true" data-seg="all">All<span class="ct">4</span></button>
+                <button role="tab" aria-selected="false" data-seg="practice">Practice<span class="ct">2</span></button>
+                <button role="tab" aria-selected="false" data-seg="assessment">Test<span class="ct">2</span></button>
+              </div>
+
+              <button class="facepill">
+                <span class="fic"><span class="icn"><svg><use href="#i-scan"/></svg></span></span>
+                <span class="ft"><b>Face check recommended</b><span>Be ready for test day</span></span>
+                <span class="go">Enroll ›</span>
+                <span style="display:none">.</span>
+              </button>
+
+              <ul class="rows f2" id="B-rows">
+                <li data-mode="assessment">
+                  <span class="ric assessment"><span class="icn"><svg><use href="#i-shield"/></svg></span></span>
+                  <span class="rmain">
+                    <span class="over assessment">Test · 15 min</span>
+                    <span class="rtitle">Networks Quiz 3<span class="duebadge"><span class="icn"><svg><use href="#i-clock"/></svg></span>Due 5:00 PM</span></span>
+                    <span class="rmeta">CS102 · One attempt</span>
+                  </span>
+                  <button class="btn btn-accent sm"><span class="icn"><svg><use href="#i-play"/></svg></span>Start</button>
+                </li>
+                <li data-mode="practice">
+                  <span class="ric practice"><span class="icn"><svg><use href="#i-zap"/></svg></span></span>
+                  <span class="rmain">
+                    <span class="over practice">Practice · Unlimited</span>
+                    <span class="rtitle">Data Structures Basics</span>
+                    <span class="rmeta">CS101 · Intro to Algorithms</span>
+                  </span>
+                  <button class="btn btn-primary sm"><span class="icn"><svg><use href="#i-play"/></svg></span>Start</button>
+                </li>
+                <li data-mode="assessment">
+                  <span class="ric assessment"><span class="icn"><svg><use href="#i-shield"/></svg></span></span>
+                  <span class="rmain">
+                    <span class="over assessment">Test · 10 min</span>
+                    <span class="rtitle">Midterm – Algorithms</span>
+                    <span class="rmeta">CS101 · Awaiting results</span>
+                  </span>
+                  <span class="chev" style="color:var(--text-3)"><span class="icn" style="width:16px;height:16px"><svg><use href="#i-chr"/></svg></span></span>
+                </li>
+                <li data-mode="practice">
+                  <span class="ric practice"><span class="icn"><svg><use href="#i-award"/></svg></span></span>
+                  <span class="rmain">
+                    <span class="over practice">Practice · Done</span>
+                    <span class="rtitle">Sorting Speedrun</span>
+                    <span class="rmeta">CS101 · <span style="color:var(--ok);font-weight:800">Results ready</span></span>
+                  </span>
+                  <button class="btn btn-soft-ok sm">Results</button>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <nav class="dock" aria-label="Mobile navigation">
+            <a href="#cB"><span class="icn"><svg><use href="#i-cap"/></svg></span>Classes</a>
+            <a href="#cB" class="on" aria-current="page"><span class="icn"><svg><use href="#i-clip"/></svg></span>Quizzes</a>
+            <a href="#cB"><span class="icn"><svg><use href="#i-zap"/></svg></span>My Quizzes</a>
+            <a href="#cB" class="dot"><span class="icn"><svg><use href="#i-scan"/></svg></span>Face</a>
+          </nav>
+          <div class="homebar" aria-hidden="true"></div>
+        </div>
+      </div>
+
+      <div class="why">
+        <p>The overline does the mode badge's job in text — scannable, zero chrome.</p>
+        <p>Title stays big and friendly; meta carries the facts.</p>
+        <p>Most "premium notes app" of the three.</p>
+      </div>
+    </div>
+
+    <!-- ═══════ F3 · TILT GLYPH ═══════ -->
+    <div class="col" id="cC">
+      <h2><span class="num">3</span>Tilt glyph</h2>
+      <p class="tagline">Most playful: <b>solid-color tiles rotated -6°</b>, dashed separators, Fredoka titles. Squeezes the most brand personality out of the same minimal list.</p>
+
+      <div class="phone">
+        <div class="screen" id="C-screen">
+          <div class="island" aria-hidden="true"></div>
+          <div class="sbar"><span>9:41</span><span class="right"><span class="sig" aria-hidden="true"><i></i><i></i><i></i><i></i></span><svg width="14" height="11" viewBox="0 0 24 18" aria-hidden="true"><path d="M12 15.5a1.6 1.6 0 1 0 0 .1zM2.6 6.4a13.5 13.5 0 0 1 18.8 0l-2.3 2.4a10 10 0 0 0-14.2 0zM6.2 10.1a8 8 0 0 1 11.6 0l-2.3 2.4a4.8 4.8 0 0 0-7 0z" fill="#7C2D12"/></svg><span class="batt" aria-hidden="true"></span></span></div>
+          <div class="scroll" data-collapse="C-screen">
+            <header class="schead">
+              <span class="logo">N</span>
+              <div class="tools">
+                <button class="bell" aria-label="Notifications, 4 unread"><span class="icn"><svg><use href="#i-bell"/></svg></span><span class="badge-n">4</span></button>
+                <button class="avatar" aria-label="Account menu">MD</button>
+              </div>
+            </header>
+            <div class="scroll-pad">
+              <div class="bigzone">
+                <h3>Class Quizzes</h3>
+                <p><span class="pulse" aria-hidden="true"></span><b>4 live</b> · 1 due today</p>
+              </div>
+
+              <div class="seg" role="tablist" aria-label="Filter quizzes">
+                <button role="tab" aria-selected="true" data-seg="all">All<span class="ct">4</span></button>
+                <button role="tab" aria-selected="false" data-seg="practice">Practice<span class="ct">2</span></button>
+                <button role="tab" aria-selected="false" data-seg="assessment">Test<span class="ct">2</span></button>
+              </div>
+
+              <button class="facepill">
+                <span class="fic"><span class="icn"><svg><use href="#i-scan"/></svg></span></span>
+                <span class="ft"><b>Face check recommended</b><span>Be ready for test day</span></span>
+                <span class="go">Enroll ›</span>
+                <span style="display:none">.</span>
+              </button>
+
+              <ul class="rows f3" id="C-rows">
+                <li data-mode="assessment">
+                  <span class="ric assessment"><span class="icn"><svg><use href="#i-shield"/></svg></span></span>
+                  <span class="rmain">
+                    <span class="rtitle">Networks Quiz 3<span class="duebadge"><span class="icn"><svg><use href="#i-clock"/></svg></span>Due 5:00 PM</span></span>
+                    <span class="rmeta">Assessment · CS102 · 15m · 1 attempt</span>
+                  </span>
+                  <button class="btn btn-accent sm"><span class="icn"><svg><use href="#i-play"/></svg></span>Start</button>
+                </li>
+                <li data-mode="practice">
+                  <span class="ric practice"><span class="icn"><svg><use href="#i-zap"/></svg></span></span>
+                  <span class="rmain">
+                    <span class="rtitle">Data Structures Basics</span>
+                    <span class="rmeta">Practice · CS101 · Unlimited</span>
+                  </span>
+                  <button class="btn btn-primary sm"><span class="icn"><svg><use href="#i-play"/></svg></span>Start</button>
+                </li>
+                <li data-mode="assessment">
+                  <span class="ric assessment"><span class="icn"><svg><use href="#i-shield"/></svg></span></span>
+                  <span class="rmain">
+                    <span class="rtitle">Midterm – Algorithms</span>
+                    <span class="rmeta">Assessment · CS101 · 10m · Awaiting results</span>
+                  </span>
+                  <span class="chev" style="color:var(--text-3)"><span class="icn" style="width:16px;height:16px"><svg><use href="#i-chr"/></svg></span></span>
+                </li>
+                <li data-mode="practice">
+                  <span class="ric practice"><span class="icn"><svg><use href="#i-award"/></svg></span></span>
+                  <span class="rmain">
+                    <span class="rtitle">Sorting Speedrun</span>
+                    <span class="rmeta">Practice · CS101 · <span style="color:var(--ok);font-weight:800">Completed</span></span>
+                  </span>
+                  <button class="btn btn-soft-ok sm">Results</button>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <nav class="dock" aria-label="Mobile navigation">
+            <a href="#cC"><span class="icn"><svg><use href="#i-cap"/></svg></span>Classes</a>
+            <a href="#cC" class="on" aria-current="page"><span class="icn"><svg><use href="#i-clip"/></svg></span>Quizzes</a>
+            <a href="#cC"><span class="icn"><svg><use href="#i-zap"/></svg></span>My Quizzes</a>
+            <a href="#cC" class="dot"><span class="icn"><svg><use href="#i-scan"/></svg></span>Face</a>
+          </nav>
+          <div class="homebar" aria-hidden="true"></div>
+        </div>
+      </div>
+
+      <div class="why">
+        <p>The tilt is the toy factor — one transform, huge personality.</p>
+        <p>Dashed separators signal "playful list" while staying quiet.</p>
+        <p>Rows compress on press (scale .92) — proper clay touch feedback.</p>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══════ compare + rec ═══════ -->
+  <section class="compare">
+    <h2>Quick compare</h2>
+    <table class="cmp">
+      <thead><tr><th></th><th>1 · Clay glyph</th><th>2 · Overline</th><th>3 · Tilt glyph</th></tr></thead>
+      <tbody>
+        <tr><td>Personality</td><td>Brand clay, contained</td><td>Editorial, calm</td><td>Playful, toy-like</td></tr>
+        <tr><td>Mode carried by</td><td>Tile color + shadow</td><td>Uppercase overline text</td><td>Tile color + tilt</td></tr>
+        <tr><td>Title font</td><td>Fredoka 16.5</td><td>Fredoka 16.5</td><td>Fredoka 17</td></tr>
+        <tr><td>Separators</td><td>Hairline</td><td>Hairline</td><td>Dashed</td></tr>
+        <tr><td>Risk</td><td>None</td><td>None</td><td>Tilt must respect reduced-motion</td></tr>
+      </tbody>
+    </table>
+
+    <div class="rec">
+      <h3>Recommendation</h3>
+      <p><b>Flavor 1 (Clay glyph)</b> — it is literally the MASTER.md clay token set applied to a row: hard offset shadows on the glyph, Fredoka titles, warm palette. Zero new patterns, no motion risk, and the due badge + pulse dot are the only additions. Flavor 3's tilt is a one-class upgrade you can switch on later with a single transform.</p>
+      <p>Implementation: mobile branches in <code>student-quizzes-client.tsx</code> only — row list becomes the <code>max-sm:</code> layout, cards stay for <code>sm:</code>; copy via <code>student.quizzes.*</code> keys; e2e names (<code>Start</code>, <code>Results/View results</code>, <code>Enroll</code>) preserved.</p>
+    </div>
+  </section>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  function initSeg(screenId, listId){
+    var screen = document.getElementById(screenId);
+    var seg = screen.querySelector(".seg");
+    if(!seg) return;
+    var btns = Array.prototype.slice.call(seg.querySelectorAll("button[data-seg]"));
+    var items = document.getElementById(listId).querySelectorAll("li");
+    btns.forEach(function(btn){
+      btn.addEventListener("click", function(){
+        var mode = btn.getAttribute("data-seg");
+        btns.forEach(function(b){ b.setAttribute("aria-selected", b === btn ? "true" : "false"); });
+        Array.prototype.forEach.call(items, function(it){
+          it.style.display = (mode === "all" || it.getAttribute("data-mode") === mode) ? "" : "none";
+        });
+      });
+    });
+  }
+  initSeg("A-screen", "A-rows");
+  initSeg("B-screen", "B-rows");
+  initSeg("C-screen", "C-rows");
+})();
+</script>
+</body>
+</html>

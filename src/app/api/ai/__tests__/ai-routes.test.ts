@@ -358,11 +358,14 @@ describe("Phase 9 — Append mode, steering, difficulty, and multi-source paths"
     );
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.questions).toHaveLength(3);
-    // Newly generated rows should have sequential order_indices starting from 2
-    expect(body.questions[0].order_index).toBe(2);
-    expect(body.questions[1].order_index).toBe(3);
-    expect(body.questions[2].order_index).toBe(4);
+    // The payload now carries the FULL saved set read back from the DB (the
+    // RPC is void — the old pin expected only the 3 appended rows and
+    // papered over the void-return quirk in the fake seam).
+    expect(body.questions).toHaveLength(5);
+    // Newly generated rows have sequential order_indices starting from 2.
+    expect(body.questions[2].order_index).toBe(2);
+    expect(body.questions[3].order_index).toBe(3);
+    expect(body.questions[4].order_index).toBe(4);
 
     // Total questions on the quiz in database should now be 5
     const totalQuestions = ctx.client.tables["questions"]?.filter((q) => q.quiz_id === QUIZ_C);
@@ -427,6 +430,14 @@ describe("Phase 9 — Append mode, steering, difficulty, and multi-source paths"
     const body = await res.json();
     expect(body.quiz.source_text).toContain("SOURCE [1/2]: deck1.txt");
     expect(body.quiz.source_text).toContain("SOURCE [2/2]: deck2.txt");
+    // 0041 regression (the "1 source" chip bug): EVERY uploaded file gets a
+    // provenance entry in quizzes.sources — not just pathsToProcess[0].
+    const quizRow = ctx.client.tables["quizzes"]?.find((q) => q.id === QUIZ_C);
+    const fileChips = ((quizRow?.sources ?? []) as Array<{ storage_path?: string }>).filter(
+      (s) => typeof s.storage_path === "string",
+    );
+    expect(fileChips).toHaveLength(2);
+    expect(fileChips.map((s) => s.storage_path?.split("/").pop())).toEqual(["deck1.txt", "deck2.txt"]);
   });
 
   it("multi-source: rejects source path outside tenant folder", async () => {

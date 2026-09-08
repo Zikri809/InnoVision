@@ -127,8 +127,9 @@ test.describe("E1b — Manual quiz → publish → visible to student", () => {
     await registerUser(studentPage, STUDENT_EMAIL, "student", LECTURER_INVITE_CODE);
     await expect(studentPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
 
+    await studentPage.getByRole("button", { name: /^enter a join code$/i }).click();
     await studentPage.getByLabel("Join code").fill(joinCode!);
-    await studentPage.getByRole("button", { name: /join/i }).click();
+    await studentPage.getByRole("button", { name: /^join class$/i }).click();
     await expect(studentPage.getByText("E1b Physics", { exact: true })).toBeVisible();
     // Class card quiz-count reflects ONLY the live quiz (draft invisible):
     // the badge reads "1 Live quiz" — a draft would make it "0".

@@ -121,15 +121,18 @@ export function GradebookMobile({
             key={quiz.id}
             type="button"
             onClick={() => setOpen({ kind: "quiz", quizId: quiz.id })}
-            className="shrink-0 cursor-pointer [scroll-snap-align:start] rounded-2xl border-[3px] border-border bg-card px-3.5 py-2.5 text-left shadow-[0_4px_0_var(--border)] transition-transform duration-150 active:translate-y-[2px] focus-visible:outline-[3px] focus-visible:outline-ring focus-visible:outline-offset-2"
+            className="flex min-w-[136px] cursor-pointer flex-1 basis-0 flex-col [scroll-snap-align:start] rounded-2xl border-[3px] border-border bg-card px-3.5 py-2.5 text-left shadow-[0_4px_0_var(--border)] transition-transform duration-150 active:translate-y-[2px] focus-visible:outline-[3px] focus-visible:outline-ring focus-visible:outline-offset-2"
+            title={quiz.title}
           >
-            <span className="flex max-w-[150px] items-center gap-1.5 text-label font-bold text-muted-foreground">
-              {quiz.title}
+            <span className="flex items-start gap-1.5 text-label font-bold text-muted-foreground">
+              <span className="line-clamp-2">{quiz.title}</span>
               {!quiz.revealed && (
-                <span className="inline-block size-1.5 rounded-full bg-amber-500" />
+                <span className="mt-1 inline-block size-1.5 shrink-0 rounded-full bg-amber-500" />
               )}
             </span>
-            <span className="mt-0.5 block font-heading text-lg font-bold tabular-nums text-foreground">
+            {/* mt-auto pins every percentage to the chip's bottom edge, so
+                titles of different wrap counts can't misalign the numbers. */}
+            <span className="mt-auto pt-0.5 font-heading text-lg font-bold tabular-nums text-foreground">
               {quiz.averagePercent === null ? "—" : `${quiz.averagePercent}%`}
             </span>
           </button>

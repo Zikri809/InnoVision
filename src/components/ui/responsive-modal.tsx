@@ -96,34 +96,47 @@ export interface ResponsiveModalTriggerProps
   asChild?: boolean;
 }
 
+/**
+ * The three surface primitives disagree on the composition API: vaul (Radix)
+ * merges the child into its trigger via `asChild`, while Base UI (Dialog and
+ * Sheet) has no `asChild` — an ignored `asChild` there makes the trigger
+ * render its own <button> AROUND the child <Button>, producing a nested
+ * <button> hydration error. This helper translates one shape into what the
+ * active surface expects: Base UI gets `render={child}`, vaul gets
+ * `asChild` + child.
+ */
+function surfaceTriggerProps(
+  surface: "dialog" | "sheet" | "drawer",
+  props: React.ButtonHTMLAttributes<HTMLButtonElement> & { asChild?: boolean },
+): Record<string, unknown> {
+  const { asChild, children, ...rest } = props;
+  if (surface === "drawer") {
+    return { asChild, children, ...rest };
+  }
+  if (asChild && React.isValidElement(children)) {
+    return { render: children, children: undefined, ...rest };
+  }
+  return { children, ...rest };
+}
+
 export function ResponsiveModalTrigger({
   className,
   children,
   ...props
 }: ResponsiveModalTriggerProps) {
   const { isDesktop, mobileSurface } = useResponsiveModalState();
+  const surface = isDesktop ? "dialog" : mobileSurface === "sheet" ? "sheet" : "drawer";
+  const translated = surfaceTriggerProps(surface, { ...props, className, children });
 
-  if (isDesktop) {
-    return (
-      <DialogTrigger className={className} {...props}>
-        {children}
-      </DialogTrigger>
-    );
+  if (surface === "dialog") {
+    return <DialogTrigger {...translated} />;
   }
 
-  if (mobileSurface === "sheet") {
-    return (
-      <SheetTrigger className={className} {...props}>
-        {children}
-      </SheetTrigger>
-    );
+  if (surface === "sheet") {
+    return <SheetTrigger {...translated} />;
   }
 
-  return (
-    <DrawerTrigger className={className} {...props}>
-      {children}
-    </DrawerTrigger>
-  );
+  return <DrawerTrigger {...translated} />;
 }
 
 export interface ResponsiveModalCloseProps
@@ -137,28 +150,18 @@ export function ResponsiveModalClose({
   ...props
 }: ResponsiveModalCloseProps) {
   const { isDesktop, mobileSurface } = useResponsiveModalState();
+  const surface = isDesktop ? "dialog" : mobileSurface === "sheet" ? "sheet" : "drawer";
+  const translated = surfaceTriggerProps(surface, { ...props, className, children });
 
-  if (isDesktop) {
-    return (
-      <DialogClose className={className} {...props}>
-        {children}
-      </DialogClose>
-    );
+  if (surface === "dialog") {
+    return <DialogClose {...translated} />;
   }
 
-  if (mobileSurface === "sheet") {
-    return (
-      <SheetClose className={className} {...props}>
-        {children}
-      </SheetClose>
-    );
+  if (surface === "sheet") {
+    return <SheetClose {...translated} />;
   }
 
-  return (
-    <DrawerClose className={className} {...props}>
-      {children}
-    </DrawerClose>
-  );
+  return <DrawerClose {...translated} />;
 }
 
 export type ResponsiveModalContentProps = React.HTMLAttributes<HTMLDivElement> & {

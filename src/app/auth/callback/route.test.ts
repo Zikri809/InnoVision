@@ -39,6 +39,7 @@ vi.mock("@/lib/env", () => ({
     NEXT_PUBLIC_SUPABASE_URL: "https://supabase.example",
     NEXT_PUBLIC_SUPABASE_ANON_KEY: "anon-key",
   },
+  SUPABASE_AUTH_COOKIE: "sb-test-auth-token",
 }));
 
 import { GET } from "@/app/auth/callback/route";

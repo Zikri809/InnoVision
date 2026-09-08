@@ -39,12 +39,13 @@ test.describe("E2F flags — web search disabled", () => {
     // The augmentation toggle is absent without the key.
     await expect(dialog.getByTestId("web-augment-toggle")).toHaveCount(0);
 
-    // The classic paste flow still works end-to-end.
+    // The classic paste flow still works end-to-end (toggle-first, mobile polish).
+    await dialog.getByRole("button", { name: /paste notes or study text instead/i }).click();
     await dialog.getByLabel(/paste your material/i).fill(
       "Velocity is displacement over time. Light travels faster than sound. " +
         "Force is measured in newtons.",
     );
-    await dialog.getByRole("button", { name: /use pasted text/i }).click();
+    await dialog.getByRole("button", { name: /continue with text/i }).click();
     await dialog.getByRole("button", { name: /generate quiz/i }).click();
     await expect(
       dialog.getByText(/questions forged|soalan dihasilkan/i),

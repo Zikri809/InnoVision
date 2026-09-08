@@ -395,10 +395,15 @@ counts, skipped fetches). Error codes: `search_unavailable` (key unset /
 401-class → 503), `search_failed` (network/5xx/429-after-retry/ALL pages
 failed → 502), `search_corpus_thin` (fetches OK but <200 chars → 422) —
 GenerationProgress maps these to localized strip copy. Provenance persists
-via the 7-arg `save_quiz_questions` overload (migration 0040):
+via `save_quiz_questions_web` (migration 0041 — the generate route's only
+save RPC; migration 0040 introduced it and 0041 extended it with
+`p_source_paths` so EVERY uploaded file gets a provenance entry, fixing the
+under-count where a multi-file build showed "1 source" beside a
+`SOURCE [1/2]` preview fence):
 `quizzes.sources` gains `{kind:"web", url, title, retrieved_at, query}`
 entries beside the legacy storage-path shape (permanently mixed — the 0016
-freeze trigger). The builder renders them as external-link chips
+freeze trigger; file and web entries combine additively). The builder renders
+them as external-link chips
 (`SourceChips`); students never see citations (Phase 7 accepted tradeoff).
 Every citation is a URL we actually fetched — fabrication impossible by
 construction. The feature flag `TINYFISH_API_KEY` (empty string counts as

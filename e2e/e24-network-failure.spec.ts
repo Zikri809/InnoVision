@@ -104,9 +104,9 @@ test.describe("E24 — network failure UX", () => {
 
     await registerUser(studentPage, STUDENT_EMAIL, "student", INVITE);
     // Inline join (NOT helpers.joinClass): this spec reuses STUDENT_EMAIL from
-    // test 1, so /student/classes already lists "E24 Offline" and ALSO renders
-    // the dashed "Join a class" card — the helper's loose /join/i locator then
-    // strict-mode-violates. "Join class" exact is unambiguous.
+    // test 1, so /student/classes already lists "E24 Offline". Open the join
+    // drawer via the FAB, then submit with the exact "Join class" name.
+    await studentPage.getByRole("button", { name: "Join a class", exact: true }).click();
     await studentPage.getByLabel("Join code").fill(joinCode);
     await studentPage.getByRole("button", { name: "Join class", exact: true }).click();
     await expect(studentPage.getByText("E24 Offline Submit", { exact: true })).toBeVisible();
@@ -174,13 +174,15 @@ test.describe("E24 — network failure UX", () => {
     await page.getByRole("button", { name: /generate with ai/i }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
+    // The paste area lives behind an explicit toggle (mobile polish).
+    await dialog.getByRole("button", { name: /paste notes or study text instead/i }).click();
     await dialog
       .getByLabel(/paste your material/i)
       .fill(
         "Photosynthesis converts light energy into chemical energy. " +
           "Chlorophyll absorbs sunlight. The Calvin cycle fixes carbon dioxide.",
       );
-    await dialog.getByRole("button", { name: /use pasted text/i }).click();
+    await dialog.getByRole("button", { name: /continue with text/i }).click();
     await expect(dialog.getByText(/difficulty level/i)).toBeVisible();
 
     // Hard-offline the generate endpoint (abort ≠ e19's happy mock).

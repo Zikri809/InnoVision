@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -58,6 +59,10 @@ export function StudentQuizzesClient({
   const locale = useLocale();
   const t = useTranslations("student.quizzes");
   const tCommon = useTranslations("common");
+  // Mobile polish round 3: <sm renders the compact list layout (Flavor 1 —
+  // clay glyph rows) via an early return, so the desktop JSX below is
+  // untouched and every count()-style desktop assertion stays exact.
+  const isMobile = useMediaQuery("(max-width: 639px)");
 
   const submitLock = useRef(false);
   const [startingId, setStartingId] = useState<string | null>(null);
@@ -142,6 +147,197 @@ export function StudentQuizzesClient({
     const due = formatDue(q.closes_at, locale);
     if (!due) return null;
     return { label: t("chipDue", { due }), tone: "amber" };
+  }
+
+  // ═══ Mobile layout (Flavor 1 — clay glyph rows) ═══
+  // Same data, same states, same accessible names as desktop: the Start /
+  // Mula button, the disabled "Awaiting results" button, the "View results"
+  // link (name includes the quiz title) and the amber deadline chip all
+  // render per the E46/E40/E37/E5 contracts.
+  if (isMobile) {
+    return (
+      <div className="space-y-4">
+        {/* Large title + live line (hero band, stat chips removed) */}
+        <section className="pt-1">
+          <h1 className="font-heading text-[30px] font-semibold leading-[1.05] [text-wrap:balance]">
+            {t("heroTitle")}
+          </h1>
+          <p className="mt-1.5 flex items-center text-[13px] font-bold text-muted-foreground">
+            <span aria-hidden className="mr-2 inline-block size-[7px] shrink-0 animate-pulse rounded-full bg-emerald-500" />
+            <span>
+              <span className="font-extrabold text-primary">{quizzes.length} {t("statLive")}</span>
+              {classFilterTitle ? <> · {classFilterTitle}</> : null}
+            </span>
+          </p>
+        </section>
+
+        {/* SQ-4: removable class filter chip */}
+        {classFilter && (
+          <div className="flex items-center gap-3">
+            <span className="inline-flex items-center gap-2 rounded-full border-[3px] border-accent/40 bg-blue-100 px-3.5 py-1.5 text-xs font-extrabold text-accent dark:border-accent/40 dark:bg-blue-500/15 dark:text-blue-300">
+              {t("filterChipLabel")}
+              {classFilterTitle && <span className="text-accent dark:text-blue-300">{classFilterTitle}</span>}
+              <Link
+                href="/student/quizzes"
+                aria-label={t("filterChipRemove")}
+                className="hit-slop ml-0.5 grid size-7 place-items-center rounded-full transition-colors hover:bg-blue-200 dark:hover:bg-blue-500/25"
+              >
+                <X className="h-3.5 w-3.5" aria-hidden />
+              </Link>
+            </span>
+          </div>
+        )}
+
+        {/* Face-enrollment pill — one line (banner body copy lives on the
+            enroll screen; the dock's Face Setup tab badge stays as backup) */}
+        {!enrolled && (
+          <Link
+            href="/student/face/enroll"
+            className="flex items-center gap-3 border-y-2 border-border py-3 transition-colors active:opacity-70"
+          >
+            <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-amber-100 text-amber-700 dark:border-2 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300">
+              <ScanFace className="h-5 w-5" aria-hidden />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-[13px] font-extrabold leading-tight text-foreground">
+                {t("enrollBannerTitle")}
+              </span>
+              <span className="block text-[11px] font-bold leading-tight text-muted-foreground">
+                {t("enrollPillSub")}
+              </span>
+            </span>
+            <span className="shrink-0 text-[12.5px] font-extrabold text-primary">
+              {t("enrollNowBtn")}
+            </span>
+          </Link>
+        )}
+
+        <div aria-live="polite">
+          {error && (
+            <p className="rounded-2xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-3 text-sm font-bold text-destructive" role="alert">
+              {error}
+            </p>
+          )}
+        </div>
+
+        {quizzes.length === 0 ? (
+          <EmptyState
+            illustration={EmptyBoxIllustration}
+            title={t("emptyTitle")}
+            subtitle={t("emptySubtitle")}
+            className="rounded-[22px] border-[3px] bg-card/60 px-6 py-12"
+          />
+        ) : (
+          <ul>
+            {quizzes.map((q) => {
+              const isPractice = q.mode === "practice";
+              const chip = deadlineChip(q);
+              // Completed + unrevealed + no retake: the disabled button IS the
+              // status — it gets its own full-width line so the wide label
+              // doesn't crush the text column, and the meta line skips it.
+              const awaitingLocked =
+                !isPractice && !!q.completedSessionId && !q.resultsRevealed && !q.allow_retake;
+
+              const glyph = (
+                <span
+                  className={`grid size-11 shrink-0 place-items-center rounded-2xl shadow-[0_3px_0] ${
+                    isPractice
+                      ? "bg-emerald-100 text-emerald-600 shadow-emerald-200 dark:border-2 dark:border-emerald-400/30 dark:bg-emerald-500/15 dark:text-emerald-300 dark:shadow-none"
+                      : "bg-blue-100 text-accent shadow-blue-200 dark:border-2 dark:border-accent/40 dark:bg-blue-500/15 dark:text-blue-300 dark:shadow-none"
+                  }`}
+                >
+                  {isPractice ? <Zap className="h-5 w-5" aria-hidden /> : <ShieldCheck className="h-5 w-5" aria-hidden />}
+                </span>
+              );
+
+              const text = (
+                <span className="min-w-0 flex-1">
+                  {/* Fredoka title + inline amber due chip */}
+                  <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="font-heading text-[16.5px] font-medium leading-tight text-foreground [text-wrap:balance]">
+                      {q.title}
+                    </span>
+                    {chip && (
+                      <span
+                        className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-extrabold tabular-nums ${
+                          chip.tone === "amber"
+                            ? "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300"
+                            : "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        <Clock className="h-3 w-3" aria-hidden />
+                        {chip.label}
+                      </span>
+                    )}
+                  </span>
+                  <span className="mt-0.5 block text-[11.5px] font-bold leading-snug text-muted-foreground">
+                    {getModeLabel(q.mode, locale)} · {q.classes?.title ?? "Class"}
+                    {q.mode === "assessment" && q.time_limit_sec != null && (
+                      <> · {formatDuration(q.time_limit_sec, locale)}</>
+                    )}
+                    {q.completedSessionId ? null : (
+                      <>
+                        {" · "}
+                        {isPractice
+                          ? t("unlimitedTries")
+                          : q.allow_retake && (q.max_attempts ?? 1) > 1
+                            ? t("retakeAllowed", { count: q.max_attempts ?? 1 })
+                            : t("oneAttempt")}
+                      </>
+                    )}
+                  </span>
+                  {/* Completed + unrevealed: status sits under the details in
+                      amber — reads as a status line, wraps as a whole unit,
+                      and can't orphan a separator fragment. */}
+                  {q.completedSessionId && !q.resultsRevealed && (
+                    <span
+                      role="status"
+                      className="mt-1.5 inline-flex w-fit items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-extrabold text-amber-800 dark:border dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300"
+                    >
+                      <Clock className="h-3 w-3" aria-hidden />
+                      {t("cardAwaitingResults")}
+                    </span>
+                  )}
+                </span>
+              );
+
+              return (
+                <li key={q.id} className="border-b-2 border-border pb-4 pt-4 flex items-center gap-3">
+                  {glyph}
+                  {text}
+                  {/* action column — same contract as desktop; locked rows
+                      intentionally end at the text (mobile-only; the disabled
+                      "Awaiting results" button remains on ≥sm, where the
+                      parked e2e assertions run) */}
+                  {notice[q.id] ? (
+                    <span className="shrink-0 text-[11px] font-bold text-muted-foreground" role="status">
+                      {notice[q.id]}
+                    </span>
+                  ) : q.completedSessionId && q.resultsRevealed ? (
+                    <Link
+                      href={`/play/${q.completedSessionId}`}
+                      className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-emerald-100 px-3.5 text-[12.5px] font-extrabold text-emerald-800 transition-transform active:scale-95 dark:bg-emerald-500/15 dark:text-emerald-300"
+                      aria-label={`${t("cardViewResults")} - ${q.title}`}
+                    >
+                      {t("cardViewResults")}
+                    </Link>
+                  ) : !awaitingLocked ? (
+                    <Button
+                      variant={isPractice ? "default" : "accent"}
+                      onClick={() => handleStart(q.id)}
+                      disabled={startingId === q.id}
+                      className="h-10 shrink-0 rounded-xl px-4"
+                    >
+                      {startingId === q.id ? t("startingBtn") : t("startBtn")}
+                    </Button>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    );
   }
 
   return (

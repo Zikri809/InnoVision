@@ -58,7 +58,11 @@ test.describe("E23 — builder mutations", () => {
     await expect(builder.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
     const row = builder.locator("li").filter({ hasText: "Pick the second?" });
     await expect(row).toBeVisible();
-    await expect(row.getByText(/Correct answer: Option 1/)).toBeVisible(); // clamped to Bb
+    // The green option row IS the answer-key indicator (Option E redesign:
+    // the old "Correct answer" summary chip is gone) — Bb is highlighted.
+    await expect(
+      row.locator("li").filter({ hasText: "Bb" }),
+    ).toHaveClass(/emerald/); // clamped to Bb
     // Options render as per-option rows (A/B/C letters) — assert the pair and
     // that the deleted first option is gone.
     await expect(row.getByText("Bb", { exact: true })).toBeVisible();

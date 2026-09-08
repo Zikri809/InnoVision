@@ -68,6 +68,9 @@ import { EditQuizDialog } from "@/components/quiz/edit-quiz-dialog";
 import { BulkImportDialog } from "@/components/quiz/bulk-import-dialog";
 import { DuplicateQuizDialog } from "@/components/quiz/duplicate-quiz-dialog";
 import { QuestionImageField } from "@/components/media/question-image-field";
+import { EmptyState } from "@/components/ui/empty-state";
+import { QuizQuestionMarkIllustration } from "@/components/illustrations/quiz-question-mark";
+import { CircleCheckIllustration } from "@/components/illustrations/circle-check";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useKeyboardOcclusion } from "@/hooks/use-keyboard-occlusion";
 import type { OcrConfig } from "@/lib/extract/types";
@@ -128,6 +131,8 @@ export function QuizBuilderClient({
   questions,
   userId,
   classes,
+  backHref,
+  backToQuizzes = false,
   unrevealedCompleted = 0,
   ocrConfig,
   sources = [],
@@ -138,6 +143,10 @@ export function QuizBuilderClient({
   userId: string;
   /** AP-2: owned, unarchived classes — duplicate destination options. */
   classes: Array<{ id: string; title: string }>;
+  /** Destination of the hero back link — the page the lecturer came from. */
+  backHref: string;
+  /** When true the back link targets the quizzes hub — swap the label. */
+  backToQuizzes?: boolean;
   /** QC-2: completed assessment sessions with hidden results (close-dialog warning). */
   unrevealedCompleted?: number;
   ocrConfig: OcrConfig;
@@ -247,7 +256,7 @@ export function QuizBuilderClient({
           router.refresh();
         } else if (res.status === 404) {
           setEditingTitle(false);
-          router.push(`/lecturer/classes/${quiz.class_id}`);
+          router.push(backHref);
         }
         return;
       }
@@ -972,11 +981,13 @@ export function QuizBuilderClient({
           {/* Top row: Back link + Settings button */}
           <div className="flex items-center justify-between gap-3">
             <Link
-              href={`/lecturer/classes/${quiz.class_id}`}
+              href={backHref}
               className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-extrabold text-muted-foreground transition-colors hover:text-primary truncate"
             >
               <ArrowLeft className="h-4 w-4 shrink-0" aria-hidden />
-              <span className="truncate">{quiz.class_title}</span>
+              <span className="truncate">
+                {backToQuizzes ? t("backToQuizzes") : quiz.class_title}
+              </span>
             </Link>
             {isDraft && (
               <Button
@@ -1270,7 +1281,7 @@ export function QuizBuilderClient({
           if (status === 409) {
             router.refresh();
           } else if (status === 404) {
-            router.push(`/lecturer/classes/${quiz.class_id}`);
+            router.push(backHref);
           }
         }}
       />
@@ -1501,22 +1512,25 @@ export function QuizBuilderClient({
         )}
         <div className="px-4 pb-4 sm:px-6 sm:pb-6">
           {questions.length === 0 ? (
-            <div className="rounded-[20px] border-[3px] border-dashed border-border bg-muted/40 px-6 py-8 text-center sm:py-10">
-              <span
-                aria-hidden
-                className="mx-auto mb-3 flex size-12 items-center justify-center rounded-2xl border-[3px] border-border bg-card text-muted-foreground shadow-[var(--shadow-clay-sm)]"
-              >
-                <ListPlus className="size-6" />
-              </span>
-              <p className="font-heading text-base font-semibold text-foreground">
-                {t("noQuestionsTitle")}
-              </p>
-              <p className="mx-auto mt-1 max-w-sm text-sm font-semibold text-muted-foreground">
-                {t("noQuestionsSubtitle")}
-              </p>
-            </div>
+            <EmptyState
+              illustration={QuizQuestionMarkIllustration}
+              title={t("noQuestionsTitle")}
+              subtitle={t("noQuestionsSubtitle")}
+              className="rounded-[20px] border-[3px] border-dashed bg-muted/40 px-6 py-8 sm:py-10"
+              iconClassName="h-20"
+            />
+          ) : visibleQuestions.length === 0 ? (
+            /* "To review" filter with everything checked — celebrate the
+                finished checklist instead of rendering a blank list. */
+            <EmptyState
+              illustration={CircleCheckIllustration}
+              title={t("allReviewedTitle")}
+              subtitle={t("allReviewedSubtitle")}
+              className="rounded-[20px] border-[3px] border-dashed bg-muted/40 px-6 py-8 sm:py-10"
+              iconClassName="h-16 text-emerald-600 dark:text-emerald-400"
+            />
           ) : (
-            <ul className="divide-y divide-border/40 sm:space-y-4 sm:divide-y-0">
+            <ul className="divide-y divide-border/40 sm:divide-y-[3px] sm:divide-border/60">
               {visibleQuestions.map((q, idx) => {
                 const correctSet =
                   q.type === "multi_select" ? (q.correct_indices ?? []) : null;
@@ -1525,11 +1539,6 @@ export function QuizBuilderClient({
                 // FILTERED list for the desktop parity branch (m-is the
                 // mobile variant, which always renders the full list).
                 const globalIdx = questions.indexOf(q);
-                const correctChip = correctSet
-                  ? `${t("correctAnswersLabel")}: ${(correctSet).map((i) => t("optionLabel", { index: i + 1 })).join(", ") || "—"}`
-                  : q.type === "true_false"
-                    ? `${t("correctAnswerLabel")}: ${q.options[q.correct_index ?? 0] ?? (q.correct_index === 0 ? "True" : "False")}`
-                    : `${t("correctAnswerLabel")}: ${t("optionLabel", { index: (q.correct_index ?? 0) + 1 })}`;
                 return (
                   <li key={q.id}>
                     {isMobile ? (
@@ -1683,41 +1692,35 @@ export function QuizBuilderClient({
                         )}
                       </div>
                     ) : (
-                      /* ── Desktop card (sm+) — byte-identical structure to
-                          the pre-redesign list; the desktop e2e suite (e23,
-                          e2b) pins per-row buttons and visible option text
-                          here, so mobile-only composition stays below sm. ── */
-                      <article
-                        className="overflow-hidden rounded-[20px] border-2 sm:border-[3px] border-border bg-background/60 dark:bg-background/30 shadow-[var(--shadow-clay-sm)]"
-                      >
-                        {/* Meta row: index + type + answer key */}
-                        <div className="flex flex-wrap items-center gap-1.5 px-3.5 py-3 sm:px-4">
-                          <span className="font-heading text-sm font-semibold text-muted-foreground tabular-nums">
+                      /* ── Desktop paper row (sm+) — Option E: questions flow
+                          as one continuous paper on the section card — no
+                          per-question box. Actions collapse into a right
+                          gutter of quiet icons, and the green option row is
+                          the single answer-key indicator (mobile parity; the
+                          old "Correct answer" chip is gone). The desktop e2e
+                          suite (e23, e2b, e45, e20) pins per-row buttons and
+                          visible option text here, so mobile-only composition
+                          stays below sm. ── */
+                      <article className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 px-1 py-5 sm:px-3">
+                        <div className="min-w-0 max-w-[860px]">
+                          <span className="grid size-10 place-items-center rounded-[13px] border-2 border-border bg-muted font-heading text-[17px] font-semibold tabular-nums text-foreground/80">
                             {globalIdx + 1}.
                           </span>
-                          <span className="rounded-full border-2 border-border bg-muted px-2.5 py-0.5 text-xs font-extrabold text-foreground">
+                          <p className="mt-2.5 font-heading text-base font-semibold leading-snug">
+                            {q.prompt}
+                          </p>
+                          <p className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-2xs font-extrabold uppercase tracking-wide text-muted-foreground">
                             {q.type === "mcq"
                               ? tCommon("mcq")
                               : q.type === "multi_select"
                                 ? tCommon("multiSelect")
                                 : tCommon("trueFalse")}
-                          </span>
-                          {hasImageFor(q.id) && (
-                            <span className="inline-flex items-center gap-1 rounded-full border-2 border-border bg-muted px-2.5 py-0.5 text-xs font-extrabold text-foreground">
-                              <ImageIcon className="size-3" aria-hidden />
-                              {tMedia("imageBadge")}
-                            </span>
-                          )}
-                          {/* Answer-key chip — the key grading fact, styled as such */}
-                          <span className="ml-auto inline-flex items-center gap-1.5 rounded-full border-2 border-emerald-600/40 bg-emerald-100/80 px-2.5 py-0.5 text-xs font-extrabold text-emerald-900 dark:border-emerald-400/30 dark:bg-emerald-950/40 dark:text-emerald-200">
-                            <Check className="size-3 shrink-0" aria-hidden />
-                            {correctChip}
-                          </span>
-                        </div>
-
-                        <div className="px-3.5 pb-3.5 sm:px-4 sm:pb-4">
-                          <p className="font-heading text-base font-semibold leading-snug">
-                            {q.prompt}
+                            {hasImageFor(q.id) && (
+                              <span className="inline-flex items-center gap-1">
+                                <ImageIcon className="size-3" aria-hidden />
+                                {tMedia("imageBadge")}
+                              </span>
+                            )}
                           </p>
 
                           {/* Per-option rows (A/B/C/D) with the key highlighted —
@@ -1767,89 +1770,98 @@ export function QuizBuilderClient({
                           )}
                         </div>
 
+                        {/* Margin gutter: quiet action icons; labels surface
+                            via tooltip on hover AND keyboard focus (the
+                            focus-within reveal keeps it accessible when hover
+                            isn't available — touch users still get the
+                            always-labelled dialog buttons inside Edit). */}
                         {isDraft && (
-                          <div className="flex flex-wrap items-center gap-1 border-t-2 border-border/50 bg-muted/30 px-2.5 py-2 dark:bg-black/10">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                setRegeneratingQuestion(q);
-                                setRegeneratingIndex(globalIdx);
-                              }}
-                              aria-label={t("regenerateBtn")}
-                              className="h-8 gap-1.5 px-2.5 text-xs font-bold"
-                            >
-                              <Wand2 className="size-3.5 text-primary" />
-                              {t("regenerateBtn")}
-                            </Button>
-                            <span className="ml-auto flex items-center gap-1">
-                              <Tooltip>
-                                <TooltipTrigger
-                                  render={
-                                    <Button
-                                      variant="ghost"
-                                      size="icon-sm"
-                                      onClick={() => startEdit(q, globalIdx)}
-                                      aria-label={t("editBtn")}
-                                      className="size-8"
-                                    >
-                                      <Pencil className="size-4" />
-                                    </Button>
-                                  }
-                                />
-                                <TooltipContent>{t("editBtn")}</TooltipContent>
-                              </Tooltip>
-                              <Tooltip>
-                                <TooltipTrigger
-                                  render={
-                                    <Button
-                                      variant="ghost"
-                                      size="icon-sm"
-                                      onClick={() => handleMove(q, "up")}
-                                      disabled={idx === 0 || reordering}
-                                      aria-label={t("moveUp")}
-                                      className="size-8"
-                                    >
-                                      <ArrowUp className="size-4" />
-                                    </Button>
-                                  }
-                                />
-                                <TooltipContent>{t("moveUp")}</TooltipContent>
-                              </Tooltip>
-                              <Tooltip>
-                                <TooltipTrigger
-                                  render={
-                                    <Button
-                                      variant="ghost"
-                                      size="icon-sm"
-                                      onClick={() => handleMove(q, "down")}
-                                      disabled={idx === questions.length - 1 || reordering}
-                                      aria-label={t("moveDown")}
-                                      className="size-8"
-                                    >
-                                      <ArrowDown className="size-4" />
-                                    </Button>
-                                  }
-                                />
-                                <TooltipContent>{t("moveDown")}</TooltipContent>
-                              </Tooltip>
-                              <Tooltip>
-                                <TooltipTrigger
-                                  render={
-                                    <Button
-                                      variant="ghost"
-                                      size="icon-sm"
-                                      onClick={() => handleDelete(q)}
-                                      aria-label={t("deleteBtn")}
-                                      className="size-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                                    >
-                                      <Trash2 className="size-4" />
-                                    </Button>
-                                  }
-                                />
-                                <TooltipContent>{t("deleteBtn")}</TooltipContent>
-                              </Tooltip>
-                            </span>
+                          <div className="flex flex-col items-center gap-1 pt-1">
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <Button
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    onClick={() => startEdit(q, globalIdx)}
+                                    aria-label={t("editBtn")}
+                                    className="size-8"
+                                  >
+                                    <Pencil className="size-4" />
+                                  </Button>
+                                }
+                              />
+                              <TooltipContent>{t("editBtn")}</TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <Button
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    onClick={() => {
+                                      setRegeneratingQuestion(q);
+                                      setRegeneratingIndex(globalIdx);
+                                    }}
+                                    aria-label={t("regenerateBtn")}
+                                    className="size-8"
+                                  >
+                                    <Wand2 className="size-4 text-primary" />
+                                  </Button>
+                                }
+                              />
+                              <TooltipContent>{t("regenerateBtn")}</TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <Button
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    onClick={() => handleMove(q, "up")}
+                                    disabled={idx === 0 || reordering}
+                                    aria-label={t("moveUp")}
+                                    className="size-8"
+                                  >
+                                    <ArrowUp className="size-4" />
+                                  </Button>
+                                }
+                              />
+                              <TooltipContent>{t("moveUp")}</TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <Button
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    onClick={() => handleMove(q, "down")}
+                                    disabled={idx === questions.length - 1 || reordering}
+                                    aria-label={t("moveDown")}
+                                    className="size-8"
+                                  >
+                                    <ArrowDown className="size-4" />
+                                  </Button>
+                                }
+                              />
+                              <TooltipContent>{t("moveDown")}</TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <Button
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    onClick={() => handleDelete(q)}
+                                    aria-label={t("deleteBtn")}
+                                    className="size-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                  >
+                                    <Trash2 className="size-4" />
+                                  </Button>
+                                }
+                              />
+                              <TooltipContent>{t("deleteBtn")}</TooltipContent>
+                            </Tooltip>
                           </div>
                         )}
                       </article>

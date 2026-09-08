@@ -1,23 +1,24 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { InputOTP, InputOTPGroup, InputOTPSeparator, InputOTPSlot } from "@/components/ui/input-otp";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Sparkles, Layers, ClipboardList, KeyRound, ArrowRight, Loader2 } from "lucide-react";
+  ResponsiveModal,
+  ResponsiveModalClose,
+  ResponsiveModalContent,
+  ResponsiveModalDescription,
+  ResponsiveModalHeader,
+  ResponsiveModalTitle,
+} from "@/components/ui/responsive-modal";
+import { Sparkles, Layers, ClipboardList, KeyRound, ArrowRight, Loader2, Plus } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { GraduationCapIllustration } from "@/components/illustrations/graduation-cap";
+import { cn } from "@/lib/utils";
 
 export type StudentClassCard = {
   id: string;
@@ -26,12 +27,14 @@ export type StudentClassCard = {
   quizCount: number;
 };
 
+const JOIN_CODE_LENGTH = 6;
+
 export function StudentClassesClient({ classes }: { classes: StudentClassCard[] }) {
   const router = useRouter();
   const t = useTranslations("student.classes");
   const tCommon = useTranslations("common");
-  const tNav = useTranslations("nav");
 
+  const [joinOpen, setJoinOpen] = useState(false);
   const [code, setCode] = useState("");
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,8 +63,9 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
       }
       setCode("");
       toast.success(t("joinedNotice", { title: body.class?.title ?? "" }));
+      // Success beat: let the toast land, then dismiss the drawer.
+      setTimeout(() => setJoinOpen(false), 900);
       router.refresh();
-
     } catch {
       setError(tCommon("errorGeneric"));
     } finally {
@@ -72,57 +76,14 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
 
   const totalQuizzes = classes.reduce((n, c) => n + c.quizCount, 0);
 
-  const joinForm = (
-    <form onSubmit={handleJoin} className="space-y-4">
-      <div>
-        <Label htmlFor="join-code" className="sr-only">
-          {t("joinCardTitle")}
-        </Label>
-        <Input
-          id="join-code"
-          // Stable accessible name for E2E (the sr-only Label follows
-          // i18n copy).
-          aria-label="Join code"
-          placeholder={t("joinCodePlaceholder")}
-          value={code}
-          onChange={(e) => setCode(e.target.value)}
-          maxLength={12}
-          inputMode="text"
-          autoCapitalize="characters"
-          autoComplete="off"
-          spellCheck={false}
-          enterKeyHint="go"
-          className="font-mono uppercase tracking-widest"
-        />
-      </div>
-      <div aria-live="polite">
-        {error && (
-          <p className="rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm font-bold text-destructive" role="alert">
-            {error}
-          </p>
-        )}
-      </div>
-      <Button type="submit" variant="accent" className="w-full" disabled={joining || !code.trim()}>
-        {joining ? (
-          <>
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
-            {t("joiningBtn")}
-          </>
-        ) : (
-          t("joinBtn")
-        )}
-      </Button>
-    </form>
-  );
-
   return (
-    <div className="space-y-6 sm:space-y-8">
+    <div className="space-y-6 pb-24 sm:space-y-8 sm:pb-0">
       {/* ── Hero band ── */}
       <section className="relative overflow-hidden rounded-[28px] border-[3px] border-border bg-gradient-to-br from-blue-100 via-blue-50 to-orange-50 dark:from-blue-950/40 dark:via-card dark:to-orange-950/40 p-5 shadow-[var(--shadow-clay)] sm:p-7 md:p-9">
         <div aria-hidden className="pointer-events-none absolute -right-8 -top-10 h-40 w-40 max-sm:hidden rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-white/50 dark:bg-white/5" />
         <div aria-hidden className="pointer-events-none absolute -bottom-12 left-1/3 h-28 w-28 max-sm:hidden rounded-[60%_40%_45%_55%/50%_60%_40%_55%] bg-orange-100/70 dark:bg-orange-500/5" />
         <div className="relative">
-          {/* Hero chrome is a desktop flourish (polish plan W2 C5): below sm
+          {/* Hero chrome is a desktop flourish (polish plan W2): below sm
               the chip + blobs + gradient card shrink to a flat section —
               the H1 is the page's first viewport statement. */}
           <span className="inline-flex max-sm:hidden items-center gap-2 rounded-full border-[3px] border-border bg-card px-3.5 py-1 text-xs font-extrabold text-accent">
@@ -173,103 +134,214 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
         </div>
       </section>
 
-      {/* ── Join + list ── */}
-      <section className="grid items-start gap-6 lg:grid-cols-[340px_1fr]">
-        {/* Zero-state rule (plan W2): with no classes the empty-state card
-            below owns the join form — this Card renders ONLY once classes
-            exist, so `aria-label="Join code"` is always unique (helpers.joinClass
-            uses getByLabel — two instances would be a strict-mode violation). */}
-        {classes.length > 0 && (
-          <Card className="order-2 lg:order-1 lg:sticky lg:top-6">
-            <CardHeader>
-              <div className="mb-1 grid h-11 w-11 place-items-center rounded-2xl bg-blue-100 text-accent">
-                <KeyRound className="h-5 w-5" aria-hidden />
-              </div>
-              <CardTitle>{t("joinCardTitle")}</CardTitle>
-              <CardDescription>
-                {t("joinCardSubtitle")}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>{joinForm}</CardContent>
-          </Card>
-        )}
-
-        {/* Class cards */}
-        <div className={classes.length > 0 ? "order-1 lg:order-2" : "lg:col-start-2 lg:row-start-1"}>
-          <div className="mb-4 flex items-baseline justify-between">
-            <h2 className="font-heading text-xl font-semibold">{t("myClasses")}</h2>
-            {classes.length > 0 && (
+      {/* ── Class list ── */}
+      <section>
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h2 className="font-heading text-xl font-semibold">{t("myClasses")}</h2>
+          {classes.length > 0 ? (
+            <div className="flex items-center gap-3">
               <span className="text-sm font-extrabold text-muted-foreground">
                 {t("classCount", { count: classes.length })}
               </span>
-            )}
-          </div>
-
-          {classes.length === 0 ? (
-            // Mobile: tight paddings so input + Join button stay in the
-            // first viewport (thumb zone, plan W2) — the desktop rhythm
-            // stacked two py-10 boxes and pushed the button below 812px.
-            <div className="rounded-[28px] border-[3px] bg-card/60 px-5 py-6 sm:px-8 sm:py-16">
-              <EmptyState
-                illustration={GraduationCapIllustration}
-                title={tNav("joinYourFirstClass")}
-                subtitle={tNav("joinFirstHint")}
-                className="border-0 px-0 py-2 sm:border-2 sm:px-6 sm:py-10"
-                iconClassName="h-12 sm:h-16"
-              />
-              {/* First-run thumb zone (plan W2): with no classes this is the
-                  ONLY join form (the sticky Card above renders only when
-                  classes exist) — it serves every viewport. */}
-              <div className="mx-auto mt-4 max-w-sm sm:mt-6">{joinForm}</div>
+              {/* Desktop counterpart of the mobile FAB (the sticky join card
+                  is gone; the top navbar stays untouched). Hidden <sm where
+                  the FAB owns the action — the two never coexist, so the
+                  shared "Join a class" name stays strict-mode-safe. */}
+              <Button variant="ghost" className="hidden sm:inline-flex" onClick={() => setJoinOpen(true)}>
+                <KeyRound className="mr-2 h-4 w-4" aria-hidden />
+                {t("joinCardTitle")}
+              </Button>
             </div>
-          ) : (
-            <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr))]">
-              {classes.map((c) => (
-                <li key={c.id}>
-                  <Link
-                    // SQ-4: drill-down — the badge now tells the truth; the
-                    // quizzes list filters to this class (?class=<id>).
-                    href={`/student/quizzes?class=${c.id}`}
-                    className="group flex h-full flex-col rounded-[22px] border-[3px] border-border bg-card p-5 shadow-[var(--shadow-clay)] transition-[transform,box-shadow] duration-200 hover:-translate-y-1 hover:shadow-[8px_10px_0_rgba(194,65,12,0.16)] active:translate-y-[3px] active:shadow-[0_2px_0_rgba(194,65,12,0.16)] focus-visible:outline-[3px] focus-visible:outline-ring focus-visible:outline-offset-2"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-blue-100 font-heading text-lg font-bold text-accent">
-                        {c.title.trim().charAt(0).toUpperCase()}
-                      </span>
-                      <span className="rounded-full border-[3px] border-border bg-muted px-2.5 py-0.5 text-xs font-extrabold text-muted-foreground">
-                        {t("liveQuizCount", { count: c.quizCount })}
-                      </span>
-                    </div>
-                    <h3 className="mt-3.5 font-heading text-lg font-semibold leading-snug [text-wrap:balance]">
-                      {c.title}
-                    </h3>
-                    <div className="mt-auto flex items-center justify-end pt-3">
-                      <span className="inline-flex items-center gap-1 text-sm font-extrabold text-accent transition-transform duration-200 group-hover:translate-x-0.5">
-                        {t("viewQuizzes")} <ArrowRight className="h-4 w-4" aria-hidden />
-                      </span>
-                    </div>
-                  </Link>
-                </li>
-              ))}
-
-              {/* Dashed join tile ≥sm only (plan W2): redundant below sm
-                  where the join card sits right under the list. */}
-              <li className="max-sm:hidden">
-                <button
-                  type="button"
-                  onClick={() => document.getElementById("join-code")?.focus()}
-                  className="flex h-full min-h-[164px] w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-[22px] border-[3px] border-dashed border-border bg-transparent p-5 text-muted-foreground transition-[border-color,color,transform] duration-200 hover:-translate-y-1 hover:border-accent hover:text-accent"
-                >
-                  <span className="grid h-10 w-10 place-items-center rounded-2xl border-[3px] border-current">
-                    <KeyRound className="h-5 w-5" aria-hidden />
-                  </span>
-                  <span className="text-sm font-extrabold">{t("joinCardTitle")}</span>
-                </button>
-              </li>
-            </ul>
-          )}
+          ) : null}
         </div>
+
+        {classes.length === 0 ? (
+          // Zero-state rule (plan W2): with no classes the empty state owns
+          // the join CTA — one button opens the same join drawer (the form
+          // exists in exactly one place, so `aria-label="Join code"` is
+          // unique for helpers.joinClass).
+          <div className="rounded-[28px] border-[3px] bg-card/60 px-5 py-6 sm:px-8 sm:py-16">
+            <EmptyState
+              illustration={GraduationCapIllustration}
+              title={t("emptyTitle")}
+              subtitle={t("emptySubtitle")}
+              className="border-0 px-0 py-2 sm:border-2 sm:px-6 sm:py-10"
+              iconClassName="h-12 sm:h-16"
+            />
+            <div className="mx-auto mt-4 max-w-sm sm:mt-6">
+              <Button variant="accent" className="w-full" onClick={() => setJoinOpen(true)}>
+                <KeyRound className="mr-2 h-4 w-4" aria-hidden />
+                {t("joinCta")}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr))]">
+            {classes.map((c) => (
+              <li key={c.id}>
+                <Link
+                  // SQ-4: drill-down — the quizzes list filters to this class
+                  // (?class=<id>). A2 row tile: the whole card is the tap
+                  // target — no nested fake-link, no "View quizzes" verb (the
+                  // chevron says drill-down). ≥lg keeps the chunky tile feel
+                  // via the shared clay card classes below.
+                  href={`/student/quizzes?class=${c.id}`}
+                  className="group flex items-center gap-3.5 rounded-[22px] border-[3px] border-border bg-card p-4 shadow-[var(--shadow-clay)] transition-[transform,box-shadow] duration-200 hover:-translate-y-1 hover:shadow-[8px_10px_0_rgba(194,65,12,0.16)] active:translate-y-[3px] active:shadow-[0_2px_0_rgba(194,65,12,0.16)] focus-visible:outline-[3px] focus-visible:outline-ring focus-visible:outline-offset-2"
+                >
+                  <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-blue-100 font-heading text-lg font-bold text-accent dark:bg-blue-950/50">
+                    {c.title.trim().charAt(0).toUpperCase()}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-heading text-base font-semibold leading-snug">
+                      {c.title}
+                    </span>
+                    <span className="mt-0.5 block text-xs font-extrabold text-muted-foreground">
+                      {t("liveQuizCount", { count: c.quizCount })}
+                    </span>
+                    {/* Accessible name preserved for e2e (11 specs click
+                        link /View quizzes/i); visually the chevron alone. */}
+                    <span className="sr-only">{t("viewQuizzes")}</span>
+                  </span>
+                  <span
+                    aria-hidden
+                    className="grid h-8 w-8 shrink-0 place-items-center rounded-[11px] border-[3px] border-border bg-card text-accent transition-transform duration-200 group-hover:translate-x-0.5"
+                  >
+                    <ArrowRight className="h-4 w-4" />
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
+
+      {/* ── Join drawer ──
+          One form, one place. FAB (classes exist) and the empty-state CTA
+          both open this. Desktop (≥sm) renders as a centered dialog via
+          ResponsiveModal; mobile is a vaul bottom drawer with handleOnly
+          drag + repositionInputs (keyboard-safe). */}
+      {classes.length > 0 && <JoinFAB onClick={() => setJoinOpen(true)} label={t("joinCardTitle")} />}
+
+      <ResponsiveModal open={joinOpen} onOpenChange={(open) => { setJoinOpen(open); if (!open) setError(null); }}>
+        {/* Actions live INLINE (not ResponsiveModalContent footer): the
+            footer prop is drawer-only and would drop the submit button on
+            the desktop dialog surface. */}
+        <ResponsiveModalContent className="sm:max-w-sm">
+          {/* Inline icon header (approved preview): icon tile left of the
+              title + subtitle block. */}
+          <ResponsiveModalHeader className="flex-row items-center gap-3.5 pb-5 text-left">
+            <div className="grid size-12 shrink-0 place-items-center rounded-[15px] bg-blue-100 text-accent dark:bg-blue-950/50">
+              <KeyRound className="h-6 w-6" aria-hidden />
+            </div>
+            <div className="min-w-0">
+              <ResponsiveModalTitle>{t("joinCardTitle")}</ResponsiveModalTitle>
+              <ResponsiveModalDescription>
+                {t("joinDrawerSubtitle")}
+              </ResponsiveModalDescription>
+            </div>
+          </ResponsiveModalHeader>
+          <form id="join-class-form" onSubmit={handleJoin} className="space-y-6">
+            {/* e2e contract: `aria-label="Join code"` lives on the OTP
+                hidden input (helpers.joinClass + 6 specs fill it by label).
+                autoComplete="one-time-code" offers SMS/paste codes on
+                mobile; uppercase + chars-only is enforced by input-otp
+                filtering. */}
+            <div className="flex justify-center py-2">
+              <InputOTP
+                aria-label="Join code"
+                maxLength={JOIN_CODE_LENGTH}
+                value={code}
+                onChange={setCode}
+                autoComplete="one-time-code"
+                autoFocus
+                containerClassName="gap-2.5"
+              >
+                <InputOTPGroup className="gap-2.5">
+                  <InputOTPSlot index={0} />
+                  <InputOTPSlot index={1} />
+                  <InputOTPSlot index={2} />
+                </InputOTPGroup>
+                <InputOTPSeparator />
+                <InputOTPGroup className="gap-2.5">
+                  <InputOTPSlot index={3} />
+                  <InputOTPSlot index={4} />
+                  <InputOTPSlot index={5} />
+                </InputOTPGroup>
+              </InputOTP>
+            </div>
+            <div aria-live="polite">
+              {error && (
+                <p className="rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2.5 text-center text-sm font-bold text-destructive" role="alert">
+                  {error}
+                </p>
+              )}
+            </div>
+            {/* Buttons mirror the OTP row width and center with it — the
+                action pair reads as one block instead of full-bleed bars. */}
+            <div className="mx-auto flex w-[min(100%,320px)] justify-center gap-3 pt-2">
+              <ResponsiveModalClose asChild>
+                <Button variant="ghost" className="h-12 flex-1 rounded-[16px] text-base">{t("cancelBtn")}</Button>
+              </ResponsiveModalClose>
+              <Button variant="accent" className="h-12 flex-1 rounded-[16px] text-base" type="submit" disabled={joining || code.length < JOIN_CODE_LENGTH}>
+                {joining ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+                    {t("joiningBtn")}
+                  </>
+                ) : (
+                  t("joinBtn")
+                )}
+              </Button>
+            </div>
+          </form>
+        </ResponsiveModalContent>
+      </ResponsiveModal>
     </div>
+  );
+}
+
+/**
+ * Scroll-aware join FAB (mobile only — the desktop join entry is the drawer
+ * opened from the empty state / hero, and ≥sm the FAB would fight the
+ * layout's max-width rhythm). Ducks below the dock while scrolling down so
+ * it never covers a card's chevron mid-read; springs back on scroll-up or
+ * near the top. Listens on window scroll — AppShell is the scroll
+ * container on mobile.
+ */
+function JoinFAB({ onClick, label }: { onClick: () => void; label: string }) {
+  const [hidden, setHidden] = useState(false);
+  const lastY = useRef(0);
+
+  useEffect(() => {
+    lastY.current = window.scrollY;
+    const onScroll = () => {
+      const y = window.scrollY;
+      const goingDown = y > lastY.current;
+      setHidden(goingDown && y > 40);
+      lastY.current = y;
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      className={cn(
+        // Mirrors the My Quizzes create FAB exactly (same posture, hide
+        // recipe, and bottom offset that clears the flat dock): one FAB
+        // language across student pages.
+        "fixed bottom-[calc(104px+var(--safe-bottom))] right-3 z-40 grid size-14 cursor-pointer place-items-center rounded-[19px] border-[3px] border-transparent bg-primary text-[#fff7ed] sm:hidden",
+        "shadow-[0_5px_0_var(--primary-deep)]",
+        "transition-[transform,opacity,box-shadow] duration-200 ease-out",
+        "active:translate-y-[3px] active:shadow-[0_2px_0_var(--primary-deep)]",
+        "focus-visible:outline-[3px] focus-visible:outline-ring focus-visible:outline-offset-2",
+        hidden && "pointer-events-none translate-y-24 opacity-0",
+      )}
+    >
+      <Plus className="h-6 w-6" aria-hidden />
+    </button>
   );
 }

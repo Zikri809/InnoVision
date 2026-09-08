@@ -276,7 +276,8 @@
       "restoringBtn": "Sedang memulihkan…",
       "restoreErrorGeneric": "Gagal memulihkan kelas. Sila cuba lagi.",
       "viewAuditBtn": "Lihat audit",
-      "emptyArchived": "Tiada kelas yang diarkibkan."
+      "emptyArchived": "Tiada kelas yang diarkibkan.",
+      "cancelBtn": "Batal"
     },
     "archivedClasses": {
       "heroBadge": "Arkib & Audit",
@@ -423,6 +424,7 @@
     },
     "builder": {
       "backToClass": "Kembali ke kelas",
+      "backToQuizzes": "Kembali ke senarai kuiz",
       "renameQuiz": "Sunting tetapan",
       "editSettings": "Tetapan kuiz",
       "titleUpdated": "Tajuk dikemas kini",
@@ -436,6 +438,8 @@
       "filterAll": "Semua",
       "filterUnreviewed": "Untuk disemak",
       "reviewedProgress": "{done}/{total} disemak",
+      "allReviewedTitle": "Semua disemak!",
+      "allReviewedSubtitle": "Setiap soalan telah disemak. Sedia untuk diterbitkan apabila anda bersedia.",
       "markReviewed": "Tanda disemak",
       "markUnreviewed": "Disemak",
       "publishingBtn": "Sedang menerbitkan…",
@@ -639,7 +643,6 @@
       "liveQuizCount": "{count} Kuiz aktif",
       "joinCardTitle": "Sertai kelas",
       "joinCardSubtitle": "Gunakan kod 6 aksara yang dikongsi oleh pensyarah anda.",
-      "joinCodePlaceholder": "cth. AB3X9K",
       "joinBtn": "Sertai kelas",
       "joiningBtn": "Sedang menyertai…",
       "myClasses": "Kelas saya",
@@ -647,7 +650,10 @@
       "emptySubtitle": "Masukkan kod penyertaan 6 aksara di atas untuk menyertai kelas pertama anda.",
       "viewQuizzes": "Lihat kuiz",
       "alreadyEnrolled": "Anda sudah pun berdaftar dalam kelas tersebut.",
-      "joinedNotice": "Berjaya menyertai {title}."
+      "joinedNotice": "Berjaya menyertai {title}.",
+      "joinCta": "Masukkan kod penyertaan",
+      "cancelBtn": "Batal",
+      "joinDrawerSubtitle": "Taip kod 6 aksara yang dikongsi oleh pensyarah anda."
     },
     "quizzes": {
       "heroTitle": "Kuiz tersedia",
@@ -658,6 +664,7 @@
       "enrollBannerTitle": "Pendaftaran wajah disyorkan",
       "enrollBannerBody": "Kuiz penilaian menggunakan pengesahan wajah. Daftarkan wajah anda sekarang agar sedia semasa hari penilaian.",
       "enrollNowBtn": "Daftar wajah anda",
+      "enrollPillSub": "Sedia untuk hari penilaian",
       "unlimitedTries": "Percubaan tanpa had",
       "retakeAllowed": "Sehingga {count} percubaan — yang terkini dikira",
       "oneAttempt": "Satu percubaan sahaja",
@@ -1172,7 +1179,18 @@
     "updatedNotice": "Disimpan.",
     "deletedNotice": "Kuis dipadam.",
     "questionCount": "{count, plural, =1 {# soalan} other {# soalan}}",
-    "mintingLink": "Menyediakan pautan anda…"
+    "mintingLink": "Menyediakan pautan anda…",
+    "countLine": "{count, plural, =1 {# kuis} other {# kuis}} · {shared, plural, =0 {tiada dikongsi} =1 {1 dikongsi} other {# dikongsi}}",
+    "mobileLargeTitle": "Kuis Saya",
+    "noQuestionsYet": "Tiada soalan lagi — sentuh untuk bina",
+    "moreActionsA11y": "Tindakan lain untuk {title}",
+    "playQuizA11y": "Main {title}",
+    "editQuizA11y": "Sunting {title} — tiada soalan lagi",
+    "actionsTitle": "Tindakan kuis",
+    "editActionSub": "Soalan, pilihan, butiran",
+    "shareActionSub": "Salin pautan atau hantar melalui WhatsApp",
+    "deleteActionSub": "Dipadamkan untuk semua orang yang ada pautan",
+    "createFabA11y": "Cipta kuis"
   },
   "quizEditor": {
     "titleLabel": "Tajuk",

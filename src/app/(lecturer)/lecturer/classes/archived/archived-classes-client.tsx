@@ -88,8 +88,12 @@ export function ArchivedClassesClient({ classes }: { classes: ArchivedClassCard[
     <div className="space-y-8 max-sm:space-y-5">
       {/* ── Hero band ── */}
       {/* Below sm the hero drops its card chrome (gradient/blobs/badge) — the
-          dock tab + ARCHIVED badges already say what this page is. */}
-      <section className="relative overflow-hidden rounded-[28px] border-[3px] border-border bg-gradient-to-br from-orange-100 via-orange-50 to-blue-50 dark:from-orange-950/40 dark:via-card dark:to-blue-950/40 p-6 shadow-[var(--shadow-clay)] md:p-8 max-sm:border-0 max-sm:bg-none max-sm:p-0 max-sm:shadow-none">
+          dock tab + ARCHIVED badges already say what this page is. The
+          max-sm:overflow-visible/max-sm:rounded-none guards against a Chromium
+          rounded-clip rasterization bug that shrinks the first glyph of the
+          subtitle when a transparent overflow-hidden clip wraps text (see
+          quizzes-hub-client). */}
+      <section className="relative overflow-hidden rounded-[28px] border-[3px] border-border bg-gradient-to-br from-orange-100 via-orange-50 to-blue-50 dark:from-orange-950/40 dark:via-card dark:to-blue-950/40 p-6 shadow-[var(--shadow-clay)] md:p-8 max-sm:border-0 max-sm:bg-none max-sm:p-0 max-sm:shadow-none max-sm:overflow-visible max-sm:rounded-none">
         <div aria-hidden className="pointer-events-none absolute -right-8 -top-10 h-40 w-40 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-white/50 dark:bg-white/5 max-sm:hidden" />
         <div aria-hidden className="pointer-events-none absolute -bottom-12 left-1/3 h-28 w-28 rounded-[60%_40%_45%_55%/50%_60%_40%_55%] bg-blue-100/60 dark:bg-blue-500/5 max-sm:hidden" />
         <div className="relative space-y-4 max-sm:space-y-3">

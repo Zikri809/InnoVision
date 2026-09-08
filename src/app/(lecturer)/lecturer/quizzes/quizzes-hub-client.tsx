@@ -65,8 +65,12 @@ export function QuizzesHubClient({ quizzes }: { quizzes: QuizzesHubRow[] }) {
 
   return (
     <div className="space-y-6 max-sm:space-y-5">
-      {/* ── Hero band (flat below sm, matching classes/archived) ── */}
-      <section className="relative overflow-hidden rounded-[28px] border-[3px] border-border bg-gradient-to-br from-orange-100 via-orange-50 to-blue-50 dark:from-orange-950/40 dark:via-card dark:to-blue-950/40 p-6 shadow-[var(--shadow-clay)] md:p-8 max-sm:border-0 max-sm:bg-none max-sm:p-0 max-sm:shadow-none">
+      {/* ── Hero band (flat below sm, matching classes/archived) ──
+          max-sm:overflow-visible/max-sm:rounded-none: the flat phone hero has
+          no border, background, or blobs to clip, and a rounded overflow-hidden
+          clip over the page background trips a Chromium rasterization bug that
+          paints the paragraph's first glyph as a tiny fragment (mobile only). */}
+      <section className="relative overflow-hidden rounded-[28px] border-[3px] border-border bg-gradient-to-br from-orange-100 via-orange-50 to-blue-50 dark:from-orange-950/40 dark:via-card dark:to-blue-950/40 p-6 shadow-[var(--shadow-clay)] md:p-8 max-sm:border-0 max-sm:bg-none max-sm:p-0 max-sm:shadow-none max-sm:overflow-visible max-sm:rounded-none">
         <div aria-hidden className="pointer-events-none absolute -right-8 -top-10 h-40 w-40 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-white/50 dark:bg-white/5 max-sm:hidden" />
         <div aria-hidden className="pointer-events-none absolute -bottom-12 left-1/3 h-28 w-28 rounded-[60%_40%_45%_55%/50%_60%_40%_55%] bg-blue-100/60 dark:bg-blue-500/5 max-sm:hidden" />
         <div className="relative space-y-3">
@@ -141,7 +145,7 @@ export function QuizzesHubClient({ quizzes }: { quizzes: QuizzesHubRow[] }) {
               <Link
                 href={
                   quiz.status === "draft"
-                    ? `/lecturer/quizzes/${quiz.id}/builder`
+                    ? `/lecturer/quizzes/${quiz.id}/builder?from=quizzes`
                     : `/lecturer/quizzes/${quiz.id}/results`
                 }
                 className="group flex h-full flex-col rounded-[22px] border-[3px] border-border bg-card p-5 shadow-[var(--shadow-clay)] transition-[transform,box-shadow] duration-200 hover:-translate-y-1 hover:shadow-[8px_10px_0_rgba(194,65,12,0.16)] active:translate-y-[3px] focus-visible:outline-[3px] focus-visible:outline-ring focus-visible:outline-offset-2"

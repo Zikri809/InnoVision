@@ -2,7 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import type { SetAllCookies } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import type { Database } from "@/lib/types/database";
-import { env } from "@/lib/env";
+import { env, SUPABASE_AUTH_COOKIE } from "@/lib/env";
 
 const COOKIE_HANDLERS = (cookieStore: Awaited<ReturnType<typeof cookies>>) => ({
   getAll() {
@@ -32,7 +32,12 @@ export async function createClient() {
   return createServerClient<Database>(
     env.NEXT_PUBLIC_SUPABASE_URL,
     env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-    { cookies: COOKIE_HANDLERS(cookieStore) },
+    {
+      cookies: COOKIE_HANDLERS(cookieStore),
+      // Pinned session-cookie name — must equal the browser client's (see
+      // SUPABASE_AUTH_COOKIE); the ssr default derives it from the URL.
+      cookieOptions: { name: SUPABASE_AUTH_COOKIE },
+    },
   );
 }
 
@@ -42,6 +47,11 @@ export async function createServerActionClient() {
   return createServerClient<Database>(
     env.NEXT_PUBLIC_SUPABASE_URL,
     env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-    { cookies: COOKIE_HANDLERS(cookieStore) },
+    {
+      cookies: COOKIE_HANDLERS(cookieStore),
+      // Pinned session-cookie name — must equal the browser client's (see
+      // SUPABASE_AUTH_COOKIE); the ssr default derives it from the URL.
+      cookieOptions: { name: SUPABASE_AUTH_COOKIE },
+    },
   );
 }

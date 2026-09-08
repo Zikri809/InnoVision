@@ -125,8 +125,9 @@ test.describe("E2 — AI quiz from a PDF is editable and publishable", () => {
     // The lecturer's title is preserved across AI generation.
     await registerUser(studentPage, STUDENT_EMAIL, "student", LECTURER_INVITE_CODE);
     await expect(studentPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
+    await studentPage.getByRole("button", { name: /^enter a join code$/i }).click();
     await studentPage.getByLabel("Join code").fill(joinCode!);
-    await studentPage.getByRole("button", { name: /join/i }).click();
+    await studentPage.getByRole("button", { name: /^join class$/i }).click();
     await expect(studentPage.getByText("E2 Physics", { exact: true })).toBeVisible();
 
     await studentPage.getByRole("link", { name: /View quizzes/i }).click();

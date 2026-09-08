@@ -36,8 +36,10 @@ async function pasteAndGenerate(
 ) {
   await page.getByRole("button", { name: /generate from file/i }).click();
   const dialog = page.getByRole("dialog");
+  // The mobile polish moved the paste textarea behind an explicit toggle.
+  await dialog.getByRole("button", { name: /paste notes or study text instead/i }).click();
   await dialog.getByLabel(/paste your material/i).fill(text);
-  await dialog.getByRole("button", { name: /use pasted text/i }).click();
+  await dialog.getByRole("button", { name: /continue with text/i }).click();
   await dialog.getByRole("button", { name: /generate quiz/i }).click();
   return dialog;
 }
@@ -74,10 +76,9 @@ test.describe("E2D — in-dialog generation", () => {
     const reviewBtn = dialog.getByTestId("generation-review-btn");
     await expect(reviewBtn).toBeEnabled();
 
-    // The trace stayed inert (aria-hidden) — assert via testid, not role.
-    const toggle = dialog.getByTestId("generation-thinking-toggle");
-    await toggle.click();
-    await expect(dialog.getByTestId("generation-thinking-trace")).toBeVisible();
+    // The Thinking accordion is GONE (replaced by the one-line token strip).
+    await expect(dialog.getByTestId("generation-thinking-toggle")).toHaveCount(0);
+    await expect(dialog.getByTestId("generation-thinking-trace")).toHaveCount(0);
 
     // Review closes the dialog; the builder already refreshed server-side.
     await reviewBtn.click();
@@ -91,7 +92,7 @@ test.describe("E2D — in-dialog generation", () => {
     ).toHaveCount(0);
   });
 
-  test("thinking accordion: stage lines are their own lines (never merged into model text)", async ({
+  test("token line: stage lines surface in the grey one-liner (S7 inert)", async ({
     page,
   }) => {
     test.skip(!LECTURER_INVITE_CODE, "LECTURER_INVITE_CODE not set");
@@ -112,30 +113,24 @@ test.describe("E2D — in-dialog generation", () => {
     await pasteAndGenerate(page, CLEAN_TEXT);
     const dialog = page.getByRole("dialog");
 
-    // Expand early (mock streams reasoning first) and watch the trace grow.
-    const toggle = dialog.getByTestId("generation-thinking-toggle");
-    await toggle.click();
-    const trace = dialog.getByTestId("generation-thinking-trace");
-    await expect(trace).toBeVisible();
-    await expect(trace).not.toBeEmpty({ timeout: 10_000 });
+    // The one-line grey strip (replaces the Thinking accordion) streams the
+    // latest trace line: the mock's reasoning tokens surface here.
+    const line = dialog.getByTestId("generation-token-line");
+    await expect(line).toBeVisible();
+    await expect(line).toHaveText(/Analyzing|Parse — |Draft — |Reading/, {
+      timeout: 10_000,
+    });
+    // Inertness (S7): the token line is aria-hidden raw text.
+    await expect(line).toHaveAttribute("aria-hidden", "true");
+    // ONE line contract: hard truncation, no wrapping.
+    await expect(line).toHaveClass(/truncate/);
 
-    // Structural line-separation contract: STAGE markers render as distinct
-    // font-sans paragraphs (model text is font-mono) — a regression that
-    // merges stage text into the coalescing model buffer fails this.
-    await expect(trace.locator("p.font-sans").first()).toHaveText(
-      /Parse — |Draft — /,
-      { timeout: 10_000 },
-    );
-    // Inertness (S7): the trace body is aria-hidden raw text.
-    await expect(trace).toHaveAttribute("aria-hidden", "true");
-
-    // Terminal: the strip morphs to the payoff; the trace body is retained.
+    // Terminal: the sentence morphs to the payoff; the token line is gone —
+    // endings are spoken by the sentence + live region, not the log.
     await expect(
       dialog.getByText(/questions forged|soalan dihasilkan/i),
     ).toBeVisible({ timeout: 30_000 });
-    await expect(trace).toBeVisible();
-    // A full run ends with the Save stage line, still its own paragraph.
-    await expect(trace.locator("p.font-sans").last()).toHaveText(/Save — /);
+    await expect(dialog.getByTestId("generation-token-line")).toHaveCount(0);
   });
 
   test("mid-stream error: error strip + Try again recovers in place", async ({
@@ -235,8 +230,9 @@ test.describe("E2D — in-dialog generation", () => {
     await expect(dialog).toHaveCount(0);
     await page.getByRole("button", { name: /generate from file/i }).click();
     const dialog2 = page.getByRole("dialog");
+    await dialog2.getByRole("button", { name: /paste notes or study text instead/i }).click();
     await dialog2.getByLabel(/paste your material/i).fill(CLEAN_TEXT);
-    await dialog2.getByRole("button", { name: /use pasted text/i }).click();
+    await dialog2.getByRole("button", { name: /continue with text/i }).click();
     await dialog2.getByRole("button", { name: /generate quiz/i }).click();
     await expect(
       dialog2.getByText(/questions forged|soalan dihasilkan/i).first(),

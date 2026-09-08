@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations, useLocale } from "next-intl";
@@ -27,16 +27,18 @@ import {
   CalendarDays,
   ClipboardList,
   ListChecks,
-  Play,
+  MessageCircle,
   Pencil,
+  Play,
+  Plus,
+  RefreshCcw,
   Share2,
   Trash2,
-  Plus,
-  Link2,
-  RefreshCcw,
   EyeOff,
-  MessageCircle,
+  Link2,
   Loader2,
+  MoreVertical,
+  TriangleAlert,
 } from "lucide-react";
 
 type MyQuiz = {
@@ -61,6 +63,9 @@ function formatQuizDate(dateStr: string, locale: string) {
   }
 }
 
+/** Which surface of the mobile action drawer is showing. `null` = closed. */
+type SheetState = "menu" | "share" | "delete" | null;
+
 export function MyQuizzesClient({ quizzes }: { quizzes: MyQuiz[] }) {
   const router = useRouter();
   const locale = useLocale();
@@ -73,6 +78,47 @@ export function MyQuizzesClient({ quizzes }: { quizzes: MyQuiz[] }) {
   const [shareTarget, setShareTarget] = useState<MyQuiz | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<MyQuiz | null>(null);
   const [regenArmed, setRegenArmed] = useState(false);
+
+  // ── Mobile-only surface state (desktop dialogs below stay untouched) ──
+  const [isMobile, setIsMobile] = useState(false);
+  const [sheet, setSheet] = useState<SheetState>(null);
+  const [sheetTarget, setSheetTarget] = useState<MyQuiz | null>(null);
+  // FAB visibility: hides while scrolling down so it never covers a card.
+  const [fabHidden, setFabHidden] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 639px)");
+    const update = () => setIsMobile(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+
+  useEffect(() => {
+    if (!isMobile) return;
+    // Direction-aware FAB: hide only while actively scrolling down past the
+    // title zone; always show at the top or on any scroll-up. Refs keep the
+    // handler stable without re-binding on every render.
+    let lastY = window.scrollY;
+    let hidden = false;
+    let ticking = false;
+    const handler = () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        ticking = false;
+        const y = window.scrollY;
+        const down = y > lastY + 8;
+        const up = y < lastY - 4;
+        if (y <= 90 || up) hidden = false;
+        else if (down) hidden = true;
+        lastY = y;
+        setFabHidden(hidden);
+      });
+    };
+    window.addEventListener("scroll", handler, { passive: true });
+    return () => window.removeEventListener("scroll", handler);
+  }, [isMobile]);
 
   async function mutate(
     quiz: MyQuiz,
@@ -102,10 +148,13 @@ export function MyQuizzesClient({ quizzes }: { quizzes: MyQuiz[] }) {
   }
 
   async function handleDelete() {
-    if (!deleteTarget || lock.current) return;
-    const { ok } = await mutate(deleteTarget, { method: "DELETE" });
+    const target = isMobile ? sheetTarget : deleteTarget;
+    if (!target || lock.current) return;
+    const { ok } = await mutate(target, { method: "DELETE" });
     if (ok) {
       setDeleteTarget(null);
+      setSheet(null);
+      setSheetTarget(null);
       toast.success(t("deletedNotice"));
     }
   }
@@ -127,12 +176,18 @@ export function MyQuizzesClient({ quizzes }: { quizzes: MyQuiz[] }) {
       // Without a share_code the dialog would fall into its "minting link"
       // spinner branch — close it; the card flips to Private via refresh.
       setShareTarget(null);
+      setSheet(null);
+      setSheetTarget(null);
       setRegenArmed(false);
       return;
     }
     const updated = body.quiz as Partial<MyQuiz> | undefined;
     if (updated?.id) {
       setShareTarget((prev) =>
+        prev && prev.id === updated.id ? { ...prev, ...updated } : prev,
+      );
+      // Keep the mobile sheet's snapshot fresh too (mirror of shareTarget).
+      setSheetTarget((prev) =>
         prev && prev.id === updated.id ? { ...prev, ...updated } : prev,
       );
     }
@@ -158,6 +213,284 @@ export function MyQuizzesClient({ quizzes }: { quizzes: MyQuiz[] }) {
       )}`
     : "";
 
+  const openSheet = useCallback((quiz: MyQuiz, state: SheetState = "menu") => {
+    setSheetTarget(quiz);
+    setShareTarget(quiz);
+    setRegenArmed(false);
+    setSheet(state);
+  }, []);
+
+  const sharedCount = quizzes.filter((q) => q.share_code).length;
+
+  /* ════════════════ MOBILE (<640px) — card-as-play + action drawer + FAB ════════════════ */
+  if (isMobile) {
+    return (
+      <div className="space-y-4">
+        <div aria-live="polite">
+          {error && (
+            <p
+              className="rounded-2xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-3 text-sm font-bold text-destructive"
+              role="alert"
+            >
+              {error}
+            </p>
+          )}
+        </div>
+
+        {/* Large title + live count (replaces the hero band) */}
+        <div className="px-1 pt-1">
+          <h1 className="font-heading text-[28px] font-semibold leading-tight">
+            {t("mobileLargeTitle")}
+          </h1>
+          <p className="mt-0.5 text-[13px] font-bold text-muted-foreground">
+            {t("countLine", { count: quizzes.length, shared: sharedCount })}
+          </p>
+        </div>
+
+        {quizzes.length === 0 ? (
+          <div className="mt-2 rounded-[24px] border-[3px] border-dashed border-border bg-card/60 px-6 py-12 text-center">
+            <span className="mx-auto grid h-16 w-16 -rotate-3 place-items-center rounded-[20px] border-[3px] border-emerald-500/30 bg-emerald-100 text-emerald-700 shadow-[0_4px_0_var(--border)] dark:bg-emerald-500/15 dark:text-emerald-300">
+              <ClipboardList className="h-8 w-8" aria-hidden />
+            </span>
+            <p className="mt-4 font-heading text-lg font-semibold">{t("emptyTitle")}</p>
+            <p className="mx-auto mt-1 max-w-[15rem] text-sm font-semibold text-muted-foreground">
+              {t("emptySubtitle")}
+            </p>
+            <Link
+              href="/student/my-quizzes/new"
+              className={cn(buttonVariants({ size: "lg" }), "mt-5 shadow-[0_5px_0_var(--primary-deep)]")}
+            >
+              <Plus className="h-5 w-5" aria-hidden /> {t("createCta")}
+            </Link>
+          </div>
+        ) : (
+          <ul className="grid list-none gap-2.5">
+            {quizzes.map((q) => {
+              const playable = q.question_count > 0;
+              return (
+                <li key={q.id} className="relative">
+                  <Link
+                    href={playable ? `/play/student/${q.id}` : `/student/my-quizzes/${q.id}/edit`}
+                    aria-label={
+                      playable ? t("playQuizA11y", { title: q.title }) : t("editQuizA11y", { title: q.title })
+                    }
+                    className="block rounded-[20px] border-[3px] border-border bg-card px-3.5 pb-3 pt-3 shadow-[var(--shadow-clay-sm)] transition-[transform,box-shadow] duration-150 active:translate-y-[2px] active:shadow-[0_2px_0_rgba(194,65,12,0.12)]"
+                  >
+                    <h2 className="line-clamp-2 pr-8 text-[15px] font-extrabold leading-snug text-foreground">
+                      {q.title}
+                    </h2>
+                    {q.description && (
+                      <p className="mt-0.5 line-clamp-2 text-[12.5px] font-bold text-muted-foreground">
+                        {q.description}
+                      </p>
+                    )}
+                    <div className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs font-bold text-muted-foreground">
+                      {playable ? (
+                        <>
+                          <ListChecks className="h-3.5 w-3.5 text-primary-deep dark:text-primary" aria-hidden />
+                          <span>{t("questionCount", { count: q.question_count })}</span>
+                          <span aria-hidden className="opacity-50">·</span>
+                          <CalendarDays className="h-3.5 w-3.5 text-primary-deep dark:text-primary" aria-hidden />
+                          <time dateTime={q.created_at}>{formatQuizDate(q.created_at, locale)}</time>
+                          {q.share_code && (
+                            <span className="ml-1 inline-flex items-center gap-1 rounded-full border-2 border-emerald-300 bg-emerald-100 px-2 py-px text-[10.5px] font-extrabold uppercase tracking-wide text-emerald-800 dark:border-emerald-400/40 dark:bg-emerald-500/15 dark:text-emerald-300">
+                              <Share2 className="h-2.5 w-2.5" aria-hidden /> {t("shared")}
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 font-extrabold text-amber-700 dark:text-amber-300">
+                          <TriangleAlert className="h-3.5 w-3.5" aria-hidden />
+                          {t("noQuestionsYet")}
+                        </span>
+                      )}
+                    </div>
+                  </Link>
+                  <button
+                    type="button"
+                    aria-label={t("moreActionsA11y", { title: q.title })}
+                    onClick={() => openSheet(q)}
+                    className="absolute right-1.5 top-1.5 grid size-11 cursor-pointer place-items-center rounded-[13px] text-muted-foreground transition-colors duration-150 hover:text-foreground active:bg-muted"
+                  >
+                    <MoreVertical className="size-5" aria-hidden />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        {/* Floating create — hides on scroll-down so it never covers a card */}
+        {quizzes.length > 0 && (
+          <Link
+            href="/student/my-quizzes/new"
+            aria-label={t("createFabA11y")}
+            className={cn(
+              "fixed bottom-[calc(104px+var(--safe-bottom))] right-3 z-30 grid size-14 cursor-pointer place-items-center rounded-[19px] border-[3px] border-transparent bg-primary text-[#fff7ed]",
+              "shadow-[0_5px_0_var(--primary-deep)]",
+              "transition-[transform,opacity,box-shadow] duration-200 ease-out",
+              "active:translate-y-[3px] active:shadow-[0_2px_0_var(--primary-deep)]",
+              "focus-visible:outline-[3px] focus-visible:outline-ring focus-visible:outline-offset-2",
+              fabHidden ? "pointer-events-none translate-y-24 opacity-0" : "translate-y-0 opacity-100",
+            )}
+          >
+            <Plus className="h-6 w-6" aria-hidden />
+          </Link>
+        )}
+
+        {/* ── Mobile action drawer (menu → share/delete) ── */}
+        <ResponsiveModal
+          open={sheet !== null}
+          onOpenChange={(o) => {
+            if (!o) {
+              setSheet(null);
+              setSheetTarget(null);
+              setRegenArmed(false);
+            }
+          }}
+        >
+          <ResponsiveModalContent className="sm:max-w-md">
+            <ResponsiveModalHeader>
+              <ResponsiveModalTitle>
+                {sheet === "menu"
+                  ? t("actionsTitle")
+                  : sheet === "share"
+                    ? sheetTarget
+                      ? t("shareTitle", { title: sheetTarget.title })
+                      : ""
+                    : t("deleteConfirmTitle")}
+              </ResponsiveModalTitle>
+              <ResponsiveModalDescription>
+                {sheet === "share"
+                  ? t("shareIntro")
+                  : sheetTarget
+                    ? sheetTarget.title
+                    : t("shareIntro")}
+              </ResponsiveModalDescription>
+            </ResponsiveModalHeader>
+
+            {sheet === "menu" && sheetTarget && (
+              <div className="divide-y-[2px] divide-border/60 rounded-2xl border-[2.5px] border-border bg-background pb-1 pt-1 shadow-[0_3px_0_var(--border)]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    router.push(`/student/my-quizzes/${sheetTarget.id}/edit`);
+                    setSheet(null);
+                  }}
+                  className="flex h-12 w-full cursor-pointer items-center gap-3 px-4 text-left transition-colors duration-150 active:bg-muted"
+                >
+                  <Pencil className="size-5 shrink-0 text-primary-deep dark:text-primary" aria-hidden />
+                  <span className="text-[15px] font-extrabold text-foreground">{t("editBtn")}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!sheetTarget.share_code) void shareAction(sheetTarget, "share");
+                    setSheet("share");
+                  }}
+                  className="flex h-12 w-full cursor-pointer items-center gap-3 px-4 text-left transition-colors duration-150 active:bg-muted"
+                >
+                  <Share2 className="size-5 shrink-0 text-primary-deep dark:text-primary" aria-hidden />
+                  <span className="text-[15px] font-extrabold text-foreground">{t("shareBtn")}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSheet("delete")}
+                  className="flex h-12 w-full cursor-pointer items-center gap-3 px-4 text-left transition-colors duration-150 active:bg-destructive/10"
+                >
+                  <Trash2 className="size-5 shrink-0 text-destructive" aria-hidden />
+                  <span className="text-[15px] font-extrabold text-destructive">{t("deleteBtn")}</span>
+                </button>
+              </div>
+            )}
+
+            {sheet === "share" && (
+              <div className="space-y-3">
+                {sheetTarget?.share_code ? (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <Input readOnly value={shareHref} aria-label={t("copyBtn")} className="font-mono text-xs" />
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        aria-label={t("copyBtn")}
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(shareHref);
+                            setError(null);
+                            toast.success(tCommon("copied"));
+                          } catch {}
+                        }}
+                      >
+                        <Link2 className="h-4 w-4" aria-hidden />
+                      </Button>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <a href={whatsappHref} target="_blank" rel="noopener noreferrer">
+                        <Button variant="outline" size="sm">
+                          <MessageCircle className="h-4 w-4" aria-hidden /> {t("whatsappBtn")}
+                        </Button>
+                      </a>
+                      <Button
+                        variant={regenArmed ? "destructive" : "outline"}
+                        size="sm"
+                        disabled={busyId !== null}
+                        onClick={handleRegenerateClick}
+                      >
+                        <RefreshCcw className="h-4 w-4" aria-hidden />
+                        {regenArmed ? tCommon("confirm") : t("regenerateBtn")}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive hover:text-destructive"
+                        disabled={busyId !== null}
+                        onClick={() => sheetTarget && void shareAction(sheetTarget, "unshare")}
+                      >
+                        <EyeOff className="h-4 w-4" aria-hidden /> {t("unshareBtn")}
+                      </Button>
+                    </div>
+                    <p className="text-xs font-semibold text-muted-foreground">{t("regenerateNote")}</p>
+                  </>
+                ) : (
+                  <p
+                    className="flex items-center gap-2 text-sm font-semibold text-muted-foreground"
+                    role="status"
+                  >
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> {t("mintingLink")}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {sheet === "delete" && sheetTarget && (
+              <div className="space-y-4">
+                <div className="flex items-start gap-2.5 rounded-2xl border-[2.5px] border-destructive/30 bg-destructive/5 px-3.5 py-3 text-sm font-bold text-destructive">
+                  <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                  <span>{t("deleteConfirmBody", { title: sheetTarget.title })}</span>
+                </div>
+                <div className="grid gap-2.5">
+                  <Button variant="destructive" disabled={busyId === sheetTarget.id} onClick={() => void handleDelete()}>
+                    <Trash2 className="h-4 w-4" aria-hidden /> {tCommon("delete")}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setSheet("menu");
+                    }}
+                  >
+                    {tCommon("cancel")}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </ResponsiveModalContent>
+        </ResponsiveModal>
+      </div>
+    );
+  }
+
+  /* ════════════════ DESKTOP (≥640px) — unchanged layout ════════════════ */
   return (
     <div className="space-y-6 sm:space-y-8">
       {/* ── Hero band ── */}
@@ -307,7 +640,7 @@ export function MyQuizzesClient({ quizzes }: { quizzes: MyQuiz[] }) {
 
       {/* ── Share dialog ── */}
       <ResponsiveModal
-        open={!!shareTarget}
+        open={!!shareTarget && !isMobile}
         onOpenChange={(o) => {
           if (!o) {
             setShareTarget(null);
@@ -380,7 +713,7 @@ export function MyQuizzesClient({ quizzes }: { quizzes: MyQuiz[] }) {
       </ResponsiveModal>
 
       {/* ── Delete confirm dialog ── */}
-      <ResponsiveModal open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+      <ResponsiveModal open={!!deleteTarget && !isMobile} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <ResponsiveModalContent className="sm:max-w-md">
           <ResponsiveModalHeader>
             <ResponsiveModalTitle>{t("deleteConfirmTitle")}</ResponsiveModalTitle>

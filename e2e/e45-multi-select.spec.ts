@@ -71,10 +71,13 @@ test.describe("E45 — multi-select questions", () => {
       ],
     });
 
-    // The builder row shows the SET in its summary line.
+    // The builder row shows the SET via green option rows (Option E redesign:
+    // the old "Correct answers" summary chip is gone).
     const row = page.locator("li").filter({ hasText: MULTI_PROMPT });
     await expect(row).toBeVisible();
-    await expect(row.getByText(/Correct answers: Option 1, Option 3/)).toBeVisible();
+    await expect(row.locator("li").filter({ hasText: "Dolphin" })).toHaveClass(/emerald/);
+    await expect(row.locator("li").filter({ hasText: "Bat" })).toHaveClass(/emerald/);
+    await expect(row.locator("li").filter({ hasText: "Shark" })).not.toHaveClass(/emerald/);
 
     // Re-open the edit dialog: both toggles are pressed.
     await row.getByRole("button", { name: "Edit", exact: true }).click();

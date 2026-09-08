@@ -276,7 +276,8 @@
       "restoringBtn": "Restoring…",
       "restoreErrorGeneric": "Failed to restore the class. Please try again.",
       "viewAuditBtn": "View audit",
-      "emptyArchived": "No archived classes."
+      "emptyArchived": "No archived classes.",
+      "cancelBtn": "Cancel"
     },
     "archivedClasses": {
       "heroBadge": "Archive & Audit",
@@ -423,6 +424,7 @@
     },
     "builder": {
       "backToClass": "Back to class",
+      "backToQuizzes": "Back to quizzes",
       "renameQuiz": "Edit settings",
       "editSettings": "Quiz settings",
       "titleUpdated": "Title updated",
@@ -436,6 +438,8 @@
       "filterAll": "All",
       "filterUnreviewed": "To review",
       "reviewedProgress": "{done}/{total} checked",
+      "allReviewedTitle": "All checked!",
+      "allReviewedSubtitle": "Every question has been reviewed. Ready to publish when you are.",
       "markReviewed": "Mark checked",
       "markUnreviewed": "Checked",
       "publishingBtn": "Publishing…",
@@ -639,7 +643,6 @@
       "liveQuizCount": "{count, plural, =1 {1 Live quiz} other {# Live quizzes}}",
       "joinCardTitle": "Join a class",
       "joinCardSubtitle": "Use the 6-character code your lecturer shared.",
-      "joinCodePlaceholder": "e.g. AB3X9K",
       "joinBtn": "Join class",
       "joiningBtn": "Joining…",
       "myClasses": "My classes",
@@ -647,7 +650,10 @@
       "emptySubtitle": "Enter a 6-character join code above to join your first class.",
       "viewQuizzes": "View quizzes",
       "alreadyEnrolled": "You are already enrolled in that class.",
-      "joinedNotice": "Joined {title}."
+      "joinedNotice": "Joined {title}.",
+      "joinCta": "Enter a join code",
+      "cancelBtn": "Cancel",
+      "joinDrawerSubtitle": "Type the 6-character code your lecturer shared."
     },
     "quizzes": {
       "heroTitle": "Available quizzes",
@@ -658,6 +664,7 @@
       "enrollBannerTitle": "Face enrollment recommended",
       "enrollBannerBody": "Assessment quizzes use face verification. Enroll your face now so you're ready when test day comes.",
       "enrollNowBtn": "Enroll your face",
+      "enrollPillSub": "Be ready for test day",
       "unlimitedTries": "Unlimited tries",
       "retakeAllowed": "Up to {count} attempts — latest counts",
       "oneAttempt": "One attempt only",
@@ -1172,7 +1179,18 @@
     "updatedNotice": "Saved.",
     "deletedNotice": "Quiz deleted.",
     "questionCount": "{count, plural, =1 {# question} other {# questions}}",
-    "mintingLink": "Preparing your link…"
+    "mintingLink": "Preparing your link…",
+    "countLine": "{count, plural, =1 {# quiz} other {# quizzes}} · {shared, plural, =0 {none shared} =1 {1 shared} other {# shared}}",
+    "mobileLargeTitle": "My Quizzes",
+    "noQuestionsYet": "No questions yet — tap to build",
+    "moreActionsA11y": "More actions for {title}",
+    "playQuizA11y": "Play {title}",
+    "editQuizA11y": "Edit {title} — no questions yet",
+    "actionsTitle": "Quiz actions",
+    "editActionSub": "Questions, options, details",
+    "shareActionSub": "Copy the link or send on WhatsApp",
+    "deleteActionSub": "Removes it for everyone with the link",
+    "createFabA11y": "Create quiz"
   },
   "quizEditor": {
     "titleLabel": "Title",

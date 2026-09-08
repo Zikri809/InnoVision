@@ -178,6 +178,95 @@ const { data: session, error: sessErr } = await sb.auth.signInWithPassword({
   check("G6 non-array web_sources rejected", error?.message.includes("invalid_web_sources_json"), error?.message);
 }
 
+// ─── 0041: multi-file provenance (p_source_paths) ────────────────────────────
+
+// H1: replace with 2 paths + web sources → BOTH file entries AND web entries
+// persist (the pre-0041 CASE was either/or and dropped the web set).
+{
+  const { error } = await sb.rpc("save_quiz_questions_web", {
+    p_quiz_id: quiz.id, p_title: "WS Probe Draft",
+    p_source_file_url: `${uid}/${quiz.id}/deck1.pdf`,
+    p_source_text: "multi-file text",
+    p_questions: WEB_QUESTIONS, p_mode: "replace",
+    p_web_sources: WEB_OK,
+    p_source_paths: [`${uid}/${quiz.id}/deck1.pdf`, `${uid}/${quiz.id}/deck2.pdf`],
+  });
+  check("H1 multi-path + web replace succeeds", !error, error?.message);
+  const { data: row } = await admin.from("quizzes").select("sources, source_file_url").eq("id", quiz.id).maybeSingle();
+  const sources = row?.sources ?? [];
+  const fileEntries = sources.filter((s) => s.kind === undefined && s.storage_path);
+  check("H1b one file entry per path (2) + 2 valid web entries",
+    fileEntries.length === 2 &&
+    fileEntries[0].filename === "deck1.pdf" && fileEntries[1].filename === "deck2.pdf" &&
+    sources.filter((s) => s.kind === "web").length === 2,
+    JSON.stringify(sources).slice(0, 200));
+  check("H1c source_file_url = primary path", row?.source_file_url === `${uid}/${quiz.id}/deck1.pdf`, row?.source_file_url);
+}
+
+// H2: append adds the new file entries beside existing ones (mixed growth).
+{
+  const { error } = await sb.rpc("save_quiz_questions_web", {
+    p_quiz_id: quiz.id, p_title: null,
+    p_source_file_url: `${uid}/${quiz.id}/deck3.pdf`,
+    p_source_text: "append text",
+    p_questions: [{ type: "mcq", prompt: "H2 append probe?", options: ["a", "b"], correct_index: 0, explanation: null }],
+    p_mode: "append",
+    p_source_paths: [`${uid}/${quiz.id}/deck3.pdf`],
+  });
+  check("H2 multi-path append succeeds", !error, error?.message);
+  const { data: row } = await admin.from("quizzes").select("sources").eq("id", quiz.id).maybeSingle();
+  const sources = row?.sources ?? [];
+  check("H2b sources grew (2 files + 2 web + 1 new file = 5)",
+    sources.length === 5 && sources[4]?.storage_path?.endsWith("deck3.pdf"),
+    JSON.stringify(sources.map((s) => s.storage_path ?? s.url)));
+}
+
+// H3: null p_source_paths + null URL → no file entries (text-only flow stays
+// chip-less); null paths + URL alone → single legacy-shape entry (fallback).
+{
+  const { error } = await sb.rpc("save_quiz_questions_web", {
+    p_quiz_id: quiz.id, p_title: "WS Probe Draft", p_source_file_url: null,
+    p_source_text: "plain text", p_questions: WEB_QUESTIONS, p_mode: "replace",
+    p_web_sources: null, p_source_paths: null,
+  });
+  check("H3 null paths succeeds", !error, error?.message);
+  const { data: row } = await admin.from("quizzes").select("sources").eq("id", quiz.id).maybeSingle();
+  check("H3b text-only replace → empty sources", (row?.sources ?? []).length === 0);
+
+  const { error: e2 } = await sb.rpc("save_quiz_questions_web", {
+    p_quiz_id: quiz.id, p_title: "WS Probe Draft", p_source_file_url: `${uid}/${quiz.id}/solo.pdf`,
+    p_source_text: "solo text", p_questions: WEB_QUESTIONS, p_mode: "replace",
+    p_web_sources: null, p_source_paths: null,
+  });
+  check("H3c URL-only fallback succeeds", !e2, e2?.message);
+  const { data: row2 } = await admin.from("quizzes").select("sources").eq("id", quiz.id).maybeSingle();
+  const sources2 = row2?.sources ?? [];
+  check("H3d URL-only → 1 legacy-shape entry", sources2.length === 1 && sources2[0].storage_path === `${uid}/${quiz.id}/solo.pdf`,
+    JSON.stringify(sources2).slice(0, 120));
+}
+
+// H4: non-array p_source_paths → invalid_source_paths_json (typed rejection);
+// non-text elements are skipped, not fatal.
+{
+  const { error } = await sb.rpc("save_quiz_questions_web", {
+    p_quiz_id: quiz.id, p_title: "x", p_source_file_url: null,
+    p_source_text: null, p_questions: WEB_QUESTIONS, p_mode: "replace",
+    p_source_paths: { not: "an array" },
+  });
+  check("H4 non-array source_paths rejected", error?.message.includes("invalid_source_paths_json"), error?.message);
+
+  const { error: e2 } = await sb.rpc("save_quiz_questions_web", {
+    p_quiz_id: quiz.id, p_title: "WS Probe Draft", p_source_file_url: null,
+    p_source_text: "skip-invalid text", p_questions: WEB_QUESTIONS, p_mode: "replace",
+    p_source_paths: [`${uid}/${quiz.id}/good.pdf`, 42, null, ""],
+  });
+  check("H4b mixed-type path list succeeds", !e2, e2?.message);
+  const { data: row } = await admin.from("quizzes").select("sources").eq("id", quiz.id).maybeSingle();
+  const sources = row?.sources ?? [];
+  check("H4c only the text path persisted", sources.length === 1 && sources[0].storage_path === `${uid}/${quiz.id}/good.pdf`,
+    JSON.stringify(sources).slice(0, 120));
+}
+
 // Cleanup the probe quiz/user rows (best effort; local DB only).
 await admin.from("quizzes").delete().eq("id", quiz.id);
 await admin.from("classes").delete().eq("id", cls.id);

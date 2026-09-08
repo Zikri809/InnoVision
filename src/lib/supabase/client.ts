@@ -1,6 +1,6 @@
 import { createBrowserClient } from "@supabase/ssr";
 import type { Database } from "@/lib/types/database";
-import { env } from "@/lib/env";
+import { env, SUPABASE_AUTH_COOKIE } from "@/lib/env";
 
 /**
  * The public Supabase URL is baked into the client bundle. When it points at
@@ -22,5 +22,9 @@ export function createClient() {
   return createBrowserClient<Database>(
     publicSupabaseUrl(),
     env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    // Must match the server clients' cookie name (see SUPABASE_AUTH_COOKIE) —
+    // the ssr default derives it from the URL, which diverges between /sb and
+    // the direct Kong URL.
+    { cookieOptions: { name: SUPABASE_AUTH_COOKIE } },
   );
 }

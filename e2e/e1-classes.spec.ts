@@ -58,9 +58,10 @@ test.describe("E1 — Class create → join via code → roster", () => {
       studentPage.getByRole("heading", { name: "My Classes" }),
     ).toBeVisible();
 
-    // ── 4. Student joins via the code ──────────────────────────
+    // ── 4. Student joins via the code (empty-state CTA → drawer) ─
+    await studentPage.getByRole("button", { name: /^enter a join code$/i }).click();
     await studentPage.getByLabel("Join code").fill(joinCode!);
-    await studentPage.getByRole("button", { name: /join/i }).click();
+    await studentPage.getByRole("button", { name: /^join class$/i }).click();
     // Exact match: the "Joined E1 Physics." status toast also contains the
     // title, so a substring query would be ambiguous.
     await expect(studentPage.getByText("E1 Physics", { exact: true })).toBeVisible();
@@ -104,6 +105,9 @@ test.describe("E1 — Class create → join via code → roster", () => {
 
     await registerUser(studentPage, `${STUDENT_EMAIL}-iso`, "student", LECTURER_INVITE_CODE);
 
+    // Classes exist → the section-header "Join a class" button opens the
+    // join dialog (desktop viewport; the mobile FAB is sm:hidden).
+    await studentPage.getByRole("button", { name: "Join a class", exact: true }).click();
     // Wrong code → inline role=alert with the literal server string.
     await studentPage.getByLabel("Join code").fill("ZZZZZZ");
     await studentPage.getByRole("button", { name: /join/i }).click();
@@ -117,6 +121,8 @@ test.describe("E1 — Class create → join via code → roster", () => {
     await studentPage.getByLabel("Join code").fill(codeOne);
     await studentPage.getByRole("button", { name: /^join class$/i }).click();
     await expect(studentPage.getByText("E1 Isolation One", { exact: true })).toBeVisible();
+    // Rejoin: the drawer stayed mounted after success (900ms beat) — reopen.
+    await studentPage.getByRole("button", { name: "Join a class", exact: true }).click();
     await studentPage.getByLabel("Join code").fill(codeOne);
     await studentPage.getByRole("button", { name: /^join class$/i }).click();
     await expect(
@@ -127,6 +133,7 @@ test.describe("E1 — Class create → join via code → roster", () => {
     ).toHaveCount(1);
 
     // Join the SECOND class → both listed; the two rosters are isolated.
+    await studentPage.getByRole("button", { name: "Join a class", exact: true }).click();
     await studentPage.getByLabel("Join code").fill(codeTwo);
     await studentPage.getByRole("button", { name: /^join class$/i }).click();
     await expect(studentPage.getByText("E1 Isolation Two", { exact: true })).toBeVisible();

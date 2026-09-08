@@ -102,6 +102,7 @@ test("student loses visibility; rejoin attempts hit the archived alert", async (
 
   // Rejoin attempt → inline hardcoded archived error.
   await student.goto("/student/classes");
+  await student.getByRole("button", { name: "Join a class", exact: true }).click();
   await student.getByLabel("Join code").fill(joinCode);
   await student.getByRole("button", { name: /^join class$/i }).click();
   await expect(

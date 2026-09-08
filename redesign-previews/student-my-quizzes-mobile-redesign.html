@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>My Practice Quizzes — mobile redesign (one concept)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  /* ── clay tokens (design-system/innovision/MASTER.md) ── */
+  :root{
+    --primary:#F97316; --primary-deep:#c2410c; --on-primary:#7C2D12;
+    --accent:#2563EB; --accent-deep:#1d4fd7;
+    --bg:#FFF7ED; --fg:#7C2D12; --card:#FFFFFF;
+    --muted:#F1F0F0; --muted-fg:#78716C; --muted-fg-strong:#57534E;
+    --border:#FED7AA; --ring:#2563EB;
+    --ok-text:#047857; --ok-border:#6EE7B7; --ok-bg:#ECFDF5; --ok-deep:#059669;
+    --blue-bg:#EFF6FF; --blue-border:#93C5FD; --blue-text:#1D4ED8;
+    --amber-bg:#FFFBEB; --amber-border:#FCD34D; --amber-text:#B45309; --amber-strong:#92400E;
+    --red-bg:#FEF2F2; --red-border:#FCA5A5; --red-strong:#B91C1C;
+    --clay:6px 6px 0 rgba(194,65,12,.14);
+    --clay-sm:0 4px 0 rgba(194,65,12,.12);
+    --clay-in:inset 0 -4px 0 rgba(194,65,12,.1),inset 0 3px 0 rgba(255,255,255,.8);
+    --spring:cubic-bezier(.34,1.56,.64,1);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{font-family:'Nunito',sans-serif;background:var(--bg);color:var(--fg);line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  h1,h2,h3,h4{font-family:'Fredoka',sans-serif;letter-spacing:-.01em}
+  button{font-family:inherit;cursor:pointer}
+  a{color:inherit}
+  button:focus-visible,a:focus-visible,[tabindex]:focus-visible{outline:3px solid var(--ring);outline-offset:2px}
+  .icn{display:inline-flex;width:1em;height:1em;flex:none}
+  .icn svg{display:block;width:100%;height:100%}
+
+  .wrap{max-width:1180px;margin:0 auto;padding:64px 24px 140px;position:relative}
+  .blob{position:fixed;pointer-events:none;z-index:-1;border-radius:46%_54%_58%_42%/52%_44%_56%_48%;opacity:.5}
+  .b1{width:420px;height:420px;top:-120px;right:-140px;background:#FFEDD5}
+  .b2{width:340px;height:340px;top:900px;left:-180px;background:#DBEAFE;opacity:.4}
+
+  .eyebrow{display:inline-flex;align-items:center;gap:8px;background:#fff;border:3px solid var(--border);border-radius:999px;padding:7px 16px;font-weight:800;font-size:13px;color:var(--primary);box-shadow:0 3px 0 var(--border)}
+  h1{font-size:clamp(32px,5vw,52px);font-weight:600;line-height:1.08;margin:20px 0 14px;max-width:860px}
+  h1 .hl{color:var(--primary)}
+  .lede{font-size:17.5px;font-weight:600;color:var(--muted-fg);max-width:720px}
+  .lede b{color:var(--fg)}
+
+  /* ── cut list ── */
+  .cutlist{margin-top:52px;background:#fff;border:3px solid var(--border);border-radius:26px;box-shadow:var(--clay);padding:26px 24px}
+  .cutlist h2{font-size:24px;font-weight:600;margin-bottom:4px}
+  .cutlist>p{color:var(--muted-fg);font-weight:600;font-size:14.5px;margin-bottom:18px;max-width:640px}
+  .cutgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px}
+  .cut{border:2.5px solid var(--border);border-radius:16px;padding:13px 15px;background:var(--bg);box-shadow:0 3px 0 var(--border)}
+  .cut b{display:block;font-size:13.5px;font-weight:800;color:var(--fg)}
+  .cut b::before{content:"✕ ";color:#DC2626;font-weight:800}
+  .cut span{display:block;font-size:13px;font-weight:700;color:var(--muted-fg);margin-top:2px}
+  .cut span::before{content:"→ ";color:var(--ok-deep);font-weight:800}
+
+  /* ── concept layout ── */
+  .concept{margin-top:84px}
+  .concept-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .num{flex:none;width:46px;height:46px;border-radius:14px;background:var(--primary);color:var(--on-primary);display:grid;place-items:center;font-family:'Fredoka';font-weight:600;font-size:21px;box-shadow:0 4px 0 var(--primary-deep);transform:rotate(-4deg)}
+  .concept-head h2{font-size:clamp(23px,3vw,30px);font-weight:600}
+  .pitch{margin:12px 0 6px;font-size:15.5px;font-weight:600;color:var(--muted-fg);max-width:740px}
+  .pitch b{color:var(--fg)}
+  .when{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 22px}
+  .when span{font:800 11.5px 'Nunito';letter-spacing:.02em;color:var(--muted-fg-strong);background:#fff;border:2.5px solid var(--border);border-radius:999px;padding:4px 12px;box-shadow:0 3px 0 var(--border)}
+
+  .duo{display:grid;grid-template-columns:minmax(0,416px) minmax(280px,1fr);gap:32px;align-items:start}
+  @media(max-width:920px){.duo{grid-template-columns:1fr}}
+
+  /* ── notes column ── */
+  .notes{display:grid;gap:12px}
+  .note{background:#fff;border:3px solid var(--border);border-radius:18px;padding:16px 18px;box-shadow:0 4px 0 var(--border)}
+  .note h4{font-size:15px;font-weight:600;display:flex;align-items:center;gap:8px}
+  .note h4 .icn{width:17px;height:17px;color:var(--primary)}
+  .note ul{list-style:none;margin-top:8px;display:grid;gap:6px}
+  .note li{font-size:13.5px;font-weight:700;color:var(--muted-fg-strong);padding-left:18px;position:relative}
+  .note li::before{content:"";position:absolute;left:2px;top:9px;width:7px;height:7px;border-radius:50%;background:var(--primary)}
+  .note.kill li::before{background:#DC2626}
+  .note.nav li::before{background:var(--accent)}
+  .note.warn li::before{background:#D97706}
+
+  /* ══════════ PHONE FRAME ══════════ */
+  .phone{width:min(392px,100%);border-radius:58px;background:#241A12;padding:11px;box-shadow:0 30px 60px -28px rgba(124,45,18,.5),0 8px 20px -10px rgba(124,45,18,.25);position:sticky;top:24px}
+  @media(max-width:920px){.phone{position:relative;top:0}}
+  .phone.static{position:relative;top:0;margin:0 auto}
+  .screen{position:relative;height:788px;border-radius:47px;overflow:hidden;background:var(--bg)}
+  .island{position:absolute;top:11px;left:50%;transform:translateX(-50%);width:110px;height:27px;background:#241A12;border-radius:999px;z-index:60}
+  .sbar{position:relative;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 30px 6px;font:800 13px 'Nunito';color:var(--fg);z-index:50}
+  .sbar .right{display:flex;align-items:center;gap:6px}
+  .sig{display:flex;align-items:flex-end;gap:1.5px}
+  .sig i{width:3px;background:var(--fg);border-radius:1px;display:block}
+  .sig i:nth-child(1){height:4px}.sig i:nth-child(2){height:6px}.sig i:nth-child(3){height:8px}.sig i:nth-child(4){height:10px}
+  .batt{width:23px;height:12px;border:1.8px solid rgba(124,45,18,.5);border-radius:4px;position:relative;padding:1.5px}
+  .batt::before{content:"";display:block;height:100%;width:72%;background:var(--fg);border-radius:1.5px}
+  .batt::after{content:"";position:absolute;right:-4px;top:3px;width:2px;height:5px;background:rgba(124,45,18,.5);border-radius:0 2px 2px 0}
+  .homebar{position:absolute;bottom:7px;left:50%;transform:translateX(-50%);width:112px;height:4px;background:rgba(36,26,18,.28);border-radius:999px;z-index:70;pointer-events:none}
+
+  /* app bar */
+  .appbar{position:sticky;top:0;z-index:40;background:var(--bg);display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 16px 10px;border-bottom:2.5px solid transparent;transition:border-color 200ms ease}
+  .screen.scrolled .appbar{border-bottom-color:var(--border)}
+  .appbar .left{display:flex;align-items:center;gap:9px;min-width:0}
+  .logo{flex:none;width:36px;height:36px;border-radius:12px;background:var(--primary);border:3px solid var(--primary-deep);color:var(--on-primary);display:grid;place-items:center;font-family:'Fredoka';font-weight:600;font-size:16px;box-shadow:0 3px 0 var(--primary-deep)}
+  .appbar-title{font-family:'Fredoka';font-weight:600;font-size:16.5px;color:var(--fg);opacity:0;transform:translateY(6px);transition:opacity 220ms ease,transform 220ms ease;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .screen.scrolled .appbar-title{opacity:1;transform:none}
+  .appbar .tools{display:flex;align-items:center;gap:10px}
+  .bell{width:40px;height:40px;border-radius:14px;background:#fff;border:3px solid var(--border);box-shadow:0 3px 0 var(--border);display:grid;place-items:center;color:var(--fg);transition:transform 160ms ease,box-shadow 160ms ease}
+  .bell:active{transform:translateY(2px);box-shadow:0 1px 0 var(--border)}
+  .bell .icn{width:19px;height:19px}
+  /* floating create — sits above the dock, z-index under it so it slides beneath on hide */
+  .fab{position:absolute;right:14px;bottom:96px;z-index:44;width:58px;height:58px;border-radius:19px;background:var(--primary);border:3px solid var(--primary-deep);color:var(--on-primary);box-shadow:0 4px 0 var(--primary-deep),0 12px 26px -12px rgba(124,45,18,.5);display:grid;place-items:center;transition:transform 300ms var(--spring),opacity 220ms ease,box-shadow 160ms ease}
+  .fab .icn{width:26px;height:26px}
+  .fab:active{transform:translateY(3px);box-shadow:0 1px 0 var(--primary-deep)}
+  .fab.hide{transform:translateY(120px) scale(.8);opacity:0;pointer-events:none}
+  .badge-n{position:relative}
+  .badge-n::after{content:"4";position:absolute;top:-7px;right:-7px;min-width:19px;height:19px;padding:0 4px;border-radius:999px;background:#DC2626;border:2.5px solid var(--bg);color:#fff;font:800 10.5px 'Nunito';display:grid;place-items:center}
+  .avatar{width:40px;height:40px;border-radius:999px;background:#FDBA74;border:3px solid var(--border);box-shadow:0 3px 0 var(--border);display:grid;place-items:center;font:800 12.5px 'Nunito';color:var(--on-primary)}
+
+  .scroll{height:calc(100% - 52px);overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none}
+  .scroll::-webkit-scrollbar{display:none}
+  .scroll-pad{padding:0 14px 132px}
+
+  /* dock */
+  .dock{position:absolute;left:12px;right:12px;bottom:18px;z-index:45;background:rgba(255,255,255,.94);backdrop-filter:blur(8px);border:3px solid var(--border);border-radius:28px;box-shadow:0 6px 0 rgba(194,65,12,.14),0 14px 30px -14px rgba(124,45,18,.35);display:grid;grid-template-columns:repeat(4,1fr);padding:8px 6px 6px}
+  .dock a{display:flex;flex-direction:column;align-items:center;gap:2px;text-decoration:none;color:var(--muted-fg-strong);font:800 10px 'Nunito';padding:5px 2px 3px;border-radius:16px}
+  .dock a .icn{width:21px;height:21px}
+  .dock a.on{color:var(--primary-deep);background:#FFEDD5;box-shadow:inset 0 -3px 0 rgba(194,65,12,.12)}
+  .dock .dot{position:relative}
+  .dock .dot::after{content:"";position:absolute;top:-2px;right:-4px;width:9px;height:9px;border-radius:999px;background:var(--amber-border);border:2px solid #fff}
+
+  /* ══════════ large title zone ══════════ */
+  .bigzone{padding:8px 16px 14px}
+  .bigzone h2{font-size:31px;font-weight:600;line-height:1.08}
+  .bigzone p{font:700 13.5px 'Nunito';color:var(--muted-fg);margin-top:3px}
+  .bigzone p b{color:var(--primary-deep)}
+
+  /* ══════════ quiz cards — the card IS the play button ══════════ */
+  .qlist{display:grid;gap:10px;list-style:none}
+  .qlist>li{animation:pop 380ms var(--spring) both}
+  .qlist>li:nth-child(1){animation-delay:40ms}
+  .qlist>li:nth-child(2){animation-delay:110ms}
+  .qlist>li:nth-child(3){animation-delay:180ms}
+  .qlist>li:nth-child(4){animation-delay:250ms}
+  @keyframes pop{from{opacity:0;transform:scale(.95) translateY(10px)}to{opacity:1;transform:none}}
+
+  .qcard{position:relative;display:block;background:#fff;border:3px solid var(--border);border-radius:20px;box-shadow:var(--clay-sm);padding:13px 14px 12px;text-decoration:none;color:inherit;transition:transform 160ms ease,box-shadow 160ms ease}
+  .qcard:active{transform:translateY(2px);box-shadow:0 2px 0 rgba(194,65,12,.12)}
+  .qtitle{font:800 15px 'Nunito';color:var(--fg);line-height:1.3;padding-right:34px}
+  .qdesc{font:700 12.5px 'Nunito';color:var(--muted-fg);margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .qmeta{display:flex;align-items:center;flex-wrap:wrap;gap:4px 0;margin-top:9px;font:700 12px 'Nunito';color:var(--muted-fg)}
+  .qmeta .icn{width:13px;height:13px;color:var(--primary-deep);margin-right:4px;vertical-align:-2px}
+  .qmeta .sep{margin:0 6px;opacity:.5}
+  .qmeta .shared{display:inline-flex;align-items:center;gap:4px;font:800 10.5px 'Nunito';letter-spacing:.04em;text-transform:uppercase;color:var(--ok-text);background:var(--ok-bg);border:2px solid var(--ok-border);border-radius:999px;padding:1px 8px;margin-left:6px}
+  .qmeta .shared .icn{width:10px;height:10px;color:var(--ok-deep);margin-right:0}
+  .qmeta .noq{color:var(--amber-strong);font-weight:800}
+  .qmeta .noq .icn{color:var(--amber-strong)}
+
+  .more{position:absolute;top:8px;right:8px;width:42px;height:42px;margin:-4px;border:none;background:transparent;border-radius:13px;display:grid;place-items:center;color:var(--muted-fg-strong);transition:background 160ms ease,transform 160ms ease}
+  .more .icn{width:20px;height:20px}
+  .more:active{transform:scale(.92);background:var(--bg)}
+
+  /* ══════════ toast (demo navigation feedback) ══════════ */
+  .toast{position:absolute;left:50%;bottom:100px;transform:translateX(-50%) translateY(10px);background:#241A12;color:#FFF7ED;font:800 12px 'Nunito';padding:9px 15px;border-radius:999px;opacity:0;transition:opacity 220ms ease,transform 220ms ease;z-index:80;pointer-events:none;max-width:86%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+  .toast .icn{width:12px;height:12px;margin-right:6px;vertical-align:-1px;color:#FDBA74}
+
+  /* ══════════ bottom sheet — menu / share / delete states ══════════ */
+  .sheet{position:absolute;inset:0;z-index:55;pointer-events:none}
+  .sheet .scrim{position:absolute;inset:0;background:rgba(124,45,18,.4);backdrop-filter:blur(2px);opacity:0;transition:opacity 280ms ease}
+  .sheet .panel{position:absolute;left:0;right:0;bottom:0;background:#fff;border:3px solid var(--border);border-bottom:none;border-radius:30px 30px 0 0;box-shadow:0 -10px 0 rgba(194,65,12,.06);padding:8px 18px 0;transform:translateY(106%);transition:transform 400ms var(--spring)}
+  .sheet.open{pointer-events:auto}
+  .sheet.open .scrim{opacity:1}
+  .sheet.open .panel{transform:translateY(0)}
+  .grip{width:46px;height:5px;border-radius:999px;background:#E7DCCF;margin:2px auto 12px;border:none;padding:8px 14px;background-clip:content-box;cursor:grab;touch-action:none}
+  .grip:active{cursor:grabbing}
+  .sh-head{display:flex;align-items:center;gap:10px;min-height:42px}
+  .sh-back{flex:none;width:38px;height:38px;border-radius:12px;background:var(--bg);border:2.5px solid var(--border);box-shadow:0 2.5px 0 var(--border);display:grid;place-items:center;color:var(--fg)}
+  .sh-back .icn{width:17px;height:17px}
+  .sh-head h4{flex:1;font-size:17px;font-weight:600;line-height:1.22;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .sh-state{font:800 11px 'Nunito';letter-spacing:.06em;text-transform:uppercase;color:var(--muted-fg)}
+
+  .sh-body{display:none;margin-top:12px}
+  .sh-body.on{display:block}
+  .sh-actions{display:grid;gap:9px;padding-bottom:24px}
+  .act{display:flex;align-items:center;gap:12px;width:100%;background:var(--bg);border:2.5px solid var(--border);border-radius:16px;box-shadow:0 3px 0 var(--border);padding:10px 12px;text-align:left;transition:transform 160ms ease,box-shadow 160ms ease}
+  .act:active{transform:translateY(2px);box-shadow:0 1px 0 var(--border)}
+  .act .aic{flex:none;width:40px;height:40px;border-radius:13px;background:#fff;border:2.5px solid currentColor;display:grid;place-items:center}
+  .act .aic .icn{width:19px;height:19px}
+  .act .at{flex:1;min-width:0}
+  .act .at b{display:block;font:800 14px 'Nunito';color:var(--fg);line-height:1.25}
+  .act .at span{display:block;font:700 11.5px 'Nunito';color:var(--muted-fg)}
+  .act.ok{color:var(--ok-deep)}
+  .act.ok .at b{color:var(--ok-text)}
+  .act.danger{color:var(--red-strong);background:var(--red-bg);border-color:var(--red-border);box-shadow:0 3px 0 var(--red-border)}
+  .act.danger .at b{color:var(--red-strong)}
+  .act .chv{color:var(--muted-fg)}
+  .act .chv .icn{width:16px;height:16px}
+
+  .linkrow{display:flex;gap:8px}
+  .linkrow .lnk{flex:1;min-width:0;background:var(--bg);border:2.5px solid var(--border);border-radius:14px;padding:11px 12px;font:700 12px ui-monospace,Consolas,monospace;color:var(--primary-deep);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .copybtn{flex:none;width:46px;height:46px;border-radius:14px;background:#fff;border:2.5px solid var(--border);box-shadow:0 3px 0 var(--border);display:grid;place-items:center;color:var(--primary-deep)}
+  .copybtn .icn{width:19px;height:19px}
+  .sh-btnrow{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .mini{display:inline-flex;align-items:center;gap:6px;font:800 12.5px 'Nunito';border-radius:13px;border:2.5px solid var(--border);background:#fff;color:var(--fg);padding:9px 12px;box-shadow:0 3px 0 var(--border);transition:transform 160ms,box-shadow 160ms}
+  .mini:active{transform:translateY(2px);box-shadow:0 1px 0 var(--border)}
+  .mini .icn{width:14px;height:14px}
+  .mini.ok{color:var(--ok-text);border-color:var(--ok-border);box-shadow:0 3px 0 var(--ok-border)}
+  .mini.red{color:var(--red-strong);border-color:var(--red-border);box-shadow:0 3px 0 var(--red-border)}
+  .mini.armed{background:var(--red-bg);color:var(--red-strong);border-color:var(--red-border);box-shadow:0 3px 0 var(--red-border)}
+  .sh-note{margin-top:10px;font:700 11.5px 'Nunito';color:var(--muted-fg);padding-bottom:24px}
+
+  .delwarn{background:var(--red-bg);border:2.5px solid var(--red-border);border-radius:16px;padding:12px 14px;font:700 13px 'Nunito';color:var(--red-strong);display:flex;gap:9px;align-items:flex-start}
+  .delwarn .icn{width:17px;height:17px;flex:none;margin-top:2px}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;font:800 14.5px 'Nunito';border-radius:16px;padding:0 16px;height:50px;width:100%;border:3px solid transparent;transition:transform 160ms ease,box-shadow 160ms ease}
+  .btn:active{transform:translateY(3px)}
+  .btn-red{background:#DC2626;color:#fff;box-shadow:0 4px 0 #991B1B}
+  .btn-red:active{box-shadow:0 1px 0 #991B1B}
+  .btn-ghost{background:#fff;color:var(--fg);border-color:var(--border);box-shadow:0 4px 0 var(--border)}
+  .btn-ghost:active{box-shadow:0 1px 0 var(--border)}
+  .btn .icn{width:17px;height:17px}
+  .del-actions{display:grid;gap:9px;padding:14px 0 24px}
+
+  /* ══════════ empty state phone ══════════ */
+  .emptycard{margin:6px 14px 0;border:3px dashed var(--border);border-radius:24px;background:rgba(255,255,255,.6);padding:34px 22px;text-align:center}
+  .emptycard .eic{width:76px;height:76px;margin:0 auto;border-radius:24px;background:var(--ok-bg);border:3px solid var(--ok-border);box-shadow:0 4px 0 var(--ok-border);display:grid;place-items:center;color:var(--ok-deep);transform:rotate(-4deg)}
+  .emptycard .eic .icn{width:34px;height:34px}
+  .emptycard h3{font-size:19px;font-weight:600;margin-top:16px}
+  .emptycard p{font:700 13px 'Nunito';color:var(--muted-fg);margin-top:4px;max-width:240px;margin-left:auto;margin-right:auto}
+  .emptycard .btn{width:auto;margin-top:18px;background:var(--primary);color:var(--on-primary);box-shadow:0 4px 0 var(--primary-deep);padding:0 20px}
+  .cap{margin:14px auto 0;max-width:392px;text-align:center;font:800 13px 'Nunito';color:var(--muted-fg-strong)}
+  .cap b{color:var(--fg)}
+  .pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:40px;margin-top:8px;align-items:start}
+
+  /* ── before/after ── */
+  .compare{margin-top:90px}
+  .compare h2{font-size:26px;font-weight:600;margin-bottom:14px}
+  .cmp{width:100%;border-collapse:separate;border-spacing:0;background:#fff;border:3px solid var(--border);border-radius:22px;box-shadow:var(--clay);overflow:hidden;font-size:13.5px}
+  .cmp th,.cmp td{padding:11px 14px;text-align:left;font-weight:700;color:var(--muted-fg-strong);border-bottom:2.5px solid #FFF1E2}
+  .cmp tr:last-child td{border-bottom:none}
+  .cmp thead th{font-family:'Fredoka';font-weight:600;font-size:14.5px;color:var(--fg);background:var(--bg)}
+  .cmp td:first-child{font-weight:800;color:var(--fg);width:30%}
+  .cmp .good{color:var(--ok-text);font-weight:800}
+  .cmp .bad{color:var(--red-strong);font-weight:800}
+
+  .rec{margin-top:18px;background:#fff;border:3px solid var(--primary);border-radius:20px;box-shadow:0 5px 0 var(--primary-deep);padding:18px 20px}
+  .rec h3{font-size:17px;display:flex;align-items:center;gap:9px;color:var(--primary-deep)}
+  .rec p{font-size:14px;font-weight:700;color:var(--muted-fg-strong);margin-top:6px}
+  .rec p b{color:var(--fg)}
+  .impl{margin-top:16px;background:var(--bg);border:2.5px solid var(--border);border-radius:16px;padding:14px 18px}
+  .impl h4{font-size:14px}
+  .impl ul{list-style:none;margin-top:6px;display:grid;gap:5px}
+  .impl li{font-size:12.5px;font-weight:700;color:var(--muted-fg-strong);padding-left:16px;position:relative}
+  .impl li::before{content:"";position:absolute;left:1px;top:8px;width:6px;height:6px;border-radius:50%;background:var(--accent)}
+  code{font:700 11.5px ui-monospace,Consolas,monospace;background:#FFF1E2;border:1.5px solid var(--border);border-radius:6px;padding:1px 5px;color:var(--primary-deep)}
+
+  @media (prefers-reduced-motion: reduce){
+    *{animation:none!important;transition:none!important;scroll-behavior:auto!important}
+  }
+</style>
+</head>
+<body>
+
+<!-- icon sprite (lucide, stroke 2.5) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14M12 5v14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></g></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><g fill="currentColor"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></g></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="m6 3 14 9-14 9V3z" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+    <symbol id="i-pen" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></g></symbol>
+    <symbol id="i-share" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.59 13.51 6.83 3.98"/><path d="m15.41 6.51-6.82 3.98"/></g></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6"/><path d="M14 11v6"/></g></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></g></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></g></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></g></symbol>
+    <symbol id="i-eyeoff" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></g></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22z" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-chr" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-chl" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></g></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="m2 12.5 8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9"/><path d="m2 17.5 8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9"/></g></symbol>
+    <symbol id="i-cal" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></g></symbol>
+    <symbol id="i-clip" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></g></symbol>
+    <symbol id="i-cap" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.42 10.922a1 1 0 0 0-.019-1.838L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.832l8.57 3.908a2 2 0 0 0 1.66 0z"/><path d="M22 10v6"/><path d="M6 12.5V16a6 3 0 0 0 12 0v-3.5"/></g></symbol>
+    <symbol id="i-scan" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="10" r="2"/><path d="M8.5 14.5s1.5 2 3.5 2 3.5-2 3.5-2"/></g></symbol>
+    <symbol id="i-zap" viewBox="0 0 24 24"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  </defs>
+</svg>
+
+<div class="blob b1" aria-hidden="true"></div>
+<div class="blob b2" aria-hidden="true"></div>
+
+<div class="wrap">
+  <span class="eyebrow"><span class="icn"><svg><use href="#i-clip"/></svg></span> Student · My Practice Quizzes · mobile only</span>
+  <h1>One tap = <span class="hl">play</span>. One sheet = <span class="hl">everything else</span>.</h1>
+  <p class="lede">The card becomes the play button, the ⋯ becomes a drag-to-dismiss action sheet that also absorbs the share and delete dialogs, and the marketing hero collapses into an iOS large title with a live count. <b>Desktop markup stays untouched</b> — everything below is a <code>max-sm:</code> branch. Every demo is live: scroll, tap cards, open ⋯, drag the sheet down.</p>
+
+  <section class="cutlist" aria-label="Redundancy cut list">
+    <h2>The redundancy cut list</h2>
+    <p>What today's mobile screen says or shows twice — and where each cut goes:</p>
+    <div class="cutgrid">
+      <div class="cut"><b>Marketing hero band</b><span>~210px of eyebrow-worthy copy → iOS large title + one live-count line ("4 quizzes · 1 shared"). Create becomes a floating button above the dock.</span></div>
+      <div class="cut"><b>Decorative clipboard tile</b><span>Every card opens with the same icon — it identifies nothing. The title carries the card.</span></div>
+      <div class="cut"><b>PRIVATE badge</b><span>Default states don't need labels (iOS doesn't badge un-shared notes). "Shared" shows only when true.</span></div>
+      <div class="cut"><b>Boxed meta chip wall</b><span>"4 questions • Sep 8" loses its bordered box — plain meta text, native list rhythm.</span></div>
+      <div class="cut"><b>Play + Edit buttons per card</b><span>Play = tapping the card itself (row-is-button). Edit lives in the ⋯ sheet.</span></div>
+      <div class="cut"><b>Share / Delete ghost row</b><span>The dashed divider and two low-contrast buttons become one 44px ⋯ with guaranteed hit area.</span></div>
+      <div class="cut"><b>Separate share &amp; delete modals</b><span>Both become states inside the same action sheet — one surface, no modal hop, drag or tap to leave.</span></div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ CONCEPT ═══════════════ -->
+  <section class="concept" id="c1">
+    <div class="concept-head">
+      <span class="num">1</span>
+      <h2>Card-as-Play + Action Sheet</h2>
+    </div>
+    <p class="pitch">Each quiz card <b>is</b> the play affordance — like tapping a playlist in Apple Music. A single ⋯ opens a native action sheet: <b>Edit</b>, <b>Share</b> (which unfolds into the full link panel in-place), and a destructive <b>Delete</b> with in-sheet confirm. Four cards fit where one used to; every primary action is one tap in the thumb zone.</p>
+    <div class="when"><span>1 tap to play</span><span>2 taps to share / edit</span><span>3 taps to delete — friction where it protects you</span></div>
+
+    <div class="duo">
+      <div class="phone">
+        <div class="screen" id="c1-screen">
+          <div class="island" aria-hidden="true"></div>
+          <div class="sbar"><span>9:41</span><span class="right"><span class="sig" aria-hidden="true"><i></i><i></i><i></i><i></i></span><svg width="15" height="12" viewBox="0 0 24 18" aria-hidden="true"><path d="M12 15.5a1.6 1.6 0 1 0 0 .1zM2.6 6.4a13.5 13.5 0 0 1 18.8 0l-2.3 2.4a10 10 0 0 0-14.2 0zM6.2 10.1a8 8 0 0 1 11.6 0l-2.3 2.4a4.8 4.8 0 0 0-7 0z" fill="#7C2D12"/></svg><span class="batt" aria-hidden="true"></span></span></div>
+          <div class="scroll" id="c1-scroll">
+            <header class="appbar">
+              <div class="left"><span class="logo">N</span><span class="appbar-title">My Quizzes</span></div>
+              <div class="tools">
+                <button class="bell badge-n" aria-label="Notifications, 4 unread"><span class="icn"><svg><use href="#i-bell"/></svg></span></button>
+                <button class="avatar" aria-label="Account menu">MD</button>
+              </div>
+            </header>
+            <div class="scroll-pad">
+              <div class="bigzone">
+                <h2>My Quizzes</h2>
+                <p><b>4 quizzes</b> · 1 shared</p>
+              </div>
+
+              <ul class="qlist">
+                <li>
+                  <a class="qcard" href="#c1" role="button" aria-label="Play Big-O Cheat Sheet Drill, 4 questions, shared"
+                     data-title="Big-O Cheat Sheet Drill" data-sub="4 questions · Sep 8" data-shared="true" data-zero="false">
+                    <span class="qtitle">Big-O Cheat Sheet Drill</span>
+                    <span class="qdesc">My revision set for the midterm — mostly the basics.</span>
+                    <span class="qmeta"><span class="icn"><svg><use href="#i-layers"/></svg></span>4 questions<span class="sep">·</span><span class="icn"><svg><use href="#i-cal"/></svg></span>Sep 8<span class="shared"><span class="icn"><svg><use href="#i-share"/></svg></span>Shared</span></span>
+                    <button class="more" aria-label="More actions for Big-O Cheat Sheet Drill"><span class="icn"><svg><use href="#i-more"/></svg></span></button>
+                  </a>
+                </li>
+                <li>
+                  <a class="qcard" href="#c1" role="button" aria-label="Play Networking Basics Remix, 6 questions"
+                     data-title="Networking Basics Remix" data-sub="6 questions · Sep 5" data-shared="false" data-zero="false">
+                    <span class="qtitle">Networking Basics Remix</span>
+                    <span class="qdesc">Loops back to the CS102 week 1–3 notes.</span>
+                    <span class="qmeta"><span class="icn"><svg><use href="#i-layers"/></svg></span>6 questions<span class="sep">·</span><span class="icn"><svg><use href="#i-cal"/></svg></span>Sep 5</span>
+                    <button class="more" aria-label="More actions for Networking Basics Remix"><span class="icn"><svg><use href="#i-more"/></svg></span></button>
+                  </a>
+                </li>
+                <li>
+                  <a class="qcard" href="#c1" role="button" aria-label="Open Circle Geometry Sprint in the editor — no questions yet"
+                     data-title="Circle Geometry Sprint" data-sub="0 questions · Sep 2" data-shared="false" data-zero="true">
+                    <span class="qtitle">Circle Geometry Sprint</span>
+                    <span class="qmeta"><span class="noq"><span class="icn"><svg><use href="#i-alert"/></svg></span>No questions yet — tap to build</span></span>
+                    <button class="more" aria-label="More actions for Circle Geometry Sprint"><span class="icn"><svg><use href="#i-more"/></svg></span></button>
+                  </a>
+                </li>
+                <li>
+                  <a class="qcard" href="#c1" role="button" aria-label="Play History True/False Blitz, 10 questions"
+                     data-title="History True/False Blitz" data-sub="10 questions · Aug 28" data-shared="false" data-zero="false">
+                    <span class="qtitle">History True/False Blitz</span>
+                    <span class="qmeta"><span class="icn"><svg><use href="#i-layers"/></svg></span>10 questions<span class="sep">·</span><span class="icn"><svg><use href="#i-cal"/></svg></span>Aug 28</span>
+                    <button class="more" aria-label="More actions for History True/False Blitz"><span class="icn"><svg><use href="#i-more"/></svg></span></button>
+                  </a>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="toast" id="c1-toast" role="status" aria-live="polite"></div>
+
+          <button class="fab" id="c1-fab" aria-label="Create quiz"><span class="icn"><svg><use href="#i-plus"/></svg></span></button>
+
+          <nav class="dock" aria-label="Mobile navigation">
+            <a href="#c1"><span class="icn"><svg><use href="#i-cap"/></svg></span>Classes</a>
+            <a href="#c1"><span class="icn"><svg><use href="#i-clip"/></svg></span>Class Quizzes</a>
+            <a href="#c1" class="on" aria-current="page"><span class="icn"><svg><use href="#i-zap"/></svg></span>My Quizzes</a>
+            <a href="#c1" class="dot"><span class="icn"><svg><use href="#i-scan"/></svg></span>Face Setup</a>
+          </nav>
+
+          <div class="sheet" id="c1-sheet" role="dialog" aria-modal="true" aria-label="Quiz actions">
+            <div class="scrim" data-close></div>
+            <div class="panel" id="c1-panel">
+              <button class="grip" aria-label="Drag to close" id="c1-grip"></button>
+              <div class="sh-head">
+                <button class="sh-back" id="c1-back" aria-label="Back to actions" hidden><span class="icn"><svg><use href="#i-chl"/></svg></span></button>
+                <h4 id="c1-sh-title">Quiz</h4>
+                <span class="sh-state" id="c1-sh-state"></span>
+              </div>
+
+              <!-- state: menu -->
+              <div class="sh-body" id="c1-menu">
+                <div class="sh-actions">
+                  <button class="act" id="c1-act-edit">
+                    <span class="aic"><span class="icn"><svg><use href="#i-pen"/></svg></span></span>
+                    <span class="at"><b>Edit quiz</b><span>Questions, options, title</span></span>
+                    <span class="chv"><span class="icn"><svg><use href="#i-chr"/></svg></span></span>
+                  </button>
+                  <button class="act ok" id="c1-act-share">
+                    <span class="aic"><span class="icn"><svg><use href="#i-share"/></svg></span></span>
+                    <span class="at"><b>Share</b><span id="c1-share-sub">Copy link or send on WhatsApp</span></span>
+                    <span class="chv"><span class="icn"><svg><use href="#i-chr"/></svg></span></span>
+                  </button>
+                  <button class="act danger" id="c1-act-delete">
+                    <span class="aic"><span class="icn"><svg><use href="#i-trash"/></svg></span></span>
+                    <span class="at"><b>Delete quiz</b><span>Removes it for everyone with the link</span></span>
+                    <span class="chv"><span class="icn"><svg><use href="#i-chr"/></svg></span></span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- state: share -->
+              <div class="sh-body" id="c1-sharebody">
+                <div class="linkrow">
+                  <span class="lnk" id="c1-lnk">innovision.app/s/K7QX-2M</span>
+                  <button class="copybtn" id="c1-copy" aria-label="Copy link"><span class="icn"><svg><use href="#i-copy"/></svg></span></button>
+                </div>
+                <div class="sh-btnrow">
+                  <button class="mini ok" id="c1-wa"><span class="icn"><svg><use href="#i-chat"/></svg></span>WhatsApp</button>
+                  <button class="mini" id="c1-regen"><span class="icn"><svg><use href="#i-refresh"/></svg></span><span id="c1-regen-label">New code</span></button>
+                  <button class="mini red" id="c1-unshare"><span class="icn"><svg><use href="#i-eyeoff"/></svg></span>Stop sharing</button>
+                </div>
+                <p class="sh-note">Generating a new code stops old links from working.</p>
+              </div>
+
+              <!-- state: delete -->
+              <div class="sh-body" id="c1-delbody">
+                <div class="delwarn"><span class="icn"><svg><use href="#i-alert"/></svg></span><span id="c1-deltext">"Big-O Cheat Sheet Drill" and all its questions will be removed for everyone. This cannot be undone.</span></div>
+                <div class="del-actions">
+                  <button class="btn btn-red" id="c1-delgo"><span class="icn"><svg><use href="#i-trash"/></svg></span>Delete quiz</button>
+                  <button class="btn btn-ghost" data-close>Cancel</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="homebar" aria-hidden="true"></div>
+        </div>
+      </div>
+
+      <div class="notes">
+        <div class="note kill">
+          <h4><span class="icn"><svg><use href="#i-check"/></svg></span>Redundancy killed</h4>
+          <ul>
+            <li>Hero band → large title + live count; Create → floating + above the dock.</li>
+            <li>Clipboard tile, PRIVATE badge, boxed meta → gone; "Shared" chip only when true.</li>
+            <li>Play/Edit buttons + Share/Delete ghost row → the card plays, ⋯ does the rest.</li>
+            <li>Two separate modals → sheet states. Nothing on this screen needs a page-level dialog on mobile.</li>
+          </ul>
+        </div>
+        <div class="note nav">
+          <h4><span class="icn"><svg><use href="#i-play"/></svg></span>Native patterns used</h4>
+          <ul>
+            <li>iOS <b>large-title → compact bar</b> collapse on scroll (try it).</li>
+            <li><b>Row-is-button</b> — Apple Music / Notes: tap the item to do the main thing.</li>
+            <li><b>Contextual action sheet</b> with drag-to-dismiss, back-navigation between states, and destructive confirm in place.</li>
+            <li><b>Floating +</b> (Material/Gmail FAB pattern) hovers above the dock in the thumb zone — and <b>ducks away on scroll-down</b> so it never covers a card, returning on scroll-up.</li>
+          </ul>
+        </div>
+        <div class="note">
+          <h4><span class="icn"><svg><use href="#i-clip"/></svg></span>State notes</h4>
+          <ul>
+            <li><b>0-question quiz</b> (3rd card): tap routes to the editor, amber "No questions yet" replaces the disabled Play button — the tap always does the right thing.</li>
+            <li>Shared card shows one green chip; sub-label under Share action flips to "Link active — copy or stop sharing".</li>
+            <li>Empty state keeps the dashed card + big CTA (see the second phone below).</li>
+          </ul>
+        </div>
+        <div class="note warn">
+          <h4><span class="icn"><svg><use href="#i-alert"/></svg></span>E2e touchpoints to update</h4>
+          <ul>
+            <li><code>e17</code> taps a per-card <code>/^share/</code> button (2 call sites) — becomes ⋯ → "Share".</li>
+            <li><code>e17</code> create flow keeps working: app-bar + keeps accessible name "Create quiz".</li>
+            <li>Card accessible names change to "Play {title}…" — grep before renaming copy.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ EMPTY STATE ═══════════════ -->
+  <section class="concept" id="c2">
+    <div class="concept-head">
+      <span class="num">2</span>
+      <h2>The empty state — first-run onboarding</h2>
+    </div>
+    <p class="pitch">With no hero band to lean on, the empty state becomes the onboarding surface: dashed drop-zone styling, a friendly tile, and the <b>same "Create quiz" accessible name</b> the e2e suite already relies on. The app-bar + is still there, but the big CTA carries first contact.</p>
+
+    <div class="pair">
+      <div>
+        <div class="phone static">
+          <div class="screen">
+            <div class="island" aria-hidden="true"></div>
+            <div class="sbar"><span>9:41</span><span class="right"><span class="sig" aria-hidden="true"><i></i><i></i><i></i><i></i></span><svg width="15" height="12" viewBox="0 0 24 18" aria-hidden="true"><path d="M12 15.5a1.6 1.6 0 1 0 0 .1zM2.6 6.4a13.5 13.5 0 0 1 18.8 0l-2.3 2.4a10 10 0 0 0-14.2 0zM6.2 10.1a8 8 0 0 1 11.6 0l-2.3 2.4a4.8 4.8 0 0 0-7 0z" fill="#7C2D12"/></svg><span class="batt" aria-hidden="true"></span></span></div>
+            <div class="scroll">
+              <header class="appbar">
+                <div class="left"><span class="logo">N</span><span class="appbar-title" style="opacity:1;transform:none">My Quizzes</span></div>
+                <div class="tools">
+                  <button class="bell badge-n" aria-label="Notifications, 4 unread"><span class="icn"><svg><use href="#i-bell"/></svg></span></button>
+                  <button class="avatar" aria-label="Account menu">MD</button>
+                </div>
+              </header>
+              <div class="scroll-pad" style="padding-top:12px">
+                <div class="bigzone" style="padding-top:0">
+                  <h2>My Quizzes</h2>
+                  <p>No quizzes yet</p>
+                </div>
+                <div class="emptycard">
+                  <span class="eic"><span class="icn"><svg><use href="#i-clip"/></svg></span></span>
+                  <h3>No quizzes yet</h3>
+                  <p>Create your first practice quiz and share it with your class.</p>
+                  <button class="btn"><span class="icn"><svg><use href="#i-plus"/></svg></span>Create quiz</button>
+                </div>
+              </div>
+            </div>
+            <nav class="dock" aria-label="Mobile navigation">
+              <a href="#c2"><span class="icn"><svg><use href="#i-cap"/></svg></span>Classes</a>
+              <a href="#c2"><span class="icn"><svg><use href="#i-clip"/></svg></span>Class Quizzes</a>
+              <a href="#c2" class="on" aria-current="page"><span class="icn"><svg><use href="#i-zap"/></svg></span>My Quizzes</a>
+              <a href="#c2" class="dot"><span class="icn"><svg><use href="#i-scan"/></svg></span>Face Setup</a>
+            </nav>
+            <button class="fab" aria-label="Create quiz"><span class="icn"><svg><use href="#i-plus"/></svg></span></button>
+            <div class="homebar" aria-hidden="true"></div>
+          </div>
+        </div>
+        <p class="cap"><b>Empty state:</b> one surface, one CTA, zero chrome.</p>
+      </div>
+
+      <div class="notes" style="align-self:center">
+        <div class="note">
+          <h4><span class="icn"><svg><use href="#i-check"/></svg></span>Why this works</h4>
+          <ul>
+            <li>Dashed border reads as "drop something here" — a create affordance, not an error.</li>
+            <li>Both CTAs share the "Create quiz" name → one e2e contract, either works.</li>
+            <li>Subtitle copy reuses <code>myQuizzes.emptySubtitle</code> — no new strings except the count line.</li>
+          </ul>
+        </div>
+        <div class="note warn">
+          <h4><span class="icn"><svg><use href="#i-alert"/></svg></span>i18n additions (en + ms)</h4>
+          <ul>
+            <li><code>myQuizzes.countLine</code> — "{count, plural, =1 {# quiz} other {# quizzes}} · {shared} shared" (ICU plural, same pattern as <code>questionCount</code>).</li>
+            <li><code>myQuizzes.noQuestionsYet</code> — "No questions yet — tap to build".</li>
+            <li><code>myQuizzes.moreActionsA11y</code> — "More actions for {title}".</li>
+            <li><code>heroTitle</code> may shorten to "My Quizzes" to match the dock tab — optional.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ BEFORE / AFTER ═══════════════ -->
+  <section class="compare">
+    <h2>Before → after, measured</h2>
+    <table class="cmp">
+      <thead><tr><th>Metric</th><th>Today (mobile)</th><th>This redesign</th></tr></thead>
+      <tbody>
+        <tr><td>Header before first quiz</td><td class="bad">~340px (hero + card chrome)</td><td class="good">~170px — 3 cards above the fold</td></tr>
+        <tr><td>Elements per card</td><td class="bad">10 (tile, badge, title, desc, meta box, 2 buttons, divider, 2 ghosts)</td><td class="good">4 (title, desc, meta, ⋯)</td></tr>
+        <tr><td>Taps to play</td><td class="good">1</td><td class="good">1 (the card itself)</td></tr>
+        <tr><td>Taps to create</td><td class="good">1</td><td class="good">1 (floating +, hides while scrolling down so it never covers cards)</td></tr>
+        <tr><td>Taps to edit / share</td><td class="good">1</td><td>2 (⋯ → action) — share is rarer than play</td></tr>
+        <tr><td>Taps to delete</td><td>1 + modal confirm</td><td>3 — deliberate friction for a destructive act</td></tr>
+        <tr><td>Page-level dialogs on mobile</td><td class="bad">2 (share, delete)</td><td class="good">0 — absorbed into the sheet</td></tr>
+        <tr><td>Smallest touch target</td><td class="bad">~28px ghost buttons</td><td class="good">42–44px (⋯, app-bar tools, sheet rows)</td></tr>
+      </tbody>
+    </table>
+
+    <div class="rec">
+      <h3><span class="icn"><svg width="18" height="18"><use href="#i-zap"/></svg></span>Implementation sketch — all inside <code>max-sm:</code> branches</h3>
+      <p><b>Files touched:</b> <code>my-quizzes-client.tsx</code> (mobile layout + sheet state machine), <code>en.json</code>/<code>ms.json</code> (4 new keys). No new primitives — the sheet is the existing <code>ResponsiveModal</code>, which already renders as a bottom sheet on mobile; the sheet bodies are plain <code>Button</code>/<code>Input</code> compositions.</p>
+      <div class="impl">
+        <h4>Key decisions to sign off</h4>
+        <ul>
+          <li><b>Card = link</b> to <code>/play/student/{id}</code> (or <code>/edit</code> when 0 questions) via the stretched-link pattern; the ⋯ button sits above it with <code>z-index</code> and <code>aria-label="More actions for {title}"</code> — no nested interactive elements.</li>
+          <li><b>Sheet state machine:</b> <code>null → "menu" → "share" | "delete"</code>; back button returns to menu, scrim/drag/Esc dismiss. Replaces the two <code>ResponsiveModal</code>s on mobile; desktop keeps the current dialogs.</li>
+          <li><b>Floating + = FAB</b> above the dock: direction-aware hide (translate+fade on scroll-down &gt;8px, return on scroll-up; always visible at top). 58×58px, 44px+ hit area, <code>aria-label="Create quiz"</code> — keeps the e2e create-flow name. Docks that already hide on scroll (this repo's pattern) compose cleanly with it.</li>
+          <li><b>Private badge removed</b> — absence of the Shared chip is the signal. If lecturers-in-review disagree, it's a one-class revert.</li>
+          <li><b>Relative dates optional:</b> <code>Intl.RelativeTimeFormat</code> for &lt;7 days ("2d ago"), else "Sep 8". Costs one helper.</li>
+          <li><b>Error banner + aria-live</b> region stay as-is (not shown in the mockup).</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ── collapsing large title + direction-aware FAB ── */
+  var scroll = document.getElementById("c1-scroll");
+  var screen = document.getElementById("c1-screen");
+  var fab = document.getElementById("c1-fab");
+  var lastY = 0;
+  scroll.addEventListener("scroll", function(){
+    var y = scroll.scrollTop;
+    screen.classList.toggle("scrolled", y > 26);
+    /* Hide only while actively scrolling down past the title zone;
+       always show at the top or on any scroll-up. */
+    var goingDown = y > lastY + 8;
+    var goingUp = y < lastY - 4;
+    if(y <= 90 || goingUp) fab.classList.remove("hide");
+    else if(goingDown) fab.classList.add("hide");
+    lastY = y;
+  }, { passive:true });
+  fab.addEventListener("click", function(){
+    showToast("<span class=\"icn\"><svg><use href=\"#i-plus\"/></svg></span>New quiz — /student/my-quizzes/new");
+  });
+
+  /* ── toast ── */
+  var toast = document.getElementById("c1-toast");
+  var toastTimer = null;
+  function showToast(html){
+    if(reduce) return;
+    toast.innerHTML = html;
+    toast.classList.add("on");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ toast.classList.remove("on"); }, 1700);
+  }
+  function playIcn(){ return "<span class=\"icn\"><svg><use href=\"#i-play\"/></svg></span>"; }
+  function penIcn(){ return "<span class=\"icn\"><svg><use href=\"#i-pen\"/></svg></span>"; }
+
+  /* ── sheet + state machine ── */
+  var sheet = document.getElementById("c1-sheet");
+  var panel = document.getElementById("c1-panel");
+  var shTitle = document.getElementById("c1-sh-title");
+  var shState = document.getElementById("c1-sh-state");
+  var backBtn = document.getElementById("c1-back");
+  var bodies = { menu: document.getElementById("c1-menu"), share: document.getElementById("c1-sharebody"), del: document.getElementById("c1-delbody") };
+  var shareSub = document.getElementById("c1-share-sub");
+  var regenLabel = document.getElementById("c1-regen-label");
+  var regenBtn = document.getElementById("c1-regen");
+  var delText = document.getElementById("c1-deltext");
+  var current = null;      /* active quiz card */
+  var state = "menu";
+  var armed = false;
+
+  function setState(next){
+    state = next;
+    Object.keys(bodies).forEach(function(k){ bodies[k].classList.toggle("on", k === next); });
+    backBtn.hidden = next === "menu";
+    shState.textContent = next === "menu" ? "" : next === "share" ? "Share" : "Delete";
+  }
+  function openSheet(card){
+    current = card;
+    shTitle.textContent = card.getAttribute("data-title");
+    delText.textContent = "\"" + card.getAttribute("data-title") + "\" and all its questions will be removed for everyone. This cannot be undone.";
+    var shared = card.getAttribute("data-shared") === "true";
+    shareSub.textContent = shared ? "Link active — copy, rotate or stop" : "Create a link, send on WhatsApp";
+    document.getElementById("c1-unshare").style.display = shared ? "" : "none";
+    if(!shared) document.getElementById("c1-lnk").textContent = "Link appears once you share";
+    disarm();
+    setState("menu");
+    sheet.classList.add("open");
+    panel.style.transition = ""; panel.style.transform = "";
+  }
+  function closeSheet(){
+    sheet.classList.remove("open");
+    current = null;
+    disarm();
+  }
+  function disarm(){ armed = false; regenBtn.classList.remove("armed"); regenLabel.textContent = "New code"; }
+
+  Array.prototype.forEach.call(document.querySelectorAll(".qcard"), function(card){
+    card.addEventListener("click", function(e){
+      if(e.target.closest(".more")) return; /* ⋯ handled separately */
+      if(card.getAttribute("data-zero") === "true"){
+        showToast(penIcn() + "Opening editor — add questions");
+      } else {
+        showToast(playIcn() + "Playing \u201C" + card.getAttribute("data-title") + "\u201D");
+      }
+    });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll(".qcard .more"), function(btn){
+    btn.addEventListener("click", function(e){
+      e.preventDefault();
+      e.stopPropagation();
+      openSheet(btn.closest(".qcard"));
+    });
+  });
+
+  document.getElementById("c1-act-edit").addEventListener("click", function(){
+    showToast(penIcn() + "Opening editor \u2014 /student/my-quizzes/{id}/edit");
+    closeSheet();
+  });
+  document.getElementById("c1-act-share").addEventListener("click", function(){ setState("share"); });
+  document.getElementById("c1-act-delete").addEventListener("click", function(){ setState("del"); });
+  backBtn.addEventListener("click", function(){ setState("menu"); });
+
+  document.getElementById("c1-copy").addEventListener("click", function(){
+    document.getElementById("c1-lnk").textContent = "innovision.app/s/K7QX-2M";
+    showToast("<span class=\"icn\"><svg><use href=\"#i-copy\"/></svg></span>Link copied");
+  });
+  document.getElementById("c1-wa").addEventListener("click", function(){
+    showToast("<span class=\"icn\"><svg><use href=\"#i-chat\"/></svg></span>Opening WhatsApp\u2026");
+  });
+  regenBtn.addEventListener("click", function(){
+    if(!armed){ armed = true; regenBtn.classList.add("armed"); regenLabel.textContent = "Tap to confirm"; return; }
+    disarm();
+    showToast("<span class=\"icn\"><svg><use href=\"#i-refresh\"/></svg></span>New link minted");
+  });
+  document.getElementById("c1-unshare").addEventListener("click", function(){
+    if(current) current.setAttribute("data-shared", "false");
+    var chip = current && current.querySelector(".shared");
+    if(chip) chip.remove();
+    closeSheet();
+    showToast("<span class=\"icn\"><svg><use href=\"#i-eyeoff\"/></svg></span>Sharing stopped");
+  });
+  document.getElementById("c1-delgo").addEventListener("click", function(){
+    if(current && current.closest("li")) current.closest("li").remove();
+    closeSheet();
+    showToast("<span class=\"icn\"><svg><use href=\"#i-trash\"/></svg></span>Quiz deleted");
+  });
+
+  Array.prototype.forEach.call(sheet.querySelectorAll("[data-close]"), function(el){
+    el.addEventListener("click", closeSheet);
+  });
+  document.addEventListener("keydown", function(e){
+    if(e.key === "Escape" && sheet.classList.contains("open")) closeSheet();
+  });
+
+  /* drag-to-dismiss on the grip */
+  var grip = document.getElementById("c1-grip");
+  var sy = 0, dy = 0, dragging = false;
+  grip.addEventListener("pointerdown", function(e){
+    dragging = true; sy = e.clientY; dy = 0;
+    panel.style.transition = "none";
+    grip.setPointerCapture(e.pointerId);
+  });
+  grip.addEventListener("pointermove", function(e){
+    if(!dragging) return;
+    dy = Math.max(0, e.clientY - sy);
+    panel.style.transform = "translateY(" + dy + "px)";
+  });
+  grip.addEventListener("pointerup", function(){
+    dragging = false;
+    panel.style.transition = "";
+    if(dy > 90){ closeSheet(); } else { panel.style.transform = ""; }
+  });
+})();
+</script>
+</body>
+</html>

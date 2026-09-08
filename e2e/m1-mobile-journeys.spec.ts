@@ -31,9 +31,10 @@ test.describe("m1 — mobile student journey", () => {
     await expect(page).toHaveURL(/\/student\/classes/);
     await expect(page.getByRole("heading", { name: "My Classes" })).toBeVisible();
 
-    // Zero-state rule (plan W2): no zero stat cards below sm; join form lives
-    // in the empty-state card.
-    await expect(page.getByLabel("Join code")).toBeVisible();
+    // Zero-state rule (plan W2): no zero stat cards below sm; the join
+    // drawer's trigger (empty-state CTA) owns the zero state. The OTP input
+    // itself mounts inside the drawer once opened.
+    await expect(page.getByRole("button", { name: /^enter a join code$/i })).toBeVisible();
     await expect(
       page.getByText(/0 classes|0 live/i).first()
     ).toBeHidden();
@@ -88,9 +89,10 @@ test.describe("m1 — mobile student journey", () => {
     });
     await lecturerCtx.close();
 
-    // Student joins via the mobile composition.
+    // Student joins via the mobile composition (empty state → drawer).
+    await page.getByRole("button", { name: /^enter a join code$/i }).click();
     await page.getByLabel("Join code").fill(joinCode);
-    await page.getByRole("button", { name: /join/i }).click();
+    await page.getByRole("button", { name: /^join class$/i }).click();
     await expect(page.getByText(classTitle, { exact: true })).toBeVisible();
 
     // Play through the mobile stage: dock → class quizzes → Start.

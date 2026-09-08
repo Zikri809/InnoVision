@@ -215,7 +215,7 @@ export function AppUserMenu({
       <ResponsiveModal open={open} onOpenChange={setOpen}>
         <ResponsiveModalTrigger
           aria-label={t("accountMenu")}
-          className="relative grid h-11 w-11 cursor-pointer place-items-center overflow-hidden rounded-2xl border-[3px] border-border bg-card font-sans text-sm font-extrabold text-foreground shadow-[0_4px_0_var(--border)] transition-[transform,box-shadow] duration-[180ms] ease-out hover:-translate-y-0.5 hover:shadow-[0_6px_0_var(--border)] active:translate-y-0.5 active:shadow-[0_1px_0_var(--border)]"
+          className="relative grid h-11 w-11 cursor-pointer place-items-center overflow-hidden rounded-2xl border-[3px] border-border bg-card font-sans text-sm font-extrabold text-foreground shadow-[0_4px_0_var(--border)] transition-[transform,box-shadow] duration-[180ms] ease-out hover:-translate-y-0.5 hover:shadow-[0_6px_0_var(--border)] active:translate-y-0.5 active:shadow-[0_1px_0_var(--border)] max-sm:h-10 max-sm:w-10 max-sm:rounded-full max-sm:border-0 max-sm:bg-[#FDBA74] max-sm:text-[13px] max-sm:text-[#7C2D12] max-sm:shadow-none max-sm:active:translate-y-0"
         >
           {shownAvatarUrl ? (
             <Image

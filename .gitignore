@@ -76,3 +76,7 @@ next-env.d.ts
 
 # GLM-OCR benchmark raw timings (regenerate with `npm run glm:bench`)
 /bench-glm-ocr.jsonl
+
+# scratch: dev logs, probe scripts, throwaway screenshots
+/.tmp/
+/.tmp_*

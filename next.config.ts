@@ -83,6 +83,14 @@ const nextConfig: NextConfig = {
     serverActions: {
       allowedOrigins: ["innovision.zikr-i.uk"],
     },
+    // The same-origin /sb proxy carries browser uploads (quiz source PDFs —
+    // 25 MB per file, 50 MB total per the client-side caps). Next's dev proxy
+    // clones request bodies with a 10 MiB default cap and TRUNCATES anything
+    // larger; the truncated stream then stalls until the dev proxy's 30s
+    // proxyTimeout aborts it as a 500. Raise both above the app's upload
+    // ceiling (production next start does not apply the clone path).
+    proxyClientMaxBodySize: 55 * 1024 * 1024,
+    proxyTimeout: 120_000,
     optimizePackageImports: [
       "lucide-react",
       "@remixicon/react",

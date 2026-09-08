@@ -1,6 +1,8 @@
 import { redirect, notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getClassRoster } from "@/lib/classes/roster";
+import { deriveSessionDisplayStatus } from "@/lib/results/derive";
+import type { SessionStatus } from "@/lib/types/aliases";
 import { SessionDetailClient } from "./session-detail-client";
 import { ProfilePendingPanel, LoadErrorPanel } from "@/components/layout/load-state";
 
@@ -9,10 +11,11 @@ type SessionInfo = {
   quiz_id: string;
   student_id: string;
   mode: string;
-  status: string;
+  status: SessionStatus;
   score: number | null;
   started_at: string | null;
   submitted_at: string | null;
+  last_activity_at: string | null;
   face_unavailable_at: string | null;
   face_exempt: boolean;
   face_fail_streak: number;
@@ -83,7 +86,7 @@ export default async function SessionDetailPage({
   // Session must belong to THIS quiz (URL can't swap in a foreign session id).
   const { data: session, error: sessionError } = await supabase
     .from("lecturer_session_view")
-    .select("id, quiz_id, student_id, mode, status, score, started_at, submitted_at, face_unavailable_at, face_exempt, face_fail_streak")
+    .select("id, quiz_id, student_id, mode, status, score, started_at, submitted_at, last_activity_at, face_unavailable_at, face_exempt, face_fail_streak")
     .eq("id", sessionId)
     .eq("quiz_id", id)
     .maybeSingle();
@@ -132,11 +135,22 @@ export default async function SessionDetailPage({
 
   const answerRows = (answers ?? []) as unknown as AnswerRow[];
 
+  // Same D5 abandonment derivation as the results dashboard — otherwise an
+  // in-progress (score=null) session that went stale (>2h, quiz closed, or
+  // flagged) is mislabeled "In progress" on this page forever.
+  // eslint-disable-next-line react-hooks/purity -- server render: fresh clock per request
+  const nowMs = Date.now();
+  const displayStatus = deriveSessionDisplayStatus(
+    { status: sessionInfo.status, last_activity_at: sessionInfo.last_activity_at },
+    { quizStatus: quiz.status, nowMs },
+  );
+
   return (
     <SessionDetailClient
       quizId={id}
       quizTitle={quiz.title}
       session={sessionInfo}
+      displayStatus={displayStatus}
       questions={questions ?? []}
       answers={answerRows}
       studentName={

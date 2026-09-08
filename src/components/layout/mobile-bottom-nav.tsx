@@ -30,8 +30,10 @@ type DockLink = {
 type LecturerClassOption = { id: string; title: string };
 
 /**
- * Floating clay dock (plan W1): solid card island with a 3px border and hard
- * offset shadow — the previous backdrop-blur bar violated clay rule 2.
+ * Flat attached dock: full-width bar flush to the bottom edge with just a
+ * top border (was a floating rounded island). Both roles share it — the
+ * lecturer FAB keeps its raised center "+" posture on the flat bar. Tab
+ * styling (incl. the tinted active pill) is unchanged.
  * Icons are 24px (--icon-nav). Labels render normal-case at 11px
  * (text-2xs): the full contract names ("Class Quizzes" / "Kuis Kelas") do
  * not fit ~80px slots at 12px uppercase, and truncating the primary
@@ -43,8 +45,8 @@ type LecturerClassOption = { id: string; title: string };
  * Dock FAB (lecturer dock overhaul): a raised center "+" anchors the
  * lecturer's #1 action — New class / New quiz (Archived was demoted to an
  * in-page destination; the Quizzes library takes the freed dock slot).
- * Lecturer-only by design: the student dock keeps its 4 tabs (join lives on
- * the classes page). The sheet is sm:hidden like the dock itself.
+ * Lecturer-only by design: the student dock keeps its 4 tabs (join lives in
+ * the classes page join drawer). The sheet is sm:hidden like the dock.
  */
 export function MobileBottomNav({
   role,
@@ -140,7 +142,7 @@ export function MobileBottomNav({
     <>
       <nav
         aria-label={t("mobileNav")}
-        className="fixed inset-x-3 bottom-[calc(8px+var(--safe-bottom))] z-40 flex items-stretch gap-1 rounded-[24px] border-[3px] border-border bg-card px-2 py-1.5 shadow-[var(--shadow-clay)] transition-transform duration-200 ease-out sm:hidden [[data-keyboard-open]_&]:translate-y-[120%]"
+        className="fixed inset-x-0 bottom-0 z-40 flex items-stretch gap-1 border-t-[3px] border-border bg-card px-2 pb-[max(0.5rem,var(--safe-bottom))] pt-1.5 transition-transform duration-200 ease-out sm:hidden [[data-keyboard-open]_&]:translate-y-[120%]"
       >
         {links.slice(0, fabIndex).map((link) => (
           <DockTab key={link.href} link={link} pathname={pathname} />
@@ -265,14 +267,7 @@ function DockTab({
           : "text-muted-foreground hover:text-foreground",
       )}
     >
-      <span
-        className={cn(
-          "relative grid h-8 min-w-12 place-items-center rounded-full transition-[background-color,box-shadow,border-color] duration-200",
-          active
-            ? "border-2 border-primary/40 bg-primary/15 shadow-[0_2px_0_var(--border)]"
-            : "border-2 border-transparent bg-transparent",
-        )}
-      >
+      <span className="relative grid h-8 min-w-12 place-items-center">
         <Icon className="size-[var(--icon-nav)] shrink-0" aria-hidden="true" />
         {link.badge === "enrolled" && (
           <span

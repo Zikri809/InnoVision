@@ -33,3 +33,15 @@ if (!parsed.success) {
 }
 
 export const env = parsed.data;
+
+/**
+ * Fixed session-storage key shared by EVERY Supabase client (browser, server,
+ * middleware, auth callback). @supabase/ssr derives its default cookie name
+ * from the client URL, so the browser client (re-pointed at the same-origin
+ * /sb prefix for remote access) and the server clients (direct to the Kong
+ * gateway) would otherwise use DIFFERENT cookie names — the login cookie
+ * written by one is invisible to the other and every browser call goes out
+ * anonymous (401/400 "permission denied"). Pinning the name decouples the
+ * cookie from the URL; renaming it here invalidates every existing session.
+ */
+export const SUPABASE_AUTH_COOKIE = "sb-innovision-auth-token";

@@ -18,10 +18,13 @@ export const dynamic = "force-dynamic";
  */
 export default async function QuizBuilderPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { id } = await params;
+  const { from } = await searchParams;
   const tBuilder = await getTranslations("builder");
   const supabase = await createClient();
   const {
@@ -162,6 +165,10 @@ export default async function QuizBuilderPage({
       questions={questions ?? []}
       userId={user.id}
       classes={ownedClasses ?? []}
+      // Origin-aware back link: entered from the cross-class quizzes hub goes
+      // back to the hub, not the quiz's class page (?from=quizzes hub link).
+      backHref={from === "quizzes" ? "/lecturer/quizzes" : `/lecturer/classes/${quiz.class_id}`}
+      backToQuizzes={from === "quizzes"}
       unrevealedCompleted={
         quiz.status === "live" &&
         quiz.mode === "assessment" &&

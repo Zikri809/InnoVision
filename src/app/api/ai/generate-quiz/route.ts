@@ -233,7 +233,7 @@ async function appendCapacityError(
 // ─── Phase 1: source preparation (parse / web search) ────────────────────────
 
 type PreparedSource =
-  | { ok: true; text: string; sourcePathFinal: string | null; parsed: boolean; webSources: WebSourceEntry[] | null; webAugmented?: boolean }
+  | { ok: true; text: string; sourcePathFinal: string | null; sourcePaths: string[]; parsed: boolean; webSources: WebSourceEntry[] | null; webAugmented?: boolean }
   | { ok: false; response: NextResponse };
 
 /** The web-search branch of source preparation (augmentation model): the
@@ -248,7 +248,7 @@ async function prepareWebSource(
     onLibEvent?: (event: GroundedSearchLibEvent) => void;
     signal?: AbortSignal;
     /** Material base (REQUIRED — web search always augments material). */
-    base: { text: string; sourcePathFinal: string | null; parsed: boolean };
+    base: { text: string; sourcePathFinal: string | null; sourcePaths: string[]; parsed: boolean };
   },
 ): Promise<PreparedSource> {
   const augmented = true;
@@ -261,7 +261,7 @@ async function prepareWebSource(
     // Augmentation degradation: without an AI client there is no query
     // planning, but the material alone still works — degrade, don't fail.
     if (augmented) {
-      return { ok: true, ...opts.base!, webSources: null, webAugmented: true };
+      return { ok: true, ...opts.base!, sourcePaths: opts.base!.sourcePaths, webSources: null, webAugmented: true };
     }
     return {
       ok: false,
@@ -286,7 +286,7 @@ async function prepareWebSource(
     // (`search_unavailable` also degrades: the key being absent is a config
     // problem the lecturer can't fix mid-generation.)
     if (augmented) {
-      return { ok: true, ...opts.base!, webSources: null, webAugmented: true };
+      return { ok: true, ...opts.base!, sourcePaths: opts.base!.sourcePaths, webSources: null, webAugmented: true };
     }
     const response =
       result.error === "search_corpus_thin"
@@ -316,6 +316,7 @@ async function prepareWebSource(
       ok: true,
       text,
       sourcePathFinal: opts.base!.sourcePathFinal,
+      sourcePaths: opts.base!.sourcePaths,
       parsed: opts.base!.parsed,
       webSources: result.sources,
       webAugmented: true,
@@ -325,6 +326,7 @@ async function prepareWebSource(
     ok: true,
     text: result.text,
     sourcePathFinal: null,
+    sourcePaths: [],
     parsed: false,
     webSources: result.sources,
   };
@@ -344,6 +346,10 @@ async function prepareSource(ctx: GenerationContext): Promise<PreparedSource> {
   // validation/clamping is real but is not "Parse" in the stage-rail sense.
   let parsed = false;
   const pathsToProcess: string[] = [];
+  // Every validated path that contributed text — forwarded to the save RPC as
+  // p_source_paths so EACH file gets a provenance chip (0041; previously only
+  // pathsToProcess[0] was persisted and the chip count under-reported).
+  const contributedPaths: string[] = [];
 
   if (body.sourcePaths && body.sourcePaths.length > 0) {
     pathsToProcess.push(...body.sourcePaths);
@@ -420,6 +426,7 @@ async function prepareSource(ctx: GenerationContext): Promise<PreparedSource> {
       }
       if (parse.text?.trim()) {
         const filename = p.split("/").pop() ?? `Document ${i + 1}`;
+        contributedPaths.push(p);
         extractedTexts.push(
           pathsToProcess.length > 1
             ? `=== SOURCE [${i + 1}/${pathsToProcess.length}]: ${filename} ===\n${parse.text.trim()}`
@@ -439,7 +446,18 @@ async function prepareSource(ctx: GenerationContext): Promise<PreparedSource> {
     text = text.slice(0, MAX_AGGREGATE_CHARS);
   }
 
-  return { ok: true, text, sourcePathFinal, parsed, webSources: null };
+  // Client-extracted text rides with sourcePaths — the files were uploaded
+  // and are legitimate provenance even though no server parse happens.
+  const finalPaths =
+    contributedPaths.length > 0
+      ? contributedPaths
+      : body.sourcePaths && body.sourcePaths.length > 0
+        ? body.sourcePaths
+        : sourcePathFinal
+          ? [sourcePathFinal]
+          : [];
+
+  return { ok: true, text, sourcePathFinal, sourcePaths: finalPaths, parsed, webSources: null };
 }
 
 // ─── Phase 2: AI generation ──────────────────────────────────────────────────
@@ -525,7 +543,7 @@ type SaveOutcome =
 
 async function saveGeneration(
   ctx: GenerationContext,
-  prepared: { text: string; sourcePathFinal: string | null; webSources: WebSourceEntry[] | null },
+  prepared: { text: string; sourcePathFinal: string | null; sourcePaths: string[]; webSources: WebSourceEntry[] | null },
   result: Extract<GenerateQuizResult, { ok: true }>,
   opts: { signal?: AbortSignal } = {},
 ): Promise<SaveOutcome> {
@@ -538,12 +556,13 @@ async function saveGeneration(
     return { kind: "error", response: jsonError("cancelled", "Generation cancelled.", 409) };
   }
 
-  // Build the RPC args with a typed boundary. The WEB overload carries
-  // p_web_sources; file/text flows keep the historical 6-arg call (the 0040
-  // sibling function exists because PostgREST can't resolve named calls
-  // across same-name overloads — see the migration header).
-  const useWebRpc = prepared.webSources !== null && prepared.webSources.length > 0;
-  type SaveQuizQuestionsArgs = {
+  // Build the RPC args with a typed boundary. The generate route ALWAYS uses
+  // save_quiz_questions_web (the 6-arg sibling stays reserved for its other
+  // callers — the import route — per 0040's PostgREST overload note): the 0041
+  // function carries p_web_sources AND p_source_paths (the full file list —
+  // one provenance chip per uploaded file; the single p_source_file_url only
+  // fed the primary path and under-counted multi-file builds).
+  type SaveQuizQuestionsWebArgs = {
     p_quiz_id: string;
     p_title: string;
     p_source_file_url: string | null;
@@ -551,21 +570,24 @@ async function saveGeneration(
     p_questions: unknown;
     p_mode: string;
     p_web_sources?: unknown;
+    p_source_paths?: unknown;
   };
-  const rpcArgs: SaveQuizQuestionsArgs = {
+  const rpcArgs: SaveQuizQuestionsWebArgs = {
     p_quiz_id: quizId,
     p_title: quizTitle,
     p_source_file_url: prepared.sourcePathFinal ?? null,
     p_source_text: prepared.text,
     p_questions: rows,
     p_mode: ctx.body.mode,
-    // Grounded-search provenance (grounded-search.md §5): web entries only —
-    // the RPC skips sources assembly for a null/empty web set.
+    p_source_paths: prepared.sourcePaths.length > 0 ? prepared.sourcePaths : null,
+    // Web provenance: the RPC skips web-entry assembly for a null/empty set.
   };
-  if (useWebRpc) rpcArgs.p_web_sources = prepared.webSources;
+  if (prepared.webSources !== null && prepared.webSources.length > 0) {
+    rpcArgs.p_web_sources = prepared.webSources;
+  }
 
   const { data: questions, error: rpcError } = await supabase.rpc(
-    useWebRpc ? "save_quiz_questions_web" : "save_quiz_questions",
+    "save_quiz_questions_web",
     rpcArgs as unknown as never,
   );
 
@@ -645,7 +667,27 @@ async function saveGeneration(
     return { kind: "saved_refresh_failed", questions: questions ?? [] };
   }
 
-  return { kind: "ok", payload: { quiz, questions: questions ?? [] } };
+  // The RPC returns VOID (0040/0041) — `questions` above is always null, so
+  // both the stream done-event and the legacy JSON payload previously
+  // reported "0 questions" on every success. Read the saved rows back: the
+  // payload carries the REAL questions (and the client's count stops lying).
+  const { data: savedQuestions, error: readBackError } = await supabase
+    .from("questions")
+    .select("id, quiz_id, order_index, type, prompt, options, correct_index, correct_indices, explanation")
+    .eq("quiz_id", quizId)
+    .order("order_index", { ascending: true });
+
+  if (readBackError) {
+    console.error("Saved question readback error:", readBackError);
+  }
+
+  return {
+    kind: "ok",
+    payload: {
+      quiz,
+      questions: savedQuestions ?? [],
+    },
+  };
 }
 
 // ─── Protocol runners ────────────────────────────────────────────────────────
@@ -661,7 +703,7 @@ async function runLegacyGeneration(ctx: GenerationContext, signal: AbortSignal):
     if (!material.ok) return material.response;
     const prepared = await prepareWebSource(ctx, {
       signal,
-      base: { text: material.text, sourcePathFinal: material.sourcePathFinal, parsed: material.parsed },
+      base: { text: material.text, sourcePathFinal: material.sourcePathFinal, sourcePaths: material.sourcePaths, parsed: material.parsed },
     });
     if (!prepared.ok) return prepared.response;
 
@@ -669,7 +711,7 @@ async function runLegacyGeneration(ctx: GenerationContext, signal: AbortSignal):
     if (!result.ok) return generationErrorResponse(result);
     const saved = await saveGeneration(
       ctx,
-      { text: prepared.text, sourcePathFinal: prepared.sourcePathFinal, webSources: prepared.webSources },
+      { text: prepared.text, sourcePathFinal: prepared.sourcePathFinal, sourcePaths: prepared.sourcePaths, webSources: prepared.webSources },
       result,
       { signal },
     );
@@ -688,7 +730,7 @@ async function runLegacyGeneration(ctx: GenerationContext, signal: AbortSignal):
 
   const saved = await saveGeneration(
     ctx,
-    { text: prepared.text, sourcePathFinal: prepared.sourcePathFinal, webSources: null },
+    { text: prepared.text, sourcePathFinal: prepared.sourcePathFinal, sourcePaths: prepared.sourcePaths, webSources: null },
     result,
     { signal },
   );
@@ -771,7 +813,7 @@ function streamGeneration(ctx: GenerationContext, request: Request): Response {
           send({ type: "stage", stage: "search", status: "start" });
           prepared = await prepareWebSource(ctx, {
             signal: internal.signal,
-            base: { text: material.text, sourcePathFinal: material.sourcePathFinal, parsed: material.parsed },
+            base: { text: material.text, sourcePathFinal: material.sourcePathFinal, sourcePaths: material.sourcePaths, parsed: material.parsed },
             onLibEvent: (ev) => {
               if (ev.type === "tool_call") {
                 send({ type: "tool_call", tool: ev.tool, query: ev.query });
@@ -870,7 +912,7 @@ function streamGeneration(ctx: GenerationContext, request: Request): Response {
         send({ type: "stage", stage: "save", status: "start" });
         const saved = await saveGeneration(
           ctx,
-          { text: prepared.text, sourcePathFinal: prepared.sourcePathFinal, webSources: prepared.webSources },
+          { text: prepared.text, sourcePathFinal: prepared.sourcePathFinal, sourcePaths: prepared.sourcePaths, webSources: prepared.webSources },
           result,
           { signal: internal.signal },
         );

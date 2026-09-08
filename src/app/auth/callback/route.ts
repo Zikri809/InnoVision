@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { sanitizeRedirect } from "@/lib/auth/redirect";
-import { env } from "@/lib/env";
+import { env, SUPABASE_AUTH_COOKIE } from "@/lib/env";
 import {
   institutionalDomains,
   isAllowedInstitutionalEmail,
@@ -44,6 +44,9 @@ export async function GET(request: NextRequest) {
           );
         },
       },
+      // Pinned session-cookie name — must equal the browser client's (see
+      // SUPABASE_AUTH_COOKIE); the ssr default derives it from the URL.
+      cookieOptions: { name: SUPABASE_AUTH_COOKIE },
     },
   );
 

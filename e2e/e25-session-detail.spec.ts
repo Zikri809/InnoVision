@@ -102,12 +102,14 @@ test.describe("E25 — session detail drill-in", () => {
       studentPage.getByText(/results will be released|awaiting/i).first(),
     ).toBeVisible({ timeout: 30_000 });
 
-    // Lecturer drills into THE session via the Actions link.
+    // Lecturer drills into THE session via the row's "View Answers" link
+    // (the dashboard redesign replaced the old "Actions" link with a
+    // "View Answers" link + a "Session actions" button).
     await openResults(lecturerPage, CLASS_TITLE, QUIZ_TITLE);
-    const actions = lecturerPage.getByRole("link", { name: /actions/i }).first();
-    await expect(actions).toBeVisible({ timeout: 15_000 });
+    const viewAnswers = lecturerPage.getByRole("link", { name: /view answers/i }).first();
+    await expect(viewAnswers).toBeVisible({ timeout: 15_000 });
     const detail = lecturerPage.waitForURL(/\/results\/[0-9a-f-]+$/);
-    await actions.click();
+    await viewAnswers.click();
     await detail;
 
     // Score tile: exactly 1 of 2. Scoped to the hero <section> so neither the
@@ -116,7 +118,7 @@ test.describe("E25 — session detail drill-in", () => {
       .locator("main section")
       .filter({ has: lecturerPage.locator("h1") })
       .first();
-    const scoreTile = hero.locator("span.font-heading.text-2xl").first();
+    const scoreTile = hero.locator("span.font-heading.text-\\[26px\\]").first();
     await expect(scoreTile).toHaveText("1");
     await expect(hero.getByText(/\/\s*2/)).toBeVisible();
 

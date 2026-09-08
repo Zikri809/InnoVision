@@ -473,34 +473,45 @@ export class FakeSupabase {
       // Update the quiz row's title/source fields.
       const quizRow = (this.tables["quizzes"] ?? []).find((q) => q.id === quizId);
       if (quizRow) {
-        const sourceEntry =
-          args?.p_source_file_url
-            ? {
-                file_url: args.p_source_file_url ?? null,
+        // 0041 semantics: p_source_paths (array of storage paths) yields one
+        // legacy-shape file entry PER path; the single p_source_file_url is
+        // the fallback (import flows / 6-arg callers that only send the URL).
+        const pathList = Array.isArray(args?.p_source_paths)
+          ? (args.p_source_paths as unknown[]).filter((p): p is string => typeof p === "string" && p.length > 0)
+          : [];
+        const fileEntries: Row[] =
+          pathList.length > 0
+            ? pathList.map((p) => ({
+                id: randomUuid(),
+                filename: p.split("/").pop() ?? p,
+                storage_path: p,
                 added_at: "2026-01-01T00:00:00Z",
-                question_count: parsed.length,
-                mode,
-              }
-            : null;
-
-        if (args?.p_title && (mode === "replace" || !quizRow.title)) quizRow.title = String(args.p_title);
-        // 0040 semantics: p_web_sources (array of {kind:"web",url,...}) is the
-        // web provenance set — replace mode REPLACES the sources set with it
-        // (when no storage entry), append mode APPENDS it.
+              }))
+            : args?.p_source_file_url
+              ? [
+                  {
+                    id: randomUuid(),
+                    file_url: args.p_source_file_url ?? null,
+                    added_at: "2026-01-01T00:00:00Z",
+                    question_count: parsed.length,
+                    mode,
+                  },
+                ]
+              : [];
+        // 0040/0041 semantics: p_web_sources (array of {kind:"web",url,...})
+        // is the web provenance set. File and web entries COMBINE
+        // (additively) — the pre-0041 either/or dropped web citations
+        // whenever a file entry existed.
         const webSources = Array.isArray(args?.p_web_sources)
           ? (args.p_web_sources as Row[])
           : [];
         if (mode === "replace") {
           quizRow.source_file_url = args?.p_source_file_url ?? null;
-          quizRow.sources = sourceEntry ? [sourceEntry] : webSources;
+          quizRow.sources = [...fileEntries, ...webSources];
         } else {
           if (args?.p_source_file_url) quizRow.source_file_url = args.p_source_file_url;
           const existingSources = Array.isArray(quizRow.sources) ? quizRow.sources : [];
-          quizRow.sources = sourceEntry
-            ? [...existingSources, sourceEntry]
-            : webSources.length > 0
-              ? [...existingSources, ...webSources]
-              : existingSources;
+          quizRow.sources = [...existingSources, ...fileEntries, ...webSources];
         }
 
         // 0025:161-185 semantics: replace overwrites the source fields

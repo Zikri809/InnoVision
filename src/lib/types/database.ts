@@ -1520,6 +1520,7 @@ export type Database = {
           p_source_text: string
           p_title: string
           p_web_sources?: Json
+          p_source_paths?: Json
         }
         Returns: undefined
       }

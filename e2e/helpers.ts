@@ -185,10 +185,31 @@ export async function fastRegisterUser(
  * Assumes the lecturer is already on /lecturer/classes.
  */
 export async function createClass(page: Page, title: string): Promise<string> {
-  await page.getByLabel("Class title").fill(title);
-  // Strict match: a bare /create/i also hits the "Create a class" empty-state
-  // tile once it renders — strict-mode race under load (observed in e38).
-  await page.getByRole("button", { name: "Create class", exact: true }).click();
+  // Desktop (≥lg): the create form is a sticky sidebar card. Mobile (<lg,
+  // mobile polish round 2): it lives behind a "New Class" modal trigger.
+  // Branch on VIEWPORT WIDTH, not visibility — the trigger is client-rendered
+  // and an early probe can race hydration into the wrong branch.
+  const isMobileViewport = (page.viewportSize()?.width ?? 1280) < 1024;
+  if (isMobileViewport) {
+    // Exact match: /new class/i also hits the dock FAB ("Create — new class
+    // or quiz") on the classes page.
+    await page.getByRole("button", { name: "New Class", exact: true }).click();
+    // Both form instances share id="class-title"; scope to the OPEN modal
+    // (the sidebar copy is display:none at mobile widths).
+    await page
+      .getByRole("dialog")
+      .getByLabel("Class title")
+      .fill(title);
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Create class", exact: true })
+      .click();  } else {
+    await page.getByLabel("Class title").fill(title);
+    // Strict match: a bare /create/i also hits the "Create a class"
+    // empty-state tile once it renders — strict-mode race under load
+    // (observed in e38).
+    await page.getByRole("button", { name: "Create class", exact: true }).click();
+  }
   await expect(page.getByText(title, { exact: true })).toBeVisible();
 
   const joinCode = await page
@@ -200,12 +221,35 @@ export async function createClass(page: Page, title: string): Promise<string> {
 }
 
 /**
+ * Open the join drawer/dialog from /student/classes. FAB (mobile, classes
+ * exist) → header button (desktop, classes exist) → empty-state CTA
+ * (zero classes). All three open the SAME single-form ResponsiveModal.
+ */
+export async function openJoinDrawer(page: Page) {
+  const fab = page.getByRole("button", { name: "Join a class", exact: true });
+  const headerBtn = page.getByRole("button", { name: "Join a class", exact: true });
+  const cta = page.getByRole("button", { name: /^enter a join code$/i });
+  if (await fab.isVisible().catch(() => false)) {
+    await fab.click();
+  } else if (await cta.isVisible().catch(() => false)) {
+    await cta.click();
+  } else {
+    await headerBtn.click();
+  }
+  await expect(page.getByRole("dialog")).toBeVisible();
+}
+
+/**
  * Student: join a class by code and confirm it appears in the class list.
  * Assumes the student is already on /student/classes.
+ *
+ * The OTP input keeps the stable `aria-label="Join code"` contract and the
+ * submit button stays "Join class" — both unchanged from the inline form.
  */
 export async function joinClass(page: Page, joinCode: string, classTitle: string) {
+  await openJoinDrawer(page);
   await page.getByLabel("Join code").fill(joinCode);
-  await page.getByRole("button", { name: /join/i }).click();
+  await page.getByRole("button", { name: /^join class$/i }).click();
   await expect(page.getByText(classTitle, { exact: true })).toBeVisible();
 }
 
@@ -243,44 +287,72 @@ export async function createQuizWithQuestions(
   await expect(page).toHaveURL(/\/lecturer\/classes\/[^/]+$/);
   await expect(page.getByRole("heading", { name: opts.classTitle })).toBeVisible();
 
-  // Create the quiz.
-  await page.getByLabel("Quiz title").fill(opts.quizTitle);
-  if (opts.mode === "assessment") {
-    await page.getByLabel("Mode").click();
-    await page.getByRole("option", { name: "Assessment" }).click();
+  // Create the quiz. Mobile (<sm, mobile polish round 2): the inline form is
+  // hidden and the create quiz form lives in a drawer — open it first. The
+  // drawer instance uses id="quiz-title-modal" (its label points there), so
+  // target by role within the dialog.
+  if ((page.viewportSize()?.width ?? 1280) < 640) {
+    // The "+" button in the Quizzes tab bar opens the create drawer.
+    await page.getByRole("button", { name: /create quiz/i }).first().click();
+    const drawer = page.getByRole("dialog");
+    await drawer.getByRole("textbox", { name: "Quiz title" }).fill(opts.quizTitle);
+    if (opts.mode === "assessment") {
+      await drawer.getByLabel("Mode").click();
+      await page.getByRole("option", { name: "Assessment" }).click();
+    }
+    await drawer.getByRole("button", { name: /create quiz/i }).click();
+  } else {
+    await page.getByLabel("Quiz title").fill(opts.quizTitle);
+    if (opts.mode === "assessment") {
+      await page.getByLabel("Mode").click();
+      await page.getByRole("option", { name: "Assessment" }).click();
+    }
+    await page.getByRole("button", { name: /create quiz|new quiz/i }).click();
   }
-  if (opts.shuffle) {
-    // Base UI Switch renders BOTH a role="switch" span and a hidden form
-    // input, so getByLabel().check() strict-violates. The switch role is the
-    // stable target (same pattern as e37).
-    await page.getByRole("switch", { name: /shuffle question/i }).click();
-  }
-  await page.getByRole("button", { name: /create quiz|new quiz/i }).click();
   await expect(page.getByText(opts.quizTitle, { exact: true })).toBeVisible();
   await page.getByText(opts.quizTitle, { exact: true }).click();
   await expect(page).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
   await expect(page.getByRole("heading", { name: opts.quizTitle })).toBeVisible();
 
-  // Add each question.
-  for (const q of opts.questions) {
+  // Add each question. Mobile (<md, mobile polish round 2): the composer is
+  // a bottom sheet opened by the "Add question" action (hero strip when the
+  // quiz is empty via the ⋯ menu, chip when questions exist). The closed
+  // desktop inline card keeps its inputs in the DOM, so EVERY field lookup
+  // below must be scoped to the open sheet's dialog.
+  const isMobileBuilder = (page.viewportSize()?.width ?? 1280) < 768;
+  const composer = isMobileBuilder
+    ? page.getByRole("dialog") // the open bottom sheet
+    : page; // desktop inline card — page scope is unambiguous
+  for (let qi = 0; qi < opts.questions.length; qi++) {
+    const q = opts.questions[qi];
+    if (isMobileBuilder) {
+      // Empty quiz: the hero strip shows Generate; Add question hides in the
+      // ⋯ menu. Once ≥1 question exists, Add question is the strip's button.
+      if (qi === 0) {
+        await page.getByRole("button", { name: /more actions/i }).click();
+        await page.getByRole("menuitem", { name: /add question/i }).click();
+      } else {
+        await page.getByRole("button", { name: /add question/i }).click();
+      }
+    }
     if (q.type === "true_false") {
-      await page.getByLabel("Type").click();
+      await composer.getByLabel("Type").click();
       await page.getByRole("option", { name: "True / False" }).click();
     }
     if (q.type === "multi_select") {
-      await page.getByLabel("Type").click();
+      await composer.getByLabel("Type").click();
       await page.getByRole("option", { name: "Multi-select" }).click();
     }
-    await page.getByRole("textbox", { name: "Question prompt" }).fill(q.prompt);
+    await composer.getByRole("textbox", { name: "Question prompt" }).fill(q.prompt);
 
     // Fill options 1..N, adding extra option inputs as needed. True/False
     // options are disabled (auto-filled True/False) — skip filling them.
     if (q.type !== "true_false") {
-      await page.getByLabel("Option 1").fill(q.options[0] ?? "");
-      if (q.options.length >= 2) await page.getByLabel("Option 2").fill(q.options[1] ?? "");
+      await composer.getByLabel("Option 1").fill(q.options[0] ?? "");
+      if (q.options.length >= 2) await composer.getByLabel("Option 2").fill(q.options[1] ?? "");
       for (let i = 2; i < q.options.length; i++) {
-        await page.getByRole("button", { name: /add option/i }).click();
-        await page.getByRole("textbox", { name: `Option ${i + 1}` }).fill(q.options[i]);
+        await composer.getByRole("button", { name: /add option/i }).click();
+        await composer.getByRole("textbox", { name: `Option ${i + 1}` }).fill(q.options[i]);
       }
     }
 
@@ -289,7 +361,7 @@ export async function createQuizWithQuestions(
       // switching to multi seeds Option 1 as marked, so toggle to the exact
       // target set.
       const target = q.correctIndices ?? [];
-      const group = page.getByRole("group", { name: "Correct answers" });
+      const group = composer.getByRole("group", { name: "Correct answers" });
       for (let i = 0; i < q.options.length; i++) {
         const toggle = group.getByRole("button", { name: `Option ${i + 1}` });
         const pressed = (await toggle.getAttribute("aria-pressed")) === "true";
@@ -299,19 +371,27 @@ export async function createQuizWithQuestions(
       }
     } else if (q.correctIndex !== undefined && q.correctIndex !== 0 && q.type !== "true_false") {
       // Set the correct answer (defaults to option 1).
-      await page.getByLabel("Correct answer").click();
+      await composer.getByLabel("Correct answer").click();
       await page.getByRole("option", { name: String(q.correctIndex + 1) }).click();
     }
 
     // Optional explanation (practice disclosure assertions).
     if (q.explanation) {
-      await page.getByLabel("Explanation (optional)").fill(q.explanation);
+      await composer.getByLabel("Explanation (optional)").fill(q.explanation);
     }
 
-    await page.getByRole("button", { name: /add this question/i }).click();
+    await composer.getByRole("button", { name: /add this question/i }).click();
     // The save completes when the form resets (Question field cleared).
-    await expect(page.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
+    await expect(
+      composer.getByRole("textbox", { name: "Question prompt" }),
+    ).toHaveValue("");
     await expect(page.getByText(q.prompt, { exact: true })).toBeVisible();
+    if (isMobileBuilder) {
+      // The bottom sheet intentionally stays open for batch authoring —
+      // close it so the next iteration can reach the page underneath.
+      await page.getByRole("button", { name: "Done", exact: true }).click();
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+    }
   }
 
   if (opts.publish) {

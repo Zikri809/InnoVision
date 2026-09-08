@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { ArrowLeft } from "lucide-react";
+import type { DisplayStatus } from "@/lib/results/types";
 
 type SessionInfo = {
   id: string;
@@ -38,10 +39,18 @@ const ROW_WRONG = "bg-destructive text-white";
 const PICK_CORRECT = "border-emerald-300 dark:border-emerald-700/60 bg-emerald-50 dark:bg-emerald-950/30";
 const PICK_WRONG = "bg-destructive/10 border-destructive/30";
 
+/** Status-pill tab colors — mirror the dashboard's STATUS_CLASS/STATUS_DOT chips. */
+const STATUS_PILL: Record<Exclude<DisplayStatus, "completed">, { dot: string; text: string }> = {
+  abandoned: { dot: "bg-destructive", text: "text-destructive" },
+  in_progress: { dot: "bg-sky-500", text: "text-sky-800 dark:text-sky-300" },
+  flagged: { dot: "bg-amber-500", text: "text-amber-800 dark:text-amber-300" },
+};
+
 export function SessionDetailClient({
   quizId,
   quizTitle,
   session,
+  displayStatus,
   questions,
   answers,
   studentName,
@@ -49,6 +58,8 @@ export function SessionDetailClient({
   quizId: string;
   quizTitle: string;
   session: SessionInfo;
+  /** D5 derivation (dashboard parity): completed/flagged/abandoned/in_progress. */
+  displayStatus: DisplayStatus;
   questions: QuestionRow[];
   answers: AnswerRow[];
   studentName: string | null;
@@ -85,9 +96,25 @@ export function SessionDetailClient({
   }
 
   const total = questions.length;
-  const inProgress = session.score == null;
+  // The arc renders only when a score exists — flagged-mid-run and abandoned
+  // sessions have none (dashboard parity: they show "—" too).
+  const hasScore = session.score != null;
   const score = session.score ?? 0;
-  const frac = !inProgress && total > 0 ? score / total : 0;
+  const frac = total > 0 ? score / total : 0;
+  // Status pill (dot + word) on the ring's bottom edge; completed → the
+  // "/ N" fraction stays inside instead, with no pill.
+  const statusPill =
+    displayStatus === "completed"
+      ? null
+      : {
+          label:
+            displayStatus === "flagged"
+              ? t("statFlagged")
+              : displayStatus === "abandoned"
+                ? t("statAbandoned")
+                : t("statInProgress"),
+          ...STATUS_PILL[displayStatus],
+        };
   // Clay score badge geometry: r=30 in a 72-box, rounded cap, starts at 12
   // o'clock via -rotate-90.
   const RING_R = 30;
@@ -137,49 +164,56 @@ export function SessionDetailClient({
           {/* ONE score representation: a clay badge with the fraction,
               vertically centered on the name/meta row. No bar, no % —
               nothing is stated twice. The bare number keeps the
-              span.font-heading.text-2xl shape; e2e (e25) reads it, and the
-              "/ N" must stay visible too. */}
+              span.font-heading.text-[26px] shape; e2e (e25) reads it, and
+              the "/ N" must stay visible too. */}
           <div
             role="img"
             aria-label={
-              inProgress
-                ? tCommon("inProgress")
+              statusPill
+                ? `${statusPill.label}${hasScore ? ` — ${t("tableHeaderScore")} ${session.score}/${total}` : ""}`
                 : `${t("tableHeaderScore")} ${session.score}/${total}`
             }
-            className="grid h-[88px] w-[88px] shrink-0 place-items-center rounded-full border-[3px] border-border bg-card shadow-[var(--shadow-clay-sm)] md:h-[108px] md:w-[108px]"
+            className="relative grid h-[88px] w-[88px] shrink-0 place-items-center rounded-full border-[3px] border-border bg-card shadow-[var(--shadow-clay-sm)] md:h-[108px] md:w-[108px]"
           >
-            <div className="relative grid place-items-center">
-              <svg viewBox="0 0 72 72" className="absolute h-[74px] w-[74px] -rotate-90 md:h-[92px] md:w-[92px]" aria-hidden>
-                <circle cx="36" cy="36" r={RING_R} fill="none" strokeWidth="8" className="stroke-border/80 dark:stroke-white/10" />
-                {!inProgress && (
-                  <circle
-                    cx="36"
-                    cy="36"
-                    r={RING_R}
-                    fill="none"
-                    strokeWidth="8"
-                    strokeLinecap="round"
-                    strokeDasharray={RING_C}
-                    strokeDashoffset={RING_C * (1 - frac)}
-                    className="stroke-primary transition-[stroke-dashoffset] duration-700 ease-out"
-                  />
-                )}
-              </svg>
-              <div className="relative flex flex-col items-center leading-none">
-                <span className="font-heading text-[26px] font-bold md:text-3xl">
-                  {session.score ?? "—"}
+            <svg viewBox="0 0 72 72" className="absolute h-[74px] w-[74px] -rotate-90 md:h-[92px] md:w-[92px]" aria-hidden>
+              <circle cx="36" cy="36" r={RING_R} fill="none" strokeWidth="8" className="stroke-border/80 dark:stroke-white/10" />
+              {hasScore && (
+                <circle
+                  cx="36"
+                  cy="36"
+                  r={RING_R}
+                  fill="none"
+                  strokeWidth="8"
+                  strokeLinecap="round"
+                  strokeDasharray={RING_C}
+                  strokeDashoffset={RING_C * (1 - frac)}
+                  className="stroke-primary transition-[stroke-dashoffset] duration-700 ease-out"
+                />
+              )}
+            </svg>
+            {/* Number/dash alone when the status lives on the pill tab below;
+                completed shows the "/ N" fraction inside instead. */}
+            <div className="relative flex flex-col items-center leading-none">
+              <span className="font-heading text-[26px] font-bold md:text-3xl">
+                {session.score ?? "—"}
+              </span>
+              {!statusPill && (
+                <span className="mt-1 text-xs font-extrabold text-muted-foreground">
+                  / {total}
                 </span>
-                {inProgress ? (
-                  <span className="mt-1 text-[10px] font-extrabold text-muted-foreground">
-                    {tCommon("inProgress")}
-                  </span>
-                ) : (
-                  <span className="mt-1 text-xs font-extrabold text-muted-foreground">
-                    / {total}
-                  </span>
-                )}
-              </div>
+              )}
             </div>
+            {/* Status pill straddles the ring's bottom edge — a solid tab
+                (card bg + border) so long labels (EN "Abandoned", MS "Sedang
+                berjalan") can never collide with the ring stroke. */}
+            {statusPill && (
+              <span
+                className={`absolute -bottom-2 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 whitespace-nowrap rounded-full border-2 border-border bg-card px-2 py-0.5 text-[10px] font-extrabold md:text-[11px] ${statusPill.text}`}
+              >
+                <span aria-hidden className={`size-1.5 rounded-full ${statusPill.dot}`} />
+                {statusPill.label}
+              </span>
+            )}
           </div>
         </div>
       </section>

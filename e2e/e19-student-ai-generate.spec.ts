@@ -31,7 +31,9 @@ test("student generates practice questions from pasted text via AI", async ({ pa
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText(/step 1 of 2/i)).toBeVisible();
 
-  // Paste-text leg: fill the paste area and continue past extraction.
+  // Paste-text leg: the paste area lives behind an explicit toggle (mobile polish).
+  const pasteToggle = dialog.getByRole("button", { name: /paste notes or study text instead/i });
+  await pasteToggle.click();
   const paste = dialog.getByLabel(/paste your material/i);
   await paste.fill(
     "Photosynthesis is the process by which plants convert light energy into " +
@@ -39,7 +41,7 @@ test("student generates practice questions from pasted text via AI", async ({ pa
       "The Calvin cycle fixes carbon dioxide into glucose. Mitochondria are " +
       "the powerhouse of the cell and produce ATP through respiration.",
   );
-  await dialog.getByRole("button", { name: /use pasted text/i }).click();
+  await dialog.getByRole("button", { name: /continue with text/i }).click();
 
   // Step 2: student-mode controls — difficulty present, steering absent.
   await expect(dialog.getByText(/difficulty level/i)).toBeVisible();
@@ -72,13 +74,14 @@ test("second generation appends into the same quiz", async ({ page }) => {
   const dialog2 = page.getByRole("dialog");
   await page.getByRole("button", { name: /generate with ai/i }).click();
   await expect(dialog2).toBeVisible();
+  await dialog2.getByRole("button", { name: /paste notes or study text instead/i }).click();
   const paste = dialog2.getByLabel(/paste your material/i);
   await paste.fill(
     "Newton's three laws describe motion. Inertia keeps objects at rest. " +
       "Force equals mass times acceleration. Every action has an equal and " +
       "opposite reaction. Gravity accelerates falling objects.",
   );
-  await dialog2.getByRole("button", { name: /use pasted text/i }).click();
+  await dialog2.getByRole("button", { name: /continue with text/i }).click();
   await dialog2.getByRole("button", { name: /generate quiz/i }).click();
   await page.waitForURL(/\/student\/my-quizzes\/[^/]+\/edit/, { timeout: 60_000 });
 

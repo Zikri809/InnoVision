@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import type { Database } from "@/lib/types/database";
-import { env } from "@/lib/env";
+import { env, SUPABASE_AUTH_COOKIE } from "@/lib/env";
 
 const PUBLIC_ROUTES = ["/", "/login", "/register", "/auth/callback", "/forgot-password", "/reset-password"];
 
@@ -48,6 +48,9 @@ export async function updateSession(request: NextRequest) {
           );
         },
       },
+      // Pinned session-cookie name — must equal the browser client's (see
+      // SUPABASE_AUTH_COOKIE); the ssr default derives it from the URL.
+      cookieOptions: { name: SUPABASE_AUTH_COOKIE },
     },
   );
 
