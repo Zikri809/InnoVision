@@ -64,6 +64,13 @@ export interface IFaceTracker {
   /** Read current framing & lighting health. */
   getFaceHealth?(): { aligned: boolean; lightingOk: boolean; faceDetected: boolean };
   /**
+   * Adaptive duty cycle: slow the detection loop during sustained play,
+   * restore full rate before liveness-critical states (see the tier
+   * constants in constants.ts). Optional — callers feature-detect; the E2E
+   * fake never needs it (its frames are synchronous).
+   */
+  setFrameInterval?(ms: number): void;
+  /**
    * Sample the current head pose as the caller's NEUTRAL baseline for
    * `yaw` (per-user calibration: nose-position proxies depend on facial
    * anatomy + webcam placement, so "straight" is not a universal zero).

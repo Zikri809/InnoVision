@@ -9,6 +9,8 @@ import { recoverFlow, recoveryLanding } from "@/lib/face/recovery";
 import { getFakeFaceControl } from "@/lib/face/fake-seam";
 import { isFakeFaceSeamEnabled } from "@/lib/face/seam-gate";
 import {
+  FACE_TRACK_FRAME_INTERVAL_MS,
+  FACE_TRACK_SLOW_INTERVAL_MS,
   FOCUS_BLUR_DEBOUNCE_MS,
   FLAGGED_POLL_MS,
   LIGHTING_RETRY_DELAY_MS,
@@ -208,6 +210,15 @@ export function useFacePipeline(props: FacePipelineProps) {
     statusRef.current = s;
     setStatus(s);
     onFaceStatusRef.current(s);
+    // Adaptive duty cycle: sustained play only needs pose health/advisories
+    // (multi-second scale) — slow the tracker to free CPU for the gesture
+    // landmarker. Every liveness-critical state (gate, recovering — both run
+    // waitForBlink AFTER this call in beginGate/runRecovery) restores FULL
+    // first, so blink sampling is never throttled. Feature-detected: the E2E
+    // fake and legacy trackers simply keep the full rate.
+    trackerRef.current?.setFrameInterval?.(
+      s === "ready" ? FACE_TRACK_SLOW_INTERVAL_MS : FACE_TRACK_FRAME_INTERVAL_MS,
+    );
     // The paused overlay copy tracks WHY the student is paused; any
     // non-paused status resets the default (face) reason.
     if (s !== "paused" && s !== "recovering") setPausedReason("face");
@@ -803,6 +814,11 @@ export function useFacePipeline(props: FacePipelineProps) {
   // ── Tracker setter (called by the parent after boot) ───────────
   function setTracker(tracker: IFaceTracker | null) {
     trackerRef.current = tracker;
+    // Boot-order safety: a tracker attached while status is already `ready`
+    // (StrictMode remount) must not run at the slow tier until its first
+    // blink/gate cycle — restore FULL here; the next setStatusBoth re-applies
+    // the tier for the current status.
+    tracker?.setFrameInterval?.(FACE_TRACK_FRAME_INTERVAL_MS);
     // The assessment gate is EXPLICIT-Begin only (design: "the gate can only
     // be exited by Begin" — blink liveness + `'start'` verify run in
     // `beginGate`). An auto-run here would silently pass the gate when the

@@ -1,6 +1,10 @@
 import type { IFaceTracker, LivePose } from "./types";
 import { BlinkDetector } from "./liveness";
-import { LIVENESS_TIMEOUT_MS } from "./constants";
+import {
+  FACE_TRACK_FRAME_INTERVAL_MS,
+  LIVENESS_TIMEOUT_MS,
+  LUMINANCE_SAMPLE_INTERVAL_MS,
+} from "./constants";
 import {
   acquireCameraStream,
   releaseCameraStream,
@@ -71,8 +75,8 @@ type VisionModule = {
 const BLINK_LANDMARKER_URL = "/mediapipe/vision_bundle.mjs";
 const WASM_ROOT = "/mediapipe/wasm";
 
-/** Caps the landmarker rAF detection loop (~30fps). */
-const FRAME_INTERVAL_MS = 33;
+/** Upper clamp for the adaptive duty-cycle interval (see setFrameInterval). */
+const FRAME_INTERVAL_MAX_MS = 200;
 
 /** JPEG quality for the captured frame (0–1). */
 const FRAME_JPEG_QUALITY = 0.85;
@@ -116,6 +120,12 @@ export class FaceTracker implements IFaceTracker {
   }
   private rafId: number | null = null;
   private disposed = false;
+  /**
+   * Adaptive duty cycle: the rAF detection loop samples this each tick (see
+   * setFrameInterval). Starts FULL — liveness-critical states (gate, blinks)
+   * must never be throttled; the pipeline slows it once sustained play begins.
+   */
+  private frameIntervalMs: number = FACE_TRACK_FRAME_INTERVAL_MS;
   private blinkDetector = new BlinkDetector();
   private visibilityHandler: (() => void) | null = null;
   private loadedMetadataHandler: (() => void) | null = null;
@@ -378,6 +388,20 @@ export class FaceTracker implements IFaceTracker {
   }
 
   /**
+   * Adaptive duty cycle (see the tier constants in constants.ts): callers
+   * slow the loop during sustained play and must restore FULL before any
+   * liveness-critical state (gate/recovery run `waitForBlink`). Values are
+   * clamped to [FACE_TRACK_FRAME_INTERVAL_MS, 200]; takes effect on the next
+   * rAF tick (no restart needed — the loop reads the field each frame).
+   */
+  setFrameInterval(ms: number): void {
+    this.frameIntervalMs = Math.min(
+      Math.max(Math.round(ms), FACE_TRACK_FRAME_INTERVAL_MS),
+      FRAME_INTERVAL_MAX_MS,
+    );
+  }
+
+  /**
    * Capture a high-quality frame where face is present, centered, facing camera,
    * eyes are open, and lighting is optimal. Polling over a brief window prevents
    * transient blink/motion/lighting misfires.
@@ -551,7 +575,7 @@ export class FaceTracker implements IFaceTracker {
         this.rafId = requestAnimationFrame((t) => this.detectLoop(t));
         return;
       }
-      if (now - this.lastFrameAt >= FRAME_INTERVAL_MS) {
+      if (now - this.lastFrameAt >= this.frameIntervalMs) {
         this.lastFrameAt = now;
         if (
           this.landmarker &&
@@ -600,7 +624,7 @@ export class FaceTracker implements IFaceTracker {
           const isTurned = Math.abs(yaw) >= 10;
           this.feedLiveness(results, isTurned);
           let lighting: "good" | "too_dark" | "too_bright" = this.currentLighting;
-          if (faceDetected && now - this.lastLuminanceSampleAt >= 250) {
+          if (faceDetected && now - this.lastLuminanceSampleAt >= LUMINANCE_SAMPLE_INTERVAL_MS) {
             this.lastLuminanceSampleAt = now;
             const canvas = this.ensureCanvas();
             const ctx = canvas.getContext("2d");

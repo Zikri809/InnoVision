@@ -33,6 +33,30 @@ export const MAX_FRAME_BASE64_CHARS = 200_000;
 /** How long the liveness gate waits for a blink before declaring `failed`. */
 export const LIVENESS_TIMEOUT_MS = 8000;
 
+/**
+ * Adaptive duty-cycle tiers for the FaceTracker detection loop
+ * (`setFrameInterval`). FULL runs during liveness-critical states (gate,
+ * recovering): a blink's blendshape crossing lasts ~100ms, and the
+ * BlinkDetector passes on a single closed sample after an open one — so the
+ * sampling period must stay well under 100ms to catch every blink. SLOW runs
+ * during sustained play (`ready`), where the loop only feeds pose health,
+ * advisories, and the precheck (all multi-second scale): 66ms (~15fps)
+ * guarantees ≥1 sample inside any ~100ms blink window while roughly halving
+ * inference duty, and capture paths (captureFrame/captureBestFrame) are
+ * loop-independent. The pipeline flips tiers at its single status choke
+ * point; the tracker clamps to [FULL, 200].
+ */
+export const FACE_TRACK_FRAME_INTERVAL_MS = 33;
+export const FACE_TRACK_SLOW_INTERVAL_MS = 66;
+
+/**
+ * How often the tracker samples face-ROI luminance for the ambient lighting
+ * classification (ms). Room lighting changes on seconds-scale; the
+ * authoritative per-capture luminance check in `captureBestFrame` is
+ * unaffected (it measures the frame it captures).
+ */
+export const LUMINANCE_SAMPLE_INTERVAL_MS = 500;
+
 /** Number of VALID capture frames needed for enrollment (one per angle). */
 export const ENROLL_CAPTURE_FRAMES = 3;
 
