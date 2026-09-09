@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
+import { Moon, Sun } from "lucide-react";
 
 import { HoldConfirm } from "@/lib/gestures/hold-confirm";
 import { HandLossMonitor } from "@/lib/gestures/hand-loss";
@@ -20,7 +21,7 @@ import { isFakeFaceSeamEnabled } from "@/lib/face/seam-gate";
 import { HandLandmarkerTracker } from "@/lib/gestures/hand-tracker";
 import type { HandFrame, HoldProgress, IHandTracker } from "@/lib/gestures/types";
 import type { FaceStatus } from "@/lib/face/types";
-import { GestureCalibration } from "@/components/vision/gesture-calibration";
+import { GestureCalibration, CalibrationHud } from "@/components/vision/gesture-calibration";
 import { useMediaQuery } from "@/hooks/use-media-query";
 
 
@@ -29,6 +30,15 @@ type HandLost = "warn" | "paused" | null;
 
 /** Throttle for the calibration finger-count readout (~5Hz, no render storm). */
 const CALIBRATION_READOUT_INTERVAL_MS = 200;
+
+/**
+ * Tolerance for spurious single-frame sensor drops / confidence dips.
+ * Upon a 1-frame dropout, the stabilizer takes FINGER_STABILIZER_RUN (2) frames
+ * to re-verify the count. Allowing 2 dropout frames (~66ms at 30fps) prevents
+ * hold accumulator resets on single-frame sensor flickers while resetting within
+ * ~99ms upon genuine hand withdrawal.
+ */
+const HOLD_DROPOUT_FRAME_TOLERANCE = 2;
 
 /**
  * GestureLayer — the Phase 6 wrapper that owns ALL gesture state/UI:
@@ -120,6 +130,7 @@ export function GestureLayer({
   const [calibFingerCount, setCalibFingerCount] = useState(0);
   const [calibHandDetected, setCalibHandDetected] = useState(false);
   const [calibLighting, setCalibLighting] = useState<"good" | "too_dark" | "too_bright">("good");
+  const [activeLighting, setActiveLighting] = useState<"good" | "too_dark" | "too_bright">("good");
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -127,6 +138,9 @@ export function GestureLayer({
   const answerHoldRef = useRef(new HoldConfirm(HOLD_MS));
   const commitHoldRef = useRef(new HoldConfirm(HOLD_MS));
   const nextHoldRef = useRef(new HoldConfirm(HOLD_MS));
+  const answerDropCountRef = useRef(0);
+  const commitDropCountRef = useRef(0);
+  const nextDropCountRef = useRef(0);
   // QT-1 re-arm gate: the finger count of the last latch (null = armed).
   // A latch re-arms only after the pose CHANGES (hand lost or different
   // count) — a sustained hold must never re-fire (a 2.4s hold would toggle
@@ -235,6 +249,10 @@ export function GestureLayer({
         return;
       }
 
+      if (frame.lighting) {
+        setActiveLighting(frame.lighting);
+      }
+
       // 1. Hand-loss bookkeeping — only while answerable or scanning, so
       //    locked/feedback/submitting don't trip spurious loss warnings.
       if (s.armed || s.scanning) {
@@ -268,6 +286,9 @@ export function GestureLayer({
           handPresentSinceRef.current = 0;
         }
         // Block ALL finger input while paused.
+        answerDropCountRef.current = 0;
+        commitDropCountRef.current = 0;
+        nextDropCountRef.current = 0;
         answerHoldRef.current.reset();
         nextHoldRef.current.reset();
         emitHold(null);
@@ -280,20 +301,30 @@ export function GestureLayer({
       //    (QT-1 multi questions cap at 4 options, so this gate never blocks
       //    them; in multi mode palm means COMMIT while armed anyway — 2b/3.)
       if (s.nextArmed && s.optionCount < MAX_ANSWER_FINGERS && !s.scanning) {
-        const nextRes = nextHoldRef.current.update(frame.fingerCount === 5 ? 5 : 0, now);
         if (frame.fingerCount === 5) {
+          nextDropCountRef.current = 0;
+          const nextRes = nextHoldRef.current.update(5, now);
           emitHold({ finger: 5, progress: nextRes.progress });
-        } else {
-          emitHold(null);
-        }
-        if (nextRes.latched !== undefined) {
-          nextHoldRef.current.reset();
-          emitHold(null);
-          rearmCountRef.current = MAX_ANSWER_FINGERS;
-          onNextRef.current();
+          if (nextRes.latched !== undefined) {
+            nextHoldRef.current.reset();
+            emitHold(null);
+            rearmCountRef.current = MAX_ANSWER_FINGERS;
+            onNextRef.current();
+            return;
+          }
+        } else if (lastEmittedHoldRef.current?.finger === 5 && nextDropCountRef.current < HOLD_DROPOUT_FRAME_TOLERANCE) {
+          // Sensor dropout tolerance against spurious sensor loss
+          nextDropCountRef.current++;
           return;
+        } else {
+          nextDropCountRef.current = 0;
+          nextHoldRef.current.reset();
+          if (lastEmittedHoldRef.current?.finger === 5) {
+            emitHold(null);
+          }
         }
       } else {
+        nextDropCountRef.current = 0;
         nextHoldRef.current.reset();
       }
 
@@ -306,6 +337,9 @@ export function GestureLayer({
         if (!frame.handPresent || frame.fingerCount !== rearmCountRef.current) {
           rearmCountRef.current = null;
         } else {
+          answerDropCountRef.current = 0;
+          commitDropCountRef.current = 0;
+          nextDropCountRef.current = 0;
           answerHoldRef.current.reset();
           commitHoldRef.current.reset();
           nextHoldRef.current.reset();
@@ -318,6 +352,9 @@ export function GestureLayer({
       //    option and an open palm COMMITS the pending set; "single" mode is
       //    the unchanged scalar latch (hold = submit one answer).
       if (s.scanning || !s.armed) {
+        answerDropCountRef.current = 0;
+        commitDropCountRef.current = 0;
+        nextDropCountRef.current = 0;
         answerHoldRef.current.reset();
         commitHoldRef.current.reset();
         emitHold(null);
@@ -325,6 +362,7 @@ export function GestureLayer({
       }
       if (s.answerMode === "multi") {
         if (frame.fingerCount === MAX_ANSWER_FINGERS) {
+          commitDropCountRef.current = 0;
           const commitRes = commitHoldRef.current.update(MAX_ANSWER_FINGERS, now);
           emitHold({ finger: MAX_ANSWER_FINGERS, progress: commitRes.progress });
           if (commitRes.latched !== undefined) {
@@ -336,12 +374,33 @@ export function GestureLayer({
           }
           return;
         }
-        commitHoldRef.current.reset();
+        if (lastEmittedHoldRef.current?.finger === MAX_ANSWER_FINGERS && commitDropCountRef.current < HOLD_DROPOUT_FRAME_TOLERANCE) {
+          commitDropCountRef.current++;
+          return;
+        } else {
+          commitDropCountRef.current = 0;
+          commitHoldRef.current.reset();
+          if (lastEmittedHoldRef.current?.finger === MAX_ANSWER_FINGERS) {
+            emitHold(null);
+          }
+        }
+
         if (mapFingersToOption(frame.fingerCount, s.optionCount) === null) {
+          if (
+            lastEmittedHoldRef.current !== null &&
+            lastEmittedHoldRef.current.finger !== MAX_ANSWER_FINGERS &&
+            answerDropCountRef.current < HOLD_DROPOUT_FRAME_TOLERANCE
+          ) {
+            // Dropout tolerance for active answer hold
+            answerDropCountRef.current++;
+            return;
+          }
+          answerDropCountRef.current = 0;
           answerHoldRef.current.reset();
           emitHold(null);
           return;
         }
+        answerDropCountRef.current = 0;
         const ansRes = answerHoldRef.current.update(frame.fingerCount, now);
         emitHold({ finger: frame.fingerCount, progress: ansRes.progress });
         if (ansRes.latched !== undefined) {
@@ -357,10 +416,21 @@ export function GestureLayer({
         return;
       }
       if (mapFingersToOption(frame.fingerCount, s.optionCount) === null) {
+        if (
+          lastEmittedHoldRef.current !== null &&
+          lastEmittedHoldRef.current.finger !== MAX_ANSWER_FINGERS &&
+          answerDropCountRef.current < HOLD_DROPOUT_FRAME_TOLERANCE
+        ) {
+          // Dropout tolerance for active answer hold
+          answerDropCountRef.current++;
+          return;
+        }
+        answerDropCountRef.current = 0;
         answerHoldRef.current.reset();
         emitHold(null);
         return;
       }
+      answerDropCountRef.current = 0;
       const ansRes = answerHoldRef.current.update(frame.fingerCount, now);
       emitHold({ finger: frame.fingerCount, progress: ansRes.progress });
       if (ansRes.latched !== undefined) {
@@ -573,19 +643,25 @@ export function GestureLayer({
   const isVerifying = faceStatus === "paused" || faceStatus === "recovering" || faceStatus === "gate";
   const isVerified = faceStatus === "ready";
 
+  const isLightingDegraded = activeLighting !== "good";
+
   const statusRingClass = isFlagged
     ? "border-rose-300 ring-[3.5px] ring-rose-400/50"
     : isVerifying
+    ? "border-amber-300 ring-[3.5px] ring-amber-400/60 animate-pulse"
+    : isLightingDegraded
     ? "border-amber-300 ring-[3.5px] ring-amber-400/60 animate-pulse"
     : isVerified
     ? "border-emerald-300 ring-[3.5px] ring-emerald-400/40"
     : "border-[#fed7aa] ring-[3.5px] ring-orange-200/50";
 
-  // Collapsed-PIP dot ring (polish C1): same live status semantics, scaled to
+  // Collapsed-PIP dot ring (polish C1): live status + lighting semantics, scaled to
   // a 24px element — solid border color + soft halo instead of the fat ring.
   const pipDotRingClass = isFlagged
     ? "border-rose-400 shadow-[0_0_0_3px_rgba(251,113,133,0.35)]"
     : isVerifying
+    ? "border-amber-400 shadow-[0_0_0_3px_rgba(251,191,36,0.4)] animate-pulse"
+    : isLightingDegraded
     ? "border-amber-400 shadow-[0_0_0_3px_rgba(251,191,36,0.4)] animate-pulse"
     : isVerified
     ? "border-emerald-400 shadow-[0_0_0_3px_rgba(52,211,153,0.3)]"
@@ -598,7 +674,7 @@ export function GestureLayer({
       ? "relative mx-auto aspect-video w-full max-w-2xl overflow-hidden rounded-[2rem] border-[3.5px] border-border bg-muted shadow-[var(--shadow-clay)]"
       // Calibration stepper (plan W3): portrait camera ~45dvh, finger chips
       // directly beneath (adjacency), instructions one at a time.
-      : "relative mx-auto aspect-[3/4] h-[45dvh] w-auto max-w-full overflow-hidden rounded-[2rem] border-[3.5px] border-border bg-muted shadow-[var(--shadow-clay)]";
+      : "relative aspect-[3/4] w-full overflow-hidden rounded-[2rem] border-[3.5px] border-border bg-muted shadow-[var(--shadow-clay)]";
   } else if (status === "active") {
     videoContainerClass = isWide
       ? `relative w-full h-full flex-1 min-h-[350px] lg:min-h-0 overflow-hidden rounded-[2rem] border-[3.5px] ${statusRingClass} bg-[#fff7ed] p-2.5 shadow-[var(--shadow-clay)] transition-[border-color,box-shadow] duration-300 pointer-events-none`
@@ -633,7 +709,7 @@ export function GestureLayer({
     <div className="relative w-full min-h-full">
       {/* ── Calibration & Booting Mode: Centered single-column calibration guide ── */}
       {(status === "calibrating" || status === "booting") && (
-        <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
+        <div className="mx-auto flex w-full max-w-2xl flex-col gap-4">
           <div className={videoContainerClass} data-testid="gesture-video-container">
             <div className="relative h-full w-full overflow-hidden rounded-[1.5rem] bg-black">
               <video
@@ -649,13 +725,32 @@ export function GestureLayer({
                   Simulated hand tracking (test mode)
                 </div>
               )}
+              {/* Mobile-only game HUD: status + lighting chips and the 1–5
+                  finger tray live ON the viewfinder (design 2026-09). Wide
+                  keeps the card-based readout in GestureCalibration. */}
+              {!isWide && (
+                <CalibrationHud
+                  fingerCount={calibFingerCount}
+                  handDetected={calibHandDetected}
+                  lighting={calibLighting}
+                  booting={!trackerReady}
+                />
+              )}
+              {isWide && (
+                <div className="pointer-events-none absolute bottom-4 inset-x-4 z-20 flex justify-center">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-black/60 px-3.5 py-1 text-center text-xs font-extrabold text-white shadow-sm backdrop-blur-sm">
+                    {t("handPositionCoach")}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Mobile stepper (plan W3): controls pinned to the thumb zone;
-              the practice mock card is omitted <sm - the live finger chips
-              plus status line teach toggle/commit with the real hand. */}
-          <div className="max-sm:sticky max-sm:bottom-[calc(1rem+var(--safe-bottom))] max-sm:rounded-[22px] max-sm:bg-background/95 max-sm:p-3 max-sm:shadow-[var(--shadow-clay)]">
+          {/* Mobile-first redesign (2026-09): no outer sticky wrapper — the
+              action dock inside GestureCalibration is sticky itself, and the
+              status/lighting readout lives ON the camera (CalibrationHud).
+              The practice mock card is omitted <sm - the live finger tray
+              plus coach copy teach toggle/commit with the real hand. */}
           <GestureCalibration
             fingerCount={calibFingerCount}
             handDetected={calibHandDetected}
@@ -677,7 +772,6 @@ export function GestureLayer({
             }}
             continueDisabled={!trackerReady}
           />
-          </div>
         </div>
       )}
 
@@ -712,6 +806,28 @@ export function GestureLayer({
                 aria-hidden
               />
               <canvas ref={canvasRef} className="absolute inset-0 h-full w-full object-cover" aria-hidden />
+              {pipExpanded && activeLighting !== "good" && (
+                <div
+                  className="absolute top-3 left-3 z-20 flex items-center gap-1.5 rounded-full border border-amber-500/60 bg-amber-950/80 px-2.5 py-1 backdrop-blur-sm"
+                  role="status"
+                >
+                  {activeLighting === "too_dark" ? (
+                    <Moon className="size-3 text-amber-300" aria-hidden />
+                  ) : (
+                    <Sun className="size-3 text-amber-300" aria-hidden />
+                  )}
+                  <span className="text-[11px] font-bold text-amber-200">
+                    {activeLighting === "too_dark" ? t("lightingTooDark") : t("lightingTooBright")}
+                  </span>
+                </div>
+              )}
+              {pipExpanded && (
+                <div className="pointer-events-none absolute bottom-3 inset-x-2 z-20 flex justify-center">
+                  <span className="inline-flex items-center rounded-full bg-black/70 px-2.5 py-0.5 text-center text-[10px] font-extrabold text-white backdrop-blur-sm">
+                    {t("handPositionCoach")}
+                  </span>
+                </div>
+              )}
             </div>
           </button>
 
@@ -724,10 +840,11 @@ export function GestureLayer({
             />
           )}
 
-          {/* Hand-loss warning (polish C4): no longer a sticky floating band
-              — the warn state mirrors up via onWarnChange and the play screen
-              renders the chip INSIDE its fixed action bar (status, not a
-              fourth layer). The wide layout keeps its in-camera chip. */}
+          {/* Phone hand-loss warning banner contract:
+              On phone viewports, the hand-loss warning is not displayed as a floating banner overlay;
+              the warning state mirrors up via onWarnChange and the play screen renders the
+              chip inline inside its fixed action bar. The wide layout renders its in-camera
+              viewfinder badge directly. */}
 
           {children}
         </div>
@@ -760,6 +877,29 @@ export function GestureLayer({
                     </span>
                   </div>
                 )}
+
+                {handLost !== "warn" && activeLighting !== "good" && (
+                  <div
+                    className="absolute top-4 left-4 z-20 flex items-center gap-2 rounded-full border border-amber-500/60 bg-amber-950/80 px-3 py-1.5 backdrop-blur-sm animate-pulse"
+                    role="status"
+                  >
+                    {activeLighting === "too_dark" ? (
+                      <Moon className="size-3.5 text-amber-300" aria-hidden />
+                    ) : (
+                      <Sun className="size-3.5 text-amber-300" aria-hidden />
+                    )}
+                    <span className="text-xs font-extrabold tracking-wide text-amber-200">
+                      {activeLighting === "too_dark" ? t("lightingTooDark") : t("lightingTooBright")}
+                    </span>
+                  </div>
+                )}
+
+                {/* Viewfinder coach guidance for optimal contrast */}
+                <div className="pointer-events-none absolute bottom-4 inset-x-4 z-20 flex justify-center">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-black/60 px-3.5 py-1 text-center text-xs font-extrabold text-white shadow-sm backdrop-blur-sm">
+                    {t("handPositionCoach")}
+                  </span>
+                </div>
               </div>
             </div>
           </div>

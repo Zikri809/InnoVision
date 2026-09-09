@@ -181,8 +181,8 @@ async function acquireMediaStream(): Promise<MediaStream> {
       audio: false,
       video: {
         facingMode: "user",
-        width: { max: 640, ideal: 640 },
-        height: { max: 480, ideal: 480 },
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
       },
     });
     console.debug("[camera] getUserMedia resolved, active=", stream.active);

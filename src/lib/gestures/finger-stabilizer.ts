@@ -13,39 +13,42 @@
  * 30fps cap, negligible against HOLD_MS).
  *
  * `handPresent` passes through RAW (never smoothed): the hand-loss monitor
- * owns presence latency. Absence resets the filter; the first present frame
- * after re-entry seeds fresh so no stale count leaks across an episode.
+ * owns presence latency. Absence resets the filter; upon hand appearance or
+ * re-entry, a non-zero count requires `FINGER_STABILIZER_RUN` consecutive frames
+ * before committing, preventing single-frame entry spikes from flashing wrong
+ * options or restarting holds.
  *
  * Frame-count based (one update per tracker frame), pure synchronous state —
  * mirrors the HoldConfirm/HandLossMonitor precedent in this directory.
  */
 
+import { MAX_ANSWER_FINGERS } from "./constants";
+
 /** Consecutive differing frames required before the committed count switches. */
 export const FINGER_STABILIZER_RUN = 2;
 
 export class FingerStabilizer {
-  private seeded = false;
   private committed = 0;
   private candidate = 0;
   private candidateRun = 0;
 
   /**
    * Feed one tracker frame. Returns the stabilized count (0 when the hand is
-   * absent).
+   * absent or unverified).
    */
   update(fingerCount: number, handPresent: boolean): number {
-    if (!handPresent) {
+    if (
+      !handPresent ||
+      !Number.isFinite(fingerCount) ||
+      fingerCount < 0 ||
+      !Number.isInteger(fingerCount) ||
+      fingerCount > MAX_ANSWER_FINGERS
+    ) {
       this.reset();
       return 0;
     }
-    if (!this.seeded) {
-      this.seeded = true;
-      this.committed = fingerCount;
-      this.candidate = 0;
-      this.candidateRun = 0;
-      return this.committed;
-    }
     if (fingerCount === this.committed) {
+      this.candidate = 0;
       this.candidateRun = 0;
       return this.committed;
     }
@@ -57,6 +60,7 @@ export class FingerStabilizer {
     }
     if (this.candidateRun >= FINGER_STABILIZER_RUN) {
       this.committed = this.candidate;
+      this.candidate = 0;
       this.candidateRun = 0;
     }
     return this.committed;
@@ -64,9 +68,9 @@ export class FingerStabilizer {
 
   /** Clear all state (tracker stop / hand-loss episode). */
   reset(): void {
-    this.seeded = false;
     this.committed = 0;
     this.candidate = 0;
     this.candidateRun = 0;
   }
 }
+

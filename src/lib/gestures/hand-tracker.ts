@@ -55,6 +55,7 @@ const FRAME_INTERVAL_MS = 33; // ~30fps cap
 type MediaPipeHandLandmarker = {
   detectForVideo(video: HTMLVideoElement, timestamp: number): {
     landmarks?: Landmark[][];
+    worldLandmarks?: Landmark[][];
     handedness?: { categoryName?: string }[][];
   };
   close(): void;
@@ -81,6 +82,8 @@ export class HandLandmarkerTracker implements IHandTracker {
   private rafId: number | null = null;
   private disposed = false;
   private lastFrameAt = 0;
+  private lastLuminanceAt = 0;
+  private cachedLuminance: "good" | "too_dark" | "too_bright" = "good";
   private stabilizer = new FingerStabilizer();
   private visibilityHandler: (() => void) | null = null;
   private loadedMetadataHandler: (() => void) | null = null;
@@ -210,6 +213,8 @@ export class HandLandmarkerTracker implements IHandTracker {
     }
     this.closeLandmarker();
     this.releaseCamera();
+    this.lastLuminanceAt = 0;
+    this.cachedLuminance = "good";
     const ctx = this.canvas.getContext("2d");
     ctx?.clearRect(0, 0, this.canvas.width, this.canvas.height);
   }
@@ -263,9 +268,9 @@ export class HandLandmarkerTracker implements IHandTracker {
       },
       runningMode: "VIDEO" as const,
       numHands: 1,
-      minHandDetectionConfidence: 0.6,
-      minHandPresenceConfidence: 0.6,
-      minTrackingConfidence: 0.6,
+      minHandDetectionConfidence: 0.5,
+      minHandPresenceConfidence: 0.5,
+      minTrackingConfidence: 0.5,
     };
     try {
       return await vision.HandLandmarker.createFromOptions(cachedHandFileset, base);
@@ -292,17 +297,26 @@ export class HandLandmarkerTracker implements IHandTracker {
         this.lastFrameAt = now;
         if (this.landmarker && this.video.readyState >= 2) {
           const results = this.landmarker.detectForVideo(this.video, now);
-          this.renderOverlay(results.landmarks);
+          this.renderVideo();
           const frame = this.stabilizeFrame(landmarksToHandFrame(results));
           const ctx = this.canvas.getContext("2d");
           if (ctx) {
-            frame.lighting = this.computeHandLuminance(
-              ctx,
-              this.canvas.width,
-              this.canvas.height,
-              results.landmarks?.[0],
-            );
+            // Throttle photometric luminance sampling to ~4Hz (250ms).
+            // On desktop GPUs, reading canvas pixels via getImageData stalls the
+            // GPU-to-CPU pipeline for 15-40ms per frame if executed every frame,
+            // causing choppy video and tracking latency on PC webcams.
+            if (now - this.lastLuminanceAt >= 250) {
+              this.lastLuminanceAt = now;
+              this.cachedLuminance = this.computeHandLuminance(
+                ctx,
+                this.canvas.width,
+                this.canvas.height,
+                results.landmarks?.[0],
+              );
+            }
+            frame.lighting = this.cachedLuminance;
           }
+          this.renderSkeleton(results.landmarks);
           onFrame(frame);
         }
       }
@@ -330,36 +344,17 @@ export class HandLandmarkerTracker implements IHandTracker {
     return fingerCount === raw.fingerCount ? raw : { ...raw, fingerCount };
   }
 
-  /**
-   * Compute perceived photometric luminance on the palm / hand bounding box to
-   * detect underexposed or overexposed hand gestures.
-   */
   private computeHandLuminance(
     ctx: CanvasRenderingContext2D,
     w: number,
     h: number,
     landmarks?: Landmark[] | null,
   ): "good" | "too_dark" | "too_bright" {
-    try {
-      const roi = getHandPalmRegion(w, h, landmarks);
-      if (roi.width <= 0 || roi.height <= 0) return "good";
-      const imgData = ctx.getImageData(roi.x, roi.y, roi.width, roi.height);
-      const data = imgData.data;
-      let total = 0;
-      let count = 0;
-      for (let i = 0; i < data.length; i += 16) {
-        total += calculatePhotometricLuminance(data[i], data[i + 1], data[i + 2]);
-        count++;
-      }
-      const lum = count > 0 ? total / count : 128;
-      return classifyLighting(lum, "ideal");
-    } catch {
-      return "good";
-    }
+    return computeHandLuminance(ctx, w, h, landmarks);
   }
 
-  /** Mirrored overlay: flip x (`1 - l.x`) so the skeleton aligns with the preview. */
-  private renderOverlay(landmarks?: Landmark[][]): void {
+  /** Mirrored video background: flip x so the preview aligns with mirror mode. */
+  private renderVideo(): void {
     const ctx = this.canvas.getContext("2d");
     if (!ctx) return;
     const w = this.canvas.width;
@@ -370,7 +365,17 @@ export class HandLandmarkerTracker implements IHandTracker {
     ctx.translate(-w, 0);
     ctx.drawImage(this.video, 0, 0, w, h);
     ctx.restore();
+  }
 
+  /**
+   * Mirrored skeleton overlay: drawn AFTER luminance sampling to prevent cyan
+   * overlay pixels from artificially inflating low-light palm luminance.
+   */
+  private renderSkeleton(landmarks?: Landmark[][]): void {
+    const ctx = this.canvas.getContext("2d");
+    if (!ctx) return;
+    const w = this.canvas.width;
+    const h = this.canvas.height;
     const lm = landmarks?.[0];
     if (!lm) return;
     ctx.fillStyle = "#00d4ff";
@@ -381,6 +386,12 @@ export class HandLandmarkerTracker implements IHandTracker {
     }
   }
 
+  /** Full overlay: video + skeleton (mirrored x for preview alignment). */
+  private renderOverlay(landmarks?: Landmark[][]): void {
+    this.renderVideo();
+    this.renderSkeleton(landmarks);
+  }
+
   private closeLandmarker(): void {
     try {
       this.landmarker?.close();
@@ -388,5 +399,38 @@ export class HandLandmarkerTracker implements IHandTracker {
       // MediaPipe close() may throw if the graph is already torn down.
     }
     this.landmarker = null;
+  }
+}
+
+/**
+ * Compute perceived photometric luminance on the palm / hand bounding box to
+ * detect underexposed or overexposed hand gestures.
+ */
+export function computeHandLuminance(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  landmarks?: Landmark[] | null,
+): "good" | "too_dark" | "too_bright" {
+  try {
+    const roi = getHandPalmRegion(w, h, landmarks);
+    if (roi.width <= 0 || roi.height <= 0) return "too_dark";
+    // The canvas preview is mirrored horizontally (scale(-1, 1), translate(-w, 0)).
+    // Mirror the ROI x-coordinate to sample the true hand palm region on the canvas.
+    const canvasX = Math.max(0, Math.min(w - roi.width, w - roi.x - roi.width));
+    const imgData = ctx.getImageData(canvasX, roi.y, roi.width, roi.height);
+    const data = imgData.data;
+    let total = 0;
+    let count = 0;
+    for (let i = 0; i < data.length; i += 16) {
+      total += calculatePhotometricLuminance(data[i], data[i + 1], data[i + 2]);
+      count++;
+    }
+    if (count === 0) return "too_dark";
+    const lum = total / count;
+    if (!Number.isFinite(lum)) return "too_dark";
+    return classifyLighting(lum, "ideal");
+  } catch {
+    return "too_dark";
   }
 }
