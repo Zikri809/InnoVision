@@ -268,7 +268,7 @@ export function ClassesPageClient({
                   {createForm(
                     "mobile",
                     <ResponsiveModalClose asChild>
-                      <Button type="button" variant="ghost" className="h-12 flex-1 rounded-[16px] text-base">
+                      <Button type="button" variant="outline" className="h-12 flex-1 rounded-[16px] text-base">
                         {t("cancelBtn")}
                       </Button>
                     </ResponsiveModalClose>,

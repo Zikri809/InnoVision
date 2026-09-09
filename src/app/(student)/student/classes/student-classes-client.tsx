@@ -280,7 +280,7 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
                 action pair reads as one block instead of full-bleed bars. */}
             <div className="mx-auto flex w-[min(100%,320px)] justify-center gap-3 pt-2">
               <ResponsiveModalClose asChild>
-                <Button variant="ghost" className="h-12 flex-1 rounded-[16px] text-base">{t("cancelBtn")}</Button>
+                <Button variant="outline" className="h-12 flex-1 rounded-[16px] text-base">{t("cancelBtn")}</Button>
               </ResponsiveModalClose>
               <Button variant="accent" className="h-12 flex-1 rounded-[16px] text-base" type="submit" disabled={joining || code.length < JOIN_CODE_LENGTH}>
                 {joining ? (

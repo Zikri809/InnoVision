@@ -355,8 +355,11 @@ export function FaceEnrollClient({
               </div>
             )}
 
+            {/* Absolute-centered (same pattern as face-verifier): on mobile
+                the top/bottom HUD chips are hidden, so flex flow would pin
+                the oval to the top of the frame. */}
             <div
-              className={`h-40 w-32 sm:h-48 sm:w-36 rounded-[50%] border-4 transition-[border-color,border-style,background-color,box-shadow,transform] duration-300 ${
+              className={`absolute inset-0 m-auto h-40 w-32 sm:h-48 sm:w-36 rounded-[50%] border-4 transition-[border-color,border-style,background-color,box-shadow,transform] duration-300 ${
                 !pose.faceDetected
                   ? "border-dashed border-white/50"
                   : (currentAngle === 0 && Math.abs(pose.yaw) <= 15 && pose.centered) ||
