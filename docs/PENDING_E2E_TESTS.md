@@ -1260,3 +1260,20 @@ Unchanged contracts that the redesign preserved (do not regress):
 > gap worth pinning. The fake already implements `getFaceHealth` +
 > `setFacePose`; no seam work needed. Unit-pinned meanwhile in
 > `face-check-gate.test.ts` (10 cases).
+
+---
+
+# Pending E2E Tests — Adaptive Face-Tracker Duty Cycle
+
+> Added 2026-09-10. `FaceTracker.setFrameInterval` (clamped [33,200]ms) is
+> flipped by the pipeline's `setStatusBoth` choke point: 66ms while
+> `ready`, 33ms for every other status (gate/recovering run `waitForBlink`
+> AFTER the flip, so blink sampling is never throttled). The E2E fake has
+> no rAF loop (synchronous frames), so the tier mechanism itself is only
+> exercisable against the real tracker — left to manual smoke
+> (`npm run face:smoke` + a live quiz), consistent with the existing
+> "browser-only glue is manual/E2E-fake" policy in face-tracker.ts. What a
+> spec COULD pin once a real-loop seam exists: interval stays 66ms during a
+> long `ready` stretch and returns to 33ms on pause → recover. Unit side
+> is covered by construction (pure threshold constants; no timing-window
+> state to invalidate at runtime).
