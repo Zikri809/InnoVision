@@ -4,11 +4,18 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
-import { VList } from "virtua";
+import { Lock, RotateCcw, Timer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BotAvatar } from "@/components/bot/bot-avatar";
 import { QuestionImage } from "@/components/media/question-image";
-import { Lock } from "lucide-react";
+import { VList } from "virtua";
+import { ScoreRing } from "@/components/quiz/score-ring";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import type { ResultsBreakdownRow } from "@/app/play/[sessionId]/page";
 
 type Session = {
@@ -31,6 +38,14 @@ type Quiz = {
   time_limit_sec: number | null;
   results_revealed_at?: string | null;
 };
+
+/** Praise line tiers — i18n keys `play.end.praisePerfect` etc. */
+const PRAISE_KEYS = {
+  perfect: "praisePerfect",
+  strong: "praiseStrong",
+  ok: "praiseOk",
+  rough: "praiseRough",
+} as const;
 
 export function EndScreen({
   session,
@@ -104,12 +119,333 @@ export function EndScreen({
     return text;
   }
 
-  return (
-    <div className="relative mx-auto max-w-2xl px-4 py-6 sm:py-12">
-      {/* decorative blobs */}
-      <div aria-hidden className="pointer-events-none absolute -left-6 top-10 h-24 w-24 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-orange-200/50" />
-      <div aria-hidden className="pointer-events-none absolute -right-4 bottom-16 h-20 w-20 rounded-[60%_40%_45%_55%/50%_60%_40%_55%] bg-blue-200/50" />
+  // ── Result banner facts (shared by both layouts) ──
+  const timedOut =
+    quiz.time_limit_sec != null &&
+    session.submitted_at != null &&
+    (new Date(session.submitted_at).getTime() - new Date(session.started_at).getTime()) / 1000 >=
+      quiz.time_limit_sec - 2;
+  const bannerTitle = isPractice ? t("practiceTitle") : revealed ? t("assessmentTitle") : t("submittedTitle");
+  const praiseTier = pct >= 100 ? "perfect" : pct >= 75 ? "strong" : pct >= 50 ? "ok" : "rough";
 
+  // ── Wide-layout breakdown row: the original always-expanded card
+  // (prompt + verdict pill header, options, explanation) inside the VList. ──
+  const renderRow = (b: ResultsBreakdownRow) => {
+    const isCorrect = b.is_correct === true;
+    // QT-1: multi rows carry their selections/key as SETS
+    // (selected_index is ALWAYS null on them — presence of the set
+    // decides "answered", never the scalar).
+    const isMulti = b.type === "multi_select";
+    const selectedSet = isMulti ? (b.selected_indices ?? []) : [];
+    const correctSet = isMulti ? (b.correct_indices ?? []) : [];
+    const answered = isMulti ? selectedSet.length > 0 : b.selected_index != null;
+    return (
+      <div
+        key={b.question_id}
+        className={`overflow-hidden rounded-[22px] border-2 bg-card shadow-[var(--shadow-clay-sm)] ${
+          isCorrect ? "border-[#C9D9B4]" : "border-[#E6B3A8]"
+        }`}
+      >
+        <div className="flex items-start justify-between gap-3 px-5 py-4">
+          <p className="font-heading text-sm font-bold text-foreground">
+            <span className="text-muted-foreground">{b.order_index + 1}.</span> {b.prompt}
+          </p>
+          <span
+            className={`shrink-0 rounded-full border-2 px-2.5 py-0.5 text-[11px] font-extrabold uppercase tracking-wide ${
+              isCorrect
+                ? "border-emerald-300 dark:border-emerald-700/60 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300"
+                : answered
+                  ? "border-destructive/30 bg-destructive/10 text-destructive"
+                  : "border-border bg-muted text-muted-foreground"
+            }`}
+          >
+            {!answered ? "—" : isCorrect ? "\u2713" : "\u2717"}
+          </span>
+        </div>
+        {b.has_image && (
+          <div className="px-5">
+            <QuestionImage questionId={b.question_id} prompt={b.prompt} compact />
+          </div>
+        )}
+        <ul className="space-y-2 px-5 pb-5">
+          {b.options.map((opt, i) => {
+            const selected = isMulti ? selectedSet.includes(i) : i === b.selected_index;
+            const correct = isMulti ? correctSet.includes(i) : i === b.correct_index;
+            return (
+              <li
+                key={i}
+                className={`flex items-center gap-3 rounded-xl border-2 px-3.5 py-2.5 text-sm ${
+                  correct
+                    ? `${selected ? "bg-emerald-50 dark:bg-emerald-950/30" : "bg-emerald-50/50 dark:bg-emerald-950/15"} border-emerald-300 dark:border-emerald-700/60`
+                    : selected
+                      ? "border-destructive/30 bg-destructive/10"
+                      : "border-transparent bg-transparent"
+                }`}
+              >
+                {/* YOUR CHOICE = solid disc (✓ green / ✕ red). THE KEY = hollow
+                    disc with a ✓ (key you missed). Numbers stay hollow gray. */}
+                <span
+                  aria-hidden
+                  className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-extrabold ${
+                    selected
+                      ? correct
+                        ? "bg-emerald-600 text-white"
+                        : "bg-destructive text-white"
+                      : correct
+                        ? "border-[3px] border-emerald-600 bg-card text-emerald-600 dark:bg-transparent"
+                        : "border-border bg-muted text-muted-foreground"
+                  }`}
+                >
+                  {selected ? (correct ? "\u2713" : "\u2715") : correct ? "\u2713" : i + 1}
+                </span>
+                <span
+                  className={`min-w-0 font-semibold ${
+                    selected || correct ? "text-foreground" : "text-muted-foreground"
+                  }`}
+                >
+                  {formatOptionText(opt)}
+                </span>
+                <span className="sr-only">
+                  {selected && correct
+                    ? tCommon("aria.yourCorrectChoice")
+                    : selected
+                      ? tCommon("aria.yourWrongChoice")
+                      : correct
+                        ? tCommon("aria.missedCorrectAnswer")
+                        : ""}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+        {b.explanation && (
+          <div className="border-t-2 border-border/60 px-5 py-3 text-sm font-semibold text-muted-foreground">
+            <strong className="font-extrabold text-foreground">{t("explanation")}</strong>{" "}
+            {b.explanation}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ── Accordion breakdown row (mobile): the trigger IS the verdict —
+  // question number, prompt, and the ✓/✗/— pill; the panel reveals the
+  // option review + explanation. e42/e45 assert the ✓/✕ glyphs and the
+  // "Correct answer" tag inside `ol > li`; nested option rows stay <li>. ──
+  const renderAccordionRow = (b: ResultsBreakdownRow) => {
+    const isCorrect = b.is_correct === true;
+    const isMulti = b.type === "multi_select";
+    const selectedSet = isMulti ? (b.selected_indices ?? []) : [];
+    const correctSet = isMulti ? (b.correct_indices ?? []) : [];
+    const answered = isMulti ? selectedSet.length > 0 : b.selected_index != null;
+    return (
+      <AccordionItem
+        key={b.question_id}
+        value={b.question_id}
+        // The accordion root renders as <ol>; items render as <li> so the
+        // e42/e45 `ol > li` probes keep resolving.
+        render={<li />}
+        className={`overflow-hidden rounded-[22px] border-2 bg-card shadow-[var(--shadow-clay-sm)] ${
+          isCorrect ? "border-[#C9D9B4]" : "border-[#E6B3A8]"
+        }`}
+      >
+        <AccordionTrigger className="items-center gap-3 px-5 py-3.5 hover:no-underline">
+          <span className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
+            <span
+              className={`grid size-7 shrink-0 place-items-center rounded-full border-2 text-sm font-extrabold ${
+                isCorrect
+                  ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-700/60 dark:bg-emerald-950/40 dark:text-emerald-300"
+                  : answered
+                    ? "border-destructive/30 bg-destructive/10 text-destructive"
+                    : "border-border bg-muted text-muted-foreground"
+              }`}
+              aria-hidden
+            >
+              {!answered ? "—" : isCorrect ? "\u2713" : "\u2717"}
+            </span>
+            <span className="min-w-0 font-heading text-sm font-bold text-foreground [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] [overflow:hidden]">
+              <span className="text-muted-foreground">{b.order_index + 1}.</span> {b.prompt}
+            </span>
+          </span>
+          {/* The ✓/✗/— disc carries the verdict; the registry trigger's
+              built-in chevron (group-aria-expanded swap) sits at the end. */}
+        </AccordionTrigger>
+        <AccordionContent className="data-open:animate-accordion-down data-closed:animate-accordion-up">
+          <div className="px-5 pb-4">
+            {b.has_image && (
+              <div className="pb-3">
+                <QuestionImage questionId={b.question_id} prompt={b.prompt} compact />
+              </div>
+            )}
+            <ul className="space-y-2">
+              {b.options.map((opt, i) => {
+                const selected = isMulti ? selectedSet.includes(i) : i === b.selected_index;
+                const correct = isMulti ? correctSet.includes(i) : i === b.correct_index;
+                return (
+                  <li
+                    key={i}
+                    className={`flex items-center gap-3 rounded-xl border-2 px-3.5 py-2.5 text-sm ${
+                      correct
+                        ? `${selected ? "bg-emerald-50 dark:bg-emerald-950/30" : "bg-emerald-50/50 dark:bg-emerald-950/15"} border-emerald-300 dark:border-emerald-700/60`
+                        : selected
+                          ? "border-destructive/30 bg-destructive/10"
+                          : "border-transparent bg-transparent"
+                    }`}
+                  >
+                    {/* YOUR CHOICE = solid disc (✓ green / ✕ red). THE KEY =
+                        hollow disc with a ✓ (key you missed). Numbers stay
+                        hollow gray. */}
+                    <span
+                      aria-hidden
+                      className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-extrabold ${
+                        selected
+                          ? correct
+                            ? "bg-emerald-600 text-white"
+                            : "bg-destructive text-white"
+                          : correct
+                            ? "border-[3px] border-emerald-600 bg-card text-emerald-600 dark:bg-transparent"
+                            : "border-border bg-muted text-muted-foreground"
+                      }`}
+                    >
+                      {selected ? (correct ? "\u2713" : "\u2715") : correct ? "\u2713" : i + 1}
+                    </span>
+                    <span
+                      className={`min-w-0 font-semibold ${
+                        selected || correct ? "text-foreground" : "text-muted-foreground"
+                      }`}
+                    >
+                      {formatOptionText(opt)}
+                    </span>
+                    <span className="sr-only">
+                      {selected && correct
+                        ? tCommon("aria.yourCorrectChoice")
+                        : selected
+                          ? tCommon("aria.yourWrongChoice")
+                          : correct
+                            ? tCommon("aria.missedCorrectAnswer")
+                            : ""}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+            {b.explanation && (
+              <div className="mt-3 rounded-xl border-2 border-border/60 bg-muted/40 px-4 py-3 text-sm font-semibold text-muted-foreground">
+                <strong className="font-extrabold text-foreground">{t("explanation")}</strong>{" "}
+                {b.explanation}
+              </div>
+            )}
+          </div>
+        </AccordionContent>
+      </AccordionItem>
+    );
+  };
+
+  // Wrong/skipped questions start OPEN (that's what a student reviews);
+  // correct ones start closed. `multiple` lets any mix stay open.
+  const defaultOpenIds = breakdown
+    .filter((b) => b.is_correct !== true)
+    .map((b) => b.question_id);
+
+  // ══════════════════════════ MOBILE (<lg default) ══════════════════════════
+  // Celebration banner, then the breakdown as a plain scrolling document
+  // (no VList viewport on phones — the page scrolls natively and a fixed
+  // score card would eat half the viewport).
+  const mobileLayout = (
+    <div className="flex flex-col">
+      {/* Banner: avatar tile, eyebrow, title, clay score ring + praise. */}
+      <div className="relative overflow-hidden rounded-[28px] border-[3px] border-border bg-card px-5 pb-6 pt-7 text-center shadow-[var(--shadow-clay)]">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -left-8 -top-8 h-24 w-24 rounded-[42%_58%_60%_40%/50%_45%_55%_50%] bg-orange-200/50"
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -bottom-6 -right-6 h-20 w-20 rounded-[60%_40%_45%_55%/50%_60%_40%_55%] bg-blue-200/50"
+        />
+        <div className="relative mx-auto mb-4 grid h-16 w-16 place-items-center rounded-[20px] bg-orange-100 shadow-[0_4px_0_rgba(194,65,12,0.15)]">
+          {isPractice ? (
+            <BotAvatar state="celebrate" size={46} />
+          ) : revealed ? (
+            <BotAvatar state="success" size={46} />
+          ) : (
+            <Lock className="h-8 w-8 text-primary" aria-hidden />
+          )}
+        </div>
+        <p className="relative text-xs font-extrabold uppercase tracking-wide text-muted-foreground">
+          {bannerTitle}
+        </p>
+        <h1 className="relative mt-1 font-heading text-2xl font-semibold [text-wrap:balance]">{quiz.title}</h1>
+
+        {timedOut && (
+          <div
+            className="relative mx-auto mt-3 inline-flex items-center gap-2 rounded-full border-[2px] border-amber-300 bg-amber-50 px-4 py-1.5 text-xs font-bold text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200"
+            role="status"
+          >
+            {tCommon("timeExpired")}
+          </div>
+        )}
+
+        {revealed && score != null ? (
+          <>
+            <div className="relative mt-5 flex justify-center">
+              <ScoreRing
+                ratio={total > 0 ? score / total : 0}
+                label={`${score}`}
+                sub={`/ ${total}`}
+              />
+            </div>
+            <p className="relative mt-2 text-sm font-extrabold text-muted-foreground">
+              {t("pctCorrect", { pct })}
+            </p>
+            <p className="relative mt-0.5 text-sm font-bold text-foreground">
+              {t(PRAISE_KEYS[praiseTier])}
+            </p>
+          </>
+        ) : (
+          <div
+            className="relative mx-auto mt-5 max-w-md rounded-2xl border-[3px] border-border bg-muted/50 px-5 py-4"
+            role="status"
+          >
+            <p className="font-heading text-base font-semibold">{t("resultsPending")}</p>
+          </div>
+        )}
+      </div>
+
+      {/* Actions — full-width stack, Try again first (primary action). */}
+      <div className="mt-5 flex flex-col items-stretch gap-2.5">
+        {isPractice && (
+          <Button size="lg" onClick={() => void handleTryAgain()} disabled={retrying} className="w-full max-sm:h-14 max-sm:text-lg">
+            <RotateCcw aria-hidden />
+            {retrying ? t("tryAgainStarting") : t("tryAgain")}
+          </Button>
+        )}
+        <Link href="/student/quizzes" className="block">
+          <Button variant="outline" size="lg" className="w-full max-sm:h-13">
+            {t("backToQuizzes")}
+          </Button>
+        </Link>
+      </div>
+
+      {/* Breakdown: verdict accordion (native page scroll on phones).
+          The <ol> wrapper + AccordionItems-as-<li> preserve the list
+          contract (e42/e45 probe `ol > li`). */}
+      {revealed && breakdown.length > 0 && (
+        <section className="mt-7">
+          <h2 className="mb-3 font-heading text-lg font-semibold">{t("answerBreakdown")}</h2>
+          <Accordion multiple defaultValue={defaultOpenIds} render={<ol />} className="flex-col gap-3">
+            {breakdown.map(renderAccordionRow)}
+          </Accordion>
+        </section>
+      )}
+    </div>
+  );
+
+  // ══════════════════════════ WIDE (≥lg) ══════════════════════════
+  // The proven composition verbatim (score typography, button row, VList
+  // breakdown) — only the emoji ⏱️ became a lucide Timer icon.
+  const wideLayout = (
+    <div className="relative mx-auto max-w-2xl">
       <div className="relative rounded-[28px] border-[3px] border-border bg-card p-8 text-center shadow-[var(--shadow-clay)] md:p-10">
         <div className="mx-auto mb-5 grid h-16 w-16 place-items-center rounded-[20px] bg-orange-100 shadow-[0_4px_0_rgba(194,65,12,0.15)]">
           {isPractice ? (
@@ -122,22 +458,18 @@ export function EndScreen({
         </div>
 
         <p className="text-sm font-extrabold uppercase tracking-wide text-muted-foreground">
-          {isPractice ? t("practiceTitle") : revealed ? t("assessmentTitle") : t("submittedTitle")}
+          {bannerTitle}
         </p>
         <h1 className="mt-1 font-heading text-2xl font-semibold [text-wrap:balance]">{quiz.title}</h1>
 
-        {quiz.time_limit_sec != null && session.submitted_at && (
-          (() => {
-            const elapsedSec = (new Date(session.submitted_at).getTime() - new Date(session.started_at).getTime()) / 1000;
-            if (elapsedSec >= quiz.time_limit_sec - 2) {
-              return (
-                <div className="mx-auto mt-3 inline-flex items-center gap-2 rounded-full border-[2px] border-amber-300 bg-amber-50 px-4 py-1.5 text-xs font-bold text-amber-800" role="status">
-                  ⏱️ {tCommon("timeExpired")}
-                </div>
-              );
-            }
-            return null;
-          })()
+        {timedOut && (
+          <div
+            className="mx-auto mt-3 inline-flex items-center gap-2 rounded-full border-[2px] border-amber-300 bg-amber-50 px-4 py-1.5 text-xs font-bold text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200"
+            role="status"
+          >
+            <Timer className="h-3.5 w-3.5" aria-hidden />
+            {tCommon("timeExpired")}
+          </div>
         )}
 
         {revealed && score != null ? (
@@ -152,9 +484,7 @@ export function EndScreen({
           </>
         ) : (
           <div className="mx-auto mt-6 max-w-md rounded-2xl border-[3px] border-border bg-muted/50 px-5 py-4" role="status">
-            <p className="font-heading text-base font-semibold">
-              {t("resultsPending")}
-            </p>
+            <p className="font-heading text-base font-semibold">{t("resultsPending")}</p>
           </div>
         )}
 
@@ -176,106 +506,29 @@ export function EndScreen({
           {/* VList (polish W4 A10): same virtualization as the practice review —
               an assessment with 200 questions must not mount every card at
               once. Height is explicit (virtua computes height:100% inline;
-              a max-h alone collapses to 0) and sizes to the question count.
-              List semantics preserved via role="list"/"listitem". */}
+              a max-h alone collapses to 0) and sizes to the question count. */}
           <VList
             style={{ height: `min(${breakdown.length * 220 + 12}px, 100dvh)` }}
             role="list"
             aria-label={t("answerBreakdown")}
           >
-            {breakdown.map((b) => {
-              const isCorrect = b.is_correct === true;
-              // QT-1: multi rows carry their selections/key as SETS
-              // (selected_index is ALWAYS null on them — presence of the set
-              // decides "answered", never the scalar).
-              const isMulti = b.type === "multi_select";
-              const selectedSet = isMulti ? (b.selected_indices ?? []) : [];
-              const correctSet = isMulti ? (b.correct_indices ?? []) : [];
-              const answered = isMulti ? selectedSet.length > 0 : b.selected_index != null;
-              return (
-                <div
-                  key={b.question_id}
-                  role="listitem"
-                  className={`mb-3 overflow-hidden rounded-[22px] border-2 bg-card shadow-[var(--shadow-clay-sm)] ${
-                    isCorrect ? "border-[#C9D9B4]" : "border-[#E6B3A8]"
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-3 px-5 py-4">
-                    <p className="font-heading text-sm font-bold text-foreground">
-                      <span className="text-muted-foreground">{b.order_index + 1}.</span>{" "}
-                      {b.prompt}
-                    </p>
-                    <span
-                      className={`shrink-0 rounded-full border-2 px-2.5 py-0.5 text-[11px] font-extrabold uppercase tracking-wide ${
-                        isCorrect
-                          ? "border-emerald-300 dark:border-emerald-700/60 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300"
-                          : !answered
-                            ? "border-border bg-muted text-muted-foreground"
-                            : "border-destructive/30 bg-destructive/10 text-destructive"
-                      }`}
-                    >
-                      {!answered ? "—" : isCorrect ? "✓" : "✗"}
-                    </span>
-                  </div>
-                  {b.has_image && (
-                    <div className="px-5">
-                      <QuestionImage questionId={b.question_id} prompt={b.prompt} compact />
-                    </div>
-                  )}
-                  <ul className="space-y-2 px-5 pb-5">
-                    {b.options.map((opt, i) => {
-                      const selected = isMulti ? selectedSet.includes(i) : i === b.selected_index;
-                      const correct = isMulti ? correctSet.includes(i) : i === b.correct_index;
-                      return (
-                        <li
-                          key={i}
-                          className={`flex items-center gap-3 rounded-xl border-2 px-3.5 py-2.5 text-sm ${
-                            correct
-                              ? `${selected ? "bg-emerald-50 dark:bg-emerald-950/30" : "bg-emerald-50/50 dark:bg-emerald-950/15"} border-emerald-300 dark:border-emerald-700/60`
-                              : selected
-                                ? "border-destructive/30 bg-destructive/10"
-                                : "border-transparent bg-transparent"
-                          }`}
-                        >
-                          <span
-                            className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-extrabold ${
-                              correct
-                                ? "bg-emerald-600 text-white"
-                                : selected
-                                  ? "bg-destructive text-white"
-                                  : "border-border bg-muted text-muted-foreground"
-                            }`}
-                          >
-                            {correct ? "\u2713" : selected ? "\u2715" : i + 1}
-                          </span>
-                          <span
-                            className={`min-w-0 font-semibold ${
-                              selected || correct ? "text-foreground" : "text-muted-foreground"
-                            }`}
-                          >
-                            {formatOptionText(opt)}
-                          </span>
-                          {correct && !selected && (
-                            <span className="ml-auto shrink-0 text-[11px] font-extrabold text-emerald-700 dark:text-emerald-400">
-                              {t("correctAnswer")}
-                            </span>
-                          )}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                  {b.explanation && (
-                    <div className="border-t-2 border-border/60 px-5 py-3 text-sm font-semibold text-muted-foreground">
-                      <strong className="font-extrabold text-foreground">{t("explanation")}</strong>{" "}
-                      {b.explanation}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            {breakdown.map((b) => (
+              <div key={b.question_id} role="listitem">
+                {renderRow(b)}
+              </div>
+            ))}
           </VList>
         </div>
       )}
     </div>
+  );
+
+  return (
+    <>
+      <div className="mx-auto max-w-2xl px-4 py-6 lg:hidden">{mobileLayout}</div>
+      <div className="hidden px-4 py-6 sm:py-12 lg:block">
+        {wideLayout}
+      </div>
+    </>
   );
 }
