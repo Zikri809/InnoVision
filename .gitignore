@@ -80,3 +80,7 @@ next-env.d.ts
 # scratch: dev logs, probe scripts, throwaway screenshots
 /.tmp/
 /.tmp_*
+
+# transient agent-work scratch (transcripts, probes, repro dirs) — skills stay tracked
+/.agents/*
+!/.agents/skills/

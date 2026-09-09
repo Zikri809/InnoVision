@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { IFaceTracker, FaceStatus } from "@/lib/face/types";
 import { PeriodicCadence, shouldScheduleFaceCheck } from "@/lib/face/cadence";
+import { shouldDeferFaceCheck } from "@/lib/face/face-check-gate";
 import { resolveVerifyOutcome } from "@/lib/face/outcome";
 import { recoverFlow, recoveryLanding } from "@/lib/face/recovery";
 import { getFakeFaceControl } from "@/lib/face/fake-seam";
@@ -27,8 +28,14 @@ import {
  */
 const MIN_CLIENT_VERIFY_GAP_MS = Math.min(MIN_VERIFY_INTERVAL_MS, 8000);
 
-/** Bounded bad-lighting deferrals before the check proceeds unconditionally. */
-const LIGHTING_RETRIES_MAX = 2;
+/**
+ * Bounded deferrals before a precheck-gated check proceeds unconditionally.
+ * Exhaustion is intentional: the capture happens anyway and the SERVER judges
+ * the real frame — sustained occlusion must surface as an honest FAIL row
+ * (pause → blink recovery), never an invisible defer loop. Also the retry
+ * count handed to min-gap-deferred runs so they re-enter the precheck fresh.
+ */
+const FACE_CHECK_DEFER_MAX = 2;
 
 export type FacePipelinePhase =
   | "question"
@@ -94,9 +101,12 @@ export type FacePipelineProps = {
  *    confirmed loss (focus_pause_count). Recovery reuses the blink flow —
  *    clicking Recover refocuses the exam window.
  *  - Tab-hide: cadence paused hidden; catch-up verify on return.
- *  - Multi-frame verify: each check captures up to 3 frames ~500ms apart;
- *    the server records ONE row decided by strict majority (a transient
- *    blur/glance fails one frame, not the check).
+  *  - Multi-frame verify: each check captures up to 3 frames ~500ms apart;
+   *    the server records ONE row decided by strict majority (a transient
+   *    blur/glance fails one frame, not the check). A bounded precheck
+   *    (lighting / mid-commit hand / unaligned-or-absent face) defers checks
+   *    that would photograph a known-bad moment; on exhaustion it captures
+   *    anyway — the server judges the real frame.
  *  - Terminal phases (submitted/dead) cancel cadence/poll/pendingVerify.
  *
  * Following the P6 pure-logic split: this hook is the CLIENT LOGIC; the
@@ -155,8 +165,8 @@ export function useFacePipeline(props: FacePipelineProps) {
   const lastVerifyPostAtRef = useRef(0);
   const minGapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const deferredTriggerRef = useRef<"start" | "question" | "periodic" | null>(null);
-  // One bounded bad-lighting deferral per check (never an infinite loop);
-  // tracked so lifecycle cleanup can cancel it.
+  // One bounded precheck deferral per check (lighting/occlusion/hand — never
+  // an infinite loop); tracked so lifecycle cleanup can cancel it.
   const lightingRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Focus-loss machinery: debounce timer + the listener teardown.
   const blurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -568,7 +578,10 @@ export function useFacePipeline(props: FacePipelineProps) {
             !isTerminalRef.current &&
             statusRef.current === "ready"
           ) {
-            void runVerify(deferred, LIGHTING_RETRIES_MAX);
+            // Fresh retry budget: the deferral is timer-chained (never
+            // immediate), so the re-run gets its own full precheck instead
+            // of bypassing it.
+            void runVerify(deferred, 0);
           }
         }, MIN_CLIENT_VERIFY_GAP_MS - sincePost);
         return;
@@ -589,20 +602,28 @@ export function useFacePipeline(props: FacePipelineProps) {
       }
       if (disposedRef.current || trackerRef.current !== tracker) return;
 
-      // Lighting precheck: the tracker already classifies face-ROI luminance
-      // every 250ms — a doomed dark/bright frame would land as a FALSE fail
-      // row. Defer THIS check (bounded by LIGHTING_RETRIES_MAX) and retry
-      // shortly; `start` (the gate) always proceeds so the student is never
-      // soft-locked by their desk lamp. The retry flag travels with the
-      // invocation so a DIFFERENT trigger firing inside the wait window
+      // Precheck: defer checks that would photograph a known-bad moment —
+      // doomed lighting (a dark/bright frame lands as a FALSE fail row), a
+      // raised/mid-commit hand, or no aligned face (palm over the face, head
+      // turned away, hand entering frame). Deferrals are BOUNDED
+      // (FACE_CHECK_DEFER_MAX): on exhaustion the capture proceeds anyway and
+      // the server judges the real frame, so sustained occlusion still lands
+      // as an honest FAIL row (pause → blink recovery) — deferral absorbs
+      // transient motion, it never suppresses verification. `start` always
+      // proceeds: the gate already ran blink liveness, and the student must
+      // never be soft-locked by desk conditions. The retry count travels with
+      // the invocation so a DIFFERENT trigger firing inside the wait window
       // still gets its own full precheck.
       const health =
         typeof tracker.getFaceHealth === "function" ? tracker.getFaceHealth() : null;
       if (
-        health &&
-        health.lightingOk === false &&
-        trigger !== "start" &&
-        lightingRetries < LIGHTING_RETRIES_MAX
+        shouldDeferFaceCheck(
+          health,
+          isHandActiveRef.current,
+          trigger,
+          lightingRetries,
+          FACE_CHECK_DEFER_MAX,
+        )
       ) {
         if (lightingRetryTimerRef.current) clearTimeout(lightingRetryTimerRef.current);
         lightingRetryTimerRef.current = setTimeout(() => {

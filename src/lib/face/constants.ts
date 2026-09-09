@@ -95,8 +95,10 @@ export const VERIFY_FRAME_SPACING_MS = 500;
 export const VERIFY_SECONDARY_CAPTURE_TIMEOUT_MS = 600;
 
 /**
- * How long a bad-lighting check defers itself before retrying (once). A
- * doomed dark-frame verify would otherwise land as a false fail row.
+ * How long a precheck-gated check (bad lighting, mid-commit hand, or no
+ * aligned face — see `face-check-gate.ts`) defers itself before retrying.
+ * Deferrals are bounded (pipeline-side `FACE_CHECK_DEFER_MAX`); a doomed
+ * frame would otherwise land as a false fail row.
  */
 export const LIGHTING_RETRY_DELAY_MS = 4000;
 
