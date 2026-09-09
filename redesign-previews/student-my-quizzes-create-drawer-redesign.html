@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>My Quizzes — create-quiz drawer (3 options)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  /* ── clay tokens (design-system/innovision/MASTER.md) ── */
+  :root{
+    --primary:#F97316; --primary-deep:#c2410c; --on-primary:#7C2D12;
+    --accent:#2563EB; --accent-deep:#1d4fd7;
+    --bg:#FFF7ED; --fg:#7C2D12; --card:#FFFFFF;
+    --muted:#F1F0F0; --muted-fg:#78716C; --muted-fg-strong:#57534E;
+    --border:#FED7AA; --ring:#2563EB;
+    --ok-text:#047857; --ok-border:#6EE7B7; --ok-bg:#ECFDF5; --ok-deep:#059669;
+    --blue-bg:#EFF6FF; --blue-border:#93C5FD; --blue-text:#1D4ED8;
+    --red-bg:#FEF2F2; --red-border:#FCA5A5; --red-strong:#B91C1C;
+    --clay:6px 6px 0 rgba(194,65,12,.14);
+    --clay-sm:0 4px 0 rgba(194,65,12,.12);
+    --spring:cubic-bezier(.34,1.56,.64,1);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  [hidden]{display:none!important}
+  html{scroll-behavior:smooth}
+  body{font-family:'Nunito',sans-serif;background:var(--bg);color:var(--fg);line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  h1,h2,h3,h4{font-family:'Fredoka',sans-serif;letter-spacing:-.01em}
+  button{font-family:inherit;cursor:pointer}
+  a{color:inherit}
+  code{background:#fff;border:2px solid var(--border);border-radius:8px;padding:1px 7px;font-size:.86em;font-weight:700;color:var(--primary-deep)}
+  button:focus-visible,a:focus-visible,[tabindex]:focus-visible,input:focus-visible{outline:3px solid var(--ring);outline-offset:2px}
+  .icn{display:inline-block;width:1em;height:1em;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+  .wrap{max-width:1180px;margin:0 auto;padding:64px 24px 140px;position:relative}
+  .blob{position:fixed;pointer-events:none;z-index:-1;border-radius:46%_54%_58%_42%/52%_44%_56%_48%;opacity:.5}
+  .b1{width:420px;height:420px;top:-120px;right:-140px;background:#FFEDD5}
+  .b2{width:340px;height:340px;top:1100px;left:-180px;background:#DBEAFE;opacity:.4}
+
+  .eyebrow{display:inline-flex;align-items:center;gap:8px;background:#fff;border:3px solid var(--border);border-radius:999px;padding:7px 16px;font-weight:800;font-size:13px;color:var(--primary);box-shadow:0 3px 0 var(--border)}
+  h1{font-size:clamp(32px,5vw,52px);font-weight:600;line-height:1.08;margin:20px 0 14px;max-width:860px}
+  h1 .hl{color:var(--primary)}
+  .lede{font-size:17.5px;font-weight:600;color:var(--muted-fg);max-width:760px}
+  .lede b{color:var(--fg)}
+
+  /* ── cut list ── */
+  .cutlist{margin-top:52px;background:#fff;border:3px solid var(--border);border-radius:26px;box-shadow:var(--clay);padding:26px 24px}
+  .cutlist h2{font-size:24px;font-weight:600;margin-bottom:4px}
+  .cutlist>p{color:var(--muted-fg);font-weight:600;font-size:14.5px;margin-bottom:18px;max-width:640px}
+  .cutgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px}
+  .cut{border:2.5px solid var(--border);border-radius:16px;padding:13px 15px;background:var(--bg);box-shadow:0 3px 0 var(--border)}
+  .cut b{display:block;font-size:13.5px;font-weight:800;color:var(--fg)}
+  .cut b::before{content:"✕ ";color:#DC2626;font-weight:800}
+  .cut span{display:block;font-size:13px;font-weight:700;color:var(--muted-fg);margin-top:2px}
+  .cut span::before{content:"→ ";color:var(--ok-deep);font-weight:800}
+
+  /* ── concept layout ── */
+  .concept{margin-top:84px}
+  .concept-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .num{flex:none;width:46px;height:46px;border-radius:14px;background:var(--primary);color:var(--on-primary);display:grid;place-items:center;font-family:'Fredoka';font-weight:600;font-size:21px;box-shadow:0 4px 0 var(--primary-deep);transform:rotate(-4deg)}
+  .concept-head h2{font-size:clamp(23px,3vw,30px);font-weight:600}
+  .tagchip{font:800 11.5px 'Nunito';letter-spacing:.02em;color:var(--on-primary);background:#FFEDD5;border:2.5px solid #FDBA74;border-radius:999px;padding:4px 12px;box-shadow:0 3px 0 #FDBA74}
+  .pitch{margin:12px 0 6px;font-size:15.5px;font-weight:600;color:var(--muted-fg);max-width:760px}
+  .pitch b{color:var(--fg)}
+  .when{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 22px}
+  .when span{font:800 11.5px 'Nunito';letter-spacing:.02em;color:var(--muted-fg-strong);background:#fff;border:2.5px solid var(--border);border-radius:999px;padding:4px 12px;box-shadow:0 3px 0 var(--border)}
+
+  .duo{display:grid;grid-template-columns:minmax(0,416px) minmax(280px,1fr);gap:32px;align-items:start}
+  @media(max-width:920px){.duo{grid-template-columns:1fr}}
+
+  /* ── notes column ── */
+  .notes{display:grid;gap:12px}
+  .note{background:#fff;border:3px solid var(--border);border-radius:18px;padding:16px 18px;box-shadow:0 4px 0 var(--border)}
+  .note h4{font-size:15px;font-weight:600;display:flex;align-items:center;gap:8px}
+  .note h4 .icn{width:17px;height:17px;color:var(--primary)}
+  .note ul{list-style:none;margin-top:8px;display:grid;gap:6px}
+  .note li{font-size:13.5px;font-weight:700;color:var(--muted-fg-strong);padding-left:18px;position:relative}
+  .note li::before{content:"";position:absolute;left:2px;top:9px;width:7px;height:7px;border-radius:50%;background:var(--primary)}
+  .note.kill li::before{background:#DC2626}
+  .note.nav li::before{background:var(--accent)}
+  .note.warn li::before{background:#D97706}
+  .note code{font-size:.8em}
+
+  /* ══════════ PHONE FRAME ══════════ */
+  .phone{width:min(392px,100%);border-radius:58px;background:#241A12;padding:11px;box-shadow:0 30px 60px -28px rgba(124,45,18,.5),0 8px 20px -10px rgba(124,45,18,.25);position:sticky;top:24px}
+  @media(max-width:920px){.phone{position:relative;top:0}}
+  .screen{position:relative;height:788px;border-radius:47px;overflow:hidden;background:var(--bg)}
+  .island{position:absolute;top:11px;left:50%;transform:translateX(-50%);width:110px;height:27px;background:#241A12;border-radius:999px;z-index:60}
+  .sbar{position:relative;height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 30px 6px;font:800 13px 'Nunito';color:var(--fg);z-index:50}
+  .sbar .right{display:flex;align-items:center;gap:6px}
+  .sig{display:flex;align-items:flex-end;gap:1.5px}
+  .sig i{width:3px;background:var(--fg);border-radius:1px;display:block}
+  .sig i:nth-child(1){height:4px}.sig i:nth-child(2){height:6px}.sig i:nth-child(3){height:8px}.sig i:nth-child(4){height:10px}
+  .batt{width:23px;height:12px;border:1.8px solid rgba(124,45,18,.5);border-radius:4px;position:relative;padding:1.5px}
+  .batt::before{content:"";display:block;height:100%;width:72%;background:var(--fg);border-radius:1.5px}
+  .batt::after{content:"";position:absolute;right:-4px;top:3px;width:2px;height:5px;background:rgba(124,45,18,.5);border-radius:0 2px 2px 0}
+  .homebar{position:absolute;bottom:7px;left:50%;transform:translateX(-50%);width:112px;height:4px;background:rgba(36,26,18,.28);border-radius:999px;z-index:70;pointer-events:none}
+
+  /* behind-screen content (matches the live My Quizzes mobile branch) */
+  .scroll{height:calc(100% - 52px);overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none}
+  .mhead{padding:16px 16px 10px}
+  .mhead h3{font-size:26px;font-weight:600}
+  .mhead p{font:800 13px 'Nunito';color:var(--muted-fg);margin-top:2px}
+  .qlist{padding:0 16px;display:grid;gap:10px;list-style:none}
+  .qcard{position:relative;background:#fff;border:3px solid var(--border);border-radius:20px;box-shadow:var(--clay-sm);padding:14px 15px;display:block}
+  .qcard .qrow{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .qcard h4{font:800 15.5px 'Nunito';color:var(--fg)}
+  .pill{flex:none;font:800 10px 'Nunito';letter-spacing:.04em;color:var(--ok-deep);background:var(--ok-bg);border:2px solid var(--ok-border);border-radius:999px;padding:2px 8px}
+  .qcard>p{font:700 12.5px 'Nunito';color:var(--muted-fg);margin-top:3px}
+  .qmeta{display:flex;align-items:center;gap:6px;font:800 12px 'Nunito';color:var(--muted-fg-strong);margin-top:10px}
+  .qmeta .icn{width:14px;height:14px}
+  .sep{color:var(--border)}
+  .peek{margin:16px 16px 0;font:700 12px 'Nunito';color:var(--muted-fg);opacity:.65;text-align:center}
+
+  /* floating + — same posture as the live FAB */
+  .fab{position:absolute;right:14px;bottom:96px;z-index:44;width:58px;height:58px;border-radius:19px;background:var(--primary);border:3px solid var(--primary-deep);color:var(--on-primary);box-shadow:0 4px 0 var(--primary-deep),0 12px 26px -12px rgba(124,45,18,.5);display:grid;place-items:center;transition:transform 160ms ease,box-shadow 160ms ease}
+  .fab .icn{width:26px;height:26px}
+  .fab:active{transform:translateY(3px);box-shadow:0 1px 0 var(--primary-deep)}
+  .dhint{position:absolute;left:14px;bottom:100px;z-index:43;background:#fff;border:2.5px solid var(--border);border-radius:999px;padding:6px 13px;font:800 11px 'Nunito';color:var(--muted-fg-strong);box-shadow:0 3px 0 var(--border);transition:opacity 200ms ease;pointer-events:none}
+  .screen.open .dhint{opacity:0}
+
+  /* dock */
+  .dock{position:absolute;left:12px;right:12px;bottom:18px;z-index:45;background:rgba(255,255,255,.94);backdrop-filter:blur(8px);border:3px solid var(--border);border-radius:28px;box-shadow:0 6px 0 rgba(194,65,12,.14),0 14px 30px -14px rgba(124,45,18,.35);display:grid;grid-template-columns:repeat(4,1fr);padding:8px 6px 6px}
+  .dock a{display:flex;flex-direction:column;align-items:center;gap:2px;text-decoration:none;color:var(--muted-fg-strong);font:800 10px 'Nunito';padding:5px 2px 3px;border-radius:16px}
+  .dock a .icn{width:21px;height:21px}
+  .dock a.on{color:var(--primary-deep);background:#FFEDD5;box-shadow:inset 0 -3px 0 rgba(194,65,12,.12)}
+
+  /* ══════════ DRAWER (clay bottom sheet) ══════════ */
+  .scrim{position:absolute;inset:0;background:rgba(124,45,18,.4);backdrop-filter:blur(3px);opacity:0;pointer-events:none;transition:opacity 240ms ease;z-index:56}
+  .screen.open .scrim{opacity:1;pointer-events:auto}
+  .drawer{position:absolute;left:0;right:0;bottom:0;z-index:58;background:var(--card);border:3px solid var(--border);border-bottom:none;border-radius:28px 28px 0 0;box-shadow:0 -6px 0 rgba(194,65,12,.14);padding:8px 18px 16px;transform:translateY(108%);transition:transform 460ms var(--spring);max-height:calc(100% - 88px);overflow-y:auto;scrollbar-width:none}
+  .screen.open .drawer{transform:translateY(0)}
+  .grip{display:block;width:44px;height:5px;border-radius:999px;background:rgba(124,45,18,.18);border:none;margin:2px auto 10px;padding:0}
+  .dhead{display:flex;align-items:flex-start;gap:11px;margin-top:2px}
+  .dht{flex:1;min-width:0}
+  .dht h3{font-size:19px;font-weight:600;line-height:1.15}
+  .dht p{font:700 12.5px 'Nunito';color:var(--muted-fg);margin-top:2px}
+  .dtile{flex:none;width:46px;height:46px;border-radius:15px;display:grid;place-items:center}
+  .dtile .icn{width:22px;height:22px}
+  .dtile.emerald{background:var(--ok-bg);border:2.5px solid var(--ok-border);color:var(--ok-deep);box-shadow:0 3px 0 var(--ok-border)}
+  .dtile.orange{background:#FFEDD5;border:2.5px solid #FDBA74;color:var(--primary-deep);box-shadow:0 3px 0 #FDBA74}
+  .dtile.blue{background:var(--blue-bg);border:2.5px solid var(--blue-border);color:var(--blue-text);box-shadow:0 3px 0 var(--blue-border)}
+  .xbtn,.backbtn{flex:none;width:40px;height:40px;border-radius:13px;background:#fff;border:2.5px solid var(--border);box-shadow:0 3px 0 var(--border);display:grid;place-items:center;color:var(--muted-fg-strong);transition:transform 160ms ease,box-shadow 160ms ease}
+  .xbtn:active,.backbtn:active{transform:translateY(2px);box-shadow:0 1px 0 var(--border)}
+  .xbtn .icn,.backbtn .icn{width:18px;height:18px}
+
+  /* fields */
+  .fld{margin-top:13px}
+  .fld label,.lbl{display:flex;align-items:center;gap:6px;font:800 13px 'Nunito';color:var(--muted-fg-strong);margin:0 0 6px}
+  .opt{font:700 11px 'Nunito';color:var(--muted-fg)}
+  .inp{width:100%;height:48px;border:3px solid var(--border);border-radius:16px;background:#fff;padding:0 14px;font:700 15px 'Nunito';color:var(--fg);transition:border-color 180ms ease,box-shadow 180ms ease}
+  .inp::placeholder{color:#C4B5A8;font-weight:600}
+  .inp:focus{border-color:var(--primary);outline:none;box-shadow:0 0 0 4px rgba(249,115,22,.18)}
+  .err{margin-top:12px;border:3px solid var(--red-border);background:var(--red-bg);color:var(--red-strong);border-radius:14px;padding:10px 14px;font:800 13px 'Nunito'}
+  .hint{display:flex;gap:8px;align-items:flex-start;margin-top:12px;font:700 12px 'Nunito';color:var(--muted-fg)}
+  .hint .icn{width:14px;height:14px;margin-top:2px;color:var(--accent)}
+  .sum{display:flex;align-items:center;gap:8px;margin-top:14px;font:800 12.5px 'Nunito';color:var(--muted-fg-strong);background:var(--bg);border:2.5px solid var(--border);border-radius:14px;padding:9px 12px}
+  .sum .icn{width:15px;height:15px;color:var(--ok-deep)}
+
+  /* buttons */
+  .btnrow{display:flex;gap:10px;margin-top:16px}
+  .btn{flex:1;height:48px;border-radius:16px;border:3px solid transparent;display:inline-flex;align-items:center;justify-content:center;gap:8px;font:800 15.5px 'Nunito';transition:transform 160ms ease,box-shadow 160ms ease}
+  .btn:active{transform:translateY(3px)}
+  .btn-ghost{background:#fff;color:var(--fg);border-color:var(--border);box-shadow:0 4px 0 var(--border)}
+  .btn-ghost:active{box-shadow:0 1px 0 var(--border)}
+  .btn-accent{background:var(--accent);color:#fff;box-shadow:0 4px 0 var(--accent-deep)}
+  .btn-accent:active{box-shadow:0 1px 0 var(--accent-deep)}
+  .btn[disabled]{opacity:.75;pointer-events:none}
+  .spin{width:17px;height:17px;animation:rot 800ms linear infinite}
+  @keyframes rot{to{transform:rotate(360deg)}}
+
+  /* option B — mode cards */
+  .bstep{display:grid;gap:10px;margin-top:14px}
+  .mode{width:100%;display:flex;align-items:center;gap:12px;text-align:left;background:#fff;border:3px solid var(--border);border-radius:20px;padding:14px;box-shadow:0 4px 0 var(--border);transition:transform 160ms ease,box-shadow 160ms ease}
+  .mode:active{transform:translateY(2px);box-shadow:0 2px 0 var(--border)}
+  .mode .mic{width:46px;height:46px;border-radius:15px;display:grid;place-items:center;flex:none}
+  .mode .mic .icn{width:21px;height:21px}
+  .mode.blank .mic{background:#FFEDD5;border:2.5px solid #FDBA74;color:var(--primary-deep)}
+  .mode.ai .mic{background:var(--blue-bg);border:2.5px solid var(--blue-border);color:var(--blue-text)}
+  .mode .mt{flex:1;min-width:0}
+  .mode .mt b{display:block;font:800 15px 'Nunito';color:var(--fg)}
+  .mode .mt span{display:block;font:700 12px 'Nunito';color:var(--muted-fg);margin-top:1px}
+  .mode .chev{width:16px;height:16px;color:var(--muted-fg)}
+
+  /* option C — segmented control + chips */
+  .seg{position:relative;display:grid;grid-template-columns:1fr 1fr;background:var(--muted);border:3px solid var(--border);border-radius:16px;padding:4px;margin-top:14px}
+  .seg .thumb{position:absolute;top:4px;bottom:4px;left:4px;width:calc(50% - 4px);background:#fff;border:2.5px solid var(--border);border-radius:12px;box-shadow:0 2px 0 var(--border);transition:transform 280ms var(--spring)}
+  .seg.ai .thumb{transform:translateX(100%)}
+  .seg button{position:relative;z-index:1;height:40px;border:none;background:none;font:800 14px 'Nunito';color:var(--muted-fg-strong);display:inline-flex;align-items:center;justify-content:center;gap:7px;border-radius:12px}
+  .seg button .icn{width:15px;height:15px}
+  .seg button[aria-pressed="true"]{color:var(--fg)}
+  .setup{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows 340ms ease,opacity 300ms ease}
+  .setup.on{grid-template-rows:1fr;opacity:1}
+  .setup-in{overflow:hidden;min-height:0}
+  .chips{display:flex;gap:8px;flex-wrap:wrap}
+  .chip{height:38px;padding:0 14px;border-radius:999px;background:#fff;border:2.5px solid var(--border);box-shadow:0 3px 0 var(--border);font:800 13px 'Nunito';color:var(--muted-fg-strong);transition:transform 160ms ease,box-shadow 160ms ease,background 160ms ease,border-color 160ms ease,color 160ms ease}
+  .chip:active{transform:translateY(2px);box-shadow:0 1px 0 var(--border)}
+  .chip[aria-pressed="true"]{background:#FFEDD5;border-color:#FDBA74;color:var(--primary-deep);box-shadow:0 3px 0 rgba(194,65,12,.28)}
+
+  /* toast */
+  .toast{position:absolute;left:50%;bottom:96px;transform:translate(-50%,12px);opacity:0;transition:opacity 220ms ease,transform 220ms var(--spring);z-index:62;background:#431407;color:#FFEDD5;border:2.5px solid rgba(255,237,213,.28);border-radius:999px;padding:9px 16px;font:800 12.5px 'Nunito';display:flex;gap:8px;align-items:center;pointer-events:none;white-space:nowrap}
+  .toast .icn{width:14px;height:14px;color:#6EE7B7}
+  .toast.show{opacity:1;transform:translate(-50%,0)}
+
+  /* comparison + recommendation */
+  .compare{margin-top:64px;background:#fff;border:3px solid var(--border);border-radius:26px;box-shadow:var(--clay);padding:26px 24px;overflow-x:auto}
+  .compare h2{font-size:24px;font-weight:600;margin-bottom:14px}
+  .compare table{width:100%;border-collapse:collapse;min-width:560px}
+  .compare th{font:800 12px 'Nunito';letter-spacing:.05em;text-transform:uppercase;color:var(--muted-fg-strong);text-align:left;padding:8px 12px;border-bottom:3px solid var(--border)}
+  .compare td{font:700 13.5px 'Nunito';color:var(--muted-fg-strong);padding:10px 12px;border-bottom:2px solid #FFF1E0}
+  .compare td:first-child{font-weight:800;color:var(--fg)}
+  .compare .good{color:var(--ok-deep);font-weight:800}
+  .compare .bad{color:#DC2626;font-weight:800}
+  .rec{margin-top:24px;background:var(--blue-bg);border:3px solid var(--blue-border);border-radius:22px;box-shadow:6px 6px 0 rgba(29,78,216,.14);padding:22px 24px}
+  .rec h3{display:flex;gap:10px;align-items:center;font-size:19px;color:var(--blue-text)}
+  .rec h3 .ric{flex:none;width:34px;height:34px;border-radius:11px;background:var(--accent);color:#fff;display:grid;place-items:center;box-shadow:0 3px 0 var(--accent-deep)}
+  .rec h3 .ric .icn{width:17px;height:17px}
+  .rec p{font:600 14.5px 'Nunito';color:#1E40AF;margin-top:10px}
+  .rec p b{color:#1D4ED8}
+  .common{margin-top:24px;background:#fff;border:3px solid var(--border);border-radius:26px;box-shadow:var(--clay);padding:26px 24px}
+  .common h2{font-size:24px;font-weight:600;margin-bottom:4px}
+  .common>p{color:var(--muted-fg);font-weight:600;font-size:14.5px;margin-bottom:18px;max-width:680px}
+
+  @media(prefers-reduced-motion:reduce){
+    html{scroll-behavior:auto}
+    *:not(.spin){transition-duration:.01ms!important;animation:none!important}
+  }
+</style>
+</head>
+<body>
+<div class="blob b1"></div><div class="blob b2"></div>
+
+<!-- icon sprite (Lucide paths, stroke inherits from .icn) -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  <symbol id="i-chl" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+  <symbol id="i-chr" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-pen" viewBox="0 0 24 24"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24"><rect width="8" height="4" x="8" y="2" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 12.18-9.17 4.16a2 2 0 0 1-1.66 0L2 12.18"/><path d="m22 17.18-9.17 4.16a2 2 0 0 1-1.66 0L2 17.18"/></symbol>
+  <symbol id="i-cal" viewBox="0 0 24 24"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></symbol>
+  <symbol id="i-cap" viewBox="0 0 24 24"><path d="M21.42 10.922a1 1 0 0 0-.019-1.838L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.832l8.57 3.908a2 2 0 0 0 1.66 0z"/><path d="M22 10v6"/><path d="M6 12.5V16a6 3 0 0 0 12 0v-3.5"/></symbol>
+  <symbol id="i-zap" viewBox="0 0 24 24"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></symbol>
+  <symbol id="i-scan" viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" x2="9.01" y1="9" y2="9"/><line x1="15" x2="15.01" y1="9" y2="9"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-loader" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></symbol>
+  <symbol id="i-attach" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></symbol>
+  <symbol id="i-thumbs" viewBox="0 0 24 24"><path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/></symbol>
+</svg>
+
+<div class="wrap">
+  <span class="eyebrow">InnoVision · My Quizzes (mobile)</span>
+  <h1>The <span class="hl">+</span> button opens a drawer,<br>not a page</h1>
+  <p class="lede">Right now the floating + leaves the list for a full page that collects two fields. These three options open a <b>create drawer in place</b> — name the quiz where you are, and the builder takes over from there. All three ride the existing <code>vaul</code> <code>ResponsiveModal</code> seam (drawer on mobile, dialog on desktop), reuse the clay drawer skin already shipped for Classes, and keep the <b>"Create quiz" accessible name</b> the e2e suite relies on. Every demo is live: tap the +, type, submit, use the grip.</p>
+
+  <div class="cutlist">
+    <h2>The cut list — what changes</h2>
+    <p>Same entry point, same destination, one new surface between them.</p>
+    <div class="cutgrid">
+      <div class="cut"><b>FAB navigates to /student/my-quizzes/new</b><span>FAB opens a bottom drawer on mobile; the /new route stays as the desktop + direct-link fallback.</span></div>
+      <div class="cut"><b>Full-page chrome for two fields</b><span>A ~430px drawer: title, optional description, one action — the list stays visible behind a warm scrim.</span></div>
+      <div class="cut"><b>No entry point for AI generation</b><span>Options 2 &amp; 3 surface the student AI path (material + count + difficulty) at the moment of intent.</span></div>
+      <div class="cut"><b>Keyboard vs. dock vs. safe area</b><span>Already solved upstream: vaul's <code>repositionInputs</code> + <code>handleOnly</code>, safe-area padding ships in the drawer skin.</span></div>
+    </div>
+  </div>
+
+  <!-- ════════════════ OPTION 1 ════════════════ -->
+  <section class="concept" id="o1">
+    <div class="concept-head">
+      <span class="num">1</span>
+      <h2>Just the essentials</h2>
+      <span class="tagchip">Smallest diff</span>
+    </div>
+    <p class="pitch">A 1:1 port of the current <code>/new</code> page into the Classes join-drawer pattern: icon header, two labelled fields, ghost + accent action pair. Nothing new to learn and nothing new to build — the smallest possible change that turns the FAB into a drawer.</p>
+    <div class="when">
+      <span>Ships today</span><span>Zero API changes</span><span>Matches join-class drawer</span><span>Keeps /new parity</span>
+    </div>
+    <div class="duo">
+      <div class="phone">
+        <div class="screen" id="s-a">
+          <div class="island"></div>
+          <div class="sbar"><span>9:41</span><span class="right"><span class="sig"><i></i><i></i><i></i><i></i></span><span class="batt"></span></span></div>
+          <div class="scroll">
+            <div class="mhead"><h3>My Quizzes</h3><p>1 quiz · 1 shared</p></div>
+            <ul class="qlist">
+              <li><article class="qcard">
+                <div class="qrow"><h4>Big-O Cheat Sheet Drill</h4><span class="pill">SHARED</span></div>
+                <p>My revision set for the midterm — mostly the basics.</p>
+                <div class="qmeta"><svg class="icn"><use href="#i-layers"/></svg>4 questions<span class="sep">·</span><svg class="icn"><use href="#i-cal"/></svg>Sep 8, 2026</div>
+              </article></li>
+            </ul>
+            <p class="peek">…list continues…</p>
+          </div>
+          <span class="dhint" aria-hidden="true">Live demo — tap the +</span>
+          <button class="fab" data-open aria-label="Create quiz" aria-haspopup="dialog"><svg class="icn"><use href="#i-plus"/></svg></button>
+          <nav class="dock" aria-label="Mobile navigation">
+            <a href="#o1"><svg class="icn"><use href="#i-cap"/></svg>Classes</a>
+            <a href="#o1"><svg class="icn"><use href="#i-grid"/></svg>Class Quizzes</a>
+            <a href="#o1" class="on" aria-current="page"><svg class="icn"><use href="#i-zap"/></svg>My Quizzes</a>
+            <a href="#o1"><svg class="icn"><use href="#i-scan"/></svg>Face Setup</a>
+          </nav>
+          <div class="scrim" data-close></div>
+          <div class="drawer" role="dialog" aria-modal="true" aria-labelledby="dwa-title">
+            <button class="grip" aria-label="Close drawer" data-close></button>
+            <div class="dhead">
+              <span class="dtile emerald"><svg class="icn"><use href="#i-clip"/></svg></span>
+              <div class="dht"><h3 id="dwa-title">Create quiz</h3><p>Name it — you'll add questions in the builder.</p></div>
+              <button class="xbtn" aria-label="Close" data-close><svg class="icn"><use href="#i-x"/></svg></button>
+            </div>
+            <div class="fld">
+              <label for="a-title">Title</label>
+              <input class="inp" id="a-title" maxlength="200" placeholder="e.g. Big-O Cheat Sheet Drill" autocomplete="off">
+            </div>
+            <div class="fld">
+              <label for="a-desc">Description <span class="opt">(optional)</span></label>
+              <input class="inp" id="a-desc" maxlength="500" placeholder="What is this quiz for?" autocomplete="off">
+            </div>
+            <p class="err" id="a-err" role="alert" hidden>Give your quiz a title first.</p>
+            <div class="btnrow">
+              <button class="btn btn-ghost" data-close>Cancel</button>
+              <button class="btn btn-accent" id="a-create"><svg class="icn spin" hidden><use href="#i-loader"/></svg><span>Create quiz</span></button>
+            </div>
+          </div>
+          <div class="toast" id="toast-a" role="status" aria-live="polite"><svg class="icn"><use href="#i-check"/></svg><span></span></div>
+          <div class="homebar"></div>
+        </div>
+      </div>
+      <div class="notes">
+        <div class="note">
+          <h4><svg class="icn"><use href="#i-check"/></svg>Why it works</h4>
+          <ul>
+            <li>Fastest possible path: open → name → create → land in the builder. Three actions, zero decisions.</li>
+            <li>Every state already has a home pattern: inline <code>role="alert"</code> error, spinner-on-submit, success toast.</li>
+            <li>The dock stays visible behind the scrim — you never lose your place in the list.</li>
+          </ul>
+        </div>
+        <div class="note warn">
+          <h4><svg class="icn"><use href="#i-x"/></svg>Watch out</h4>
+          <ul>
+            <li>AI generation stays invisible — students who would benefit from it never discover it exists.</li>
+            <li>It does exactly what the page does today. If the drawer is the only surface, that's a ceiling.</li>
+          </ul>
+        </div>
+        <div class="note nav">
+          <h4><svg class="icn"><use href="#i-sliders"/></svg>Build notes</h4>
+          <ul>
+            <li><code>ResponsiveModal</code> + <code>DrawerContent</code> — same seam as the Classes join drawer.</li>
+            <li>Focus moves to Title on open, returns to the FAB on close; Esc / scrim / grip all dismiss.</li>
+            <li>Create → close → <code>router.push(/student/my-quizzes/{id}/edit)</code> — unchanged POST payload.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════════ OPTION 2 ════════════════ -->
+  <section class="concept" id="o2">
+    <div class="concept-head">
+      <span class="num">2</span>
+      <h2>Pick a start</h2>
+      <span class="tagchip">Recommended</span>
+    </div>
+    <p class="pitch">Step one asks the only question that matters — <b>blank or AI?</b> — with two big clay cards. Step two is the form for that choice; AI adds question-count and difficulty chips. Same step-and-back navigation as the existing quiz action sheet, one decision per screen.</p>
+    <div class="when">
+      <span>AI discoverable</span><span>One decision per screen</span><span>Reuses sheet-state pattern</span><span>Superset of Option 1</span>
+    </div>
+    <div class="duo">
+      <div class="phone">
+        <div class="screen" id="s-b">
+          <div class="island"></div>
+          <div class="sbar"><span>9:41</span><span class="right"><span class="sig"><i></i><i></i><i></i><i></i></span><span class="batt"></span></span></div>
+          <div class="scroll">
+            <div class="mhead"><h3>My Quizzes</h3><p>1 quiz · 1 shared</p></div>
+            <ul class="qlist">
+              <li><article class="qcard">
+                <div class="qrow"><h4>Big-O Cheat Sheet Drill</h4><span class="pill">SHARED</span></div>
+                <p>My revision set for the midterm — mostly the basics.</p>
+                <div class="qmeta"><svg class="icn"><use href="#i-layers"/></svg>4 questions<span class="sep">·</span><svg class="icn"><use href="#i-cal"/></svg>Sep 8, 2026</div>
+              </article></li>
+            </ul>
+            <p class="peek">…list continues…</p>
+          </div>
+          <span class="dhint" aria-hidden="true">Live demo — tap the +</span>
+          <button class="fab" data-open aria-label="Create quiz" aria-haspopup="dialog"><svg class="icn"><use href="#i-plus"/></svg></button>
+          <nav class="dock" aria-label="Mobile navigation">
+            <a href="#o2"><svg class="icn"><use href="#i-cap"/></svg>Classes</a>
+            <a href="#o2"><svg class="icn"><use href="#i-grid"/></svg>Class Quizzes</a>
+            <a href="#o2" class="on" aria-current="page"><svg class="icn"><use href="#i-zap"/></svg>My Quizzes</a>
+            <a href="#o2"><svg class="icn"><use href="#i-scan"/></svg>Face Setup</a>
+          </nav>
+          <div class="scrim" data-close></div>
+          <div class="drawer" role="dialog" aria-modal="true" aria-labelledby="dwb-title">
+            <button class="grip" aria-label="Close drawer" data-close></button>
+            <div class="dhead">
+              <button class="backbtn" id="b-back" aria-label="Back to start options" hidden><svg class="icn"><use href="#i-chl"/></svg></button>
+              <div class="dht"><h3 id="dwb-title">Start a new quiz</h3><p id="dwb-sub">Pick how you want to begin.</p></div>
+              <button class="xbtn" aria-label="Close" data-close><svg class="icn"><use href="#i-x"/></svg></button>
+            </div>
+            <div class="bstep" id="b-step1">
+              <button class="mode blank" id="b-blank">
+                <span class="mic"><svg class="icn"><use href="#i-pen"/></svg></span>
+                <span class="mt"><b>Start blank</b><span>Add your own questions in the builder</span></span>
+                <svg class="icn chev"><use href="#i-chr"/></svg>
+              </button>
+              <button class="mode ai" id="b-ai">
+                <span class="mic"><svg class="icn"><use href="#i-spark"/></svg></span>
+                <span class="mt"><b>Generate with AI</b><span>Upload material — we draft the questions</span></span>
+                <svg class="icn chev"><use href="#i-chr"/></svg>
+              </button>
+            </div>
+            <div id="b-step2" hidden>
+              <div class="fld">
+                <label for="b-title">Title</label>
+                <input class="inp" id="b-title" maxlength="200" placeholder="e.g. Big-O Cheat Sheet Drill" autocomplete="off">
+              </div>
+              <div class="fld">
+                <label for="b-desc">Description <span class="opt">(optional)</span></label>
+                <input class="inp" id="b-desc" maxlength="500" placeholder="What is this quiz for?" autocomplete="off">
+              </div>
+              <div id="b-ai-extra" hidden>
+                <div class="fld">
+                  <span class="lbl" id="b-count-lbl">Question count</span>
+                  <div class="chips" role="group" aria-labelledby="b-count-lbl">
+                    <button class="chip" aria-pressed="false" data-value="5">5</button>
+                    <button class="chip" aria-pressed="true" data-value="10">10</button>
+                    <button class="chip" aria-pressed="false" data-value="15">15</button>
+                    <button class="chip" aria-pressed="false" data-value="20">20</button>
+                  </div>
+                </div>
+                <div class="fld">
+                  <span class="lbl" id="b-diff-lbl">Difficulty</span>
+                  <div class="chips" role="group" aria-labelledby="b-diff-lbl">
+                    <button class="chip" aria-pressed="true" data-value="Mixed">Mixed</button>
+                    <button class="chip" aria-pressed="false" data-value="Easy">Easy</button>
+                    <button class="chip" aria-pressed="false" data-value="Medium">Medium</button>
+                    <button class="chip" aria-pressed="false" data-value="Hard">Hard</button>
+                  </div>
+                </div>
+                <p class="hint"><svg class="icn"><use href="#i-attach"/></svg><span>You'll attach your material in the builder — count &amp; difficulty carry over.</span></p>
+              </div>
+              <p class="err" id="b-err" role="alert" hidden>Give your quiz a title first.</p>
+              <div class="btnrow">
+                <button class="btn btn-ghost" data-close>Cancel</button>
+                <button class="btn btn-accent" id="b-create"><svg class="icn spin" hidden><use href="#i-loader"/></svg><span>Create quiz</span></button>
+              </div>
+            </div>
+          </div>
+          <div class="toast" id="toast-b" role="status" aria-live="polite"><svg class="icn"><use href="#i-check"/></svg><span></span></div>
+          <div class="homebar"></div>
+        </div>
+      </div>
+      <div class="notes">
+        <div class="note">
+          <h4><svg class="icn"><use href="#i-check"/></svg>Why it works</h4>
+          <ul>
+            <li>Gives the student AI contract a front door <b>without</b> taxing the common blank path — the blank step <i>is</i> Option 1's drawer.</li>
+            <li>Mode state mirrors the existing menu → sub-state action sheet (back chevron included) — a pattern already proven in this page.</li>
+            <li>One decision per screen keeps every state short and scannable on a 375px display.</li>
+          </ul>
+        </div>
+        <div class="note warn">
+          <h4><svg class="icn"><use href="#i-x"/></svg>Watch out</h4>
+          <ul>
+            <li>One extra tap for the common blank path — mitigate by remembering the last-used mode.</li>
+            <li>~10 new strings across two steps (next-intl: <code>myQuizzes.createDrawer.*</code>).</li>
+          </ul>
+        </div>
+        <div class="note nav">
+          <h4><svg class="icn"><use href="#i-sliders"/></svg>Build notes</h4>
+          <ul>
+            <li>State as a union like the action sheet: <code>"pick" | "blank" | "ai" | null</code>.</li>
+            <li>Chips ride to the builder as query params (<code>?ai=1&amp;count=10&amp;difficulty=mixed</code>) — no schema change; material attach stays in the builder where there's room.</li>
+            <li>Count bounds match the existing student generation contract (3–30; presets 5/10/15/20).</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════════ OPTION 3 ════════════════ -->
+  <section class="concept" id="o3">
+    <div class="concept-head">
+      <span class="num">3</span>
+      <h2>One-screen studio</h2>
+      <span class="tagchip">Fewest taps</span>
+    </div>
+    <p class="pitch">One drawer, no steps: a segmented <b>Blank / AI</b> switch swaps the setup row in place — the drawer grows smoothly when AI is on. A live summary line states exactly what will happen before you tap. The power mode.</p>
+    <div class="when">
+      <span>Fewest taps</span><span>Live summary</span><span>Compact</span><span>Needs careful a11y</span>
+    </div>
+    <div class="duo">
+      <div class="phone">
+        <div class="screen" id="s-c">
+          <div class="island"></div>
+          <div class="sbar"><span>9:41</span><span class="right"><span class="sig"><i></i><i></i><i></i><i></i></span><span class="batt"></span></span></div>
+          <div class="scroll">
+            <div class="mhead"><h3>My Quizzes</h3><p>1 quiz · 1 shared</p></div>
+            <ul class="qlist">
+              <li><article class="qcard">
+                <div class="qrow"><h4>Big-O Cheat Sheet Drill</h4><span class="pill">SHARED</span></div>
+                <p>My revision set for the midterm — mostly the basics.</p>
+                <div class="qmeta"><svg class="icn"><use href="#i-layers"/></svg>4 questions<span class="sep">·</span><svg class="icn"><use href="#i-cal"/></svg>Sep 8, 2026</div>
+              </article></li>
+            </ul>
+            <p class="peek">…list continues…</p>
+          </div>
+          <span class="dhint" aria-hidden="true">Live demo — tap the +</span>
+          <button class="fab" data-open aria-label="Create quiz" aria-haspopup="dialog"><svg class="icn"><use href="#i-plus"/></svg></button>
+          <nav class="dock" aria-label="Mobile navigation">
+            <a href="#o3"><svg class="icn"><use href="#i-cap"/></svg>Classes</a>
+            <a href="#o3"><svg class="icn"><use href="#i-grid"/></svg>Class Quizzes</a>
+            <a href="#o3" class="on" aria-current="page"><svg class="icn"><use href="#i-zap"/></svg>My Quizzes</a>
+            <a href="#o3"><svg class="icn"><use href="#i-scan"/></svg>Face Setup</a>
+          </nav>
+          <div class="scrim" data-close></div>
+          <div class="drawer" role="dialog" aria-modal="true" aria-labelledby="dwc-title">
+            <button class="grip" aria-label="Close drawer" data-close></button>
+            <div class="dhead">
+              <span class="dtile orange"><svg class="icn"><use href="#i-sliders"/></svg></span>
+              <div class="dht"><h3 id="dwc-title">New quiz</h3><p>One screen — pick a mode, name it, go.</p></div>
+              <button class="xbtn" aria-label="Close" data-close><svg class="icn"><use href="#i-x"/></svg></button>
+            </div>
+            <div class="seg" id="c-seg" role="group" aria-label="Quiz mode">
+              <span class="thumb" aria-hidden="true"></span>
+              <button aria-pressed="true" data-mode="blank"><svg class="icn"><use href="#i-pen"/></svg>Blank</button>
+              <button aria-pressed="false" data-mode="ai"><svg class="icn"><use href="#i-spark"/></svg>AI</button>
+            </div>
+            <div class="fld">
+              <label for="c-title">Title</label>
+              <input class="inp" id="c-title" maxlength="200" placeholder="e.g. Big-O Cheat Sheet Drill" autocomplete="off">
+            </div>
+            <div class="fld">
+              <label for="c-desc">Description <span class="opt">(optional)</span></label>
+              <input class="inp" id="c-desc" maxlength="500" placeholder="What is this quiz for?" autocomplete="off">
+            </div>
+            <div class="setup" id="c-setup">
+              <div class="setup-in">
+                <div class="fld">
+                  <span class="lbl" id="c-count-lbl">Question count</span>
+                  <div class="chips" role="group" aria-labelledby="c-count-lbl" data-effects="c">
+                    <button class="chip" aria-pressed="false" data-value="5">5</button>
+                    <button class="chip" aria-pressed="true" data-value="10">10</button>
+                    <button class="chip" aria-pressed="false" data-value="15">15</button>
+                    <button class="chip" aria-pressed="false" data-value="20">20</button>
+                  </div>
+                </div>
+                <div class="fld">
+                  <span class="lbl" id="c-diff-lbl">Difficulty</span>
+                  <div class="chips" role="group" aria-labelledby="c-diff-lbl" data-effects="c">
+                    <button class="chip" aria-pressed="true" data-value="Mixed">Mixed</button>
+                    <button class="chip" aria-pressed="false" data-value="Easy">Easy</button>
+                    <button class="chip" aria-pressed="false" data-value="Medium">Medium</button>
+                    <button class="chip" aria-pressed="false" data-value="Hard">Hard</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <p class="sum" id="c-sum" aria-live="polite"><svg class="icn"><use href="#i-check"/></svg><span>Blank quiz — you add questions in the builder.</span></p>
+            <p class="err" id="c-err" role="alert" hidden>Give your quiz a title first.</p>
+            <div class="btnrow">
+              <button class="btn btn-ghost" data-close>Cancel</button>
+              <button class="btn btn-accent" id="c-create"><svg class="icn spin" hidden><use href="#i-loader"/></svg><span>Create quiz</span></button>
+            </div>
+          </div>
+          <div class="toast" id="toast-c" role="status" aria-live="polite"><svg class="icn"><use href="#i-check"/></svg><span></span></div>
+          <div class="homebar"></div>
+        </div>
+      </div>
+      <div class="notes">
+        <div class="note">
+          <h4><svg class="icn"><use href="#i-check"/></svg>Why it works</h4>
+          <ul>
+            <li>Three actions to a fully-specified AI quiz — the fewest of any option; no step transitions to manage.</li>
+            <li>The <code>aria-live</code> summary doubles as pre-submit confirmation: "Will generate 10 questions · Mixed".</li>
+            <li>The height animation keeps it feeling light — the drawer grows only when AI needs the room.</li>
+          </ul>
+        </div>
+        <div class="note warn">
+          <h4><svg class="icn"><use href="#i-x"/></svg>Watch out</h4>
+          <ul>
+            <li>The segmented switch is the one element shadcn doesn't drop pre-skinned here — it's a hand-rolled pure-styling composition, so it needs arrow-key support and <code>aria-pressed</code> discipline.</li>
+            <li>Busiest of the three on small screens; every element must earn its place.</li>
+          </ul>
+        </div>
+        <div class="note nav">
+          <h4><svg class="icn"><use href="#i-sliders"/></svg>Build notes</h4>
+          <ul>
+            <li>Collapse via CSS grid <code>grid-template-rows: 0fr → 1fr</code> — no height measurement, no jank.</li>
+            <li>CTA label swaps with the mode: "Create quiz" ↔ "Create &amp; set up AI".</li>
+            <li>Same chip → query-param handoff as Option 2.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════════ COMPARISON ════════════════ -->
+  <div class="compare">
+    <h2>Side by side</h2>
+    <table>
+      <thead><tr><th></th><th>1 · Essentials</th><th>2 · Pick a start</th><th>3 · Studio</th></tr></thead>
+      <tbody>
+        <tr><td>Actions to a blank quiz</td><td class="good">3</td><td>4</td><td class="good">3</td></tr>
+        <tr><td>Actions to AI setup</td><td class="bad">—</td><td class="good">4</td><td class="good">3</td></tr>
+        <tr><td>AI entry point</td><td class="bad">hidden</td><td class="good">explicit cards</td><td class="good">one tap away</td></tr>
+        <tr><td>Decisions visible at once</td><td class="good">1</td><td class="good">1 per step</td><td>2 (mode + fields)</td></tr>
+        <tr><td>New API work</td><td class="good">none</td><td class="good">none *</td><td class="good">none *</td></tr>
+        <tr><td>New strings (next-intl)</td><td class="good">~3</td><td>~10</td><td>~12</td></tr>
+        <tr><td>Implementation risk</td><td class="good">lowest</td><td class="good">low</td><td>medium (segment control)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="rec">
+    <h3><span class="ric"><svg class="icn"><use href="#i-thumbs"/></svg></span>Recommendation — Option 2, phased</h3>
+    <p><b>Option 2</b> is the only one that gives AI generation a front door without taxing the common blank path — and its blank step <b>is</b> Option 1, so you can phase the work: land the drawer with the blank card first, then switch on the AI card when the builder accepts prefill params. If you want the absolute smallest diff today, ship Option 1 — nothing is lost, because Option 2 is a strict superset. Pick Option 3 only if the team is comfortable owning a hand-rolled segmented control.</p>
+  </div>
+
+  <div class="common">
+    <h2>Shared build contract — all three options</h2>
+    <p>Whatever the direction, these don't change.</p>
+    <div class="cutgrid">
+      <div class="cut"><b>Surface</b><span><code>ResponsiveModal</code>: vaul drawer on mobile (<code>handleOnly</code>, <code>repositionInputs</code>), centered dialog ≥640px. <code>/new</code> stays for desktop + direct links.</span></div>
+      <div class="cut"><b>A11y contract</b><span>FAB keeps <code>aria-label="Create quiz"</code> (e2e name); drawer is a labelled <code>role="dialog"</code>; error <code>role="alert"</code>; focus to first field on open, back to FAB on close.</span></div>
+      <div class="cut"><b>Clay skin</b><span><code>rounded-t-[28px]</code>, <code>border-t/x-[3px]</code>, <code>shadow-[var(--shadow-clay-up)]</code>, warm scrim, <code>pb-[max(1rem,var(--safe-bottom))]</code>; inputs <code>h-12 rounded-[16px]</code>; CTA <code>variant="accent"</code> (blue = drawer-CTA convention from Classes).</span></div>
+      <div class="cut"><b>States &amp; motion</b><span>Submit shows spinner → success toast → close → push to builder; spring entrance <code>cubic-bezier(.34,1.56,.64,1)</code>; all copy via <code>myQuizzes.createDrawer.*</code>; <code>prefers-reduced-motion</code> respected.</span></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var SCREENS = ["a","b","c"];
+
+  function screenOf(el){ return el.closest(".screen"); }
+
+  function setOpen(sc, open){
+    sc.classList.toggle("open", open);
+    var dr = sc.querySelector(".drawer");
+    dr.inert = !open;
+    if(open){
+      var first = sc.querySelector(".drawer .mode") || sc.querySelector(".drawer input");
+      setTimeout(function(){ try{ first.focus({preventScroll:true}); }catch(e){} }, 430);
+    }
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll("[data-open]"), function(btn){
+    btn.addEventListener("click", function(){ setOpen(screenOf(btn), true); });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-close]"), function(el){
+    el.addEventListener("click", function(){ setOpen(screenOf(el), false); });
+  });
+  document.addEventListener("keydown", function(e){
+    if(e.key !== "Escape") return;
+    SCREENS.forEach(function(id){
+      var sc = document.getElementById("s-" + id);
+      if(sc.classList.contains("open")) setOpen(sc, false);
+    });
+  });
+
+  function toast(key, msg){
+    var t = document.getElementById("toast-" + key);
+    t.querySelector("span").textContent = msg;
+    t.classList.add("show");
+    clearTimeout(t._h);
+    t._h = setTimeout(function(){ t.classList.remove("show"); }, 2100);
+  }
+
+  function wireCreate(key){
+    var btn = document.getElementById(key + "-create");
+    if(!btn) return;
+    var label = btn.querySelector("span");
+    var spin = btn.querySelector(".spin");
+    var err = document.getElementById(key + "-err");
+    var title = document.getElementById(key + "-title");
+    btn.addEventListener("click", function(){
+      if(btn.disabled) return;
+      if(!title.value.trim()){
+        if(err) err.hidden = false;
+        title.focus();
+        return;
+      }
+      if(err) err.hidden = true;
+      btn.disabled = true;
+      btn.setAttribute("aria-busy", "true");
+      var orig = label.textContent;
+      label.textContent = "Creating…";
+      if(spin) spin.hidden = false;
+      setTimeout(function(){
+        if(spin) spin.hidden = true;
+        label.textContent = orig;
+        btn.disabled = false;
+        btn.removeAttribute("aria-busy");
+        setOpen(document.getElementById("s-" + key), false);
+        toast(key, "Quiz created — opening the builder");
+        title.value = "";
+      }, 950);
+    });
+  }
+
+  // chips: single-select groups (C groups update the summary via data-effects)
+  Array.prototype.forEach.call(document.querySelectorAll(".chips"), function(group){
+    group.addEventListener("click", function(e){
+      var chip = e.target.closest(".chip");
+      if(!chip) return;
+      Array.prototype.forEach.call(group.querySelectorAll(".chip"), function(c){
+        c.setAttribute("aria-pressed", c === chip ? "true" : "false");
+      });
+      if(group.getAttribute("data-effects") === "c") cSummary();
+    });
+  });
+  function chipVal(groupId, fallback){
+    var g = document.getElementById(groupId);
+    var on = g && g.querySelector('.chip[aria-pressed="true"]');
+    return on ? on.getAttribute("data-value") : fallback;
+  }
+
+  // ── Option B: step machine ──
+  var bStep1 = document.getElementById("b-step1");
+  var bStep2 = document.getElementById("b-step2");
+  var bExtra = document.getElementById("b-ai-extra");
+  var bBack  = document.getElementById("b-back");
+  var bTitle = document.getElementById("dwb-title");
+  var bSub   = document.getElementById("dwb-sub");
+  var bLbl   = document.querySelector("#b-create span");
+
+  function bGo(mode){
+    bStep1.hidden = true;
+    bStep2.hidden = false;
+    bBack.hidden = false;
+    bExtra.hidden = mode !== "ai";
+    bTitle.textContent = mode === "ai" ? "Generate with AI" : "Start blank";
+    bSub.textContent = mode === "ai"
+      ? "Count & difficulty now — material in the builder."
+      : "Name it — you'll add questions in the builder.";
+    bLbl.textContent = mode === "ai" ? "Create & open AI studio" : "Create quiz";
+    setTimeout(function(){ try{ document.getElementById("b-title").focus({preventScroll:true}); }catch(e){} }, 60);
+  }
+  document.getElementById("b-blank").addEventListener("click", function(){ bGo("blank"); });
+  document.getElementById("b-ai").addEventListener("click", function(){ bGo("ai"); });
+  bBack.addEventListener("click", function(){
+    bStep2.hidden = true;
+    bStep1.hidden = false;
+    bBack.hidden = true;
+    bTitle.textContent = "Start a new quiz";
+    bSub.textContent = "Pick how you want to begin.";
+    setTimeout(function(){ try{ document.getElementById("b-blank").focus({preventScroll:true}); }catch(e){} }, 60);
+  });
+
+  // ── Option C: segment + live summary ──
+  var seg = document.getElementById("c-seg");
+  var setup = document.getElementById("c-setup");
+  var cSum = document.getElementById("c-sum");
+  var cLbl = document.querySelector("#c-create span");
+  var cMode = "blank";
+
+  function cSummary(){
+    cSum.querySelector("span").textContent = cMode === "blank"
+      ? "Blank quiz — you add questions in the builder."
+      : "Will generate " + chipVal("c-count","10") + " questions · " + chipVal("c-diff","Mixed") + " · material attached in the builder.";
+  }
+  seg.addEventListener("click", function(e){
+    var btn = e.target.closest("button[data-mode]");
+    if(!btn) return;
+    cMode = btn.getAttribute("data-mode");
+    seg.classList.toggle("ai", cMode === "ai");
+    Array.prototype.forEach.call(seg.querySelectorAll("button"), function(b){
+      b.setAttribute("aria-pressed", b === btn ? "true" : "false");
+    });
+    setup.classList.toggle("on", cMode === "ai");
+    cLbl.textContent = cMode === "ai" ? "Create & set up AI" : "Create quiz";
+    cSummary();
+  });
+
+  wireCreate("a"); wireCreate("b"); wireCreate("c");
+
+  // drawers start inert (closed)
+  SCREENS.forEach(function(id){
+    document.querySelector("#s-" + id + " .drawer").inert = true;
+  });
+})();
+</script>
+</body>
+</html>

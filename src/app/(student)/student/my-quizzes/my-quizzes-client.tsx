@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/card";
 import {
   ResponsiveModal,
+  ResponsiveModalClose,
   ResponsiveModalContent,
   ResponsiveModalDescription,
   ResponsiveModalFooter,
@@ -23,6 +24,7 @@ import {
   ResponsiveModalTitle,
 } from "@/components/ui/responsive-modal";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   CalendarDays,
   ClipboardList,
@@ -71,6 +73,7 @@ export function MyQuizzesClient({ quizzes }: { quizzes: MyQuiz[] }) {
   const locale = useLocale();
   const t = useTranslations("myQuizzes");
   const tCommon = useTranslations("common");
+  const tEditor = useTranslations("quizEditor");
 
   const lock = useRef(false);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -78,6 +81,49 @@ export function MyQuizzesClient({ quizzes }: { quizzes: MyQuiz[] }) {
   const [shareTarget, setShareTarget] = useState<MyQuiz | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<MyQuiz | null>(null);
   const [regenArmed, setRegenArmed] = useState(false);
+
+  // ── Create-quiz drawer (mobile) ──
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createTitle, setCreateTitle] = useState("");
+  const [createDesc, setCreateDesc] = useState("");
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const createLock = useRef(false);
+  const createTitleRef = useRef<HTMLInputElement>(null);
+
+  /** Shared by the mobile drawer and the desktop /new page (same POST contract). */
+  async function createQuiz() {
+    if (createLock.current) return;
+    if (!createTitle.trim()) {
+      setCreateError(tEditor("needTitle"));
+      createTitleRef.current?.focus();
+      return;
+    }
+    setCreateError(null);
+    createLock.current = true;
+    setCreating(true);
+    try {
+      const res = await fetch("/api/student-quizzes", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          title: createTitle,
+          description: createDesc.trim() ? createDesc.trim() : null,
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { quiz?: { id?: string }; message?: string };
+      if (res.ok && body.quiz?.id) {
+        router.push(`/student/my-quizzes/${body.quiz.id}/edit`);
+        return;
+      }
+      setCreateError(body.message ?? tCommon("errorGeneric"));
+    } catch {
+      setCreateError(tCommon("errorGeneric"));
+    } finally {
+      createLock.current = false;
+      setCreating(false);
+    }
+  }
 
   // ── Mobile-only surface state (desktop dialogs below stay untouched) ──
   const [isMobile, setIsMobile] = useState(false);
@@ -320,11 +366,18 @@ export function MyQuizzesClient({ quizzes }: { quizzes: MyQuiz[] }) {
           </ul>
         )}
 
-        {/* Floating create — hides on scroll-down so it never covers a card */}
+        {/* Floating create — hides on scroll-down so it never covers a card.
+            Keeps the /new href + "Create quiz" link name (e2e contract) but
+            intercepts the tap to open the create drawer in place. */}
         {quizzes.length > 0 && (
           <Link
             href="/student/my-quizzes/new"
             aria-label={t("createFabA11y")}
+            onClick={(e) => {
+              e.preventDefault();
+              setCreateError(null);
+              setCreateOpen(true);
+            }}
             className={cn(
               "fixed bottom-[calc(104px+var(--safe-bottom))] right-3 z-30 grid size-14 cursor-pointer place-items-center rounded-[19px] border-[3px] border-transparent bg-primary text-[#fff7ed]",
               "shadow-[0_5px_0_var(--primary-deep)]",
@@ -337,6 +390,95 @@ export function MyQuizzesClient({ quizzes }: { quizzes: MyQuiz[] }) {
             <Plus className="h-6 w-6" aria-hidden />
           </Link>
         )}
+
+        {/* ── Create-quiz drawer (mirrors the Classes join drawer) ── */}
+        <ResponsiveModal
+          open={createOpen}
+          onOpenChange={(o) => {
+            setCreateOpen(o);
+            if (!o) setCreateError(null);
+          }}
+        >
+          {/* Actions inline (not the drawer-only footer prop): the submit
+              button must survive the desktop dialog surface too. */}
+          <ResponsiveModalContent className="sm:max-w-sm">
+            <ResponsiveModalHeader className="flex-row items-center gap-3.5 pb-5 text-left">
+              <div className="grid size-12 shrink-0 place-items-center rounded-[15px] bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
+                <ClipboardList className="h-6 w-6" aria-hidden />
+              </div>
+              <div className="min-w-0">
+                <ResponsiveModalTitle>{t("createCta")}</ResponsiveModalTitle>
+                <ResponsiveModalDescription>
+                  {t("createDrawerSubtitle")}
+                </ResponsiveModalDescription>
+              </div>
+            </ResponsiveModalHeader>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void createQuiz();
+              }}
+              className="space-y-6"
+            >
+              <div className="space-y-2">
+                <Label htmlFor="create-title">{tEditor("titleLabel")}</Label>
+                <Input
+                  id="create-title"
+                  ref={createTitleRef}
+                  value={createTitle}
+                  onChange={(e) => setCreateTitle(e.target.value)}
+                  placeholder={tEditor("titlePlaceholder")}
+                  maxLength={200}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="create-desc">{tEditor("descriptionLabel")}</Label>
+                <Input
+                  id="create-desc"
+                  value={createDesc}
+                  onChange={(e) => setCreateDesc(e.target.value)}
+                  placeholder={tEditor("descriptionPlaceholder")}
+                  maxLength={500}
+                />
+              </div>
+
+              <div aria-live="polite">
+                {createError && (
+                  <p
+                    className="rounded-xl border-[3px] border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm font-bold text-destructive"
+                    role="alert"
+                  >
+                    {createError}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex justify-center gap-3 pt-2">
+                <ResponsiveModalClose asChild>
+                  <Button type="button" variant="outline" className="h-12 flex-1 rounded-[16px] text-base">
+                    {tCommon("cancel")}
+                  </Button>
+                </ResponsiveModalClose>
+                <Button
+                  type="submit"
+                  variant="accent"
+                  className="h-12 flex-1 rounded-[16px] text-base"
+                  disabled={creating}
+                >
+                  {creating ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+                      {tCommon("submitting")}
+                    </>
+                  ) : (
+                    tEditor("createBtn")
+                  )}
+                </Button>
+              </div>
+            </form>
+          </ResponsiveModalContent>
+        </ResponsiveModal>
 
         {/* ── Mobile action drawer (menu → share/delete) ── */}
         <ResponsiveModal
@@ -370,37 +512,36 @@ export function MyQuizzesClient({ quizzes }: { quizzes: MyQuiz[] }) {
             </ResponsiveModalHeader>
 
             {sheet === "menu" && sheetTarget && (
-              <div className="divide-y-[2px] divide-border/60 rounded-2xl border-[2.5px] border-border bg-background pb-1 pt-1 shadow-[0_3px_0_var(--border)]">
-                <button
-                  type="button"
+              <div className="grid gap-2.5">
+                <Button
+                  variant="outline"
+                  className="w-full justify-start"
                   onClick={() => {
                     router.push(`/student/my-quizzes/${sheetTarget.id}/edit`);
                     setSheet(null);
                   }}
-                  className="flex h-12 w-full cursor-pointer items-center gap-3 px-4 text-left transition-colors duration-150 active:bg-muted"
                 >
-                  <Pencil className="size-5 shrink-0 text-primary-deep dark:text-primary" aria-hidden />
-                  <span className="text-[15px] font-extrabold text-foreground">{t("editBtn")}</span>
-                </button>
-                <button
-                  type="button"
+                  <Pencil className="size-5 text-primary-deep dark:text-primary" aria-hidden />{" "}
+                  {t("editBtn")}
+                </Button>
+                <Button
+                  variant="outline"
+                  className="w-full justify-start"
                   onClick={() => {
                     if (!sheetTarget.share_code) void shareAction(sheetTarget, "share");
                     setSheet("share");
                   }}
-                  className="flex h-12 w-full cursor-pointer items-center gap-3 px-4 text-left transition-colors duration-150 active:bg-muted"
                 >
-                  <Share2 className="size-5 shrink-0 text-primary-deep dark:text-primary" aria-hidden />
-                  <span className="text-[15px] font-extrabold text-foreground">{t("shareBtn")}</span>
-                </button>
-                <button
-                  type="button"
+                  <Share2 className="size-5 text-primary-deep dark:text-primary" aria-hidden />{" "}
+                  {t("shareBtn")}
+                </Button>
+                <Button
+                  variant="destructive"
+                  className="w-full justify-start"
                   onClick={() => setSheet("delete")}
-                  className="flex h-12 w-full cursor-pointer items-center gap-3 px-4 text-left transition-colors duration-150 active:bg-destructive/10"
                 >
-                  <Trash2 className="size-5 shrink-0 text-destructive" aria-hidden />
-                  <span className="text-[15px] font-extrabold text-destructive">{t("deleteBtn")}</span>
-                </button>
+                  <Trash2 className="size-5" aria-hidden /> {t("deleteBtn")}
+                </Button>
               </div>
             )}
 
