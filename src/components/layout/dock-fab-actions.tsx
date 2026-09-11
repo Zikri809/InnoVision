@@ -133,14 +133,14 @@ export function CreateQuizAction({
   /** Called with the class page URL to navigate to. */
   onPick: (url: string) => void;
 }) {
-  const t = useTranslations("nav");
+  const tNav = useTranslations("nav");
 
   const [classId, setClassId] = useState("");
 
   if (classes.length === 0) {
     return (
       <p className="rounded-xl border-[3px] border-dashed border-border bg-card/60 px-3 py-3 text-center text-xs font-bold text-muted-foreground">
-        {t("createNewQuizHint")}
+        {tNav("createNewQuizHint")}
       </p>
     );
   }
@@ -149,7 +149,7 @@ export function CreateQuizAction({
     <div className="space-y-3">
       <fieldset className="space-y-1.5">
         <legend className="text-sm font-bold text-foreground">
-          {t("createNewQuiz")}
+          {tNav("createNewQuiz")}
         </legend>
         <div className="max-h-44 space-y-1.5 overflow-y-auto pr-0.5">
           {classes.map((c) => (
@@ -184,7 +184,7 @@ export function CreateQuizAction({
         onClick={() => onPick(`/lecturer/classes/${classId}?newQuiz=1`)}
       >
         <Plus className="mr-1 h-4 w-4" aria-hidden />
-        {t("createNewQuiz")}
+        {tNav("createNewQuiz")}
       </Button>
     </div>
   );

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { useTranslations } from "next-intl";
-import { BotAvatar } from "@/components/bot/bot-avatar";
+import { GenerationSphere } from "@/components/bot/generation-sphere";
 import { Button } from "@/components/ui/button";
 import {
   useGenerationStream,
@@ -382,11 +382,18 @@ export function GenerationProgress({
         data-testid="generation-status-strip"
         className="flex flex-col items-center px-2 pb-1 pt-2 text-center"
       >
-        <BotAvatar state={botState} size={96} className="shrink-0" />
-        {/* Clay pedestal — the bot "stands" here while it works. */}
+        <GenerationSphere
+          state={botState}
+          size={96}
+          className="relative z-10 shrink-0"
+        />
+        {/* Clay pedestal — pulled up under the sphere so its bottom edge
+            sinks ~4px into the bar (seated exactly on it per the reference
+            pic); the SVG paints ON TOP so the orbit ring's lower arc and
+            the cream halo cross the bar visibly, as in the pic. */}
         <div
           aria-hidden="true"
-          className="mt-1 h-4 w-32 rounded-full border-[3px] border-border bg-orange-200/50 shadow-[0_4px_0_#FED7AA] dark:bg-orange-500/15"
+          className="relative -mt-[19px] h-4 w-32 rounded-full border-[3px] border-border bg-orange-200/50 shadow-[0_4px_0_#FED7AA] dark:bg-orange-500/15"
         />
 
         {/* Stage rail — the plan's TRUE stages (search chip only in web
