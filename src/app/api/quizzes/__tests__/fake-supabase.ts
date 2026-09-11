@@ -1286,7 +1286,7 @@ export class FakeSupabase {
       (s) => s.id === sessionId && s.student_id === studentId,
     );
     if (!session) return { data: { error: "not_owner" }, error: null };
-    if (reason !== "hand_loss" && reason !== "focus_lost") {
+    if (reason !== "hand_loss" && reason !== "focus_lost" && reason !== "fullscreen_exit") {
       return { data: { error: "invalid_reason" }, error: null };
     }
     if (session.mode !== "assessment") return { data: { error: "not_assessment" }, error: null };

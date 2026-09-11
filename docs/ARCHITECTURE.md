@@ -536,6 +536,8 @@ envelope + first question via `student_session_view` and hands off to
 | face fail streak | 3 fails in last 5 checks | `paused` → recover flow (blink liveness + re-verify) |
 | focus loss | visibility/blur advisories, debounced | 3rd strike auto-flags session |
 | hand loss | MediaPipe loses both hands mid-hold | transient `hand_loss` pause (auto-resumes) |
+| fullscreen exit | fullscreenchange exit while armed (integrity hardening) | plain `fullscreen_exit` pause (no counter increment — deferred one release; blur/fullscreen same-gesture duplicates dedupe via a shared 2s stamp) |
+| verify silence | pg_cron `flag_verify_silent_sessions` (migration 0042): active assessment, last face check >300s old, an answer within 90s, no reported camera outage | auto-flags (`auto_flag_verify_silence` audit) — closes the "client stopped sending verifies" bypass; honest clients verify every 30–45s while answering |
 
 Recovery paths out of `paused`/`flagged`:
 
@@ -557,6 +559,38 @@ timeline (`lecturer_audit_view`).
 **Submit**: `POST /api/sessions/[id]/submit` → RPC `submit_session`
 (row-lock → compute score from `session_answers.is_correct` count → mark
 completed → maybe auto-reveal — see 7.9).
+
+### 7.5b Client integrity hardening (deterrence tier)
+
+Assessment-mode-only, env-kill-switchable (`NEXT_PUBLIC_INTEGRITY_HARDENING_OFF=1`,
+`src/lib/integrity/hardening-gate.ts` — the Playwright harness sets it so the
+main e2e suite runs hardening-free; the opt-in `e51` spec runs against a
+hardening-ON build). Deterrence, NOT enforcement — the server secrecy layer
+(the key never reaches the client) is the real control, and a devtools user
+bypasses all of it:
+
+- **Copy prevention** (`question-card.tsx`): `user-select:none` +
+  `onCopy`/`onCut`/`onContextMenu` preventDefault on the question section.
+  The `selectstart` guard was deliberately cut (a11y friction, no marginal
+  deterrence).
+- **Fullscreen lockdown** (`use-fullscreen-guard.ts`): entered at the gate
+  Begin click (gesture-scoped — a later `ready` transition has no transient
+  activation), exited deliberately on terminal phases; any exit while armed +
+  active POSTs `pause(reason:'fullscreen_exit')` (plain pause). Blur and
+  fullscreen-exit fire from the same app switch — a shared 2s pause stamp
+  (`sharedPauseStampRef`) dedupes them so the focus counter and the incident
+  recorder each act once. No auto re-request on Esc (the gesture is
+  consumed); Recover re-enters. iOS Safari no-ops (no
+  `documentElement.requestFullscreen`).
+- **Server-recorded second-face advisory** (`second-face.ts` + verify route):
+  the sidecar returns ALL faces per frame; the route now reports `second_face`
+  when ≥2 of the submitted frames carry an extra face (det ≥0.6, ≥15% of the
+  primary's area, center ≥1 span displaced). The client's own attention
+  monitor is suppressible by a tampered browser; the frames the server judged
+  are not. Review-only (advisory chip), 55s-throttled.
+
+Also fixed in 0042: `prune_expired_incident_clips()` existed since 0021 but
+was never scheduled — now daily pg_cron (`innovision-incident-prune`).
 
 ### 7.6 Face verification protocol (the deepest part)
 

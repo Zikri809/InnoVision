@@ -243,16 +243,20 @@ export function FaceVerifier({
             <p className="font-heading text-xl font-semibold">
               {status === "recovering"
                 ? t("recoveringTitle")
-                : pausedReason === "focus_lost"
-                  ? t("focusLostTitle")
-                  : t("pausedTitle")}
+                : pausedReason === "fullscreen_exit"
+                  ? t("fullscreenExitTitle")
+                  : pausedReason === "focus_lost"
+                    ? t("focusLostTitle")
+                    : t("pausedTitle")}
             </p>
             <p className="mx-auto mt-2 max-w-xs text-sm font-semibold text-muted-foreground">
               {status === "recovering"
                 ? t("recoveringBody")
-                : pausedReason === "focus_lost"
-                  ? t("focusLostBody")
-                  : t("pausedBody")}
+                : pausedReason === "fullscreen_exit"
+                  ? t("fullscreenExitBody")
+                  : pausedReason === "focus_lost"
+                    ? t("focusLostBody")
+                    : t("pausedBody")}
             </p>
             {/* Live self-view (plan W3): reposition with real feedback. The
                 stream comes from the SAME shared MediaStream as the tracker. */}
@@ -261,9 +265,10 @@ export function FaceVerifier({
             </div>
             {status === "paused" && (
               <Button size="lg" className="mt-6 w-full sm:w-auto" onClick={onRecover}>
-                {pausedReason === "focus_lost" ? t("focusLostBtn") : t("recoverBtn")}
+                {pausedReason === "face" ? t("recoverBtn") : t("focusLostBtn")}
               </Button>
             )}
+
           </div>
         </BlockingOverlay>
       )}

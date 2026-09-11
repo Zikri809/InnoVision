@@ -134,6 +134,18 @@ export const LIGHTING_RETRY_DELAY_MS = 4000;
 export const FOCUS_BLUR_DEBOUNCE_MS = 900;
 
 /**
+ * Verify-silence backstop (integrity hardening, migration 0042): a verify
+ * POST that fails at the TRANSPORT layer (fetch throw — e.g. proxies that
+ * drop the large multi-frame bodies while tiny answer POSTs sail through)
+ * currently retries silently forever. After this many consecutive transport
+ * failures the pipeline degrades to `unavailable` + reportUnavailableOnce(),
+ * routing the session into the self-exempting outage path the silence cron
+ * honors — without it, that student is falsely flagged ~300s in (answers
+ * flow, no face_checks rows land). HTTP ≥500 already degrades (L14).
+ */
+export const VERIFY_TRANSPORT_FAIL_LIMIT = 4;
+
+/**
  * Focus-loss pause escalation: the Nth confirmed focus-loss pause flags the
  * session (lecturer decision). Mirrors the SQL constant in `pause_session`.
  */

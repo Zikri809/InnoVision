@@ -6,6 +6,7 @@ import { VerifySchema } from "@/lib/face/schemas";
 import { MAX_FRAME_BASE64_CHARS, VERIFY_FRAMES_PER_CHECK } from "@/lib/face/constants";
 import { mapFaceError } from "@/lib/face/rpc-mapping";
 import { selectPrimaryFace } from "@/lib/face/embedding";
+import { shouldReportSecondFace } from "@/lib/face/second-face";
 import * as insightface from "@/lib/face/server/insightface-client";
 import {
   checkSameOrigin,
@@ -128,28 +129,34 @@ export async function POST(request: Request) {
   // One extract + compare per non-empty frame, in parallel (enroll pattern).
   // An empty string is the no-face sentinel for that slot → a FAIL vote with
   // similarity 0 (never skipped silently — the row still lands as a fail when
-  // the majority fails).
+  // the majority fails). Each frame's FULL face list is kept (not just the
+  // primary's similarity) for the server-side second-face advisory below.
+  type FrameOutcome = { similarity: number; faces: insightface.InsightFaceExtractResult["faces"] } | { error: string };
   const results = await Promise.all(
-    frames.map(async (frame): Promise<number | { error: string }> => {
-      if (frame === "") return 0;
+    frames.map(async (frame): Promise<FrameOutcome> => {
+      if (frame === "") return { similarity: 0, faces: [] };
       // MISMATCH marker → 0-vote WITHOUT a sidecar call or RPC compare (no
       // sidecar exists in CI — a fetch would 503 instead of failing as a
       // vote, which would kill the pause/streak specs).
-      if (insightface.isMockMismatchFrame(frame)) return 0;
+      if (insightface.isMockMismatchFrame(frame)) return { similarity: 0, faces: [] };
       const extracted = await insightface.extractFace(frame, auth.userId);
       if ("error" in extracted) return { error: extracted.error };
-      return comparePrimaryFace(supabase, extracted.faces);
+      const sim = await comparePrimaryFace(supabase, extracted.faces);
+      if (typeof sim === "number") return { similarity: sim, faces: extracted.faces };
+      return sim;
     }),
   );
 
   // Any sidecar/compare failure fails the WHOLE check honestly (503 →
   // pipeline `unavailable` passthrough, never a partial verdict).
-  const firstError = results.find((r): r is { error: string } => typeof r === "object");
+  const firstError = results.find((r): r is { error: string } => "error" in r);
   if (firstError) {
     return mapFaceError(firstError) ?? internalError("Something went wrong.");
   }
 
-  const similarities = (results as number[]).map((s) => Math.min(1, Math.max(0, s)));
+  const similarities = (results as Array<{ similarity: number }>).map((r) =>
+    Math.min(1, Math.max(0, r.similarity)),
+  );
 
   // The subject is ROUTE-derived (always the authenticated uid) — the RPC's
   // `p_subject = auth.uid()` check stays as defense in depth against direct
@@ -181,6 +188,28 @@ export async function POST(request: Request) {
   if (mapped) return mapped;
 
   if (payload && typeof payload.matched === "boolean" && typeof payload.nextNonce === "string") {
+    // Server-recorded second_face advisory (integrity hardening): the client's
+    // own attention monitor is suppressible by a tampered browser, but the
+    // frames the server just judged are not. Fired ONLY after record_face_check
+    // succeeded (never on the 503 path), fire-and-forget — an advisory failure
+    // must never fail the verify. The pure gates (≥2 frames, ≥15% area, one
+    // span displaced, det floor) live in second-face.ts; the RPC's own owner/
+    // assessment/status gates + 55s throttle bound the write.
+    const frameFaces = (results as Array<{ faces: insightface.InsightFaceExtractResult["faces"] }>).map(
+      (r) => r.faces,
+    );
+    if (shouldReportSecondFace(frameFaces)) {
+      void Promise.resolve(
+        supabase.rpc("report_session_advisory", {
+          p_session_id: parsed.data.sessionId,
+          p_type: "second_face",
+        }),
+      )
+        .then((r) => {
+          if (r.error) console.error("report_session_advisory error:", r.error);
+        })
+        .catch(() => {});
+    }
     const result: FaceCheckResult = {
       matched: payload.matched,
       distance: typeof payload.distance === "number" ? payload.distance : null,
@@ -198,7 +227,8 @@ export async function POST(request: Request) {
 /**
  * Pick the primary face from the extract result and compare it against the
  * caller's OWN baseline. No qualifying face → 0-vote (FAIL); an RPC failure →
- * typed error (the whole check fails honestly).
+ * typed error (the whole check fails honestly). The full face list travels
+ * back to the caller for the second-face advisory.
  */
 async function comparePrimaryFace(
   supabase: SupabaseClient,

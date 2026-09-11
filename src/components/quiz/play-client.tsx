@@ -19,6 +19,7 @@ import { useIntegrityAdvisories } from "@/components/face/use-integrity-advisori
 import { useIncidentRecorder } from "@/components/face/use-incident-recorder";
 import { getFakeFaceTracker } from "@/lib/face/fake-seam";
 import { isFakeFaceSeamEnabled } from "@/lib/face/seam-gate";
+import { useFullscreenGuard } from "@/lib/integrity/use-fullscreen-guard";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useWakeLock } from "@/hooks/use-wake-lock";
 import { HAPTIC, haptic } from "@/lib/haptics";
@@ -287,6 +288,61 @@ export function PlayClient({
     enabled: quiz.mode === "assessment" && Boolean(face),
     onUnavailable: () => setFaceUnavailable(true),
   });
+
+  // Integrity hardening (Feature C): shared pause stamp so the debounced
+  // blur (focus_lost) and the fullscreen-exit (fullscreen_exit) pauses for
+  // the SAME app switch dedupe — see useFacePipeline / useFullscreenGuard.
+  // faceStatusRef mirrors faceStatus (sync effect, React Compiler-safe)
+  // because the fullscreenchange closure must read the CURRENT status.
+  // fullscreenArmed: set at the gate Begin click so holdFullscreen flips
+  // WITHIN the user gesture — entry is gesture-scoped (request() below), and
+  // entry driven by the later 'ready' transition would reject (the blink
+  // wait outlives transient user activation).
+  const [fullscreenArmed, setFullscreenArmed] = useState(false);
+  const sharedPauseStampRef = useRef(0);
+  const faceStatusRef = useRef(faceStatus);
+  useEffect(() => {
+    faceStatusRef.current = faceStatus;
+  });
+  const fullscreenGuard = useFullscreenGuard({
+    enabled: quiz.mode === "assessment" && Boolean(face),
+    active: phase !== "submitted" && phase !== "dead" && phase !== "timeUp",
+    // Held from the Begin click until a terminal phase; the true→false edge
+    // deliberately exits fullscreen so the results/dead screen never rides
+    // fullscreen. Entry is gesture-scoped only (request() in onBegin).
+    holdFullscreen:
+      fullscreenArmed && phase !== "submitted" && phase !== "dead",
+    // Same ref the pipeline's focusLossPause checks-and-stamps — BOTH orders
+    // of the app-switch double-fire (fullscreen-first, blur-first) dedupe.
+    sharedPauseStampRef,
+    onFullscreenExit: () => {
+      // Only a verified, answering student leaving fullscreen is an integrity
+      // event — exits during the gate or while already paused are ignored
+      // (deterrence-only; no redundant server round-trip).
+      if (faceStatusRef.current !== "ready") return;
+      sharedPauseStampRef.current = Date.now();
+      void fetch(`/api/sessions/${sessionId}/pause`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ reason: "fullscreen_exit" }),
+      })
+        .then((r) => r.json().catch(() => ({})))
+        .then((body: Record<string, unknown>) => {
+          // The RPC is authoritative (plain pause today; flagged only if the
+          // reason is ever promoted to the focus-loss counter).
+          if (body?.sessionStatus === "flagged") {
+            pipeline.setStatusBoth("flagged");
+            pipeline.checkAgain();
+            return;
+          }
+          pipeline.pauseLocally("fullscreen_exit");
+        })
+        .catch(() => {
+          // network — block input locally until the cadence re-checks
+          pipeline.pauseLocally("fullscreen_exit");
+        });
+    },
+  });
   // Screen wake lock (plan W3): a screen auto-lock mid-assessment cascades
   // into a focus_lost pause. Acquired once the gate is passed (beginGate),
   // re-armed on visibilitychange by the hook, released on terminal phases.
@@ -311,6 +367,7 @@ export function PlayClient({
     questionVisible: phase === "question" || phase === "locked",
     phase,
     isHandActive: holdProgress !== null,
+    sharedPauseStampRef,
     onHandLossPause: () => {
       // The server pause POST happens in the hook; here we keep the gesture
       // layer from emitting input while paused (sessionPaused gate).
@@ -1049,6 +1106,11 @@ export function PlayClient({
             : null
         }
         onBegin={() => {
+          // Integrity hardening: arm + enter fullscreen INSIDE the Begin
+          // click (a user gesture — requestFullscreen rejects outside one).
+          // The guard no-ops when disabled (practice / env off / iOS Safari).
+          setFullscreenArmed(true);
+          fullscreenGuard.request();
           void pipeline.beginGate();
         }}
         onConsent={() => {
@@ -1063,6 +1125,9 @@ export function PlayClient({
             .catch(() => {});
         }}
         onRecover={() => {
+          // Recovery click is a valid user gesture: re-enter fullscreen (the
+          // Esc exit consumed the old one; no auto re-request is possible).
+          fullscreenGuard.request();
           void pipeline.runRecovery();
         }}
         onCheckAgain={() => {

@@ -21,7 +21,9 @@ import {
   VERIFY_FRAMES_PER_CHECK,
   VERIFY_FRAME_SPACING_MS,
   VERIFY_SECONDARY_CAPTURE_TIMEOUT_MS,
+  VERIFY_TRANSPORT_FAIL_LIMIT,
 } from "@/lib/face/constants";
+import { FULLSCREEN_PAUSE_DEDUPE_MS } from "@/lib/integrity/use-fullscreen-guard";
 
 /**
  * Client-side floor between verify POSTs (latest-wins deferral). Below the
@@ -50,10 +52,11 @@ export type FacePipelinePhase =
 
 /**
  * Why the session is currently paused — the overlay copy differs (a
- * focus-loss pause means "you left the exam window", not "look at the
- * camera"), and it clears on any non-paused status.
+ * focus-loss pause means "you left the exam window", a fullscreen-exit
+ * pause means "fullscreen was closed"; neither is a face problem), and it
+ * clears on any non-paused status.
  */
-export type PausedReason = "face" | "focus_lost";
+export type PausedReason = "face" | "focus_lost" | "fullscreen_exit";
 
 export type FacePipelineProps = {
   sessionId: string;
@@ -72,6 +75,15 @@ export type FacePipelineProps = {
   onFaceStatus: (s: FaceStatus) => void;
   /** True when a hand gesture (hold to answer/next) is currently in progress. */
   isHandActive?: boolean;
+  /**
+   * Integrity hardening (fullscreen guard): a shared "a pause POST was sent
+   * at this ms" stamp. The fullscreen-exit pause and the debounced blur pause
+   * fire from the SAME app switch — without the shared window both POST and
+   * focus_lost would double-count focus_pause_count (3-strike flag after 2
+   * app switches instead of 3) and flush incident footage twice. The blur
+   * path checks-and-stamps it; play-client's fullscreen handler stamps it.
+   */
+  sharedPauseStampRef?: React.RefObject<number>;
   /** D13 — a lecturer reset the session mid-flight (verify → 404 no longer owned). */
   onReset?: () => void;
 };
@@ -132,6 +144,7 @@ export function useFacePipeline(props: FacePipelineProps) {
     onPhaseChange,
     onFaceStatus,
     isHandActive = false,
+    sharedPauseStampRef,
     onReset,
   } = props;
 
@@ -175,6 +188,10 @@ export function useFacePipeline(props: FacePipelineProps) {
   // `pendingVerifyRef` stores the deferred TRIGGER (latest-wins).
   const pendingVerifyRef = useRef<"start" | "question" | "periodic" | null>(null);
   const nonceRetriedRef = useRef(false);
+  // Consecutive verify TRANSPORT failures (fetch throw) — reset on any
+  // successful POST; at VERIFY_TRANSPORT_FAIL_LIMIT the pipeline degrades to
+  // `unavailable` (verify-silence backstop, see the catch in postVerifyInternal).
+  const transportFailStreakRef = useRef(0);
   const cadenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hadStartVerifyRef = useRef(false);
@@ -393,10 +410,31 @@ export function useFacePipeline(props: FacePipelineProps) {
       // Network error — re-schedule cadence (bounded retry, no hot-loop).
       // Only while ready: a flagged-poll caller ('recovering') must not arm
       // cadence outside the ready invariant.
+      //
+      // Silence-backstop (VERIFY_TRANSPORT_FAIL_LIMIT): sustained transport
+      // failures record NO face_checks rows while answers (tiny bodies) keep
+      // flowing — the verify-silence cron (0042) would flag that student
+      // ~300s in. After N consecutive transport failures, degrade honestly
+      // to `unavailable` + reportUnavailableOnce() — the same self-exempting,
+      // lecturer-visible path as an HTTP ≥500 outage (L14 parity).
+      transportFailStreakRef.current += 1;
+      if (
+        trigger !== "start" &&
+        transportFailStreakRef.current >= VERIFY_TRANSPORT_FAIL_LIMIT &&
+        statusRef.current === "ready"
+      ) {
+        transportFailStreakRef.current = 0;
+        setStatusBoth("unavailable");
+        reportUnavailableOnce();
+        return "unavailable";
+      }
       if (trigger === "start") setStatusBoth("gate");
       else if (statusRef.current === "ready") scheduleCadence();
       return null;
     }
+    // The request REACHED the server (any HTTP status) — transport recovered;
+    // a 429, for instance, still means connectivity is intact.
+    transportFailStreakRef.current = 0;
     let body: Record<string, unknown> = {};
     if (res.ok || res.status === 409 || res.status === 403 || res.status === 400 || res.status === 503) {
       body = await res.json().catch(() => ({}));
@@ -781,6 +819,18 @@ export function useFacePipeline(props: FacePipelineProps) {
   async function focusLossPause() {
     if (disposedRef.current || isTerminalRef.current) return;
     if (statusRef.current !== "ready") return;
+    // Fullscreen-guard dedupe: a fullscreen-exit pause POSTed moments ago for
+    // the SAME app switch — the session is already paused server-side and the
+    // client mirrors it locally instead of double-counting the strike.
+    const stamp = sharedPauseStampRef?.current ?? 0;
+    if (Date.now() - stamp < FULLSCREEN_PAUSE_DEDUPE_MS) {
+      if (statusRef.current === "ready") {
+        setPausedReason("focus_lost");
+        setStatusBoth("paused");
+      }
+      return;
+    }
+    if (sharedPauseStampRef) sharedPauseStampRef.current = Date.now();
     try {
       const res = await fetch(`/api/sessions/${sessionId}/pause`, {
         method: "POST",
@@ -974,6 +1024,19 @@ export function useFacePipeline(props: FacePipelineProps) {
     startFlaggedPoll();
   }
 
+  /**
+   * Client-side pause surface for sibling guards (integrity hardening's
+   * fullscreen exit): the caller owns the POST (a different reason); this
+   * mirrors the server-paused state locally so the overlay + input block
+   * engage. No-op unless the pipeline is `ready` — a pause arriving while
+   * paused/flagged/gate must not stomp those flows.
+   */
+  function pauseLocally(reason: PausedReason) {
+    if (statusRef.current !== "ready") return;
+    setPausedReason(reason);
+    setStatusBoth("paused");
+  }
+
   // Called by the consumer AFTER a successful consent POST from the gate: the
   // server's consent_given_at is now set, so the client-side `consentGivenRef`
   // gate must agree or a re-clicked Begin would never run the `'start'` verify
@@ -989,6 +1052,7 @@ export function useFacePipeline(props: FacePipelineProps) {
     checkAgain,
     runRecovery,
     handLossPause,
+    pauseLocally,
     setTracker,
     setStatusBoth,
     markConsentGiven,

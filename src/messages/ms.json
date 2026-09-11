@@ -909,7 +909,10 @@
     "degradedBody": "Pemeriksaan kamera tidak dapat dijalankan, jadi anda boleh terus menjawab dengan mengetik. Sila angkat tangan dan beritahu pengawas supaya ia dicatat — anda juga boleh cuba semakannya selepas kuiz.",
     "focusLostTitle": "Anda keluar dari tetingkap peperiksaan",
     "focusLostBody": "Peperiksaan anda dijeda kerana aplikasi atau tetingkap lain mengambil fokus. Klik di bawah untuk kembali.",
-    "focusLostBtn": "Kembali ke peperiksaan"
+    "focusLostBtn": "Kembali ke peperiksaan",
+    "fullscreenExitTitle": "Skrin penuh ditutup",
+    "fullscreenExitBody": "Peperiksaan anda dijeda kerana mod skrin penuh dikeluarkan. Klik di bawah untuk kembali — peperiksaan diteruskan dari tempat anda berhenti.",
+    "fullscreenExitBtn": "Kembali ke peperiksaan"
   },
   "extract": {
     "dialogTitle": "Jana kuiz daripada fail",
@@ -1122,8 +1125,8 @@
         "body": "Satu percubaan baharu untuk \"{quizTitle}\" telah dihantar."
       },
       "session_flagged": {
-        "title": "Perlu semakan: semakan wajah",
-        "body": "Semakan wajah {studentName} asyik tidak sepadan pada \"{quizTitle}\". Ini kerap berpunca daripada pencahayaan atau kamera — sila semak sebelum membuka kunci."
+        "title": "Perlu semakan: sesi ditandakan",
+        "body": "Sesi {studentName} pada \"{quizTitle}\" telah ditandakan secara automatik oleh semakan integriti (strak ketidakpadanan wajah, kehilangan fokus, atau jurang pengesahan). Buka butiran sesi untuk punca — sila semak sebelum membuka kunci."
       },
       "quiz_completed_all": {
         "title": "Kuiz telah dicuba sepenuhnya",

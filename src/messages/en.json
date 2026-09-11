@@ -909,7 +909,10 @@
     "degradedBody": "The camera check couldn't run, so you can keep answering by tapping. Please raise your hand and tell the invigilator so they can note it — you can also retry the check after the quiz.",
     "focusLostTitle": "You left the exam window",
     "focusLostBody": "Your exam was paused because another app or window took focus. Click below to return — this window will come back to the front.",
-    "focusLostBtn": "Return to the exam"
+    "focusLostBtn": "Return to the exam",
+    "fullscreenExitTitle": "Fullscreen was closed",
+    "fullscreenExitBody": "Your exam was paused because fullscreen mode was exited. Click below to return — the exam continues where you left off.",
+    "fullscreenExitBtn": "Return to the exam"
   },
   "extract": {
     "dialogTitle": "Generate quiz from file",
@@ -1122,8 +1125,8 @@
         "body": "A new attempt for \"{quizTitle}\" was submitted."
       },
       "session_flagged": {
-        "title": "Review needed: face checks",
-        "body": "{studentName}'s face checks kept mismatching on \"{quizTitle}\". This is often lighting or a camera hiccup — review before unlocking."
+        "title": "Review needed: flagged session",
+        "body": "{studentName}'s session on \"{quizTitle}\" was auto-flagged by an integrity check (face mismatch streak, focus loss, or a verification gap). Open the session detail for the cause — review before unlocking."
       },
       "quiz_completed_all": {
         "title": "Quiz fully attempted",

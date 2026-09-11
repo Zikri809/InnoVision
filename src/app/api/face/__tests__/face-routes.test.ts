@@ -419,6 +419,58 @@ describe("I-vote — multi-frame majority voting", () => {
     expect(body.matched).toBe(false);
   });
 
+  it("server-recorded second_face advisory: ≥2 frames with a large distinct extra face → advisory row", async () => {
+    const ctx = faceContext();
+    // The student's face is primary (320×336 at center (320,264)); a 200×200
+    // distinct face sits ≥1 span (336px) away in 2 of the 3 frames (frame 3
+    // is clean) — area 37% ✓, displacement 355px ✓.
+    const secondFace = {
+      ...mockFace(),
+      embedding: testVector(33),
+      bbox: [560, 60, 760, 260] as [number, number, number, number],
+      det_score: 0.95,
+    };
+    insightfaceMock.extractFace.mockImplementation(async (_frame: string, _uid: string) => {
+      // extractFace receives the raw frame; the mock's own primary-face
+      // handling is bypassed — return explicit face lists per call order.
+      return { faces: [mockFace(), secondFace] };
+    });
+    const res = await verify.POST(
+      verifyReq({ frames: ["REAL1", "REAL2", "REAL3"], trigger: "periodic" }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.matched).toBe(true); // the student's own face still passes 1:1
+    // The advisory is fire-and-forget in the route — flush the microtask
+    // queue (the fake RPC resolves synchronously into .then) before asserting.
+    await new Promise((r) => setTimeout(r, 0));
+    const advisories = ctx.client.tables["session_advisories"] ?? [];
+    const row = advisories.find((a) => a.session_id === SESSION_ID && a.adv_type === "second_face");
+    expect(row).toBeTruthy();
+  });
+
+  it("no advisory when the extra face appears in only ONE frame (noise gate)", async () => {
+    const ctx = faceContext();
+    let call = 0;
+    insightfaceMock.extractFace.mockImplementation(async () => {
+      call += 1;
+      return {
+        faces:
+          call <= 1
+            ? [mockFace(), { ...mockFace(), embedding: testVector(34), bbox: [560, 60, 760, 260] as [number, number, number, number], det_score: 0.95 }]
+            : [mockFace()],
+      };
+    });
+    const res = await verify.POST(
+      verifyReq({ frames: ["REAL1", "REAL2", "REAL3"], trigger: "periodic" }),
+    );
+    expect(res.status).toBe(200);
+    const advisories = ctx.client.tables["session_advisories"] ?? [];
+    expect(
+      advisories.find((a) => a.session_id === SESSION_ID && a.adv_type === "second_face"),
+    ).toBeUndefined();
+  });
+
   it("an oversized frame → 413", async () => {
     faceContext();
     const res = await verify.POST(

@@ -14,7 +14,7 @@ type Params = { params: Promise<{ id: string }> };
 const PAUSE_RATE = { limit: 20, windowMs: 60 * 1000 };
 
 const PauseSchema = z.object({
-  reason: z.enum(["hand_loss", "focus_lost"]).default("hand_loss"),
+  reason: z.enum(["hand_loss", "focus_lost", "fullscreen_exit"]).default("hand_loss"),
 });
 
 /**
@@ -27,7 +27,9 @@ const PauseSchema = z.object({
  *
  * `reason: 'focus_lost'` additionally accumulates `focus_pause_count`; the
  * RPC FLAGS the session at the threshold (3) — a lecturer decision — and
- * audits it. The response's `sessionStatus` is authoritative.
+ * audits it. `reason: 'fullscreen_exit'` (client hardening) is a PLAIN pause
+ * with hand_loss semantics — no counter increment (deferred one release). The
+ * response's `sessionStatus` is authoritative.
  *
  * Preamble: guard → CSRF → rate-limit → RPC → `mapFaceError`.
  *
@@ -65,7 +67,7 @@ export async function POST(request: Request, { params }: Params) {
     }
     const parsed = PauseSchema.safeParse(body);
     if (!parsed.success) {
-      return invalidBody("reason must be 'hand_loss' or 'focus_lost'.");
+      return invalidBody("reason must be 'hand_loss', 'focus_lost' or 'fullscreen_exit'.");
     }
     reason = parsed.data.reason;
   }

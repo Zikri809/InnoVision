@@ -3,6 +3,7 @@
 import { useLocale, useTranslations } from "next-intl";
 import { OptionCard } from "@/components/quiz/option-card";
 import { QuestionImage } from "@/components/media/question-image";
+import { isIntegrityHardeningEnabled } from "@/lib/integrity/hardening-gate";
 import type { AnswerState } from "@/components/quiz/play-client";
 import type { HoldProgress } from "@/lib/gestures/types";
 
@@ -40,6 +41,29 @@ export function QuestionCard({
   const letters = ["A", "B", "C", "D", "E"];
   const isMulti = question.type === "multi_select";
 
+  // Integrity hardening (assessment only, deterrence-only): block the
+  // clipboard/context-menu routes to off-device sharing of the live question.
+  // The server secrecy layer is the real control — the key never reaches the
+  // client — so this is defense-in-depth against shoulder-surf-adjacent
+  // convenience, explicitly bypassable (hardening-gate) and bypassable by any
+  // devtools user (documented; devtools detection is theater and was cut).
+  // The `selectstart` guard was deliberately NOT added: it breaks text
+  // selection for assistive-tech users for near-zero marginal deterrence.
+  const harden = mode === "assessment" && isIntegrityHardeningEnabled();
+  function blockEvent(e: { preventDefault(): void; stopPropagation(): void }) {
+    if (!harden) return;
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  const hardeningProps = harden
+    ? {
+        onCopy: blockEvent,
+        onCut: blockEvent,
+        onContextMenu: blockEvent,
+        style: { userSelect: "none" as const },
+      }
+    : {};
+
   function formatOptionText(text: string, type: "mcq" | "true_false" | "multi_select"): string {
     if (type === "true_false") {
       const lower = text.trim().toLowerCase();
@@ -54,7 +78,7 @@ export function QuestionCard({
   }
 
   return (
-    <section aria-labelledby="question-prompt">
+    <section aria-labelledby="question-prompt" {...hardeningProps}>
       <div className="mb-3 flex items-center justify-between gap-3">
         <span className="rounded-full border-[3px] border-border bg-card px-3.5 py-1 text-xs font-extrabold text-muted-foreground">
           {/* 3-way map (QT-1): the old `=== "mcq" ? : trueFalse` ternary would
