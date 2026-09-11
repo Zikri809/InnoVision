@@ -98,10 +98,12 @@ const anon = createClient(URL, ANON);
   check("G1b web fn anon denied (grant revoked)", e2?.message.includes("permission denied"), e2?.message);
 }
 
-// Owner session for the RPC calls.
+// Owner session for the RPC calls. The first attempt uses a placeholder email
+// (the real one embeds the created timestamp) — its result is discarded; the
+// block below signs in with the reconstructed address.
 const sb = createClient(URL, ANON);
-const { data: session, error: sessErr } = await sb.auth.signInWithPassword({
-  email: `ws-probe-${Date.now()}@innovision.test`, // wrong on purpose? no — use the created one
+await sb.auth.signInWithPassword({
+  email: `ws-probe-${Date.now()}@innovision.test`,
 });
 // The created email embeds a timestamp; re-fetch it.
 {

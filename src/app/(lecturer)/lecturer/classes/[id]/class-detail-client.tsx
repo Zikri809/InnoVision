@@ -140,6 +140,7 @@ export function ClassDetailClient({
     params.delete("newQuiz");
     const qs = params.toString();
     router.replace(qs ? `?${qs}` : window.location.pathname, { scroll: false });
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read-once external init: the deep link lives in window.location.search, unreadable during SSR
     setCreateQuizModalOpen(true);
   }, [router]);
 
