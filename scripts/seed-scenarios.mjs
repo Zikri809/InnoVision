@@ -11,37 +11,15 @@
 //             classes spanning active + archived, with many attempts.
 //
 // Idempotent: existing rows are reused. Re-runs only top up what's missing.
-// Run:  node scripts/seed-scenarios.mjs [first|normal|extreme|all]
+// Run:  node scripts/seed-scenarios.mjs [first|normal|extreme|all] [--remote]
+//   --remote targets the hosted project (.env.production.local) — still requires
+//   ALLOW_PROD_SEED=1 or an interactive confirm.
 import { createClient } from "@supabase/supabase-js";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolveEnv, confirmRemote } from "./lib/remote-env.mjs";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const envPath = path.resolve(__dirname, "../.env.local");
-const env = fs
-  .readFileSync(envPath, "utf8")
-  .split(/\r?\n/)
-  .filter((l) => l && !l.trim().startsWith("#"))
-  .reduce((acc, l) => {
-    const idx = l.indexOf("=");
-    if (idx > 0) acc[l.slice(0, idx).trim()] = l.slice(idx + 1).trim();
-    return acc;
-  }, {});
-
-const URL_ = env.NEXT_PUBLIC_SUPABASE_URL;
-const SERVICE = env.SUPABASE_SERVICE_ROLE_KEY;
-if (!URL_ || !SERVICE) {
-  console.error("Missing .env.local keys (NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY).");
-  process.exit(1);
-}
-const isLocalUrl = URL_.includes("localhost") || URL_.includes("127.0.0.1");
-if (!isLocalUrl) {
-  console.error("SAFETY GUARD: refusing to seed a remote Supabase project.");
-  process.exit(1);
-}
-
+const { URL: URL_, SERVICE, isRemote } = resolveEnv(process.argv);
 const admin = createClient(URL_, SERVICE, { auth: { persistSession: false } });
+if (isRemote) await confirmRemote("SEED scenario datasets");
 const PASSWORD = "Password123!";
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no 0/O/1/I/L
 
@@ -565,7 +543,7 @@ async function seedExtreme() {
 }
 
 // ── Main ────────────────────────────────────────────────────────────
-const which = (process.argv[2] ?? "all").toLowerCase();
+const which = (process.argv.slice(2).find((a) => !a.startsWith("--")) ?? "all").toLowerCase();
 try {
   if (which === "first" || which === "all") await seedFirst();
   if (which === "normal" || which === "all") await seedNormal();

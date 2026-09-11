@@ -92,6 +92,19 @@ context/invariants; verify details against code.
   lecturers, 10 students, closed quiz with revealed history, shared student
   quizzes at `/s/STUDYHARD2` and `/s/EXAMPREP24`). Password `Password123!`.
   Face setup is intentionally not seeded.
+- **Hosted-project tooling**: the same seed/cleanup scripts accept `--remote`
+  to target the hosted Supabase project via `.env.production.local` (instead
+  of the local seam in `.env.local`). Remote runs are guard-gated: they need
+  `ALLOW_PROD_SEED=1` or an interactive confirm (type the project ref).
+  ```bash
+  npm run db:reset:remote    # wipe hosted data: auth users cascade + all 4 storage buckets
+  npm run seed:demo:remote   # seed the hosted project (schema via `supabase db push`)
+  npm run seed:scenarios:remote [first|normal|extreme]
+  node scripts/media-cleanup.mjs --remote [--dry-run]
+  node scripts/face-reset.mjs --remote
+  ```
+  The remote reset never touches schema — migrations go through `db:push`.
+  Verify/mass-fixture scripts (`verify-*.mjs`) remain local-only by design.
 - **Verification commands**:
   ```bash
   npm run test            # vitest units + route tests

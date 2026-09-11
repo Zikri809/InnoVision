@@ -1,37 +1,18 @@
 // Dev script to wipe all face recognition data (Supabase DB; the InsightFace
 // sidecar is stateless — nothing to wipe there)
-// Run: npm run face:reset
+// Run: npm run face:reset [-- --remote]
+//   --remote targets the hosted project (.env.production.local) — still requires
+//   ALLOW_PROD_SEED=1 or an interactive confirm.
 import { createClient } from "@supabase/supabase-js";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { assertLocalTarget } from "./lib/target-guard.mjs";
+import { resolveEnv, confirmRemote } from "./lib/remote-env.mjs";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const envPath = path.resolve(__dirname, "../.env.local");
-
-let env = {};
-if (fs.existsSync(envPath)) {
-  env = fs
-    .readFileSync(envPath, "utf8")
-    .split(/\r?\n/)
-    .filter((l) => l && !l.trim().startsWith("#"))
-    .reduce((acc, l) => {
-      const idx = l.indexOf("=");
-      if (idx > 0) acc[l.slice(0, idx).trim()] = l.slice(idx + 1).trim();
-      return acc;
-    }, {});
-}
-
-const URL = env.NEXT_PUBLIC_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "http://127.0.0.1:58021";
-const SERVICE = env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+const { URL, SERVICE, isRemote } = resolveEnv(process.argv);
+if (isRemote) await confirmRemote("WIPE all face-recognition data");
 async function main() {
-  assertLocalTarget(URL, "face-reset.mjs");
-  console.log("🧹 [face:reset] Starting complete face recognition cleanup...\n");
+  console.log(`🧹 [face:reset] Target: ${URL}\nStarting complete face recognition cleanup...\n`);
 
   // 1. Clear Supabase database records
-  if (SERVICE) {
-    console.log(`\nConnecting to Supabase at ${URL}...`);
+  {
     const admin = createClient(URL, SERVICE, { auth: { persistSession: false } });
 
     // Clear enrolled biometric samples (0039) — service_role bypasses the

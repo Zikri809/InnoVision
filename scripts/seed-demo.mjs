@@ -22,43 +22,16 @@
 // Face setup is intentionally NOT seeded (biometric enrollment stays a
 // deliberate user action).
 //
-// Run:  node scripts/seed-demo.mjs
-// Requires .env.local keys (NEXT_PUBLIC_SUPABASE_URL / SERVICE_ROLE).
+// Run:  node scripts/seed-demo.mjs [--remote]
+//   --remote targets the hosted project (.env.production.local) instead of the
+//   local seam — still requires ALLOW_PROD_SEED=1 or an interactive confirm.
 import { createClient } from "@supabase/supabase-js";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolveEnv, confirmRemote } from "./lib/remote-env.mjs";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const envPath = path.resolve(__dirname, "../.env.local");
-const env = fs
-  .readFileSync(envPath, "utf8")
-  .split(/\r?\n/)
-  .filter((l) => l && !l.trim().startsWith("#"))
-  .reduce((acc, l) => {
-    const idx = l.indexOf("=");
-    if (idx > 0) acc[l.slice(0, idx).trim()] = l.slice(idx + 1).trim();
-    return acc;
-  }, {});
-
-const URL = env.NEXT_PUBLIC_SUPABASE_URL;
-const SERVICE = env.SUPABASE_SERVICE_ROLE_KEY;
-if (!URL || !SERVICE) {
-  console.error("Missing .env.local keys (NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY).");
-  process.exit(1);
-}
-
-const isLocalUrl = URL.includes("localhost") || URL.includes("127.0.0.1");
-if (!isLocalUrl && process.env.ALLOW_PROD_SEED !== "1" && env.ALLOW_PROD_SEED !== "1") {
-  console.error(
-    `\n⚠️ SAFETY GUARD: Target Supabase URL (${URL}) appears to be a remote/production environment.` +
-    `\nSeeding demo accounts and mock data to a remote project is blocked by default.` +
-    `\nIf you intended to seed this remote project, re-run with: ALLOW_PROD_SEED=1 node scripts/seed-demo.mjs\n`
-  );
-  process.exit(1);
-}
-
+const REMOTE = process.argv.includes("--remote");
+const { URL, SERVICE, isRemote } = resolveEnv(process.argv);
 const admin = createClient(URL, SERVICE, { auth: { persistSession: false } });
+if (isRemote) await confirmRemote("SEED demo accounts and mock data");
 
 const PASSWORD = "Password123!";
 // Join codes: 6 chars, unambiguous alphabet (no 0/O/1/I/L).

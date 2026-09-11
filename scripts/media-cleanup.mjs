@@ -7,35 +7,11 @@
 // Usage:
 //   node scripts/media-cleanup.mjs --dry-run   # list unreferenced objects
 //   node scripts/media-cleanup.mjs             # delete them
+//   node scripts/media-cleanup.mjs --remote    # target hosted (.env.production.local)
 import { createClient } from "@supabase/supabase-js";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolveEnv } from "./lib/remote-env.mjs";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const envPath = path.resolve(__dirname, "../.env.local");
-const env = fs
-  .readFileSync(envPath, "utf8")
-  .split(/\r?\n/)
-  .filter((l) => l && !l.trim().startsWith("#"))
-  .reduce((acc, l) => {
-    const idx = l.indexOf("=");
-    if (idx > 0) acc[l.slice(0, idx).trim()] = l.slice(idx + 1).trim();
-    return acc;
-  }, {});
-
-const URL_ = env.NEXT_PUBLIC_SUPABASE_URL;
-const SERVICE = env.SUPABASE_SERVICE_ROLE_KEY;
-if (!URL_ || !SERVICE) {
-  console.error("Missing .env.local keys (NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY).");
-  process.exit(1);
-}
-
-// Guard: never point the sweeper at a hosted project by accident.
-if (!/^(http|https):\/\/(localhost|127\.0\.0\.1|kong)/.test(URL_)) {
-  console.error(`Refusing to sweep a non-local target: ${URL_}`);
-  process.exit(1);
-}
+const { URL: URL_, SERVICE } = resolveEnv(process.argv);
 
 const dryRun = process.argv.includes("--dry-run");
 const admin = createClient(URL_, SERVICE, { auth: { persistSession: false } });
