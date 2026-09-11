@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { registerUser, createClass, joinClass, createQuizWithQuestions, E2E_PASSWORD } from "./helpers";
+import { registerUser, createClass, joinClass, openJoinDrawer, createQuizWithQuestions, E2E_PASSWORD } from "./helpers";
 
 /**
  * E26 — Class archiving lifecycle (HIGH #9).
@@ -36,7 +36,8 @@ test.describe.configure({ mode: "serial" });
 
 test("lecturer archives a live class with an enrolled student", async ({
   browser,
-}) => {
+}, testInfo) => {
+  testInfo.setTimeout(120_000);
   test.skip(!LECTURER_INVITE_CODE, "LECTURER_INVITE_CODE not set");
 
   const lecturerCtx = await browser.newContext();
@@ -102,7 +103,7 @@ test("student loses visibility; rejoin attempts hit the archived alert", async (
 
   // Rejoin attempt → inline hardcoded archived error.
   await student.goto("/student/classes");
-  await student.getByRole("button", { name: "Join a class", exact: true }).click();
+  await openJoinDrawer(student);
   await student.getByLabel("Join code").fill(joinCode);
   await student.getByRole("button", { name: /^join class$/i }).click();
   await expect(
@@ -114,7 +115,8 @@ test("student loses visibility; rejoin attempts hit the archived alert", async (
 
 test("restore re-exposes the class and quiz to the student", async ({
   browser,
-}) => {
+}, testInfo) => {
+  testInfo.setTimeout(120_000);
   test.skip(!classId, "setup test did not run");
 
   const lecturerCtx = await browser.newContext();

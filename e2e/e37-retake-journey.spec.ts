@@ -137,7 +137,7 @@ test("retake journey: enable on live quiz → spawn → chip → budget exhausti
   await student.getByRole("button", { name: /B2/i }).click();
   await student.getByRole("button", { name: "Finish", exact: true }).click();
   await expect(
-    student.getByText(/released by your lecturer/i),
+    student.locator(":visible", { hasText: /released by your lecturer/i }).first(),
   ).toBeVisible({ timeout: 10_000 });
 
   // ── 5. Both attempts coexist server-side (attempt 1 + 2, both completed).

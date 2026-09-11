@@ -61,18 +61,23 @@ async function createQuizWithQuestion(
   await page.getByLabel("Title").fill(title);
   await page.getByRole("button", { name: /create quiz/i }).click();
   await page.waitForURL(/\/student\/my-quizzes\/[^/]+\/edit/);
-  const optionInputs = page.locator("fieldset input[maxlength='500']");
-  await optionInputs.nth(0).fill("Square");
-  await optionInputs.nth(1).fill("Circle");
-  await page.getByRole("textbox", { name: /prompt/i }).fill(prompt);
-  await page.getByRole("radio").nth(1).check(); // Circle correct
+  // Rebuilt add form: no fieldset/radios — mark Circle correct via the
+  // "Correct answer" Select (key defaults to Option 1 otherwise).
+  await page.getByLabel("Option 1", { exact: true }).fill("Square");
+  await page.getByLabel("Option 2", { exact: true }).fill("Circle");
+  const promptBox = page.getByRole("textbox", { name: /prompt/i });
+  await promptBox.fill(prompt);
+  await page.getByRole("combobox", { name: "Correct answer" }).click();
+  await page.keyboard.press("ArrowDown"); // Option 1 → Option 2
+  await page.keyboard.press("Enter");
 }
 
 test("stage image in the add-question dropzone → renders in self-play", async ({ page }) => {
   await registerUser(page, AUTHOR, "student", "");
   await createQuizWithQuestion(page, QUIZ_TITLE, QUESTION_PROMPT);
 
-  // Stage via the form-scoped hidden input.
+  // Stage via the form-scoped hidden input (the form is reset and ready —
+  // createQuizWithQuestion waits for the prompt box to clear post-POST).
   await addFormImageInput(page).setInputFiles("e2e/fixtures/tiny.png");
   // Local object-URL preview appears instantly (no network involved).
   await expect(page.locator('img[src^="blob:"]')).toBeVisible();

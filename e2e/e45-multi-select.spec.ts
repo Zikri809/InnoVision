@@ -34,8 +34,8 @@ const MULTI_PROMPT_3 = "E45 Which are metals?";
  * Covering: (1) authoring via the toggle group + edit-dialog persistence +
  * the mcq→multi TYPE-SWITCH seed (correctIndex → correctIndices) in the edit
  * dialog; (2) practice journey (toggle set → Confirm → set feedback + EndScreen
- * ✓ set marks AND the wrong-selection journey → EndScreen ✕ + "Correct answer"
- * tag); (3) resume translation (aria-pressed on the persisted presented slots);
+ * ✓ set marks AND the wrong-selection journey → EndScreen ✕ + missed-key ✓
+ * disc); (3) resume translation (aria-pressed on the persisted presented slots);
  * (4) assessment keyless acks + deterministic service-role probe of the stored
  * canonical set; (5) GESTURE-DISABLED contract (holds never answer; palm-next
  * still navigates); (6) SHUFFLE-ON multi journey (e42 pattern: plan-derived
@@ -165,25 +165,27 @@ test.describe("E45 — multi-select questions", () => {
     await expect(studentPage.getByText("Multi-select", { exact: true })).toHaveCount(0);
     await studentPage.getByRole("button", { name: /^D 9/ }).click();
     await studentPage.getByRole("button", { name: "Finish", exact: true }).click();
-    await expect(studentPage.getByText("Practice complete! 🎉")).toBeVisible({ timeout: 15_000 });
+    await expect(
+      studentPage.locator("p:visible", { hasText: "Practice complete! 🎉" }),
+    ).toBeVisible({ timeout: 15_000 });
 
     // ENDTSCREEN SET RENDERING: the multi row carries ✓ on BOTH correct
     // options (end-screen multi branch: correct_indices.includes) and neither
     // ✓ nor ✕ on the untouched wrong options; the scalar row keeps its single ✓.
-    await expect(studentPage.getByText("Answer breakdown")).toBeVisible();
-    const multiRow = studentPage.locator("ol > li").filter({ hasText: MULTI_PROMPT });
+    await expect(studentPage.locator("h2:visible", { hasText: "Answer breakdown" })).toBeVisible();
+    const multiRow = studentPage.locator('[role="listitem"]').filter({ hasText: MULTI_PROMPT });
     await expect(multiRow).toHaveCount(1);
     await expect(multiRow.locator("li").filter({ hasText: "Dolphin" })).toContainText("✓");
     await expect(multiRow.locator("li").filter({ hasText: "Bat" })).toContainText("✓");
     await expect(multiRow.locator("li").filter({ hasText: "Shark" })).not.toContainText("✓");
     await expect(multiRow.locator("li").filter({ hasText: "Shark" })).not.toContainText("✕");
-    const scalarEndRow = studentPage.locator("ol > li").filter({ hasText: MULTI_PROMPT_2 });
+    const scalarEndRow = studentPage.locator('[role="listitem"]').filter({ hasText: MULTI_PROMPT_2 });
     await expect(scalarEndRow.locator("li").filter({ hasText: "9" })).toContainText("✓");
 
     // WRONG-SELECTION journey (fresh attempt): one correct + one wrong toggle →
     // practice feedback "Incorrect ✗" (all-or-nothing). The EndScreen must
-    // render the row badge ✗, ✕ on the wrong selection, and ✓ PLUS the
-    // "Correct answer" tag on the MISSED key option (selected-but-wrong and
+    // render the row badge ✗, ✕ on the wrong selection, and the hollow ✓ disc
+    // on the MISSED key option (selected-but-wrong and
     // correct-but-not-selected multi branches — never painted by the ✓-only
     // journey above).
     // SQ-3: "Try again" now starts a REAL fresh attempt (routes into a NEW
@@ -208,16 +210,17 @@ test.describe("E45 — multi-select questions", () => {
     await expect(studentPage.getByText(MULTI_PROMPT_2, { exact: true })).toBeVisible();
     await studentPage.getByRole("button", { name: /^D 9/ }).click();
     await studentPage.getByRole("button", { name: "Finish", exact: true }).click();
-    await expect(studentPage.getByText("Practice complete! 🎉")).toBeVisible({ timeout: 15_000 });
-    await expect(studentPage.getByText("Answer breakdown")).toBeVisible();
-    const wrongRow = studentPage.locator("ol > li").filter({ hasText: MULTI_PROMPT });
+    await expect(
+      studentPage.locator("p:visible", { hasText: "Practice complete! 🎉" }),
+    ).toBeVisible({ timeout: 15_000 });
+    await expect(studentPage.locator("h2:visible", { hasText: "Answer breakdown" })).toBeVisible();
+    const wrongRow = studentPage.locator('[role="listitem"]').filter({ hasText: MULTI_PROMPT });
     await expect(wrongRow).toContainText("✗"); // row badge (options carry ✓ / ✕ / numbers only)
     await expect(wrongRow.locator("li").filter({ hasText: "Shark" })).toContainText("✕");
     await expect(wrongRow.locator("li").filter({ hasText: "Dolphin" })).toContainText("✓");
     await expect(wrongRow.locator("li").filter({ hasText: "Bat" })).toContainText("✓");
-    await expect(wrongRow.locator("li").filter({ hasText: "Bat" })).toContainText("Correct answer");
     // 1/2 — no partial credit for the half-right set.
-    await expect(studentPage.getByText("50% correct", { exact: true })).toBeVisible();
+    await expect(studentPage.locator("p:visible", { hasText: "50% correct" })).toBeVisible();
 
     // RESUME: the completed session renders the EndScreen (not the resume
     // path). Drive a FRESH practice attempt via the EndScreen "Try again"
@@ -564,14 +567,14 @@ test.describe("E45 — multi-select questions", () => {
     // and ✓ marks land on the PRESENTED slots of the canonical key set
     // (applyBreakdownShuffle's per-element translateSet — canonical marks on a
     // presented options array would light the WRONG option texts).
-    await expect(studentPage.getByText("Answer breakdown")).toBeVisible();
-    const breakdownRows = studentPage.locator("ol > li");
+    await expect(studentPage.locator("h2:visible", { hasText: "Answer breakdown" })).toBeVisible();
+    const breakdownRows = studentPage.locator('[role="listitem"]');
     await expect(breakdownRows).toHaveCount(2);
     for (let i = 0; i < presentedQuestions.length; i++) {
       await expect(breakdownRows.nth(i)).toContainText(presentedQuestions[i].prompt);
     }
     for (const q of canonicalQuestions) {
-      const row = studentPage.locator("ol > li").filter({ hasText: q.prompt });
+      const row = studentPage.locator('[role="listitem"]').filter({ hasText: q.prompt });
       await expect(row).toHaveCount(1);
       for (const ci of q.correct_indices) {
         await expect(row.locator("li").filter({ hasText: q.options[ci] })).toContainText("✓");

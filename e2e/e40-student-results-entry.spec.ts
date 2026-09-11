@@ -110,7 +110,7 @@ test.describe("E40 — student results entry point", () => {
     // Click through: EndScreen renders the score (1/1 → "1").
     await studentPage.getByRole("link", { name: new RegExp(`View results.*${QUIZ_1}`) }).click();
     await fast(studentPage).toHaveURL(/\/play\/[0-9a-f-]+/);
-    await fast(studentPage.getByText(/1\s*\/\s*1/).first()).toBeVisible();
+    await fast(studentPage.locator(":visible", { hasText: /1\s*\/\s*1/ }).first()).toBeVisible();
 
     await lecturerCtx.close();
     await studentCtx.close();

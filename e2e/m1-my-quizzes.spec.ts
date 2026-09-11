@@ -63,13 +63,28 @@ test.describe("m1 — My Quizzes mobile redesign", () => {
     await page.getByRole("button", { name: /create quiz/i }).click();
     await page.waitForURL(/\/student\/my-quizzes\/[^/]+\/edit/);
 
-    // Add one MCQ via the editor.
-    const optionInputs = page.locator("fieldset input[maxlength='500']");
-    await optionInputs.nth(0).fill("Paris");
-    await optionInputs.nth(1).fill("London");
-    await page.getByRole("textbox", { name: /prompt/i }).fill("What is the capital of France?");
-    await page.getByRole("radio").first().check();
-    await page.getByRole("button", { name: /add this question/i }).click();
+    // Add one MCQ via the editor. The quiz is empty, so the mobile hero strip
+    // shows Generate as primary — open the add-question bottom Sheet from the
+    // ⋯ menu (Add question lives there while the quiz has no questions).
+    await page
+      .getByRole("button", { name: /more actions/i })
+      .first()
+      .click();
+    await page.getByRole("menuitem", { name: /add question/i }).click();
+    const sheet = page.getByRole("dialog");
+    await expect(sheet).toBeVisible();
+    // Rebuilt add form: no radios — options are aria-labelled inputs and the
+    // correct key defaults to Option 1.
+    const promptBox = sheet.getByRole("textbox", { name: /prompt/i });
+    await sheet.getByLabel("Option 1", { exact: true }).fill("Paris");
+    await sheet.getByLabel("Option 2", { exact: true }).fill("London");
+    await promptBox.fill("What is the capital of France?");
+    await sheet.getByRole("button", { name: /add this question/i }).click();
+    // Form resets after the POST resolves — wait for the reset before the row
+    // (a bare getByText matches the still-filled textarea and races the reset).
+    await expect(promptBox).toHaveValue("");
+    await sheet.getByRole("button", { name: "Done", exact: true }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(page.getByText("What is the capital of France?")).toBeVisible();
 
     // Hub: card accessible name is now "Play …" and tapping it plays.

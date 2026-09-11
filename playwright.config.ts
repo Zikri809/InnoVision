@@ -39,7 +39,11 @@ export default defineConfig({
   maxFailures: process.env.CI ? 1 : undefined,
   // Capped in CI to prevent runner CPU saturation; scaled to machine capacity locally
   workers: process.env.CI ? 1 : Math.min(6, os.cpus().length || 4),
-  reporter: "html",
+  // HTML stays the human-facing report; `line` streams one stdout line per test
+  // so agent/CI runs capture per-test results (incl. retries) without digging
+  // through playwright-report/ blobs — a plain "html" reporter prints almost
+  // nothing to stdout on a green run.
+  reporter: [["html"], ["line"]],
   use: {
     baseURL: BASE_URL,
     trace: "on-first-retry",
@@ -48,17 +52,17 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
-      // m1-* specs exercise the mobile compositions (dock, bottom sheets, PIP
+      // m* specs exercise the mobile compositions (dock, bottom sheets, PIP
       // play stage) that only render at phone viewports — running them on the
       // 1280×720 desktop project would fail every assertion and, with CI's
       // maxFailures: 1, abort the whole step. They run in the `mobile`
       // project below.
-      testIgnore: ["**/m1-*.spec.ts", "**/e2f-web-generate-flags.spec.ts"],
+      testIgnore: ["**/m*.spec.ts", "**/e2f-web-generate-flags.spec.ts"],
     },
     {
       // Mobile project (plan §6): phone viewport + touch + mobile UA so the
       // coarse-pointer branches (:active press physics, hit-slop, pointer:coarse
-      // rules) are actually exercised. testMatch pins it to the m1 allowlist
+      // rules) are actually exercised. testMatch pins it to the m* allowlist
       // so CI cost stays a handful of specs, not a second full run.
       name: "mobile",
       use: {
@@ -68,7 +72,7 @@ export default defineConfig({
         // second browser install in CI (ci.yml installs chromium only).
         browserName: "chromium",
       },
-      testMatch: ["**/m1-*.spec.ts"],
+      testMatch: ["**/m*.spec.ts"],
     },
     {
       // Flag-off project (grounded-search.md §9C): TINYFISH_API_KEY explicitly
@@ -79,7 +83,7 @@ export default defineConfig({
       name: "chromium-nowebsearch",
       use: { ...devices["Desktop Chrome"], baseURL: `http://localhost:${NOWEBSEARCH_PORT}` },
       testMatch: ["**/e2f-web-generate-flags.spec.ts"],
-      testIgnore: ["**/m1-*.spec.ts"],
+      testIgnore: ["**/m*.spec.ts"],
     },
   ],
   webServer: [
@@ -155,6 +159,13 @@ export default defineConfig({
         // explicit harness-only opt-in that survives the build (src/lib/face/
         // seam-gate.ts). NEVER set this outside the Playwright harness.
         NEXT_PUBLIC_E2E_FAKE_SEAM: "1",
+        // Integrity hardening OFF for the main suite (src/lib/integrity/
+        // hardening-gate.ts): clipboard/fullscreen lockdown must not fight
+        // headless runs (fullscreen events are flaky headless; copy guards
+        // would break fixture-building copy). Build-time inlined like the
+        // seam above — a run without this var bakes the hardening IN, which
+        // is exactly what the opt-in e51 spec wants.
+        NEXT_PUBLIC_INTEGRITY_HARDENING_OFF: "1",
       },
     },
     {

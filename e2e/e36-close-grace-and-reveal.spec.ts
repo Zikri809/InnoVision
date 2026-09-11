@@ -147,8 +147,8 @@ test("mid-session close: answer dead-screens, submit grace succeeds, results rea
   // the metadata; practice = policy-revealed → EndScreen with score).
   await student.goto(sessionUrl);
   await expect(student).toHaveURL(sessionUrl);
-  await expect(student.getByText(/^1\s*\/\s*2$/)).toBeVisible({ timeout: 10_000 });
-  await expect(student.getByText("50% correct", { exact: true })).toBeVisible();
+  await expect(student.locator(":visible", { hasText: /^1\s*\/\s*2$/ }).first()).toBeVisible({ timeout: 10_000 });
+  await expect(student.locator(":visible", { hasText: "50% correct" }).first()).toBeVisible();
 
   await lecCtx.close();
   await stuCtx.close();
@@ -210,7 +210,13 @@ test("reveal-first-then-close: unrevealed submissions warn, CTA reveals, student
   await resultsLink.click();
   await expect(lecturer).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/results/);
 
-  const closeBtn = lecturer.getByRole("button", { name: /close quiz/i });
+  const menuBtn = lecturer.getByRole("button", { name: /quiz actions/i });
+  if (await menuBtn.isVisible()) {
+    await menuBtn.click();
+  }
+  const closeBtn = lecturer.getByRole("menuitem", { name: /close quiz/i }).or(
+    lecturer.getByRole("button", { name: /close quiz/i })
+  );
   await expect(closeBtn).toBeVisible();
   await closeBtn.click();
   const dialog = lecturer.getByRole("dialog");
@@ -223,7 +229,7 @@ test("reveal-first-then-close: unrevealed submissions warn, CTA reveals, student
 
   // Both flips land: Close control unmounts (status=closed) and the reveal
   // card swaps to the revealed chip.
-  await expect(lecturer.getByRole("button", { name: /close quiz/i })).toBeHidden({
+  await expect(lecturer.getByRole("button", { name: /quiz actions|close quiz/i })).toBeHidden({
     timeout: 10_000,
   });
   await expect(
@@ -236,8 +242,8 @@ test("reveal-first-then-close: unrevealed submissions warn, CTA reveals, student
   await student.goto(sessionUrl);
   await expect(student).toHaveURL(sessionUrl);
   // EndScreen renders score 1/1 for the revealed assessment.
-  await expect(student.getByText(/^1\s*\/\s*1$/)).toBeVisible({ timeout: 10_000 });
-  await expect(student.getByText("100% correct", { exact: true })).toBeVisible();
+  await expect(student.locator(":visible", { hasText: /^1\s*\/\s*1$/ }).first()).toBeVisible({ timeout: 10_000 });
+  await expect(student.locator(":visible", { hasText: "100% correct" }).first()).toBeVisible();
 
   // The API contract double-check: quiz is closed AND revealed.
   const pubRes = await lecturer.request.post(`/api/quizzes/${quizId}/publish`);
@@ -294,7 +300,13 @@ test("close-anyway: stranded pending state, later dashboard reveal recovers the 
   // ── Lecturer closes anyway (dialog warns; the destructive secondary is
   // clicked, NOT the reveal-first CTA).
   await openResults(lecturer, `${CLASS_TITLE} C`, `${QUIZ_TITLE} C`);
-  const closeBtn = lecturer.getByRole("button", { name: /close quiz/i });
+  const menuBtn = lecturer.getByRole("button", { name: /quiz actions/i });
+  if (await menuBtn.isVisible()) {
+    await menuBtn.click();
+  }
+  const closeBtn = lecturer.getByRole("menuitem", { name: /close quiz/i }).or(
+    lecturer.getByRole("button", { name: /close quiz/i })
+  );
   await expect(closeBtn).toBeVisible();
   await closeBtn.click();
   const dialog = lecturer.getByRole("dialog");
@@ -302,7 +314,7 @@ test("close-anyway: stranded pending state, later dashboard reveal recovers the 
     dialog.getByText(/1 student has submitted but results are not revealed/i),
   ).toBeVisible();
   await dialog.getByRole("button", { name: /close anyway/i }).click();
-  await expect(lecturer.getByRole("button", { name: /close quiz/i })).toBeHidden({
+  await expect(lecturer.getByRole("button", { name: /quiz actions|close quiz/i })).toBeHidden({
     timeout: 10_000,
   });
 
@@ -332,10 +344,10 @@ test("close-anyway: stranded pending state, later dashboard reveal recovers the 
 
   // ── Recovery: the SAME session URL now shows the score + breakdown.
   await student.goto(sessionUrl);
-  await expect(student.getByText(/^1\s*\/\s*1$/)).toBeVisible({ timeout: 10_000 });
-  await expect(student.getByText("100% correct", { exact: true })).toBeVisible();
+  await expect(student.locator(":visible", { hasText: /^1\s*\/\s*1$/ }).first()).toBeVisible({ timeout: 10_000 });
+  await expect(student.locator(":visible", { hasText: "100% correct" }).first()).toBeVisible();
   await expect(
-    student.getByText("Answer breakdown", { exact: true }),
+    student.locator("h2:visible", { hasText: "Answer breakdown" }).first(),
   ).toBeVisible();
 
   await lecCtx.close();

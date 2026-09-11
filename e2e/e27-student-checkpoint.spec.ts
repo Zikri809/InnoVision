@@ -33,12 +33,15 @@ async function createQuizWithThreeQuestions(page: import("@playwright/test").Pag
     ["What is 2 + 2?", "Four", "Three"],
   ];
   for (const [prompt, optA, optB] of questions) {
-    const optionInputs = page.locator("fieldset input[maxlength='500']");
-    await optionInputs.nth(0).fill(optA);
-    await optionInputs.nth(1).fill(optB);
-    await page.getByRole("textbox", { name: /prompt/i }).fill(prompt);
-    await page.getByRole("radio").first().check();
+    // Rebuilt add form: no fieldset/radios — the key defaults to Option 1.
+    const promptBox = page.getByRole("textbox", { name: /prompt/i });
+    await page.getByLabel("Option 1", { exact: true }).fill(optA);
+    await page.getByLabel("Option 2", { exact: true }).fill(optB);
+    await promptBox.fill(prompt);
     await page.getByRole("button", { name: /add this question/i }).click();
+    // Form resets after the POST resolves — wait for the reset before the row
+    // (a bare getByText matches the still-filled textarea and races the reset).
+    await expect(promptBox).toHaveValue("");
     await expect(page.getByText(prompt, { exact: true })).toBeVisible();
   }
 }
@@ -73,11 +76,11 @@ test("checkpoint resume + retry clears progress", async ({ page }) => {
   // Finish → end screen.
   await answerQuestion(page, "Four");
   await page.getByRole("button", { name: /^(see results|next)$/i }).click();
-  await expect(page.getByText("Practice complete")).toBeVisible();
-  await expect(page.getByText("Try again")).toBeVisible();
+  await expect(page.locator("p:visible", { hasText: "Practice complete" })).toBeVisible();
+  await expect(page.locator("button:visible", { hasText: "Try again" })).toBeVisible();
 
   // Try again → back at Q1, and the checkpoint is cleared (reload stays Q1).
-  await page.getByRole("button", { name: "Try again", exact: true }).click();
+  await page.locator("button:visible", { hasText: "Try again" }).first().click();
   await expect(page.getByText("Question 1 of 3")).toBeVisible();
   await page.reload();
   await expect(page.getByText("Question 1 of 3")).toBeVisible();

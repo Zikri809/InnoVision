@@ -226,16 +226,9 @@ export async function createClass(page: Page, title: string): Promise<string> {
  * (zero classes). All three open the SAME single-form ResponsiveModal.
  */
 export async function openJoinDrawer(page: Page) {
-  const fab = page.getByRole("button", { name: "Join a class", exact: true });
-  const headerBtn = page.getByRole("button", { name: "Join a class", exact: true });
-  const cta = page.getByRole("button", { name: /^enter a join code$/i });
-  if (await fab.isVisible().catch(() => false)) {
-    await fab.click();
-  } else if (await cta.isVisible().catch(() => false)) {
-    await cta.click();
-  } else {
-    await headerBtn.click();
-  }
+  const trigger = page.locator("button:visible").filter({ hasText: /join a class|enter a join code/i }).first();
+  await expect(trigger).toBeVisible({ timeout: 15_000 });
+  await trigger.click();
   await expect(page.getByRole("dialog")).toBeVisible();
 }
 
@@ -250,6 +243,7 @@ export async function joinClass(page: Page, joinCode: string, classTitle: string
   await openJoinDrawer(page);
   await page.getByLabel("Join code").fill(joinCode);
   await page.getByRole("button", { name: /^join class$/i }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0, { timeout: 5_000 });
   await expect(page.getByText(classTitle, { exact: true })).toBeVisible();
 }
 
@@ -300,12 +294,18 @@ export async function createQuizWithQuestions(
       await drawer.getByLabel("Mode").click();
       await page.getByRole("option", { name: "Assessment" }).click();
     }
+    if (opts.shuffle) {
+      await drawer.getByRole("switch", { name: /shuffle/i }).click();
+    }
     await drawer.getByRole("button", { name: /create quiz/i }).click();
   } else {
     await page.getByLabel("Quiz title").fill(opts.quizTitle);
     if (opts.mode === "assessment") {
       await page.getByLabel("Mode").click();
       await page.getByRole("option", { name: "Assessment" }).click();
+    }
+    if (opts.shuffle) {
+      await page.getByRole("switch", { name: /shuffle/i }).click();
     }
     await page.getByRole("button", { name: /create quiz|new quiz/i }).click();
   }
@@ -779,20 +779,15 @@ export async function createAssessmentAndPublish(
  * builder → Results (the header link is only present on the builder).
  */
 export async function openResults(page: Page, classTitle: string, quizTitle: string) {
-  // Return to the class list first (the caller may be on the builder).
+  // Return to the class list first (the caller may be anywhere else).
   await page.goto("/lecturer/classes");
   await expect(page.getByRole("heading", { name: /My Classes|Kelas Saya/i })).toBeVisible();
   await page.getByText(classTitle, { exact: true }).click();
   await expect(page).toHaveURL(/\/lecturer\/classes\/[^/]+$/);
 
-  const directResultsLink = page.getByRole("link", { name: new RegExp(`results.*${quizTitle}|${quizTitle}.*results`, "i") });
-  if (await directResultsLink.count() > 0) {
-    await directResultsLink.first().click();
-  } else {
-    await page.getByText(quizTitle, { exact: true }).click();
-    await expect(page).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
-    await page.getByRole("link", { name: /results/i }).first().click();
-  }
+  await page.getByText(quizTitle, { exact: true }).click();
+  await expect(page).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
+  await page.getByRole("link", { name: /^(?:view results|lihat keputusan)$/i }).click();
   await expect(page).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/results/);
 }
 
@@ -950,7 +945,7 @@ export async function configureRetakesOnCreate(page: Page, maxAttempts: number) 
  */
 export async function setAutoReveal(request: APIRequestContext, quizId: string) {
   const res = await request.patch(`/api/quizzes/${quizId}/reveal-settings`, {
-    data: { auto_reveal_on_complete: true },
+    data: { autoRevealOnComplete: true },
   });
   if (!res.ok()) {
     throw new Error(`setAutoReveal failed: ${res.status()} ${await res.text()}`);

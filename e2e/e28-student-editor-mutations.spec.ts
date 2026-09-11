@@ -43,13 +43,20 @@ async function addQuestion(
   optA: string,
   optB: string,
 ) {
-  const optionInputs = page.locator("fieldset input[maxlength='500']");
-  await optionInputs.nth(0).fill(optA);
-  await optionInputs.nth(1).fill(optB);
-  await page.getByRole("textbox", { name: /prompt/i }).fill(prompt);
-  await page.getByRole("radio").first().check();
+  // Rebuilt add form (lecturer parity): no fieldset wrapper and no radios —
+  // options are aria-labelled inputs and the correct key defaults to Option 1.
+  const promptBox = page.getByRole("textbox", { name: /prompt/i });
+  await page.getByLabel("Option 1", { exact: true }).fill(optA);
+  await page.getByLabel("Option 2", { exact: true }).fill(optB);
+  await promptBox.fill(prompt);
   await page.getByRole("button", { name: /add this question/i }).click();
-  await expect(page.getByText(prompt, { exact: true })).toBeVisible();
+  // The form resets (emptyDraft) AFTER the POST resolves — a bare
+  // getByText(prompt) matches the still-filled textarea and races the reset,
+  // which wipes the NEXT call's fills. Wait for the reset first, then the row.
+  await expect(promptBox).toHaveValue("");
+  await expect(
+    page.locator("li:has(> article)").filter({ hasText: prompt }),
+  ).toBeVisible();
 }
 
 test("reorder persists after reload", async ({ page }) => {
@@ -60,7 +67,11 @@ test("reorder persists after reload", async ({ page }) => {
   await addQuestion(page, "Q-two beta?", "b1", "b2");
   await addQuestion(page, "Q-three gamma?", "c1", "c2");
 
-  const cards = () => page.locator("ol > li");
+  // Rebuilt desktop row = article inside li, with a quiet action gutter
+  // (tooltip icon buttons aria-labelled "Move option up"/"Move option down").
+  // Scope to TOP-LEVEL question rows only — each row's option list is ALSO
+  // a ul > li (nested inside the question li).
+  const cards = () => page.locator("li:has(> article)");
   await expect(cards().first()).toContainText("Q-one alpha?");
 
   // Move Q-two up → [beta, alpha, gamma].
@@ -153,7 +164,9 @@ test("lecturer EditQuestionDialog parity — shared reducer clamps identically",
   await dialog.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect(dialog).not.toBeVisible();
 
-  // Key clamped to old option 2 (Bb) — now "Option 1", options "Bb · Cc".
-  await expect(row.getByText(/Correct answer: Option 1/)).toBeVisible();
-  await expect(row.getByText(/Bb · Cc/)).toBeVisible();
+  // Key clamped to old option 2 (Bb) — now option A (with Check icon), options "Bb" and "Cc".
+  const optionA = row.locator("li").filter({ hasText: "Bb" });
+  await expect(optionA).toBeVisible();
+  await expect(optionA.locator("svg")).toBeVisible();
+  await expect(row.locator("li").filter({ hasText: "Cc" })).toBeVisible();
 });

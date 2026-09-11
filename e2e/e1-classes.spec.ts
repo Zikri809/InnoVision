@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { registerUser, createClass } from "./helpers";
+import { registerUser, createClass, openJoinDrawer } from "./helpers";
 
 const TEST_TIMESTAMP = Date.now();
 const LECTURER_EMAIL = `lecturer-e1-${TEST_TIMESTAMP}@innovision.test`;
@@ -104,10 +104,11 @@ test.describe("E1 — Class create → join via code → roster", () => {
     expect(codeTwo).toMatch(/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/);
 
     await registerUser(studentPage, `${STUDENT_EMAIL}-iso`, "student", LECTURER_INVITE_CODE);
+    await studentPage.goto("/student/classes");
 
     // Classes exist → the section-header "Join a class" button opens the
     // join dialog (desktop viewport; the mobile FAB is sm:hidden).
-    await studentPage.getByRole("button", { name: "Join a class", exact: true }).click();
+    await openJoinDrawer(studentPage);
     // Wrong code → inline role=alert with the literal server string.
     await studentPage.getByLabel("Join code").fill("ZZZZZZ");
     await studentPage.getByRole("button", { name: /join/i }).click();
@@ -118,9 +119,11 @@ test.describe("E1 — Class create → join via code → roster", () => {
     // Join the FIRST class, then REJOIN it → sonner info toast (en.json:429),
     // not a duplicated roster row. Post-first-join the dashed "Join a class"
     // card appears — anchor the submit exactly (§5.1 #7).
+    await studentPage.getByLabel("Join code").clear();
     await studentPage.getByLabel("Join code").fill(codeOne);
     await studentPage.getByRole("button", { name: /^join class$/i }).click();
     await expect(studentPage.getByText("E1 Isolation One", { exact: true })).toBeVisible();
+    await expect(studentPage.getByRole("dialog")).toHaveCount(0);
     // Rejoin: the drawer stayed mounted after success (900ms beat) — reopen.
     await studentPage.getByRole("button", { name: "Join a class", exact: true }).click();
     await studentPage.getByLabel("Join code").fill(codeOne);
@@ -132,11 +135,17 @@ test.describe("E1 — Class create → join via code → roster", () => {
       studentPage.locator("a").filter({ hasText: "E1 Isolation One" }),
     ).toHaveCount(1);
 
+    if (await studentPage.getByRole("dialog").isVisible().catch(() => false)) {
+      await studentPage.keyboard.press("Escape");
+      await expect(studentPage.getByRole("dialog")).toHaveCount(0);
+    }
+
     // Join the SECOND class → both listed; the two rosters are isolated.
     await studentPage.getByRole("button", { name: "Join a class", exact: true }).click();
     await studentPage.getByLabel("Join code").fill(codeTwo);
     await studentPage.getByRole("button", { name: /^join class$/i }).click();
     await expect(studentPage.getByText("E1 Isolation Two", { exact: true })).toBeVisible();
+    await expect(studentPage.getByRole("dialog")).toHaveCount(0);
 
     await lecturerPage.getByText("E1 Isolation One", { exact: true }).click();
     await expect(lecturerPage.getByText(/student-/)).toBeVisible();

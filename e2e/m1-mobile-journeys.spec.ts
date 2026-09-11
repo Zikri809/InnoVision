@@ -94,6 +94,7 @@ test.describe("m1 — mobile student journey", () => {
     await page.getByLabel("Join code").fill(joinCode);
     await page.getByRole("button", { name: /^join class$/i }).click();
     await expect(page.getByText(classTitle, { exact: true })).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(0, { timeout: 5_000 });
 
     // Play through the mobile stage: dock → class quizzes → Start.
     await page

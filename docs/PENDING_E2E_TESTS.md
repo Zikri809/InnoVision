@@ -1277,3 +1277,85 @@ Unchanged contracts that the redesign preserved (do not regress):
 > long `ready` stretch and returns to 33ms on pause → recover. Unit side
 > is covered by construction (pure threshold constants; no timing-window
 > state to invalidate at runtime).
+
+---
+
+# Verification Pass — Gemini Clearance Batch (2026-09-10)
+
+> A full static verification of the pending-work batch (helpers rewrite, 13
+> patched `e*`/`m1` specs, config changes, and the 5 new specs `e49`, `e50`,
+> `m2`, `m3`, `m4`) against the component/API/RPC source. Gates: `tsc` clean,
+> `eslint` clean, i18n parity 1223/1223, targeted vitest green,
+> `playwright --list` parses all 176 tests. Selector-level findings below were
+> fixed in the same pass; full Playwright runs still pending a quiet machine
+> (webServer rebuilds `.next` — see the infra note above).
+
+## Verified against source (no change needed)
+
+- `helpers.setAutoReveal` now PATCHes `autoRevealOnComplete` — matches
+  `RevealSettingsSchema` (`src/lib/quizzes/validation.ts:339`) and the
+  `reveal-settings` route.
+- `helpers.openJoinDrawer` visible-button probe + `joinClass` dialog-count-0
+  wait — matches the ResponsiveModal unmount beat documented in §"What
+  changed in these specs".
+- `helpers.createQuizWithQuestions` shuffle Switch tap — Base UI `switch`
+  role + wrapped-label name ("Shuffle question & option order"), same
+  pattern as e40's retake switch.
+- `helpers.openResults` simplification — builder "View results" link
+  (`lecturer.builder.viewResults`, en) renders on every published builder.
+- Editor add-form rewrites (`Option 1/2` labels, no radios, reset-then-row
+  waits) — match `editor-client.tsx` (`quizEditor.optionLabel`,
+  `addQuestionSubmit`, form reset on `emptyDraft`).
+- e28 desktop gutter: `Move option up/down` (aria `quizEditor.moveUpA11y`),
+  `Delete` (`common.delete`), `Edit question`; `li:has(> article)` row
+  scoping; option-surgery radios kept in `OptionDraftForm`.
+- e45/e42 breakdown `[role="listitem"]` (VList) vs `ol > li` (accordion);
+  removed "Correct answer" tag assertion — tag no longer rendered.
+- e36 results-dashboard close moved into the "Quiz actions" menu
+  (`results.quizMenu`), `menuitem`-or-button fallback is correct.
+- e49: submit-RPC auto-reveal flip (migration 0012 §7), "Results revealed"
+  chip, desktop hub `<li>` cards, disabled-awaiting card branch.
+- e50: answer RPC checks `session_not_active` BEFORE question membership
+  (0008_sessions.sql:343 vs :383) so the dummy-questionId 409 probes are
+  sound; overlay copy ("Face check paused"/"Assessment flagged"),
+  `flagged-wait-ticker` testid, `/api/face/unlock` envelope all match.
+- m2: sticky mobile header (`header.sticky`), `Q {current}/{total}` strip,
+  `role="timer"` chip + aria-label, quiz-info modal rows
+  (`infoOpen`/`info.*`), fixed bottom bar (`div.fixed.bottom-0` unique),
+  calibration HUD (`noHand`/`lightingGood`, Skip →
+  `vision.gesturesUnavailable`), PIP expand/collapse + Escape,
+  palm-next (nextArmed = feedback), ScoreRing spans, verdict accordion
+  default-open state.
+- m3: `GradebookMobile` swap below sm, summary meter (`classAvgLabel`,
+  width style), quiz chips, per-quiz sheet distribution
+  (`bg-amber-400/80` / `bg-emerald-600/80`, `<50 · 50-64 · …` legend),
+  per-student sheet (`colCumulative` = "Overall"), `#gradebook-search` +
+  "Showing X of Y students".
+- m4: builder mobile strip state swap (Generate-from-file → Add question),
+  ⋯ menu Add question, batch sheet stays open + Done, single-open
+  accordion, `mark checked — N` aria, reviewed persistence, publish footer
+  bar + `getStatusLabel` "Live" chip; student editor hero chips, settings
+  drawer (`metaSave` = "Save details"), reviewed checklist copy.
+
+## Fixed during verification (strict-mode / drift)
+
+1. **e45 (2 sites)** — bare `getByText("Practice complete! 🎉")` matched the
+   banner in BOTH mounted end-screen layouts (the component renders the
+   mobile and wide compositions unconditionally; visibility is CSS-gated).
+   Scoped to `p:visible`.
+2. **m2 test 4** — same dual-mount issue for "Practice complete! 🎉",
+   "50% correct", praise line, quiz-title h1 (level-1 heading matches both
+   layouts), and "Answer breakdown" h2. All scoped to visible elements.
+3. **m2 test 1** — terminal "Assessment complete/submitted" text scoped to
+   `p:visible` for the same reason.
+
+Note for future specs on any end-state surface (end-screen.tsx,
+player-client.tsx results): both layouts are ALWAYS in the DOM. Use
+`:visible` scoping or layout-unique class hooks — never bare getByText.
+
+## Still pending (unchanged)
+
+- Full Playwright runs (chromium + mobile + e2f) on a quiet machine; the
+  status tables above clear only on a green run.
+- M3 backlog items (e51–e55) and the m1-mobile-journeys dialog-count fix
+  verification remain as recorded in PROJECT.md.

@@ -180,7 +180,7 @@ test.describe("E42 — per-session question/option shuffling", () => {
     // Full score: if translation were broken (presented index persisted),
     // the canonical grading would misfire — this is the loud failure.
     await expect(studentPage.getByText(/^3\s*\/\s*3$/)).toBeVisible({ timeout: 10_000 });
-    await expect(studentPage.getByText("100% correct", { exact: true })).toBeVisible();
+    await expect(studentPage.locator("p:visible", { hasText: "100% correct" })).toBeVisible();
 
     // Deterministic persisted-index probe: session_answers must hold the
     // CANONICAL correct index for every question (P(false pass) = 0).
@@ -201,14 +201,14 @@ test.describe("E42 — per-session question/option shuffling", () => {
     // (6) EndScreen breakdown (practice always reveals): rows render in the
     // DERIVED presented order, each prompt appears exactly once, and each
     // correct option's row carries the ✓ glyph.
-    await expect(studentPage.getByText("Answer breakdown")).toBeVisible();
-    const breakdownRows = studentPage.locator("ol > li");
+    await expect(studentPage.locator("h2:visible", { hasText: "Answer breakdown" })).toBeVisible();
+    const breakdownRows = studentPage.locator('[role="listitem"]');
     await expect(breakdownRows).toHaveCount(QUESTIONS.length);
     for (let i = 0; i < presentedQuestions.length; i++) {
       await expect(breakdownRows.nth(i)).toContainText(presentedQuestions[i].prompt);
     }
     for (const q of canonicalQuestions) {
-      const row = studentPage.locator("ol > li").filter({ hasText: q.prompt });
+      const row = studentPage.locator('[role="listitem"]').filter({ hasText: q.prompt });
       await expect(row).toHaveCount(1);
       await expect(row.locator("li").filter({ hasText: q.options[q.correct_index] })).toContainText("✓");
     }
@@ -299,7 +299,7 @@ test.describe("E42 — per-session question/option shuffling", () => {
     await expect(studentPage.getByRole("button", { name: "Finish", exact: true })).toBeVisible();
     await studentPage.getByRole("button", { name: "Finish", exact: true }).click();
     await expect(studentPage.getByText(/^3\s*\/\s*3$/)).toBeVisible({ timeout: 10_000 });
-    await expect(studentPage.getByText("Answer breakdown")).toBeVisible();
+    await expect(studentPage.locator("h2:visible", { hasText: "Answer breakdown" })).toBeVisible();
 
     await lecturerCtx.close();
     await studentCtx.close();

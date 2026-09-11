@@ -40,15 +40,16 @@ test("creator lifecycle — create, build, play own quiz", async ({ page }) => {
   // Builder opens for the new quiz.
   await page.waitForURL(/\/student\/my-quizzes\/[^/]+\/edit/);
 
-  // Add one MCQ.
-  const optionInputs = page.locator("fieldset input[maxlength='500']");
-  await optionInputs.nth(0).fill("Paris");
-  await optionInputs.nth(1).fill("London");
-  await page
-    .getByRole("textbox", { name: /prompt/i })
-    .fill("What is the capital of France?");
-  await page.getByRole("radio").first().check(); // mark Paris correct
+  // Add one MCQ. Rebuilt add form: no fieldset/radios — options are
+  // aria-labelled inputs and the correct key defaults to Option 1 (Paris).
+  const promptBox = page.getByRole("textbox", { name: /prompt/i });
+  await page.getByLabel("Option 1", { exact: true }).fill("Paris");
+  await page.getByLabel("Option 2", { exact: true }).fill("London");
+  await promptBox.fill("What is the capital of France?");
   await page.getByRole("button", { name: /add this question/i }).click();
+  // Form resets after the POST resolves — wait for the reset before the row
+  // (a bare getByText matches the still-filled textarea and races the reset).
+  await expect(promptBox).toHaveValue("");
   await expect(page.getByText("What is the capital of France?")).toBeVisible();
 
   // Self-play from the editor's preview link.
@@ -57,7 +58,7 @@ test("creator lifecycle — create, build, play own quiz", async ({ page }) => {
   await page.getByRole("button", { name: "London" }).click(); // wrong on purpose
   await expect(page.getByText(/not quite/i)).toBeVisible();
   await page.getByRole("button", { name: /^(next|see results)$/i }).click();
-  await expect(page.getByText(/practice complete/i)).toBeVisible();
+  await expect(page.locator("p:visible", { hasText: /practice complete/i })).toBeVisible();
 });
 
 test("share flow — friend plays via link; login wall preserves it", async ({
@@ -104,7 +105,7 @@ test("share flow — friend plays via link; login wall preserves it", async ({
   await anon.getByRole("button", { name: "Paris" }).click(); // correct
   await expect(anon.getByText(/correct!/i)).toBeVisible();
   await anon.getByRole("button", { name: /^(next|see results)$/i }).click();
-  await expect(anon.getByText(/practice complete/i)).toBeVisible();
+  await expect(anon.locator("p:visible", { hasText: /practice complete/i })).toBeVisible();
   await anonCtx.close();
 });
 

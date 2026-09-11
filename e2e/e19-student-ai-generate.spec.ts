@@ -70,7 +70,7 @@ test("second generation appends into the same quiz", async ({ page }) => {
   await row.getByRole("link", { name: /edit/i }).first().click();
   await page.waitForURL(/\/student\/my-quizzes\/[^/]+\/edit/);
 
-  const before = await page.locator("ol > li").count();
+  const before = await page.locator("ul > li").count();
   const dialog2 = page.getByRole("dialog");
   await page.getByRole("button", { name: /generate with ai/i }).click();
   await expect(dialog2).toBeVisible();
@@ -87,6 +87,6 @@ test("second generation appends into the same quiz", async ({ page }) => {
 
   // Append semantics: total grows beyond the first batch.
   await expect
-    .poll(async () => page.locator("ol > li").count(), { timeout: 30_000 })
+    .poll(async () => page.locator("ul > li").count(), { timeout: 30_000 })
     .toBeGreaterThan(before);
 });

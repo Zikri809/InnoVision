@@ -45,12 +45,15 @@ async function createTwoQuestionQuiz(page: import("@playwright/test").Page) {
     ["Q1 — pick the right one?", "Paris", "London"],
     ["Q2 — pick the other right one?", "Mars", "Venus"],
   ]) {
-    const optionInputs = page.locator("fieldset input[maxlength='500']");
-    await optionInputs.nth(0).fill(optA);
-    await optionInputs.nth(1).fill(optB);
-    await page.getByRole("textbox", { name: /prompt/i }).fill(prompt);
-    await page.getByRole("radio").first().check();
+    // Rebuilt add form: no fieldset/radios — the key defaults to Option 1.
+    const promptBox = page.getByRole("textbox", { name: /prompt/i });
+    await page.getByLabel("Option 1", { exact: true }).fill(optA);
+    await page.getByLabel("Option 2", { exact: true }).fill(optB);
+    await promptBox.fill(prompt);
     await page.getByRole("button", { name: /add this question/i }).click();
+    // Form resets after the POST resolves — wait for the reset before the row
+    // (a bare getByText matches the still-filled textarea and races the reset).
+    await expect(promptBox).toHaveValue("");
     await expect(page.getByText(prompt, { exact: true })).toBeVisible();
   }
 }

@@ -194,7 +194,7 @@ test.describe("E24 — network failure UX", () => {
     // Inline failure alert (role=alert INSIDE the dialog — generate failures
     // never toast; only success does) + NO rows landed + retry possible.
     await expect(dialog.getByRole("alert")).toBeVisible({ timeout: 20_000 });
-    await expect(page.locator("ol > li")).toHaveCount(0);
+    await expect(page.locator("ul > li")).toHaveCount(0);
     await expect(dialog.getByRole("button", { name: /generate quiz/i })).toBeEnabled({
       timeout: 10_000,
     });
