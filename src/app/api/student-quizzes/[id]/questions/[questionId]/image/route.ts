@@ -7,6 +7,7 @@ import { parseImageUpload } from "@/lib/media/server";
 import {
   QUESTION_IMAGES_BUCKET,
   MAX_QUESTION_IMAGE_BYTES,
+  isOwnedQuestionImagePath,
 } from "@/lib/media/validation";
 import { checkSameOrigin, internalError, invalidOrigin, notFound, rateLimited } from "@/lib/http";
 
@@ -75,7 +76,18 @@ export async function POST(request: Request, { params }: Params) {
 
   const oldPath = (question as { image_path: string | null }).image_path;
   if (oldPath && oldPath !== path) {
-    void admin.storage.from(QUESTION_IMAGES_BUCKET).remove([oldPath]).catch(() => {});
+    // audit-2 C-03: owner-pinned shape gate before the service-role remove —
+    // the column is caller-writable at the DB layer, so an attacker-poisoned
+    // path must fail closed here (skip + log) instead of deleting cross-
+    // tenant bytes.
+    if (isOwnedQuestionImagePath(oldPath, owner.userId)) {
+      void admin.storage.from(QUESTION_IMAGES_BUCKET).remove([oldPath]).catch(() => {});
+    } else {
+      console.error("practice question image replace: refusing malformed old image_path", {
+        quizId: id,
+        questionId,
+      });
+    }
   }
 
   return Response.json(
@@ -121,7 +133,16 @@ export async function DELETE(request: Request, { params }: Params) {
   const oldPath = (question as { image_path: string | null }).image_path;
   if (oldPath) {
     const admin = createAdminClient();
-    void admin.storage.from(QUESTION_IMAGES_BUCKET).remove([oldPath]).catch(() => {});
+    // audit-2 C-03: owner-pinned shape gate before the service-role remove
+    // (poisoned-column vector). Fail closed: skip + log.
+    if (isOwnedQuestionImagePath(oldPath, owner.userId)) {
+      void admin.storage.from(QUESTION_IMAGES_BUCKET).remove([oldPath]).catch(() => {});
+    } else {
+      console.error("practice question image delete: refusing malformed image_path", {
+        quizId: id,
+        questionId,
+      });
+    }
   }
 
   return Response.json(

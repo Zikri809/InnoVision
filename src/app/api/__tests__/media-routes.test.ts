@@ -703,7 +703,9 @@ describe("lecturer image route — additional branches", () => {
   it("POST replace tolerates a failed old-object removal (orphan swept later)", async () => {
     const ctx = lecturerContext("draft");
     (ctx.client.tables["questions"]!.find((q) => q.id === QUESTION_ID)! as { image_path: string }).image_path =
-      `${LECTURER_ID}/old-object.png`;
+      // audit-2 C-03: fixtures use WELL-FORMED owner-pinned paths — the
+      // service-role remove() now refuses anything else.
+      `${LECTURER_ID}/11111111-1111-4111-8111-111111111111.png`;
     storageMock.remove.mockRejectedValue(new Error("storage boom"));
 
     const { lecturerImage } = await importMediaRoutes();
@@ -731,7 +733,7 @@ describe("lecturer image route — additional branches", () => {
   it("DELETE ignores a storage outage (column stays cleared, no throw)", async () => {
     const ctx = lecturerContext("draft");
     (ctx.client.tables["questions"]!.find((q) => q.id === QUESTION_ID)! as { image_path: string }).image_path =
-      `${LECTURER_ID}/doomed.png`;
+      `${LECTURER_ID}/22222222-2222-4222-8222-222222222222.png`;
     storageMock.remove.mockRejectedValue(new Error("bucket down"));
 
     const { lecturerImage } = await importMediaRoutes();
@@ -741,7 +743,25 @@ describe("lecturer image route — additional branches", () => {
     );
     expect(res.status).toBe(200);
     expect(ctx.client.tables["questions"]!.find((q) => q.id === QUESTION_ID)?.image_path).toBeNull();
-    expect(storageMock.remove).toHaveBeenCalledWith([`${LECTURER_ID}/doomed.png`]);
+    expect(storageMock.remove).toHaveBeenCalledWith([`${LECTURER_ID}/22222222-2222-4222-8222-222222222222.png`]);
+  });
+
+  it("audit-2 C-03: DELETE refuses (skip + still clears) a malformed/poisoned image_path", async () => {
+    const ctx = lecturerContext("draft");
+    // A direct-PostgREST poison vector: the column holds another owner's
+    // well-formed object path. The gate must NOT pass it to service-role
+    // remove() — the column still clears (app consistency), object survives.
+    (ctx.client.tables["questions"]!.find((q) => q.id === QUESTION_ID)! as { image_path: string }).image_path =
+      `99999999-9999-4999-8999-999999999999/victim.png`;
+
+    const { lecturerImage } = await importMediaRoutes();
+    const res = await lecturerImage.DELETE(
+      new Request("http://localhost/api/x", { method: "DELETE" }),
+      { params: Promise.resolve({ id: QUIZ_ID, questionId: QUESTION_ID }) },
+    );
+    expect(res.status).toBe(200);
+    expect(ctx.client.tables["questions"]!.find((q) => q.id === QUESTION_ID)?.image_path).toBeNull();
+    expect(storageMock.remove).not.toHaveBeenCalled();
   });
 });
 
@@ -763,10 +783,30 @@ describe("practice image route — additional branches", () => {
     return ctx;
   }
 
-  it("POST without content-length → 413 (fail closed, no length oracle)", async () => {
+  it("audit-2 H-04: headerless (chunked-style) POST is STREAM-CAPPED, not blindly 413'd — small body succeeds", async () => {
+    // The old intake gated on the declared content-length only. The new
+    // readCappedFormData intake counts real bytes, so a headerless body
+    // within the cap is accepted and an over-cap one aborts mid-stream —
+    // strictly stronger than the header check with no honest-client 413.
     const ctx = ownerCtx();
     const form = new FormData();
     form.append("image", new File([new Uint8Array(PNG).buffer as ArrayBuffer], "pic.png", { type: "image/png" }));
+    const { studentImage } = await importMediaRoutes();
+    const res = await studentImage.POST(
+      new Request("http://localhost/api/x", { method: "POST", body: form }),
+      { params: Promise.resolve({ id: ctx.quizId, questionId: QUESTION_ID }) },
+    );
+    expect(res.status).toBe(200);
+    expect(storageMock.upload).toHaveBeenCalledTimes(1);
+  });
+
+  it("audit-2 H-04: a multipart body over the cap is rejected mid-stream (413, no upload)", async () => {
+    const ctx = ownerCtx();
+    // 6 MB of junk past a valid PNG header — over the 5 MB image cap.
+    const blob = new Uint8Array(6 * 1024 * 1024);
+    blob.set(PNG, 0);
+    const form = new FormData();
+    form.append("image", new File([blob.buffer as ArrayBuffer], "big.png", { type: "image/png" }));
     const { studentImage } = await importMediaRoutes();
     const res = await studentImage.POST(
       new Request("http://localhost/api/x", { method: "POST", body: form }),
@@ -806,7 +846,7 @@ describe("practice image route — additional branches", () => {
   it("POST cross-extension replace removes the OLD object", async () => {
     const ctx = ownerCtx();
     (ctx.client.tables["student_quiz_questions"]!.find((q) => q.id === QUESTION_ID)! as { image_path: string }).image_path =
-      `${ctx.ownerId}/old.jpeg`;
+      `${ctx.ownerId}/33333333-3333-4333-8333-333333333333.jpeg`;
     const JPEG: number[] = [0xff, 0xd8, 0xff, 0xe0];
     const { studentImage } = await importMediaRoutes();
     const res = await studentImage.POST(
@@ -814,14 +854,14 @@ describe("practice image route — additional branches", () => {
       { params: Promise.resolve({ id: ctx.quizId, questionId: QUESTION_ID }) },
     );
     expect(res.status).toBe(200);
-    expect(storageMock.remove).toHaveBeenCalledWith([`${ctx.ownerId}/old.jpeg`]);
+    expect(storageMock.remove).toHaveBeenCalledWith([`${ctx.ownerId}/33333333-3333-4333-8333-333333333333.jpeg`]);
     const row = ctx.client.tables["student_quiz_questions"]!.find((q) => q.id === QUESTION_ID);
     expect(String(row?.image_path)).toMatch(/\.jpg$/);
   });
 
   it("DELETE clears the column first, then removes the object best-effort", async () => {
     const ctx = ownerCtx();
-    const oldPath = `${ctx.ownerId}/gone.png`;
+    const oldPath = `${ctx.ownerId}/44444444-4444-4444-8444-444444444444.png`;
     (ctx.client.tables["student_quiz_questions"]!.find((q) => q.id === QUESTION_ID)! as { image_path: string }).image_path = oldPath;
 
     const { studentImage } = await importMediaRoutes();
@@ -838,7 +878,7 @@ describe("practice image route — additional branches", () => {
   it("DELETE tolerates a failed object removal (orphan swept later)", async () => {
     const ctx = ownerCtx();
     (ctx.client.tables["student_quiz_questions"]!.find((q) => q.id === QUESTION_ID)! as { image_path: string }).image_path =
-      `${ctx.ownerId}/doomed.png`;
+      `${ctx.ownerId}/55555555-5555-4555-8555-555555555555.png`;
     storageMock.remove.mockRejectedValue(new Error("bucket down"));
 
     const { studentImage } = await importMediaRoutes();

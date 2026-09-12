@@ -143,3 +143,18 @@ export function isWellFormedQuestionImagePath(path: string): boolean {
   if (dot <= 0) return false;
   return ANY_UID_RE.test(owner) && UUID_RE.test(rest.slice(0, dot)) && IMG_EXT_RE.test(rest.slice(dot));
 }
+
+/**
+ * audit-2 C-03: OWNER-PINNED gate for every PRIVILEGED storage operation
+ * (service-role remove()/copy()) fed from a DB column. The signing route
+ * only needs isWellFormedQuestionImagePath (the viewer is not the owner);
+ * delete/replace/copy DO know the owner, so the folder prefix must be pinned
+ * to them — a tampered/poisoned column pointing at another user's object
+ * (or any stray path) fails closed here instead of deleting cross-tenant
+ * bytes through the confused deputy. Callers skip+log on false, never throw.
+ */
+export function isOwnedQuestionImagePath(path: string, ownerUid: string): boolean {
+  return (
+    path.startsWith(`${ownerUid}/`) && isWellFormedQuestionImagePath(path)
+  );
+}

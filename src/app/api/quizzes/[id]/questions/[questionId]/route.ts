@@ -1,21 +1,20 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { QUESTION_IMAGES_BUCKET } from "@/lib/media/validation";
+import { QUESTION_IMAGES_BUCKET, isOwnedQuestionImagePath } from "@/lib/media/validation";
 import { requireQuizOwner } from "@/lib/quizzes/guards";
 import { isUuid } from "@/lib/classes/roster";
 import { rateLimit } from "@/lib/classes/rate-limit";
 import { QuestionInputSchema } from "@/lib/quizzes/validation";
 import {
-  checkBodyLimit,
   checkSameOrigin,
   firstIssueMessage,
   internalError,
   invalidBody,
-  invalidJson,
   jsonError,
   notDraft,
   notFound,
+  readCappedJson,
 } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
@@ -51,9 +50,6 @@ export async function PATCH(request: Request, { params }: Params) {
     return jsonError("rate_limited", "Too many edits. Try again later.", 429);
   }
 
-  const sizeError = checkBodyLimit(request);
-  if (sizeError) return sizeError;
-
   // The question must belong to this quiz (no cross-quiz moves).
   const { data: existing, error: existingError } = await supabase
     .from("questions")
@@ -69,14 +65,10 @@ export async function PATCH(request: Request, { params }: Params) {
     return notFound();
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return invalidJson();
-  }
+  const body = await readCappedJson(request);
+  if (!body.ok) return body.response;
 
-  const parsed = QuestionInputSchema.safeParse(body);
+  const parsed = QuestionInputSchema.safeParse(body.data);
   if (!parsed.success) {
     return invalidBody(firstIssueMessage(parsed.error.issues, "Invalid question data."));
   }
@@ -174,10 +166,18 @@ export async function DELETE(request: Request, { params }: Params) {
   // failure mode a swept orphan, never a dangling pointer).
   const imagePath = (deleted as { image_path: string | null }).image_path;
   if (imagePath) {
-    void createAdminClient()
-      .storage.from(QUESTION_IMAGES_BUCKET)
-      .remove([imagePath])
-      .catch(() => {});
+    // audit-2 C-03: owner-pinned shape gate before the service-role remove —
+    // the column is caller-writable at the DB layer, so a poisoned path must
+    // fail closed (skip + log; 0046's CHECK/trigger backstop now makes the
+    // poison unreachable for NEW writes anyway).
+    if (isOwnedQuestionImagePath(imagePath, owner.userId)) {
+      void createAdminClient()
+        .storage.from(QUESTION_IMAGES_BUCKET)
+        .remove([imagePath])
+        .catch(() => {});
+    } else {
+      console.error("question delete: refusing malformed image_path", { quizId: id, questionId });
+    }
   }
 
   return NextResponse.json({ ok: true });

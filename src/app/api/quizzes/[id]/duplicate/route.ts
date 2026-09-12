@@ -5,17 +5,16 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireClassOwner, requireQuizOwner } from "@/lib/quizzes/guards";
 import { isUuid } from "@/lib/classes/roster";
 import { rateLimit } from "@/lib/classes/rate-limit";
-import { isWellFormedQuestionImagePath, QUESTION_IMAGES_BUCKET } from "@/lib/media/validation";
+import { isOwnedQuestionImagePath, QUESTION_IMAGES_BUCKET } from "@/lib/media/validation";
 import {
-  checkBodyLimit,
   checkSameOrigin,
   firstIssueMessage,
   internalError,
   invalidBody,
-  invalidJson,
   jsonError,
   notFound,
   rateLimited,
+  readCappedJson,
 } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
@@ -66,17 +65,10 @@ export async function POST(request: Request, { params }: Params) {
     return rateLimited("Too many duplicates. Try again later.");
   }
 
-  const sizeError = checkBodyLimit(request);
-  if (sizeError) return sizeError;
+  const body = await readCappedJson(request);
+  if (!body.ok) return body.response;
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return invalidJson();
-  }
-
-  const parsed = DuplicateSchema.safeParse(body);
+  const parsed = DuplicateSchema.safeParse(body.data);
   if (!parsed.success) {
     return invalidBody(firstIssueMessage(parsed.error.issues, "Invalid duplicate payload."));
   }
@@ -106,9 +98,12 @@ export async function POST(request: Request, { params }: Params) {
     return internalError("Could not duplicate the quiz right now.");
   }
 
-  await duplicateQuestionImages(supabase, owner.userId, newQuizId);
+  // audit-2 M-15: the phase outcome is SURFACED instead of a bare 201 —
+  // callers (and logs) can see when a crash/freeze mid-phase degraded the
+  // clone instead of silently shipping a partial copy.
+  const images = await duplicateQuestionImages(supabase, owner.userId, newQuizId);
 
-  return NextResponse.json({ quizId: newQuizId }, { status: 201 });
+  return NextResponse.json({ quizId: newQuizId, images }, { status: 201 });
 }
 
 /**
@@ -122,19 +117,24 @@ export async function POST(request: Request, { params }: Params) {
  * NULL every clone row's image_path (fail-closed: images lost on the clone,
  * never dangling).
  */
+type DuplicateImageOutcome = { copied: number; failed: number | null };
+
 async function duplicateQuestionImages(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
   newQuizId: string,
-): Promise<void> {
+): Promise<DuplicateImageOutcome> {
   try {
-    await duplicateQuestionImagesInner(supabase, userId, newQuizId);
+    return await duplicateQuestionImagesInner(supabase, userId, newQuizId);
   } catch (err) {
     // Fail-closed contract: an unexpected phase error (admin client,
     // randomUUID, …) must NULL every clone row's image_path rather than
     // leave rows referencing objects we can no longer reason about.
     console.error("duplicate image phase error:", err);
     await supabase.from("questions").update({ image_path: null }).eq("quiz_id", newQuizId);
+    // `failed: null` = unknown/degraded — the per-image tally was lost with
+    // the crashed loop (M-15: previously invisible behind a bare 201).
+    return { copied: 0, failed: null };
   }
 }
 
@@ -142,7 +142,7 @@ async function duplicateQuestionImagesInner(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
   newQuizId: string,
-): Promise<void> {
+): Promise<DuplicateImageOutcome> {
   const { data: cloned, error: selectError } = await supabase
     .from("questions")
     .select("id, image_path")
@@ -152,16 +152,18 @@ async function duplicateQuestionImagesInner(
   if (selectError) {
     console.error("duplicate image select error:", selectError);
     await supabase.from("questions").update({ image_path: null }).eq("quiz_id", newQuizId);
-    return;
+    return { copied: 0, failed: null };
   }
 
   const imaged = (cloned ?? []).filter(
     (question): question is { id: string; image_path: string } =>
       Boolean((question as { image_path: string | null }).image_path),
   );
-  if (imaged.length === 0) return;
+  if (imaged.length === 0) return { copied: 0, failed: 0 };
 
   const admin = createAdminClient();
+  let copied = 0;
+  let failed = 0;
 
   for (const question of imaged) {
     const srcPath = question.image_path;
@@ -176,7 +178,13 @@ async function duplicateQuestionImagesInner(
 
     // House rule: validate the stored path immediately before every
     // privileged storage op — the admin client bypasses all policy.
-    if (!isWellFormedQuestionImagePath(srcPath)) {
+    // audit-2 C-03 (R2-storage NEW-1): the copy SOURCE must ALSO be pinned
+    // to the caller's own folder — shape-validity alone let a poisoned
+    // source path from ANOTHER owner's folder be copied into this lecturer's
+    // clone (cross-tenant exfiltration via copy()). Clone rows are same-
+    // owner by construction, so the owner pin never blocks a legit path.
+    if (!isOwnedQuestionImagePath(srcPath, userId)) {
+      failed++;
       await clearPath();
       continue;
     }
@@ -189,6 +197,7 @@ async function duplicateQuestionImagesInner(
 
     if (copyError) {
       console.error("question image copy error:", copyError);
+      failed++;
       await clearPath();
       continue;
     }
@@ -208,6 +217,16 @@ async function duplicateQuestionImagesInner(
       // not orphan the just-copied object before removal dispatches.
       await admin.storage.from(QUESTION_IMAGES_BUCKET).remove([newPath]).catch(() => {});
       await clearPath();
+      failed++;
+      continue;
     }
+    copied++;
   }
+
+  if (failed > 0) {
+    // M-15: per-image failures were console.error-only — the aggregate is
+    // now logged AND returned in the 201 body.
+    console.error("duplicate image phase degraded:", { quizId: newQuizId, copied, failed });
+  }
+  return { copied, failed };
 }

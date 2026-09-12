@@ -1,22 +1,21 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { QUESTION_IMAGES_BUCKET } from "@/lib/media/validation";
+import { QUESTION_IMAGES_BUCKET, isOwnedQuestionImagePath } from "@/lib/media/validation";
 import { requireQuizOwner } from "@/lib/quizzes/guards";
 import { isUuid } from "@/lib/classes/roster";
 import { rateLimit } from "@/lib/classes/rate-limit";
 import { UpdateQuizSchema } from "@/lib/quizzes/validation";
 import { buildQuizUpdates, hasNonWindowFields, hasRetakeFields, hasWindowFields } from "@/lib/quizzes/updates";
 import {
-  checkBodyLimit,
   checkSameOrigin,
   firstIssueMessage,
   internalError,
   invalidBody,
-  invalidJson,
   jsonError,
   notDraft,
   notFound,
+  readCappedJson,
 } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
@@ -54,17 +53,10 @@ export async function PATCH(request: Request, { params }: Params) {
     return jsonError("rate_limited", "Too many updates. Try again later.", 429);
   }
 
-  const sizeError = checkBodyLimit(request);
-  if (sizeError) return sizeError;
+  const body = await readCappedJson(request);
+  if (!body.ok) return body.response;
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return invalidJson();
-  }
-
-  const parsed = UpdateQuizSchema.safeParse(body);
+  const parsed = UpdateQuizSchema.safeParse(body.data);
   if (!parsed.success) {
     return invalidBody(firstIssueMessage(parsed.error.issues, "Invalid quiz data."));
   }
@@ -195,7 +187,16 @@ export async function DELETE(request: Request, { params }: Params) {
     .select("image_path")
     .eq("quiz_id", id);
   for (const row of questionRows ?? []) {
-    if (row.image_path) push(QUESTION_IMAGES_BUCKET, row.image_path);
+    // audit-2 C-03: every path here feeds a service-role remove() — each one
+    // is gated to the quiz owner's OWN folder with the well-formed shape
+    // check (a poisoned column would otherwise delete cross-tenant bytes;
+    // quiz-sources paths are validated by the 0040-era owner-prefix writes,
+    // but the question column is the direct vector — gate both defensively).
+    if (row.image_path && isOwnedQuestionImagePath(row.image_path, owner.userId)) {
+      push(QUESTION_IMAGES_BUCKET, row.image_path);
+    } else if (row.image_path) {
+      console.error("quiz delete: refusing malformed question image_path", { quizId: id });
+    }
   }
   const { data: quizRow } = await supabase
     .from("quizzes")

@@ -164,9 +164,11 @@ export async function GET() {
     return notFound();
   }
 
+  // audit-2 M-11: no-store — same signed-URL residue rationale as
+  // question-images (the bearer URL outlives unenroll/archive inside its TTL).
   return Response.json(
     { url: signed.signedUrl, expiresAt: new Date(Date.now() + AVATAR_TTL_SECONDS * 1000).toISOString() },
-    { status: 200, headers: { "content-type": "application/json" } },
+    { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" } },
   );
 }
 

@@ -7,6 +7,7 @@ import { parseImageUpload } from "@/lib/media/server";
 import {
   QUESTION_IMAGES_BUCKET,
   MAX_QUESTION_IMAGE_BYTES,
+  isOwnedQuestionImagePath,
 } from "@/lib/media/validation";
 import { checkSameOrigin, internalError, invalidOrigin, notFound, rateLimited, notDraft } from "@/lib/http";
 
@@ -83,8 +84,20 @@ export async function POST(request: Request, { params }: Params) {
 
   const oldPath = (question as { image_path: string | null }).image_path;
   if (oldPath && oldPath !== path) {
-    // Only AFTER the new state is durable. Failure mode = swept orphan.
-    void admin.storage.from(QUESTION_IMAGES_BUCKET).remove([oldPath]).catch(() => {});
+    // audit-2 C-03: the column is caller-writable at the DB layer (RLS
+    // self-update + plain text), so the value reaching this service-role
+    // remove() must be validated as THIS owner's well-formed object path —
+    // a poisoned path would delete cross-tenant bytes. Fail closed: skip +
+    // log (the orphan sweeper reaps whatever this misses).
+    if (isOwnedQuestionImagePath(oldPath, owner.userId)) {
+      // Only AFTER the new state is durable. Failure mode = swept orphan.
+      void admin.storage.from(QUESTION_IMAGES_BUCKET).remove([oldPath]).catch(() => {});
+    } else {
+      console.error("question image replace: refusing malformed old image_path", {
+        quizId: id,
+        questionId,
+      });
+    }
   }
 
   return Response.json(
@@ -134,8 +147,18 @@ export async function DELETE(request: Request, { params }: Params) {
   const oldPath = (question as { image_path: string | null }).image_path;
   if (oldPath) {
     const admin = createAdminClient();
-    // Best-effort: a failed object delete leaves a swept orphan, not an error.
-    void admin.storage.from(QUESTION_IMAGES_BUCKET).remove([oldPath]).catch(() => {});
+    // audit-2 C-03: owner-pinned shape gate before the service-role remove
+    // (same poisoned-column vector as the replace path). Fail closed: skip +
+    // log; the column is already cleared so the app stays consistent.
+    if (isOwnedQuestionImagePath(oldPath, owner.userId)) {
+      // Best-effort: a failed object delete leaves a swept orphan, not an error.
+      void admin.storage.from(QUESTION_IMAGES_BUCKET).remove([oldPath]).catch(() => {});
+    } else {
+      console.error("question image delete: refusing malformed image_path", {
+        quizId: id,
+        questionId,
+      });
+    }
   }
 
   return Response.json(

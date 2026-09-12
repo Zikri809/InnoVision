@@ -71,8 +71,11 @@ export async function GET(_request: Request, { params }: Params) {
     return notFound();
   }
 
+  // audit-2 M-11: the signing JSON must never be cached — the bearer URL
+  // outlives visibility changes (quiz close/unenroll) within its TTL, and a
+  // cached signing response would extend that residue.
   return Response.json(
     { url: signed.signedUrl, expiresAt: new Date(Date.now() + ttl * 1000).toISOString() },
-    { status: 200, headers: { "content-type": "application/json" } },
+    { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" } },
   );
 }
