@@ -8,10 +8,15 @@
 // Companion to the SQL prune_expired_incident_clips() (migration 0020):
 // storage.objects deletion from SQL needs cross-schema ownership this script
 // handles cleanly through the Storage API instead. Cron-friendly.
+//
+// audit-2 M-20: --remote now passes the SAME interactive project-ref gate as
+// the seed scripts (confirmRemote) — `--remote --days 0` used to wipe hosted
+// incident footage with no confirmation at all.
 import { createClient } from "@supabase/supabase-js";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { confirmRemote } from "./lib/remote-env.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const envPath = path.resolve(__dirname, "../.env.local");
@@ -45,6 +50,10 @@ const isLocal = /localhost|127\.0\.0\.1/.test(URL);
 if (!isLocal && !REMOTE) {
   console.error(`Refusing non-local target ${URL} without --remote.`);
   process.exit(1);
+}
+if (!isLocal && !DRY && process.env.ALLOW_PROD_SEED !== "1") {
+  // M-20 (audit-2): a destructive hosted run needs an explicit confirm.
+  await confirmRemote(`delete incident clips older than ${DAYS}d`);
 }
 
 const admin = createClient(URL, SERVICE, { auth: { persistSession: false } });
