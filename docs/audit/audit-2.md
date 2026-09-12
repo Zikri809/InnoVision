@@ -419,7 +419,7 @@ pre-fix behavior). Each fix row carries the commit hash(es) that landed it
 
 | Finding | Fix | Commit(s) |
 |---|---|---|
-| C-01 (min) | `face_checks.frame_poses` + `attach_frame_poses()`; verify route records sidecar yaw/pitch/roll per frame for lecturer audit. Full server-side liveness still needs sidecar spoof-model support (see Deferred). | b87b347 + bd4abd5 |
+| C-01 | **Full fix.** The InsightFace sidecar bakes a MiniFASNet print/replay ensemble (`app/spoof.py`, Silent-Face-Anti-Spoofing ONNX, Apache-2.0, weights pinned by sha256 in the Dockerfile) and returns a per-frame P(real) verdict on `/extract`. The verify route records yaw/pitch/roll + the spoof score on `face_checks.frame_poses`, and when `FACE_SPOOF_ENFORCE=1` a majority-spoofed frame set forces the whole check to a FAIL vote (recorded - streak machinery + lecturer audit see it; `matched` can never be true for a photo/replay). Record-only without the env (dev sidecars without weights); prod warns when unset. Route gate + policy: `src/lib/face/spoof.ts` (+tests). | f29b779 + b87b347 + bd4abd5 |
 | C-02 | `quiz_sessions.face_verify_attempted_at` + verify-route attempt touch; silence-cron outage-claim exemption now requires corroboration (recent face_checks row or recent attempt) in cursor + UPDATE predicates. | b87b347 + bd4abd5 |
 | C-03 | `isOwnedQuestionImagePath()` (owner-pinned shape gate) applied at all 6 privileged remove()/copy() sites (fail-closed skip+log) + duplicate copy-source owner pin; DB backstop: anchored-shape CHECKs (NOT VALID) + `enforce_image_path_ownership()` trigger on questions/student_quiz_questions. | ed0455b + bd4abd5 |
 | C-04 | media-cleanup rewritten: paginated reference fetches + offset-paginated storage walk, batched remove(), fail-closed on any fetch error, deletion behind explicit `--apply`. | 81050d6 |
@@ -461,12 +461,15 @@ pre-fix behavior). Each fix row carries the commit hash(es) that landed it
 
 ### Deferred (not implemented here)
 
-- **C-01/M-09 full**: server-judged liveness/spoof score — needs sidecar
-  anti-spoofing model support; pose audit trail is the interim.
+- **M-09 (residual)**: yaw/pitch are recorded but not gated - the MiniFASNet
+  spoof verdict is the server-judged liveness signal now; pose-diversity
+  gating for challenge triggers stays out (false-flag risk on honest flows,
+  and the spoof model supersedes it for the photo case).
 - **M-05**: unlock/exempt return creditedSeconds/remainingMs + client adoption
   (flagged-poll time re-sync).
-- **M-08**: perceptual frozen-frame check (embedding-distance ε) replacing
-  exact-hash equality.
+- **M-08 (residual)**: perceptual frozen-frame check (embedding-distance
+  epsilon) - largely superseded by the spoof ensemble for photo replay; keep
+  on the list only for matched-frame replay forensics.
 - **M-10**: central envelope scrub + provenance from actually-emitted blocks.
 - **M-11 (rest)**: 300s TTL for all non-owner grants (DB RPC change) + client
   cache invalidation on status transitions.
