@@ -161,8 +161,9 @@ Stop rule honored: keep attacking (new claims, fix proposals, unexamined surface
 > session against local Supabase (migrations applied via `db reset`, unit
 > suite 1654 green, all eight `verify-*.mjs` harnesses green). The SQL,
 > app, and harness work landed as three commits; this section was added in
-> a fourth. Original findings above are preserved verbatim as the
-> historical record.
+> a fourth, with two straggler files (enroll's streaming cap + the verify
+> route test mock) landing in a fifth: a1b2cbc. Original findings above are
+> preserved verbatim as the historical record.
 
 | Finding | Status | Commit |
 |---|---|---|
@@ -175,7 +176,7 @@ Stop rule honored: keep attacking (new claims, fix proposals, unexamined surface
 | P1-2 manual single-add uncapped past 30 | **FIXED** — cap under the unified lock (clone fixture re-pinned) | e114725 |
 | P1-3 timer-credit asymmetry + stale `paused_at` | **FIXED** — unlock capped at 120 s, exempt clears `paused_at`, recover returns credited time | e114725 |
 | P1-4 incident upload TOCTOU | **FIXED** — post-upload re-select + object discard | 30fc30d |
-| P1-5 body caps header-only / unbounded routes | **FIXED** — streaming `readCappedJson/Text/FormData`; wired start/join/verify/enroll/advisory/answer/pause/incident | 30fc30d |
+| P1-5 body caps header-only / unbounded routes | **FIXED** — streaming `readCappedJson/Text/FormData`; wired start/join/verify/enroll/advisory/answer/pause/incident | 30fc30d, a1b2cbc |
 | P1-6 retake auto-reveal livelock | **FIXED** — `quiz_autoclose` sweeper flips reveal after 2 h inactivity (pinned live) | 30fc30d |
 | P1-7 gradebook export sheet-name collision 500 | **FIXED** — case-insensitive dedupe + `Summary` reservation | 30fc30d |
 | P1-8 secondary-omission quorum (pad-don't-omit) | **OPEN (P2)** — pad-not-omit not yet implemented; §9 binding posture unchanged | — |
