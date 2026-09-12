@@ -51,7 +51,9 @@
     "face:report": "node scripts/face-threshold-report.mjs",
     "face:scenarios": "node scripts/face-scenarios.mjs",
     "incident:cleanup": "node scripts/incident-cleanup.mjs",
-    "verify:clone": "node scripts/verify-clone-quiz.mjs"
+    "verify:clone": "node scripts/verify-clone-quiz.mjs",
+    "verify:silence": "node scripts/verify-silence.mjs",
+    "check:env": "node scripts/check-env-parity.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

@@ -60,6 +60,9 @@ jobs:
       - name: Validate i18n parity
         run: node scripts/check-i18n.mjs
 
+      - name: Env parity (audit-1 §5.5)
+        run: node scripts/check-env-parity.mjs
+
       - name: Lint
         run: npm run lint
 
@@ -137,6 +140,11 @@ jobs:
       # NEXT_PUBLIC_INTEGRITY_HARDENING_OFF, so `next build` bakes the
       # hardening IN; e51's own test.skip gate keys on the same var.
       INTEGRITY_E2E: "1"
+      # audit-1 §5.3: e51's SKIP gate is now dedicated to this job (the
+      # build-env signal INTEGRITY_E2E stays separate, so a leaked
+      # INTEGRITY_E2E in a local .env.local can no longer run e51 against a
+      # hardening-OFF build).
+      E51_HARDENING_E2E: "1"
     steps:
       - uses: actions/checkout@v4
 

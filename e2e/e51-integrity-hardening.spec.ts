@@ -12,7 +12,7 @@ import {
 /**
  * e51 — integrity hardening (clipboard + fullscreen), OPT-IN.
  *
- * Run ONLY with INTEGRITY_E2E=1 against a server whose build did NOT bake
+ * Run ONLY with E51_HARDENING_E2E=1 (dedicated job) against a server whose build did NOT bake
  * NEXT_PUBLIC_INTEGRITY_HARDENING_OFF=1, e.g.:
  *   NEXT_PUBLIC_E2E_FAKE_SEAM=1 FACE_MOCK_ENABLED=1 INSIGHTFACE_BASE_URL=http://localhost:8000 \
  *   SIGNUP_RATE_LIMIT=1000 INVITE_RATE_LIMIT=1000 E2E_RATE_LIMIT_DISABLED=1 \
@@ -23,7 +23,20 @@ import {
  * (hardening-gate.ts), so under the standard harness the hardening is inert
  * and these tests would prove nothing — the skip IS the contract.
  */
-test.skip(!process.env.INTEGRITY_E2E, "opt-in: INTEGRITY_E2E=1 + a hardening-ON build");
+// audit-1 §5.3 (skip-signal split): the skip gate is now its OWN variable —
+// E51_HARDENING_E2E — set ONLY by the dedicated hardening-ON CI job.
+// INTEGRITY_E2E still controls the webServer BUILD env (kill-switch omitted),
+// but it is no longer what turns e51 on: a leaked INTEGRITY_E2E=1 in a
+// local .env.local (dotenv loads it into the harness process) used to run
+// e51 against a kill-switch build that proved nothing. The second guard
+// fails the pairing outright if the kill switch is visible in the harness
+// env — the build in that mode would bake hardening OFF and e51's
+// assertions would be theatre.
+test.skip(!process.env.E51_HARDENING_E2E, "opt-in: E51_HARDENING_E2E=1 (dedicated hardening-ON job)");
+test.skip(
+  process.env.NEXT_PUBLIC_INTEGRITY_HARDENING_OFF === "1",
+  "NEXT_PUBLIC_INTEGRITY_HARDENING_OFF is set — this build bakes hardening OFF; e51 would prove nothing",
+);
 
 const LECTURER_INVITE_CODE = process.env.LECTURER_INVITE_CODE ?? "";
 

@@ -43,7 +43,7 @@ export default defineConfig({
   // so agent/CI runs capture per-test results (incl. retries) without digging
   // through playwright-report/ blobs — a plain "html" reporter prints almost
   // nothing to stdout on a green run.
-  reporter: [["html"], ["line"]],
+  reporter: [["html"], ["line"], ["./scripts/e2e-min-exec-reporter.mjs"]],
   use: {
     baseURL: BASE_URL,
     trace: "on-first-retry",

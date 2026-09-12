@@ -399,14 +399,16 @@
 
 **Why it is skipped by default:** the hardening gate (`src/lib/integrity/hardening-gate.ts`) is build-time inlined. The main suite's webServer env sets `NEXT_PUBLIC_INTEGRITY_HARDENING_OFF=1` (fullscreen events are flaky headless; copy guards break fixture-building), so under the standard harness e51 would test nothing — the skip IS the contract.
 
-**How it runs in CI:** the dedicated `integrity-e2e` job sets `INTEGRITY_E2E=1`, which makes `playwright.config.ts` OMIT the kill switch (the build bakes the hardening IN) and runs ONLY e51 on the chromium project. Do not widen that invocation to the full suite — every non-e51 spec expects a hardening-OFF build.
+**Fail-on-fully-skipped (audit-1 §5.3):** `scripts/e2e-min-exec-reporter.mjs` runs on every Playwright invocation and fails a run in which ZERO of the collected tests executed (all skipped — e.g. `LECTURER_INVITE_CODE` unset). Allow an intentionally empty local run with `E2E_ALLOW_ALL_SKIPPED=1`.
+
+**How it runs in CI:** the dedicated `integrity-e2e` job sets `E51_HARDENING_E2E=1` (e51's skip gate — audit-1 §5.3 split it from the build signal) plus `INTEGRITY_E2E=1`, which makes `playwright.config.ts` OMIT the kill switch (the build bakes the hardening IN) and runs ONLY e51 on the chromium project. Do not widen that invocation to the full suite — every non-e51 spec expects a hardening-OFF build.
 
 **Local run** (mirrors the CI job):
 
 ```bash
 # 1. Supabase up + .env.local as per §3 / the CI job's env-write step, then,
-#    with INTEGRITY_E2E=1 exported:
-INTEGRITY_E2E=1 npx playwright test e2e/e51-integrity-hardening.spec.ts --project=chromium
+#    with E51_HARDENING_E2E=1 AND INTEGRITY_E2E=1 exported:
+E51_HARDENING_E2E=1 INTEGRITY_E2E=1 npx playwright test e2e/e51-integrity-hardening.spec.ts --project=chromium
 ```
 
 Two gotchas that make the run look green while testing nothing:

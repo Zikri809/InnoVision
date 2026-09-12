@@ -63,16 +63,10 @@ export default defineConfig({
         "src/lib/extract/tesseract.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
         "src/lib/extract/glm-ocr.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
         "src/app/api/ai/**/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
-        // P3 quiz routes are tested by P3's test suite (above); the P4 gate
-        // is the AI/extraction/OCR surface, so exclude P3 routes from the gate
-        // but keep them in the report.
-        "src/app/api/quizzes/[id]/route.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
-        "src/app/api/quizzes/[id]/publish/route.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
-        // QC-1: the close route carries state-machine logic — session-route gate.
-        "src/app/api/quizzes/[id]/close/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
-        "src/app/api/quizzes/[id]/questions/route.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
-        "src/app/api/quizzes/[id]/questions/[questionId]/route.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
-        "src/app/api/quizzes/[id]/reorder/route.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
+        // P3 quiz routes are tested by P3's test suite (above). audit-1 §5.2:
+        // these were 0-gated ("tested-but-ungated" — deleting assertions stayed
+        // green); they now carry floors AT their measured coverage in the §5.2
+        // block below. classes/join stays 0-key (no unit test exercises it).
         "src/app/api/classes/join/route.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
         // P5: pure session helpers + session routes carry the timer/grading
         // integrity logic (unit + route-test covered). Browser-only UI
@@ -125,7 +119,10 @@ export default defineConfig({
         "src/lib/face/rpc-mapping.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/lib/face/fake-seam.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/lib/face/face-tracker.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
-        "src/lib/face/server/insightface-client.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
+                // audit-1 §5.4: its unmocked boundary contract (URL wiring, token
+        // header, error mapping, per-face validation, timeout) is pinned by
+        // insightface-client.test.ts against a local HTTP stand-in.
+        "src/lib/face/server/insightface-client.ts": { lines: 70, statements: 70, functions: 60, branches: 55 },
         "src/lib/vision/camera.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/app/api/face/**/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
         "src/app/api/sessions/[id]/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
@@ -138,6 +135,24 @@ export default defineConfig({
         "src/app/api/sessions/[id]/incident/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
         // Integrity hardening gate (env-only kill switch + prod-baked-off warn).
         "src/lib/integrity/hardening-gate.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        // Audit-1 §5.2 (2026-09): these route/lib files HAD tests but no
+        // per-file floor — deleting assertions stayed green. Floors are set
+        // AT the measured coverage; any assertion deletion now drops below.
+        "src/app/api/quizzes/[id]/duplicate/route.ts": { lines: 100 },
+        "src/app/api/quizzes/[id]/export/route.ts": { lines: 78 },
+        "src/app/api/quizzes/[id]/import-questions/route.ts": { lines: 100 },
+        "src/app/api/quizzes/[id]/reveal/route.ts": { lines: 81 },
+        "src/app/api/quizzes/[id]/reveal-settings/route.ts": { lines: 86 },
+        "src/app/api/quizzes/[id]/close/route.ts": { lines: 75 },
+        "src/app/api/quizzes/[id]/publish/route.ts": { lines: 54 },
+        "src/app/api/quizzes/[id]/route.ts": { lines: 80 },
+        "src/app/api/quizzes/[id]/reorder/route.ts": { lines: 78 },
+        "src/app/api/quizzes/[id]/questions/route.ts": { lines: 66 },
+        "src/app/api/quizzes/[id]/questions/[questionId]/route.ts": { lines: 52 },
+        "src/lib/classes/guards.ts": { lines: 100 },
+        "src/lib/quizzes/guards.ts": { lines: 100 },
+        "src/lib/http.ts": { lines: 95 },
+        "src/lib/supabase/middleware.ts": { lines: 77 },
         // Voice-activity advisory detector (pure, unit-tested).
         "src/lib/audio/vad.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/app/api/sessions/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
