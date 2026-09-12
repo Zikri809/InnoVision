@@ -4,11 +4,11 @@ import { requireLecturer } from "@/lib/classes/guards";
 import { rateLimit } from "@/lib/classes/rate-limit";
 import { getClassRoster, isUuid } from "@/lib/classes/roster";
 import {
-  checkBodyLimit,
   checkSameOrigin,
   internalError,
   invalidJson,
   notFound,
+  readCappedJson,
 } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
@@ -65,7 +65,7 @@ export async function GET(_request: Request, { params }: Params) {
     }
     if (!cls) return notFound();
 
-    const { roster, error: rosterError } = await getClassRoster(supabase, id);
+    const { roster, truncated: rosterTruncated, error: rosterError } = await getClassRoster(supabase, id);
     if (rosterError) {
       console.error("Roster fetch error:", rosterError);
       return internalError("Could not complete the request right now.");
@@ -80,6 +80,8 @@ export async function GET(_request: Request, { params }: Params) {
         archived_at: cls.archived_at,
       },
       roster,
+      // audit-2 M-13: additive truncation flag — "showing first 100".
+      rosterTruncated,
     });
   }
 
@@ -125,21 +127,14 @@ export async function PATCH(request: Request, { params }: Params) {
     );
   }
 
-  const sizeError = checkBodyLimit(request);
-  if (sizeError) return sizeError;
+  const body = await readCappedJson(request);
+  if (!body.ok) return body.response;
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
+  if (!body.data || typeof body.data !== "object" || Array.isArray(body.data)) {
     return invalidJson();
   }
 
-  if (!body || typeof body !== "object" || Array.isArray(body)) {
-    return invalidJson();
-  }
-
-  const rawBody = body as Record<string, unknown>;
+  const rawBody = body.data as Record<string, unknown>;
   const updatePayload: { title?: string; archived_at?: string | null } = {};
 
   if ("title" in rawBody) {

@@ -32,19 +32,22 @@ export const ROSTER_LIMIT = 100;
 export async function getClassRoster(
   supabase: SupabaseClient<Database>,
   classId: string,
-): Promise<{ roster: RosterEntry[]; error: string | null }> {
+): Promise<{ roster: RosterEntry[]; truncated: boolean; error: string | null }> {
+  // audit-2 M-13: fetch LIMIT+1 and report truncation — the silent 100-row
+  // cap previously let a lecturer certify an incomplete roster in a grade
+  // dispute with no signal at all.
   const { data: rows, error } = await supabase
     .from("student_roster_view")
     .select("student_id, full_name, enrolled_at, matric_no")
     .eq("class_id", classId)
     .order("enrolled_at", { ascending: true })
-    .limit(ROSTER_LIMIT);
+    .limit(ROSTER_LIMIT + 1);
 
-  if (error) return { roster: [], error: error.message };
+  if (error) return { roster: [], truncated: false, error: error.message };
 
   // The view's generated types mark columns nullable; the underlying columns
   // are NOT NULL. Narrow to the non-null shape the client expects.
-  const roster = (rows ?? [])
+  const all = (rows ?? [])
     .filter((r) => r.student_id && r.enrolled_at)
     .map((r) => ({
       student_id: r.student_id!,
@@ -53,5 +56,8 @@ export async function getClassRoster(
       matric_no: r.matric_no ?? null,
     }));
 
-  return { roster, error: null };
+  const truncated = all.length > ROSTER_LIMIT;
+  const roster = truncated ? all.slice(0, ROSTER_LIMIT) : all;
+
+  return { roster, truncated, error: null };
 }

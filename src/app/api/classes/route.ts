@@ -4,13 +4,13 @@ import { requireLecturer } from "@/lib/classes/guards";
 import { createClassWithRetry } from "@/lib/classes/join-code";
 import { rateLimit } from "@/lib/classes/rate-limit";
 import {
-  checkBodyLimit,
   checkSameOrigin,
   invalidJson,
   internalError,
   unauthorized,
   forbidden,
   rateLimited,
+  readCappedJson,
 } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
@@ -36,21 +36,14 @@ export async function POST(request: Request) {
     return rateLimited("Too many classes created. Try again later.");
   }
 
-  const sizeError = checkBodyLimit(request);
-  if (sizeError) return sizeError;
+  const body = await readCappedJson(request);
+  if (!body.ok) return body.response;
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
+  if (!body.data || typeof body.data !== "object" || Array.isArray(body.data)) {
     return invalidJson();
   }
 
-  if (!body || typeof body !== "object" || Array.isArray(body)) {
-    return invalidJson();
-  }
-
-  const rawBody = body as Record<string, unknown>;
+  const rawBody = body.data as Record<string, unknown>;
   const title = typeof rawBody.title === "string" ? rawBody.title.trim() : "";
   if (title.length < 1 || title.length > 200) {
     return NextResponse.json(
@@ -136,12 +129,15 @@ export async function GET() {
       .select("id, title, join_code, created_at, archived_at")
       .eq("lecturer_id", user.id)
       .order("created_at", { ascending: false })
-      .limit(CLASS_LIST_LIMIT);
+      .limit(CLASS_LIST_LIMIT + 1);
     if (error) {
       console.error("Class list error:", error);
       return internalError("Could not load classes.");
     }
-    return NextResponse.json({ classes: data ?? [] });
+    // audit-2 M-13: limit+1 probe + additive truncation flag (dashboards
+    // silently dropped classes past the cap before).
+    const classes = (data ?? []).slice(0, CLASS_LIST_LIMIT);
+    return NextResponse.json({ classes, classesTruncated: (data ?? []).length > CLASS_LIST_LIMIT });
   }
 
   if (profile.role === "student") {
@@ -152,12 +148,14 @@ export async function GET() {
       .from("student_class_view")
       .select("id, title, created_at")
       .order("created_at", { ascending: false })
-      .limit(CLASS_LIST_LIMIT);
+      .limit(CLASS_LIST_LIMIT + 1);
     if (error) {
       console.error("Class list error:", error);
       return internalError("Could not load classes.");
     }
-    return NextResponse.json({ classes: data ?? [] });
+    // audit-2 M-13: same truncation flag as the lecturer branch.
+    const classes = (data ?? []).slice(0, CLASS_LIST_LIMIT);
+    return NextResponse.json({ classes, classesTruncated: (data ?? []).length > CLASS_LIST_LIMIT });
   }
 
   return forbidden();
