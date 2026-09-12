@@ -196,6 +196,7 @@ export type Database = {
           checked_at: string
           distance: number | null
           frame_hash: string | null
+          frame_poses: Json | null
           id: string
           matched: boolean
           session_id: string
@@ -207,6 +208,7 @@ export type Database = {
           checked_at?: string
           distance?: number | null
           frame_hash?: string | null
+          frame_poses?: Json | null
           id?: string
           matched: boolean
           session_id: string
@@ -218,6 +220,7 @@ export type Database = {
           checked_at?: string
           distance?: number | null
           frame_hash?: string | null
+          frame_poses?: Json | null
           id?: string
           matched?: boolean
           session_id?: string
@@ -481,6 +484,7 @@ export type Database = {
           face_fail_count: number
           face_fail_streak: number
           face_unavailable_at: string | null
+          face_verify_attempted_at: string | null
           focus_pause_count: number
           fullscreen_pause_count: number
           hand_pause_count: number
@@ -503,6 +507,7 @@ export type Database = {
           face_fail_count?: number
           face_fail_streak?: number
           face_unavailable_at?: string | null
+          face_verify_attempted_at?: string | null
           focus_pause_count?: number
           fullscreen_pause_count?: number
           hand_pause_count?: number
@@ -525,6 +530,7 @@ export type Database = {
           face_fail_count?: number
           face_fail_streak?: number
           face_unavailable_at?: string | null
+          face_verify_attempted_at?: string | null
           focus_pause_count?: number
           fullscreen_pause_count?: number
           hand_pause_count?: number
@@ -1448,6 +1454,10 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      attach_frame_poses: {
+        Args: { p_nonce: string; p_poses: Json; p_session_id: string }
+        Returns: undefined
       }
       backfill_notification_state: { Args: never; Returns: Json }
       can_student_view_quiz: { Args: { p_quiz_id: string }; Returns: boolean }
