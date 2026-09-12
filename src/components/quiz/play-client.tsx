@@ -192,6 +192,15 @@ export function PlayClient({
   // namespace (single source — the same phrase the wide layout renders).
   const tVision = useTranslations("vision");
 
+  // audit-1 P1-12 / audit-2 L-12: consume the 401-stash ONCE at mount (state
+  // initializer — stable across re-renders) and route it to the PENDING map,
+  // never into `answers`. The old restore seeded a keyless `isCorrect:false`
+  // AnswerState: practice rendered a graded "Incorrect" badge on an
+  // ungraded draft, and the truthy `answers` entry disarmed Confirm/Next —
+  // a dead-end with no actionable button until reload.
+  const [stashedDraft] = useState<StashedDraft | null>(() =>
+    takeStashedAnswer(sessionId),
+  );
   const [index, setIndex] = useState(initialIndex < 0 ? 0 : initialIndex);
   const [answers, setAnswers] = useState<Record<string, AnswerState>>(() => {
     const seed: Record<string, AnswerState> = {};
@@ -208,21 +217,6 @@ export function PlayClient({
             : {}),
         isCorrect: a.is_correct === true,
         seeded: true,
-      };
-    }
-    // audit-1 P1-12: restore an unsent selection stashed by the 401
-    // recovery path (no isCorrect — the server never recorded it).
-    const stashed = takeStashedAnswer(sessionId);
-    if (stashed) {
-      seed[stashed.questionId] = {
-        ...(stashed.selectedIndices
-          ? { selectedIndices: stashed.selectedIndices }
-          : stashed.selectedIndex != null
-            ? { selectedIndex: stashed.selectedIndex }
-            : {}),
-        // Keyless: the server never recorded this answer (same shape the
-        // assessment already_answered replay renders pre-reveal).
-        isCorrect: false,
       };
     }
     return seed;
@@ -315,7 +309,16 @@ export function PlayClient({
   // space; committed by the Confirm button via answer()). Keying removes any
   // reset-on-navigation effect: a fresh question simply has no entry, and a
   // stale entry for an answered question is ignored at the read site.
-  const [pendingByQuestion, setPendingByQuestion] = useState<Record<string, number[]>>({});
+  const [pendingByQuestion, setPendingByQuestion] = useState<Record<string, number[]>>(() => {
+    // audit-2 L-12: the stashed multi draft re-arms the Confirm button for
+    // its question (re-POSTs on confirm — the server never recorded it).
+    // A stashed SINGLE selection has no pending UI (single answers commit on
+    // click) — restoring it into `answers` would strand the question, so it
+    // is intentionally dropped: the student re-clicks, one tap.
+    return stashedDraft?.selectedIndices
+      ? { [stashedDraft.questionId]: stashedDraft.selectedIndices }
+      : {};
+  });
   const pendingMulti = answers[question?.id] ? [] : (pendingByQuestion[question?.id] ?? []);
   function setPendingMulti(next: number[] | ((prev: number[]) => number[])) {
     if (!question) return;

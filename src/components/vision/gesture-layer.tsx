@@ -178,6 +178,9 @@ export function GestureLayer({
   const handLostRef = useRef<HandLost>(null);
   // P7: server-pause mirror (reassigned in the latest-ref effect below).
   const sessionPausedRef = useRef(Boolean(sessionPaused));
+  // audit-2 M-23: `blockInput` (submit/timeUp takeover suppression) was also
+  // dead in the frame handler — mirrored now so holds reset behind it too.
+  const blockInputRef = useRef(Boolean(blockInput));
   const onPauseRef = useRef(onPause);
   const frameHandlerRef = useRef<(frame: HandFrame) => void>(() => {});
   const onSelectRef = useRef(onSelect);
@@ -231,6 +234,7 @@ export function GestureLayer({
     onStatusChangeRef.current = onStatusChange;
     onWarnChangeRef.current = onWarnChange;
     sessionPausedRef.current = Boolean(sessionPaused);
+    blockInputRef.current = Boolean(blockInput);
     onPauseRef.current = onPause;
     stateRef.current = { optionCount, questionId, armed, nextArmed, answerMode, scanning, status };
 
@@ -296,6 +300,46 @@ export function GestureLayer({
       }
       handPresentSinceRef.current = 0;
 
+      // audit-2 M-23: server-paused/flagged (sessionPaused) and input-takeover
+      // (blockInput) phases used to be DEAD gates here — the props were
+      // assigned but never read by the frame handler, so gestures kept
+      // firing behind the pause (answers failed safe at the server 409, but
+      // palm-next browsed questions behind the BlockingOverlay). Block all
+      // hold input and reset every hold so nothing fires on resume.
+      if (sessionPausedRef.current || blockInputRef.current) {
+        answerDropCountRef.current = 0;
+        commitDropCountRef.current = 0;
+        nextDropCountRef.current = 0;
+        answerHoldRef.current.reset();
+        commitHoldRef.current.reset();
+        nextHoldRef.current.reset();
+        emitHold(null);
+        return;
+      }
+
+      // 2b (moved ABOVE the palm-next path — audit-2 M-23 palm double-fire):
+      // QT-1 re-arm gate: after ANY latch, holds stay dead until the pose
+      // changes (hand lost or a different finger count) — a sustained hold
+      // must never re-fire. It has to precede palm-next: the multi COMMIT
+      // latches with a sustained 5-palm and re-arms on 5, so palm-next
+      // running first re-used the still-hot nextHold and auto-advanced past
+      // the feedback review 1.2s later. In single mode the gate is normally
+      // a no-op because a latch leaves `armed` anyway.
+      if (rearmCountRef.current !== null) {
+        if (!frame.handPresent || frame.fingerCount !== rearmCountRef.current) {
+          rearmCountRef.current = null;
+        } else {
+          answerDropCountRef.current = 0;
+          commitDropCountRef.current = 0;
+          nextDropCountRef.current = 0;
+          answerHoldRef.current.reset();
+          commitHoldRef.current.reset();
+          nextHoldRef.current.reset();
+          emitHold(null);
+          return;
+        }
+      }
+
       // 2. Palm-next (before the answer path). Finger 5 on an optionCount < 5
       //    question can never be a valid answer, so it is a safe "next" affordance.
       //    (QT-1 multi questions cap at 4 options, so this gate never blocks
@@ -328,26 +372,6 @@ export function GestureLayer({
         nextHoldRef.current.reset();
       }
 
-      // 2b. QT-1 re-arm gate: after ANY latch, holds stay dead until the pose
-      //     changes (hand lost or a different finger count) — a sustained
-      //     hold must never re-fire (a 2.4s hold would toggle an option
-      //     straight back off). Applies to every path below; in single mode
-      //     it is normally a no-op because a latch leaves `armed` anyway.
-      if (rearmCountRef.current !== null) {
-        if (!frame.handPresent || frame.fingerCount !== rearmCountRef.current) {
-          rearmCountRef.current = null;
-        } else {
-          answerDropCountRef.current = 0;
-          commitDropCountRef.current = 0;
-          nextDropCountRef.current = 0;
-          answerHoldRef.current.reset();
-          commitHoldRef.current.reset();
-          nextHoldRef.current.reset();
-          emitHold(null);
-          return;
-        }
-      }
-
       // 3. Answer path. "multi" mode (QT-1): holds 1..4 TOGGLE the presented
       //    option and an open palm COMMITS the pending set; "single" mode is
       //    the unchanged scalar latch (hold = submit one answer).
@@ -368,6 +392,7 @@ export function GestureLayer({
           if (commitRes.latched !== undefined) {
             commitHoldRef.current.reset();
             answerHoldRef.current.reset();
+            nextHoldRef.current.reset();
             emitHold(null);
             rearmCountRef.current = MAX_ANSWER_FINGERS;
             onCommitRef.current?.();
