@@ -14,6 +14,14 @@ export type ExtractionResult = {
   engine: ExtractEngine;
   /** Heuristic: too little text per page for reliable question generation. */
   lowConfidence?: boolean;
+  /**
+   * audit-2 M-17: multi-page engines (GLM over a PDF) keep going when
+   * individual pages fail, so `pages` (success count) alone let a partial
+   * corpus read as a complete one. `pagesAttempted` is the real denominator
+   * for density math; `failedPages` (1-based) drives the UI warning.
+   */
+  pagesAttempted?: number;
+  failedPages?: number[];
 };
 
 /** Config passed from the builder page (server component reads env).

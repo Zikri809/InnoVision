@@ -106,6 +106,7 @@ export async function glmExtract(
 
   const deadline = Date.now() + GLM_OCR_BUDGET_MS;
   const parts: string[] = [];
+  const failedPages: number[] = [];
   let successCount = 0;
   for (let i = 0; i < images.length; i++) {
     onProgress?.(i + 1, images.length);
@@ -118,6 +119,7 @@ export async function glmExtract(
       console.warn(`[GLM-OCR] Error on page ${i + 1}:`, err);
       // If all pages fail, error out; if partial pages fail, keep existing.
       if (images.length === 1) throw err;
+      failedPages.push(images[i].page);
     }
   }
 
@@ -135,7 +137,13 @@ export async function glmExtract(
     text,
     pages: successCount,
     engine: "glm",
-    ...(partial ? { lowConfidence: true } : {}),
+    // audit-2 M-17: carry the real denominator + which pages failed so the
+    // dialog can warn "N of M pages failed" for EVERY file type (the old
+    // low-confidence flag only surfaced for office files) and run the
+    // density heuristic over ATTEMPTED pages (the success count deflated it,
+    // inflating avg words/page on partial runs).
+    pagesAttempted: images.length,
+    ...(partial ? { lowConfidence: true, failedPages } : {}),
   };
 }
 

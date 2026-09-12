@@ -139,6 +139,8 @@ export function GenerateFromFileDialog({
   const [steeringPrompt, setSteeringPrompt] = useState("");
   const [language, setLanguage] = useState<"auto" | "en" | "ms">("auto");
   const [isLowDensity, setIsLowDensity] = useState(false);
+  // audit-2 M-17: "N of M pages failed" advisory state (all file types).
+  const [partialPages, setPartialPages] = useState<{ failed: number; attempted: number } | null>(null);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -209,6 +211,11 @@ export function GenerateFromFileDialog({
       let totalPages = 0;
       let hasLowConfidence = false;
       let hasOfficeFiles = false;
+      // audit-2 M-17: per-file partial-OCR accounting ("N of M pages
+      // failed"). GLM keeps going when a page 504s — the quiz used to be
+      // built from the surviving subset with a success-shaped dialog.
+      let totalAttemptedPages = 0;
+      let totalFailedPages = 0;
 
       for (let i = 0; i < files.length; i++) {
         if (controller.signal.aborted) return;
@@ -226,7 +233,14 @@ export function GenerateFromFileDialog({
           signal: controller.signal,
         });
 
-        totalPages += result.pages || 1;
+        // Denominator = ATTEMPTED pages (audit-2 M-17): the success count
+        // deflated the per-page density on partial runs and inflated the
+        // avg words/page. With no attempt data (single-page/legacy engines),
+        // fall back to the success count as before.
+        const attempted = result.pagesAttempted ?? (result.pages || 1);
+        totalPages += attempted;
+        totalAttemptedPages += attempted;
+        totalFailedPages += result.failedPages?.length ?? 0;
         if (result.lowConfidence) {
           hasLowConfidence = true;
         }
@@ -252,6 +266,16 @@ export function GenerateFromFileDialog({
       // Heuristic: Flag presentation/office decks where text density is suspiciously low (<12 words or <50 chars per page)
       const lowDensityDetected = hasOfficeFiles && (hasLowConfidence || avgWordsPerPage < 12 || avgCharsPerPage < 50);
       setIsLowDensity(lowDensityDetected);
+
+      // audit-2 M-17: surface partial-OCR loss for ALL file types (the old
+      // low-density advisory only ever fired for .pptx/.docx) — a 10-page
+      // scan with one 504'd page read as success and shipped an incomplete
+      // assessment.
+      if (totalFailedPages > 0 && totalAttemptedPages > 0) {
+        setPartialPages({ failed: totalFailedPages, attempted: totalAttemptedPages });
+      } else {
+        setPartialPages(null);
+      }
 
       setExtractedText(combinedText);
       setStep(2);
@@ -681,6 +705,25 @@ export function GenerateFromFileDialog({
                   </pre>
                 )}
               </div>
+              )}
+
+              {/* audit-2 M-17: partial-OCR warning — fires for EVERY file
+                  type when any page of a multi-page extraction failed, not
+                  just office decks with low text density. */}
+              {partialPages && (
+                <div className="flex items-start gap-3 rounded-2xl border-[3px] border-amber-500/30 bg-amber-500/10 p-3.5 shadow-[var(--shadow-clay-sm)]">
+                  <div className="rounded-xl bg-amber-500/20 p-2 text-amber-700 dark:text-amber-300 shrink-0 mt-0.5">
+                    <AlertCircle className="size-4" />
+                  </div>
+                  <div className="min-w-0 space-y-1">
+                    <p className="text-xs font-bold font-heading text-amber-950 dark:text-amber-200">
+                      {t("partialPagesTitle")}
+                    </p>
+                    <p className="text-2xs font-semibold text-amber-900/90 dark:text-amber-300/90 leading-relaxed">
+                      {t("partialPagesDesc", { failed: partialPages.failed, attempted: partialPages.attempted })}
+                    </p>
+                  </div>
+                </div>
               )}
 
               {/* Low Density Heuristic Advisory Notice */}
