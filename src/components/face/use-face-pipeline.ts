@@ -91,6 +91,15 @@ export type FacePipelineProps = {
   sharedPauseStampRef?: React.RefObject<number>;
   /** D13 — a lecturer reset the session mid-flight (verify → 404 no longer owned). */
   onReset?: () => void;
+  /**
+   * 0045 §5 (audit-1 §2.13): a successful self-recovery returns the server's
+   * own remaining exam time (its credited-seconds arithmetic). PlayClient
+   * adopts it so the countdown reflects the capped credit instead of
+   * freezing through the whole pause — the drift that surfaced as a
+   * mid-answer `time_expired` 403. Fired only on a server-confirmed
+   * recovery, only for timed quizzes (number, not null).
+   */
+  onRecoveredRemaining?: (remainingMs: number) => void;
 };
 
 /**
@@ -151,6 +160,7 @@ export function useFacePipeline(props: FacePipelineProps) {
     isHandActive = false,
     sharedPauseStampRef,
     onReset,
+    onRecoveredRemaining,
   } = props;
 
   const [status, setStatus] = useState<FaceStatus>(() => {
@@ -192,6 +202,7 @@ export function useFacePipeline(props: FacePipelineProps) {
   const onFaceStatusRef = useRef(onFaceStatus);
   const isHandActiveRef = useRef(isHandActive);
   const onResetRef = useRef(onReset);
+  const onRecoveredRemainingRef = useRef(onRecoveredRemaining);
 
   const nonceRef = useRef(initialNonce);
   const verifyLock = useRef(false);
@@ -240,6 +251,7 @@ export function useFacePipeline(props: FacePipelineProps) {
     onFaceStatusRef.current = onFaceStatus;
     isHandActiveRef.current = isHandActive;
     onResetRef.current = onReset;
+    onRecoveredRemainingRef.current = onRecoveredRemaining;
     isTerminalRef.current = isTerminal;
   });
 
@@ -359,14 +371,20 @@ export function useFacePipeline(props: FacePipelineProps) {
     return frame;
   }
 
-  // Record a mid-session camera/face outage to the server ONCE per session
-  // (`report_face_unavailable` is set-if-null — the route stays idempotent;
-  // the boot path in play-client also reports). Without this, a verify-5xx
-  // degradation to `unavailable` would be invisible to the lecturer.
-  const unavailableReportedRef = useRef(false);
-  function reportUnavailableOnce() {
-    if (unavailableReportedRef.current) return;
-    unavailableReportedRef.current = true;
+  // Record a mid-session camera/face outage to the server. 0045 P0-3: the
+  // stamp is RE-ARMABLE — report_face_unavailable refreshes it at most once
+  // per 5-minute window and the silence cron stops trusting it after 10, so
+  // the FIRST degradation reports immediately and every further degradation
+  // re-arms (time-guarded below; the RPC collapses the retry storm and
+  // re-keys the lecturer notice hourly). Without the re-arms a sustained
+  // honest outage would expire from its own exemption and get
+  // silence-flagged — the client keeps the claim fresh while it lives.
+  const lastUnavailableReportAtRef = useRef(0);
+  const UNAVAILABLE_REARM_MS = 6 * 60 * 1000;
+  function reportUnavailable() {
+    const now = Date.now();
+    if (now - lastUnavailableReportAtRef.current < UNAVAILABLE_REARM_MS) return;
+    lastUnavailableReportAtRef.current = now;
     void fetch(`/api/sessions/${sessionId}/face-unavailable`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -375,6 +393,35 @@ export function useFacePipeline(props: FacePipelineProps) {
       // network — a later report still records it
     });
   }
+
+  // 0045 P0-3 client arm: while the pipeline sits in `unavailable`, the
+  // verify cadence is SUSPENDED (shouldScheduleFaceCheck requires 'ready'),
+  // so degradations alone cannot keep the claim fresh. A dedicated re-arm
+  // timer posts the report every 6 min (interval > the RPC's 5-min refresh
+  // window, < the cron's 10-min staleness bound) for as long as the outage
+  // lasts; any status change clears it. The 6-min guard inside
+  // reportUnavailable keeps an immediate report + the first tick idempotent.
+  const unavailableRearmTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    if (status === "unavailable" && !disposedRef.current && !isTerminalRef.current) {
+      if (unavailableRearmTimerRef.current) return;
+      unavailableRearmTimerRef.current = setInterval(() => {
+        if (!disposedRef.current && !isTerminalRef.current && statusRef.current === "unavailable") {
+          reportUnavailable();
+        }
+      }, UNAVAILABLE_REARM_MS);
+    } else if (unavailableRearmTimerRef.current) {
+      clearInterval(unavailableRearmTimerRef.current);
+      unavailableRearmTimerRef.current = null;
+    }
+    return () => {
+      if (unavailableRearmTimerRef.current) {
+        clearInterval(unavailableRearmTimerRef.current);
+        unavailableRearmTimerRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status]);
 
   // ── Cadence (30–45s jittered, clear-then-set) ──────────────────
   function scheduleCadence() {
@@ -435,7 +482,7 @@ export function useFacePipeline(props: FacePipelineProps) {
       // failures record NO face_checks rows while answers (tiny bodies) keep
       // flowing — the verify-silence cron (0042) would flag that student
       // ~300s in. After N consecutive transport failures, degrade honestly
-      // to `unavailable` + reportUnavailableOnce() — the same self-exempting,
+      // to `unavailable` + reportUnavailable() — the same self-exempting,
       // lecturer-visible path as an HTTP ≥500 outage (L14 parity).
       transportFailStreakRef.current += 1;
       if (
@@ -445,7 +492,7 @@ export function useFacePipeline(props: FacePipelineProps) {
       ) {
         transportFailStreakRef.current = 0;
         setStatusBoth("unavailable");
-        reportUnavailableOnce();
+        reportUnavailable();
         return "unavailable";
       }
       if (trigger === "start") setStatusBoth("gate");
@@ -483,7 +530,7 @@ export function useFacePipeline(props: FacePipelineProps) {
     }
     if (res.status >= 500) {
       setStatusBoth("unavailable");
-      reportUnavailableOnce();
+      reportUnavailable();
       return "unavailable";
     }
 
@@ -844,6 +891,13 @@ export function useFacePipeline(props: FacePipelineProps) {
       const body = await res.json().catch(() => ({}));
       if (res.ok && body.sessionStatus === "active") {
         nonceRef.current = body.nextNonce ?? nonceRef.current;
+        // 0045 §5: adopt the server's post-credit remaining time (number only
+        // — null means the quiz is untimed and the countdown doesn't exist).
+        // This is what converts the pause from a full client freeze into the
+        // server's capped credit, killing the mid-answer time_expired drift.
+        if (typeof body.remainingMs === "number" && body.remainingMs >= 0) {
+          onRecoveredRemainingRef.current?.(body.remainingMs);
+        }
         setStatusBoth(recoveryLanding(hadStartVerifyRef.current));
         if (hadStartVerifyRef.current) {
           // Immediate identity re-check after recovery (mirrors the

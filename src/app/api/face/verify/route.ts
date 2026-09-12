@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { requireStudent } from "@/lib/classes/guards";
 import { isUuid } from "@/lib/classes/roster";
 import { rateLimit } from "@/lib/classes/rate-limit";
@@ -7,15 +8,17 @@ import { MAX_FRAME_BASE64_CHARS, VERIFY_FRAMES_PER_CHECK } from "@/lib/face/cons
 import { mapFaceError } from "@/lib/face/rpc-mapping";
 import { selectPrimaryFace } from "@/lib/face/embedding";
 import { shouldReportSecondFace } from "@/lib/face/second-face";
+import { mintVerifyProof } from "@/lib/face/server/verify-proof";
 import * as insightface from "@/lib/face/server/insightface-client";
 import {
   checkSameOrigin,
   firstIssueMessage,
   invalidBody,
-  invalidJson,
   internalError,
+  MULTIPART_OVERHEAD_BYTES,
   notFound,
   payloadTooLarge,
+  readCappedJson,
 } from "@/lib/http";
 import type { FaceCheckResult } from "@/lib/face/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -46,6 +49,11 @@ type Db = Awaited<ReturnType<typeof createClient>>;
  *   3. `compare_face_baseline(emb)` — max cosine against the student's OWN
  *      enrolled samples (1:1-by-baseline; no gallery involvement), clamped to
  *      [0,1] by the RPC.
+ *   4. `record_face_check(...)` with an HMAC proof minted HERE (0045 P0-1):
+ *      HMAC-SHA256(secret, session:nonce:frame-concat). The RPC verifies the
+ *      proof before its verdict, so a direct PostgREST caller — which can
+ *      read the nonce but never the app_private secret — cannot forge
+ *      similarities; a SQL-side 60/10-min attempt throttle bounds loops.
  * Empty frames are FAIL votes (the no-face sentinel stays
  * integrity-conservative). The RPC computes `matched` as the STRICT MAJORITY
  * of votes ≥ 0.5 — NO client-supplied verdict.
@@ -76,14 +84,16 @@ export async function POST(request: Request) {
     return mapFaceError({ error: "rate_limited" }) ?? internalError("Something went wrong.");
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return invalidJson();
-  }
+  // audit-1 P1-5: pre-parse body bound. The old flow parsed the WHOLE
+  // body (unbounded on chunked requests) and only then 413'd per frame;
+  // the streaming cap rejects an oversized body before it materializes.
+  // 3 frames x MAX_FRAME_BASE64_CHARS + JSON/multipart slack.
+  const VERIFY_BODY_LIMIT_BYTES =
+    VERIFY_FRAMES_PER_CHECK * MAX_FRAME_BASE64_CHARS + MULTIPART_OVERHEAD_BYTES;
+  const body = await readCappedJson(request, VERIFY_BODY_LIMIT_BYTES);
+  if (!body.ok) return body.response;
 
-  const parsed = VerifySchema.safeParse(body);
+  const parsed = VerifySchema.safeParse(body.data);
   if (!parsed.success) {
     return invalidBody(firstIssueMessage(parsed.error.issues, "Invalid verify payload."));
   }
@@ -96,7 +106,28 @@ export async function POST(request: Request) {
 
   if (!isUuid(parsed.data.sessionId)) return notFound();
 
-  const { frames } = parsed.data;
+  // The RPC consumes EXACTLY this array (schema caps at 3, the slice is
+  // defensive) — the proof below must cover the same bytes p_frames carries.
+  const frames = parsed.data.frames.slice(0, VERIFY_FRAMES_PER_CHECK);
+
+  // P0-1 (audit-1 / migration 0045 §9c): mint the HMAC proof the RPC
+  // verifies before its verdict. The secret lives in app_private (never
+  // PostgREST-exposed) and is read through a service_role-only getter;
+  // without it no proof can be minted, so the route fails CLOSED — a 503
+  // degradation the pipeline surfaces as `unavailable` (lecturer-visible),
+  // never a silent proof-less call.
+  let proof: string;
+  try {
+    const admin = createAdminClient();
+    const { data: secretData, error: secretError } = await admin.rpc("get_verify_proof_secret");
+    if (secretError || typeof secretData !== "string" || secretData.length === 0) {
+      throw secretError ?? new Error("empty verify-proof secret");
+    }
+    proof = mintVerifyProof(secretData, parsed.data.sessionId, parsed.data.nonce, frames);
+  } catch (secretError) {
+    console.error("get_verify_proof_secret error:", secretError);
+    return mapFaceError({ error: "proof_secret_unavailable" }) ?? internalError("Something went wrong.");
+  }
 
   // Exempt probe BEFORE the baseline guard: 0020's step-6 exempt short-circuit
   // runs before the enrollment check inside the RPC, and the route-side
@@ -167,7 +198,8 @@ export async function POST(request: Request) {
     p_similarities: similarities,
     p_trigger: parsed.data.trigger,
     p_nonce: parsed.data.nonce,
-    p_frames: frames.slice(0, VERIFY_FRAMES_PER_CHECK),
+    p_frames: frames,
+    p_proof: proof,
   });
 
   if (error) {

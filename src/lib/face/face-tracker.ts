@@ -18,6 +18,7 @@ import {
   getFacialSkinRegion,
   scoreFrameQuality,
 } from "./quality";
+import { isLiveFeed as isLiveFeedGate } from "./live-feed";
 
 /**
  * Browser-only MediaPipe face tracker (Phase 7 — CompreFace migration).
@@ -379,12 +380,12 @@ export class FaceTracker implements IFaceTracker {
   /**
    * Capture a base64 JPEG frame of the current `<video>` frame, subject to a
    * best-effort client quality gate. Returns null when the gate fails / the
-   * video is not ready / the tab is hidden.
+   * video is not ready / the tab is hidden / the feed is not LIVE.
    */
   async captureFrame(): Promise<string | null> {
     if (this.disposed || !this.video) return null;
     if (typeof document !== "undefined" && document.hidden) return null;
-    if (this.video.readyState < 2) return null;
+    if (!this.isLiveFeed()) return null;
 
     try {
       const canvas = this.ensureCanvas();
@@ -404,6 +405,22 @@ export class FaceTracker implements IFaceTracker {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Live-feed gate (audit-1 P0-2 client arm) — delegates to the pure
+   * `isLiveFeed` (live-feed.ts, unit-tested): a paused/seeking <video> or
+   * one whose srcObject no longer points at the shared camera stream still
+   * reports readyState ≥ 2 while showing its LAST GOOD frame — the exact
+   * frozen-frame primitive behind `video.pause()` / srcObject-swap presence
+   * fraud (a `track.enabled = false` freeze yields BLACK frames instead and
+   * is caught by the similarity vote, so it needs no guard here). Capture
+   * and pose detection must both refuse anything but the live shared feed;
+   * a null capture degrades through the pipeline's existing unavailable /
+   * fail paths (never a frozen pass).
+   */
+  private isLiveFeed(): boolean {
+    return isLiveFeedGate(this.video, this.sharedStream);
   }
 
   /**
@@ -683,9 +700,10 @@ export class FaceTracker implements IFaceTracker {
         this.lastFrameAt = now;
         if (
           this.landmarker &&
-          this.video.readyState >= 2 &&
-          this.video.videoWidth > 0 &&
-          this.video.videoHeight > 0
+          // isLiveFeed (audit-1 P0-2) replaces the bare readyState/size
+          // checks: pose landmarks computed on a paused/swapped video would
+          // re-arm blink/turn recovery from a frozen frame.
+          this.isLiveFeed()
         ) {
           const results = this.landmarker.detectForVideo(this.video, now);
           let yaw = 0;

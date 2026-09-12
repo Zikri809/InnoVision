@@ -14,8 +14,11 @@ const UNAVAILABLE_RATE = { limit: 10, windowMs: 60 * 1000 };
 
 /**
  * POST /api/sessions/[id]/face-unavailable — record that face tracking is
- * unavailable (camera denied / models offline). Idempotent (set-if-null), so
- * the risk-7 gap is lecturer-visible via `face_unavailable_at` on GET.
+ * unavailable (camera denied / models offline). Re-armable (0045 P0-3: the
+ * stamp refreshes at most once per 5-min window and expires from the
+ * silence-cron exemption after 10 min — the client re-arms a real outage
+ * every 5 min), so the claim stays lecturer-visible via
+ * `face_unavailable_at` on GET without becoming a permanent kill-switch.
  *
  * Preamble: guard → CSRF → rate-limit → RPC → `mapFaceError`.
  *

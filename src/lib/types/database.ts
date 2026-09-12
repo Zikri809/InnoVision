@@ -777,6 +777,7 @@ export type Database = {
           correct_index: number
           created_at: string
           explanation: string | null
+          generation_id: string | null
           id: string
           image_path: string | null
           options: string[]
@@ -789,6 +790,7 @@ export type Database = {
           correct_index: number
           created_at?: string
           explanation?: string | null
+          generation_id?: string | null
           id?: string
           image_path?: string | null
           options: string[]
@@ -801,6 +803,7 @@ export type Database = {
           correct_index?: number
           created_at?: string
           explanation?: string | null
+          generation_id?: string | null
           id?: string
           image_path?: string | null
           options?: string[]
@@ -1430,6 +1433,7 @@ export type Database = {
           correct_index: number
           created_at: string
           explanation: string | null
+          generation_id: string | null
           id: string
           image_path: string | null
           options: string[]
@@ -1459,6 +1463,7 @@ export type Database = {
       }
       face_baseline_status: { Args: never; Returns: Json }
       flag_verify_silent_sessions: { Args: never; Returns: number }
+      get_verify_proof_secret: { Args: never; Returns: string }
       grant_face_consent: { Args: never; Returns: Json }
       is_enrolled_in_class: { Args: { p_class_id: string }; Returns: boolean }
       is_lecturer: { Args: never; Returns: boolean }
@@ -1490,6 +1495,7 @@ export type Database = {
         Args: {
           p_frames: string[]
           p_nonce: string
+          p_proof?: string
           p_session_id: string
           p_similarities: number[]
           p_subject: string
@@ -1547,11 +1553,17 @@ export type Database = {
         Returns: undefined
       }
       save_student_quiz_questions: {
-        Args: { p_mode?: string; p_questions: Json; p_quiz_id: string }
+        Args: {
+          p_generation_id?: string
+          p_mode?: string
+          p_questions: Json
+          p_quiz_id: string
+        }
         Returns: {
           correct_index: number
           created_at: string
           explanation: string | null
+          generation_id: string | null
           id: string
           image_path: string | null
           options: string[]

@@ -54,6 +54,17 @@ export function mapFaceError(
       // The sidecar responded with a non-2xx — an outage-ish condition, not a
       // client error. Never leak the upstream body.
       return jsonError("insightface_error", "Face recognition service returned an error.", 503);
+    case "proof_secret_unavailable":
+      // 0045 P0-1: the route could not read the HMAC secret (service key or
+      // DB skew). Fail closed as an outage — the pipeline degrades to
+      // `unavailable` and the lecturer sees it; never a proof-less verify.
+      return jsonError("proof_secret_unavailable", "Face verification is temporarily unavailable.", 503);
+    case "proof_required":
+    case "proof_invalid":
+      // 0045 P0-1: a verify reached the RPC without a valid route-minted
+      // HMAC proof. Reachable only by direct PostgREST callers or a
+      // route/DB skew — a client error, never a verdict.
+      return jsonError(err, undefined, 400);
     case "rate_limited":
       return jsonError("rate_limited", "Too many requests. Try again in a minute.", 429);
     default:

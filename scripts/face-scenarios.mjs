@@ -31,6 +31,7 @@
 //
 // NOT a unit test; run manually. Cleanup deletes everything it created.
 import { createClient } from "@supabase/supabase-js";
+import { createHmac } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -65,6 +66,23 @@ const FACE_SIMILARITY_MIN = 0.5; // mirror of the SQL constant (0021)
 const FIXTURES = path.resolve(__dirname, "../e2e/fixtures/faces/scenarios");
 
 const admin = createClient(URL, SERVICE, { auth: { persistSession: false } });
+
+// 0045 P0-1: route-shaped HMAC proof (same byte contract as verify-face.mjs —
+// HMAC-SHA256(secret, session:nonce:frame-concat)); secret via the
+// service_role-only getter. Verdict-reaching record_face_check calls fail
+// with proof_required without it.
+const { data: PROOF_SECRET, error: PROOF_SECRET_ERR } = await admin.rpc("get_verify_proof_secret");
+if (PROOF_SECRET_ERR || typeof PROOF_SECRET !== "string" || PROOF_SECRET.length === 0) {
+  console.error("get_verify_proof_secret failed — has migration 0045 been applied?", PROOF_SECRET_ERR);
+  process.exit(1);
+}
+function mintProof(sessionId, nonce, frames) {
+  const concat = (frames ?? []).map((f) => f ?? "").reduce((acc, f) => `${acc}|${f}`, "");
+  return createHmac("sha256", PROOF_SECRET)
+    .update(`${sessionId}:${nonce}:${concat}`, "utf8")
+    .digest("hex");
+}
+
 const stamp = Date.now();
 const results = [];
 const createdUsers = [];
@@ -356,6 +374,7 @@ async function main() {
       p_trigger: "start",
       p_nonce: nonce,
       p_frames: ["scen-a1", "scen-a2", "scen-a3"],
+      p_proof: mintProof(sessionId, nonce, ["scen-a1", "scen-a2", "scen-a3"]),
     });
     const row = await faceCheckRow(clientA, sessionId);
     record(
@@ -391,6 +410,7 @@ async function main() {
       p_trigger: "start",
       p_nonce: nonce,
       p_frames: ["scen-imp1", "scen-imp2", "scen-imp3"],
+      p_proof: mintProof(sessionId, nonce, ["scen-imp1", "scen-imp2", "scen-imp3"]),
     });
     const row = await faceCheckRow(clientA, sessionId);
     record(
@@ -430,6 +450,7 @@ async function main() {
       p_trigger: "start",
       p_nonce: nonce3,
       p_frames: ["scen-r1", "scen-r2", "scen-r3"],
+      p_proof: mintProof(sessionId, nonce3, ["scen-r1", "scen-r2", "scen-r3"]),
     });
     record(
       "S4c genuine recovery after imposter pause → active again",
@@ -481,6 +502,7 @@ async function main() {
       p_trigger: "periodic",
       p_nonce: nonce,
       p_frames: ["scen-blank1", "scen-blank2", "scen-blank3"],
+      p_proof: mintProof(sessionId, nonce, ["scen-blank1", "scen-blank2", "scen-blank3"]),
     });
     const row = await faceCheckRow(clientA, sessionId);
     record(
@@ -557,6 +579,7 @@ async function main() {
       p_trigger: "start",
       p_nonce: nonceB,
       p_frames: ["scen-b1", "scen-b2", "scen-b3"],
+      p_proof: mintProof(sessionIdB, nonceB, ["scen-b1", "scen-b2", "scen-b3"]),
     });
     record(
       "S7d B's own face passes on B's baseline → matched, active",
@@ -581,6 +604,7 @@ async function main() {
         p_trigger: "periodic",
         p_nonce: nonce,
         p_frames: [`scen-fail${i}a`, `scen-fail${i}b`, `scen-fail${i}c`],
+        p_proof: mintProof(sessionId, nonce, [`scen-fail${i}a`, `scen-fail${i}b`, `scen-fail${i}c`]),
       });
       return res.data;
     };
@@ -611,6 +635,7 @@ async function main() {
       p_trigger: "start",
       p_nonce: nonce,
       p_frames: ["scen-u1", "scen-u2", "scen-u3"],
+      p_proof: mintProof(sessionId, nonce, ["scen-u1", "scen-u2", "scen-u3"]),
     });
     record(
       "S8b lecturer unlock → genuine re-verify → active (exam continues)",

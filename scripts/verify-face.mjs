@@ -54,12 +54,19 @@
 // cross-student search primitive is callable from authenticated).
 // record_face_check still receives per-frame SIMILARITIES (route-computed vs
 // the caller's own baseline via compare_face_baseline, clamped [0,1]) —
-// `matched` is computed from SQL constants. A direct caller can forge
-// similarities for their OWN uid (pre-existing residual risk); the
-// `p_subject = auth.uid()` check means they can only pass as themselves.
+// `matched` is computed from SQL constants. Since 0045 (P0-1) every verdict-
+// reaching call MUST carry a route-shaped HMAC proof
+// (HMAC-SHA256(secret, session:nonce:frame-concat), secret via
+// get_verify_proof_secret — service_role only): a direct caller WITHOUT the
+// proof gets `proof_required`/`proof_invalid` no matter what similarities it
+// fabricates, and a tight forge loop burns the 60-attempts/10-min SQL
+// throttle. This harness replicates the route's minting via the service key
+// so the verdict semantics stay testable; the forge-resistance pins below
+// cover the attacker path.
 //
 // NOT a unit test; run manually: node scripts/verify-face.mjs
 import { createClient } from "@supabase/supabase-js";
+import { createHmac } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -89,6 +96,28 @@ if (!URL || !ANON || !SERVICE) {
 assertLocalTarget(URL, "verify-face.mjs");
 
 const admin = createClient(URL, SERVICE, { auth: { persistSession: false } });
+
+// 0045 P0-1: the route-minted HMAC proof. Byte contract (migration 0045 §9c):
+// HMAC-SHA256(secret, sessionId || ':' || nonce || ':' || frameConcat) where
+// frameConcat is the frames joined with '|' (the SQL `v_concat` twin).
+const { data: PROOF_SECRET, error: PROOF_SECRET_ERR } = await admin.rpc("get_verify_proof_secret");
+if (PROOF_SECRET_ERR || typeof PROOF_SECRET !== "string" || PROOF_SECRET.length === 0) {
+  console.error("get_verify_proof_secret failed — has migration 0045 been applied?", PROOF_SECRET_ERR);
+  process.exit(1);
+}
+
+function mintProof(sessionId, nonce, frames) {
+  const concat = (frames ?? []).map((f) => f ?? "").reduce((acc, f) => `${acc}|${f}`, "");
+  return createHmac("sha256", PROOF_SECRET)
+    .update(`${sessionId}:${nonce}:${concat}`, "utf8")
+    .digest("hex");
+}
+
+/** Attach the route-shaped proof to a probe object (verdict-reaching calls). */
+function withProof(sessionId, nonce, probe) {
+  return { ...probe, p_proof: mintProof(sessionId, nonce, probe.p_frames) };
+}
+
 const stamp = Date.now();
 const results = [];
 const createdUsers = [];
@@ -379,7 +408,7 @@ async function main() {
     const nonce = await currentNonce(clientS1, sessionId);
     const check = await clientS1.rpc("record_face_check", {
       p_session_id: sessionId,
-      ...matchProbe(studentS1.id),
+      ...withProof(sessionId, nonce, matchProbe(studentS1.id)),
       p_trigger: "start",
       p_nonce: nonce,
     });
@@ -426,7 +455,7 @@ async function main() {
     const nonce1 = await currentNonce(clientS1, sessionId);
     const r1 = await clientS1.rpc("record_face_check", {
       p_session_id: sessionId,
-      ...matchProbe(studentS1.id),
+      ...withProof(sessionId, nonce1, matchProbe(studentS1.id)),
       p_trigger: "question",
       p_nonce: nonce1,
     });
@@ -439,7 +468,7 @@ async function main() {
     });
     const r3 = await clientS1.rpc("record_face_check", {
       p_session_id: sessionId,
-      ...matchProbe(studentS1.id),
+      ...withProof(sessionId, nonce2, matchProbe(studentS1.id)),
       p_trigger: "periodic",
       p_nonce: nonce2,
     });
@@ -460,7 +489,7 @@ async function main() {
       // active WITHOUT adding a window row, so the next fail lands on top.
       last = await clientS1.rpc("record_face_check", {
         p_session_id: sessionId,
-        ...mismatchProbe(`I5-fail-${i}`),
+        ...withProof(sessionId, nonce, mismatchProbe(`I5-fail-${i}`)),
         p_trigger: "periodic",
         p_nonce: nonce,
       });
@@ -489,7 +518,7 @@ async function main() {
     let nonce = await currentNonce(clientS1, sessionId);
     await clientS1.rpc("record_face_check", {
       p_session_id: sessionId,
-      ...mismatchProbe("I6-fail"),
+      ...withProof(sessionId, nonce, mismatchProbe("I6-fail")),
       p_trigger: "periodic",
       p_nonce: nonce,
     });
@@ -506,7 +535,7 @@ async function main() {
     for (let i = 0; i < 3; i++) {
       const r = await clientS1.rpc("record_face_check", {
         p_session_id: sessionId,
-        ...mismatchProbe(`I6-flag-${i}`),
+        ...withProof(sessionId, nonce2, mismatchProbe(`I6-flag-${i}`)),
         p_trigger: "periodic",
         p_nonce: nonce2,
       });
@@ -659,6 +688,7 @@ async function main() {
       p_trigger: "periodic",
       p_nonce: nonce,
       p_frames: ["vote-lookalike-1", "vote-lookalike-2"],
+      p_proof: mintProof(sessionId, nonce, ["vote-lookalike-1", "vote-lookalike-2"]),
     });
     record("1:1 vote: self sims [0.7,0.72] pass even though a lookalike would rank top-1",
       r.data?.matched === true && r.data?.sessionStatus === "active",
@@ -676,6 +706,7 @@ async function main() {
       p_trigger: "periodic",
       p_nonce: nonce2,
       p_frames: ["vote-min-1", "vote-min-2", "vote-min-3"],
+      p_proof: mintProof(s2, nonce2, ["vote-min-1", "vote-min-2", "vote-min-3"]),
     });
     record("1:1 vote: 1-of-3 split → no majority → fail (paused)",
       r2.data?.matched === false && r2.data?.sessionStatus === "paused",
@@ -694,7 +725,7 @@ async function main() {
     const { sessionId } = await makeLiveAssessment("Advisory", clientS3);
     let nonce = await currentNonce(clientS3, sessionId);
     // The SAME frame string → the RPC computes the SAME sha256 → replay.
-    const probe = matchProbe(studentS3.id, "replay-frame");
+    const probe = withProof(sessionId, nonce, matchProbe(studentS3.id, "replay-frame"));
     await clientS3.rpc("record_face_check", {
       p_session_id: sessionId,
       ...probe,
@@ -704,7 +735,7 @@ async function main() {
     const nonce2 = await currentNonce(clientS3, sessionId);
     const r2 = await clientS3.rpc("record_face_check", {
       p_session_id: sessionId,
-      ...probe,
+      ...withProof(sessionId, nonce2, matchProbe(studentS3.id, "replay-frame")),
       p_trigger: "periodic",
       p_nonce: nonce2,
     });
@@ -718,14 +749,14 @@ async function main() {
       `second=${JSON.stringify(second)} r2=${JSON.stringify(r2.data)}`);
   }
 
-  // ── report_face_unavailable idempotence ─────────────────────────
+  // ── report_face_unavailable: gates + re-armable claim (0045 P0-3) ──
   {
     const { sessionId } = await makeLiveAssessment("Unavailable");
     const r1 = await clientS1.rpc("report_face_unavailable", { p_session_id: sessionId });
     await sleep(50);
     const r2 = await clientS1.rpc("report_face_unavailable", { p_session_id: sessionId });
     const row = (await clientS1.from("quiz_sessions").select("face_unavailable_at").eq("id", sessionId).single()).data;
-    record("report_face_unavailable idempotent (set-if-null)",
+    record("report_face_unavailable: claim set, re-call within window is a no-op",
       r1.data?.ok === true && r2.data?.ok === true && row.face_unavailable_at !== null,
       `row=${JSON.stringify(row)} r1=${JSON.stringify(r1.data)} r2=${JSON.stringify(r2.data)}`);
   }
@@ -749,7 +780,7 @@ async function main() {
     const nonce = await currentNonce(clientS3, sessionId);
     const r = await clientS3.rpc("record_face_check", {
       p_session_id: sessionId,
-      ...mismatchProbe("tiebreak-mismatch"),
+      ...withProof(sessionId, nonce, mismatchProbe("tiebreak-mismatch")),
       p_trigger: "periodic",
       p_nonce: nonce,
     });
@@ -770,6 +801,7 @@ async function main() {
       p_session_id: sessionId, p_subject: null, p_similarities: [0.9],
       p_trigger: "start",
       p_nonce: nonce, p_frames: ["null-subject"],
+      p_proof: mintProof(sessionId, nonce, ["null-subject"]),
     });
     const row = (await clientS3.from("quiz_sessions").select("status").eq("id", sessionId).single()).data;
     record("numeric gate: NULL p_subject + high similarity → clean fail row (paused), not a 500",
@@ -791,7 +823,7 @@ async function main() {
     const nonce = await currentNonce(clientS3, sessionId);
     const pass = await clientS3.rpc("record_face_check", {
       p_session_id: sessionId,
-      ...matchProbe(studentS3.id, "win-pass"),
+      ...withProof(sessionId, nonce, matchProbe(studentS3.id, "win-pass")),
       p_trigger: "periodic",
       p_nonce: nonce,
     });
@@ -802,7 +834,7 @@ async function main() {
     // (b) The VERY NEXT fail re-flags — passes do NOT launder standing fails.
     const failAfter = await clientS3.rpc("record_face_check", {
       p_session_id: sessionId,
-      ...mismatchProbe("win-fail-after-pass"),
+      ...withProof(sessionId, pass.data?.nextNonce, mismatchProbe("win-fail-after-pass")),
       p_trigger: "periodic",
       p_nonce: pass.data?.nextNonce,
     });
@@ -820,7 +852,9 @@ async function main() {
     for (const isFail of [true, false, true, false, true]) {
       const r = await clientS3.rpc("record_face_check", {
         p_session_id: sessionId,
-        ...(isFail ? mismatchProbe(`fpf-f-${Math.random()}`) : matchProbe(studentS3.id, `fpf-p-${Math.random()}`)),
+        ...(isFail
+          ? withProof(sessionId, nonce, mismatchProbe(`fpf-f-${Math.random()}`))
+          : withProof(sessionId, nonce, matchProbe(studentS3.id, `fpf-p-${Math.random()}`))),
         p_trigger: "periodic",
         p_nonce: nonce,
       });
@@ -845,7 +879,9 @@ async function main() {
       const isFail = [1, 2, 7].includes(i);
       const r = await clientS3.rpc("record_face_check", {
         p_session_id: sessionId,
-        ...(isFail ? mismatchProbe(`sp8-f-${i}`) : matchProbe(studentS3.id, `sp8-p-${i}`)),
+        ...(isFail
+          ? withProof(sessionId, nonce, mismatchProbe(`sp8-f-${i}`))
+          : withProof(sessionId, nonce, matchProbe(studentS3.id, `sp8-p-${i}`))),
         p_trigger: "periodic",
         p_nonce: nonce,
       });
@@ -869,6 +905,7 @@ async function main() {
       p_session_id: sessionId, p_subject: studentS3.id, p_similarities: [0.5],
       p_trigger: "start",
       p_nonce: nonce, p_frames: ["threshold-0.5"],
+      p_proof: mintProof(sessionId, nonce, ["threshold-0.5"]),
     });
     record("threshold: similarity exactly 0.5 → matched",
       at.data?.matched === true, JSON.stringify(at.data));
@@ -879,6 +916,7 @@ async function main() {
       p_session_id: s2, p_subject: studentS3.id, p_similarities: [0.49],
       p_trigger: "start",
       p_nonce: nonce2, p_frames: ["threshold-0.49"],
+      p_proof: mintProof(s2, nonce2, ["threshold-0.49"]),
     });
     record("threshold: similarity 0.49 → not matched",
       below.data?.matched === false, JSON.stringify(below.data));
@@ -888,7 +926,8 @@ async function main() {
   {
     // A per-element NULL/NaN similarity previously crashed the verdict (raw
     // 500); the 0020 gates reject them with typed invalid_frame. PostgREST
-    // resolves the single 6-arg signature, so partial args are fine.
+    // resolves the single 7-arg signature (p_proof has a DEFAULT), so
+    // partial args are fine — and these gates die BEFORE the proof check.
     const { sessionId } = await makeLiveAssessment("Numeric Gates", clientS3);
     const nonce = await currentNonce(clientS3, sessionId);
     const nullSim = await clientS3.rpc("record_face_check", {
@@ -1128,14 +1167,14 @@ async function main() {
     // different reason that it survives the pass outright (fail=1, pass
     // untouched, fail=2). The two columns agree numerically here but for
     // distinct semantics; both are pinned.
-    await clientS3.rpc("record_face_check", { p_session_id: sF, ...mismatchProbe(), p_trigger: "periodic", p_nonce: await currentNonce(clientS3, sF) });
+    await clientS3.rpc("record_face_check", { p_session_id: sF, ...withProof(sF, await currentNonce(clientS3, sF), mismatchProbe()), p_trigger: "periodic", p_nonce: await currentNonce(clientS3, sF) });
     await clientS3.rpc("self_recover_session", { p_session_id: sF });
-    await clientS3.rpc("record_face_check", { p_session_id: sF, ...matchProbe(studentS3.id), p_trigger: "periodic", p_nonce: await currentNonce(clientS3, sF) });
+    await clientS3.rpc("record_face_check", { p_session_id: sF, ...withProof(sF, await currentNonce(clientS3, sF), matchProbe(studentS3.id)), p_trigger: "periodic", p_nonce: await currentNonce(clientS3, sF) });
     const streakAfterPass = (await admin.from("quiz_sessions")
       .select("face_fail_streak").eq("id", sF).single()).data.face_fail_streak;
     record("0044 fails: pass resets the STREAK to 0 (window re-read after pass)",
       streakAfterPass === 0, `streak after pass=${streakAfterPass}`);
-    const third = await clientS3.rpc("record_face_check", { p_session_id: sF, ...mismatchProbe(), p_trigger: "periodic", p_nonce: await currentNonce(clientS3, sF) });
+    const third = await clientS3.rpc("record_face_check", { p_session_id: sF, ...withProof(sF, await currentNonce(clientS3, sF), mismatchProbe()), p_trigger: "periodic", p_nonce: await currentNonce(clientS3, sF) });
     const rowF = (await admin.from("quiz_sessions")
       .select("face_fail_streak, face_fail_count, status").eq("id", sF).single()).data;
     record("0044 fails: F,P,F window → streak 2, paused (not flagged)",
@@ -1179,6 +1218,155 @@ async function main() {
     record("advisory: direct-RPC spam throttled (occurrences stay at 1)",
       before?.occurrences === 1 && after?.occurrences === 1,
       `before=${JSON.stringify(before)} after=${JSON.stringify(after)}`);
+  }
+
+  // ── 0045 P0-1: proof gate + SQL throttle (the audit's decisive tests) ──
+  {
+    const { sessionId } = await makeLiveAssessment("P01 Proof Gate", clientS3);
+    const nonce = await currentNonce(clientS3, sessionId);
+
+    // (a) Sidecar-virgin direct call, NO proof → proof_required (never a
+    // verdict — this is the exact "direct-RPC [1,1]" forge the audit ran).
+    const forge = await clientS3.rpc("record_face_check", {
+      p_session_id: sessionId,
+      p_subject: studentS3.id,
+      p_similarities: [1.0, 1.0],
+      p_trigger: "periodic",
+      p_nonce: nonce,
+      p_frames: ["forge-1", "forge-2"],
+    });
+    record("0045 P0-1: direct-RPC forged similarities without proof → proof_required",
+      forge.data?.error === "proof_required", JSON.stringify(forge.data));
+
+    // (b) A proof minted over DIFFERENT frame bytes → proof_invalid.
+    const wrongProof = await clientS3.rpc("record_face_check", {
+      p_session_id: sessionId,
+      p_subject: studentS3.id,
+      p_similarities: [1.0],
+      p_trigger: "periodic",
+      p_nonce: nonce,
+      p_frames: ["forge-wrong-1"],
+      p_proof: mintProof(sessionId, nonce, ["NOT-the-frames"]),
+    });
+    record("0045 P0-1: proof bound to other frame bytes → proof_invalid",
+      wrongProof.data?.error === "proof_invalid", JSON.stringify(wrongProof.data));
+
+    // (c) A proof minted for ANOTHER nonce → proof_invalid.
+    const wrongNonce = await clientS3.rpc("record_face_check", {
+      p_session_id: sessionId,
+      p_subject: studentS3.id,
+      p_similarities: [1.0],
+      p_trigger: "periodic",
+      p_nonce: nonce,
+      p_frames: ["forge-wrong-2"],
+      p_proof: mintProof(sessionId, "00000000-0000-4000-8000-000000000009", ["forge-wrong-2"]),
+    });
+    record("0045 P0-1: proof bound to another nonce → proof_invalid",
+      wrongNonce.data?.error === "proof_invalid", JSON.stringify(wrongNonce.data));
+
+    // (d) A VALID route-shaped proof + honest verdict path works end to end.
+    const okNonce = nonce; // (a)-(c) die pre-rotation: the nonce is still live.
+    const honest = await clientS3.rpc("record_face_check", {
+      p_session_id: sessionId,
+      ...withProof(sessionId, okNonce, matchProbe(studentS3.id, "proof-honest")),
+      p_trigger: "periodic",
+      p_nonce: okNonce,
+    });
+    record("0045 P0-1: valid proof + honest similarities → matched (route path)",
+      honest.data?.matched === true && honest.data?.sessionStatus === "active",
+      JSON.stringify(honest.data));
+
+    // (e) Throttle: a tight forge loop burns the per-session budget
+    // (60 attempts / 10 min, counted BEFORE the proof check so proof-less
+    // forgeries pay too). Run on a FRESH session: attempts 1..60 →
+    // proof_required, the 61st → rate_limited.
+    const { sessionId: sThrottle } = await makeLiveAssessment("P01 Throttle", clientS3);
+    let throttleNonce = await currentNonce(clientS3, sThrottle);
+    let lastAttempt = null;
+    for (let i = 0; i < 61; i++) {
+      lastAttempt = await clientS3.rpc("record_face_check", {
+        p_session_id: sThrottle,
+        p_subject: studentS3.id,
+        p_similarities: [1.0],
+        p_trigger: "periodic",
+        p_nonce: throttleNonce,
+        p_frames: [`throttle-${i}`],
+      });
+      if (lastAttempt.data?.error === "rate_limited") break;
+      // Forged attempts never rotate the nonce — the same one stays valid.
+      if (lastAttempt.data?.nextNonce) throttleNonce = lastAttempt.data.nextNonce;
+    }
+    record("0045 P0-1: tight PostgREST forge loop → rate_limited at the SQL throttle",
+      lastAttempt.data?.error === "rate_limited",
+      `last=${JSON.stringify(lastAttempt.data)}`);
+  }
+
+  // ── 0045 P0-2: 3rd consecutive identical frame → paused ────────────
+  {
+    const { sessionId } = await makeLiveAssessment("P02 Replay", clientS3);
+    const seq = [];
+    for (let i = 0; i < 3; i++) {
+      const n = await currentNonce(clientS3, sessionId);
+      const r = await clientS3.rpc("record_face_check", {
+        p_session_id: sessionId,
+        ...withProof(sessionId, n, matchProbe(studentS3.id, "frozen-frame")),
+        p_trigger: "periodic",
+        p_nonce: n,
+      });
+      seq.push(r.data?.sessionStatus ?? "err");
+      if (r.data?.sessionStatus === "paused") break;
+    }
+    const row = (await clientS3.from("quiz_sessions").select("status").eq("id", sessionId).single()).data;
+    record("0045 P0-2: 3rd consecutive identical matched frame → paused (frozen-frame fraud)",
+      seq[0] === "active" && seq[1] === "active" && seq[2] === "paused" && row.status === "paused",
+      seq.join(",") + ` row=${row.status}`);
+
+    // Honest jittered captures never collide: distinct frames stay active.
+    const { sessionId: sH } = await makeLiveAssessment("P02 Honest Drift", clientS3);
+    const n1 = await currentNonce(clientS3, sH);
+    const h1 = await clientS3.rpc("record_face_check", {
+      p_session_id: sH,
+      ...withProof(sH, n1, matchProbe(studentS3.id, "honest-capture-1")),
+      p_trigger: "periodic",
+      p_nonce: n1,
+    });
+    const n2 = await currentNonce(clientS3, sH);
+    const h2 = await clientS3.rpc("record_face_check", {
+      p_session_id: sH,
+      ...withProof(sH, n2, matchProbe(studentS3.id, "honest-capture-2")),
+      p_trigger: "periodic",
+      p_nonce: n2,
+    });
+    record("0045 P0-2: honest distinct captures → active (no false pause)",
+      h1.data?.sessionStatus === "active" && h2.data?.sessionStatus === "active",
+      `${JSON.stringify(h1.data)} ${JSON.stringify(h2.data)}`);
+  }
+
+  // ── 0045 P0-3: face_unavailable_at clears on a streak-2 pass ───────
+  {
+    const { sessionId } = await makeLiveAssessment("P03 Unavailable Clear", clientS3);
+    await clientS3.rpc("report_face_unavailable", { p_session_id: sessionId });
+    const stampAfterReport = (await clientS3.from("quiz_sessions").select("face_unavailable_at").eq("id", sessionId).single()).data.face_unavailable_at;
+    const n1 = await currentNonce(clientS3, sessionId);
+    const pass1 = await clientS3.rpc("record_face_check", {
+      p_session_id: sessionId,
+      ...withProof(sessionId, n1, matchProbe(studentS3.id, "recover-pass-1")),
+      p_trigger: "periodic",
+      p_nonce: n1,
+    });
+    const stampAfterPass1 = (await clientS3.from("quiz_sessions").select("face_unavailable_at").eq("id", sessionId).single()).data.face_unavailable_at;
+    const n2 = await currentNonce(clientS3, sessionId);
+    const pass2 = await clientS3.rpc("record_face_check", {
+      p_session_id: sessionId,
+      ...withProof(sessionId, n2, matchProbe(studentS3.id, "recover-pass-2")),
+      p_trigger: "periodic",
+      p_nonce: n2,
+    });
+    const stampAfterPass2 = (await clientS3.from("quiz_sessions").select("face_unavailable_at").eq("id", sessionId).single()).data.face_unavailable_at;
+    record("0045 P0-3: claim cleared on the SECOND consecutive pass (streak-2), not the first",
+      stampAfterReport !== null && pass1.data?.matched === true && stampAfterPass1 !== null &&
+        pass2.data?.matched === true && stampAfterPass2 === null,
+      `report=${stampAfterReport} p1=${stampAfterPass1} p2=${stampAfterPass2}`);
   }
 
   // ── Summary ──────────────────────────────────────────────────

@@ -59,6 +59,41 @@ type SeedAnswer = {
   is_correct: boolean | null;
 };
 
+// ── audit-1 P1-12: unsent-answer stash ──────────────────────────────
+// A 401 mid-exam (expired auth session) bounces the student through
+// /login?redirect=<here>. Every RECORDED answer lives server-side and seeds
+// back from initialAnswers; the only client-local state at risk is the
+// selection the student just committed but the server never recorded. It is
+// stashed to sessionStorage (per session id) and re-merged on remount.
+type StashedDraft = {
+  questionId: string;
+  selectedIndex?: number;
+  selectedIndices?: number[];
+};
+
+const DRAFT_STASH_PREFIX = "innovision:play-draft:";
+
+function stashUnsentAnswer(sessionId: string, draft: StashedDraft): void {
+  try {
+    sessionStorage.setItem(DRAFT_STASH_PREFIX + sessionId, JSON.stringify(draft));
+  } catch {
+    // storage unavailable (private mode / quota) — redirect without the draft
+  }
+}
+
+function takeStashedAnswer(sessionId: string): StashedDraft | null {
+  try {
+    const key = DRAFT_STASH_PREFIX + sessionId;
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return null;
+    sessionStorage.removeItem(key);
+    const parsed = JSON.parse(raw) as StashedDraft | null;
+    return parsed && typeof parsed.questionId === "string" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export type AnswerState = {
   /** Single-answer selection (presented space). Absent on multi questions. */
   selectedIndex?: number;
@@ -150,6 +185,9 @@ export function PlayClient({
   const router = useRouter();
   const t = useTranslations("play");
   const tCommon = useTranslations("common");
+  // audit-1 P1-12: the mid-exam expired-session copy (authErrors key was
+  // written for the register flow and unused until now).
+  const tAuth = useTranslations("authErrors");
   // Polish round (W2 C4): the hand-loss warn chip copy lives in the vision
   // namespace (single source — the same phrase the wide layout renders).
   const tVision = useTranslations("vision");
@@ -170,6 +208,21 @@ export function PlayClient({
             : {}),
         isCorrect: a.is_correct === true,
         seeded: true,
+      };
+    }
+    // audit-1 P1-12: restore an unsent selection stashed by the 401
+    // recovery path (no isCorrect — the server never recorded it).
+    const stashed = takeStashedAnswer(sessionId);
+    if (stashed) {
+      seed[stashed.questionId] = {
+        ...(stashed.selectedIndices
+          ? { selectedIndices: stashed.selectedIndices }
+          : stashed.selectedIndex != null
+            ? { selectedIndex: stashed.selectedIndex }
+            : {}),
+        // Keyless: the server never recorded this answer (same shape the
+        // assessment already_answered replay renders pre-reveal).
+        isCorrect: false,
       };
     }
     return seed;
@@ -383,6 +436,13 @@ export function PlayClient({
       setError(t("toast.resetDead"));
       setPhaseAndRef("dead");
     },
+    onRecoveredRemaining: (ms) => {
+      // 0045 §5 (audit-1 §2.13): after a blink recovery the server reports
+      // the post-credit remaining time. Adopt it wholesale — the countdown
+      // used to freeze through the whole pause while the server credited at
+      // most 120 s, and the drift surfaced as a mid-answer time_expired 403.
+      setRemainingMs(ms);
+    },
     onFaceStatus: (s) => setFaceStatus(s),
   });
 
@@ -395,7 +455,16 @@ export function PlayClient({
   // ── Integrity advisories (lecturer-visible hints, never blocking) ──
   const { micStreamRef } = useIntegrityAdvisories({
     sessionId,
-    enabled: quiz.mode === "assessment" && Boolean(face) && faceTracker.available,
+    // audit-1 P2 (R6 P1-B): `enabled` flipping false at a terminal phase
+    // runs the hook's cleanup, which stops the mic tracks — without it the
+    // OS mic indicator stayed hot after submit (the camera tracker is
+    // disposed but the advisory mic stream was not).
+    enabled:
+      quiz.mode === "assessment" &&
+      Boolean(face) &&
+      faceTracker.available &&
+      phase !== "submitted" &&
+      phase !== "dead",
     armed: faceStatus === "ready",
     tracker: faceTracker.trackerRef.current,
   });
@@ -686,6 +755,25 @@ export function PlayClient({
           return;
         }
 
+        if (res.status === 401) {
+          // audit-1 P1-12: auth session expired mid-exam. Stash the unsent
+          // selection, then bounce through login and BACK to this exact URL;
+          // the remount re-seeds recorded answers + restores the draft.
+          stashUnsentAnswer(sessionId, {
+            questionId: question.id,
+            ...(isMulti ? { selectedIndices: set } : { selectedIndex: scalar }),
+          });
+          setError(tAuth("sessionExpired"));
+          setTimeout(() => {
+            // router.push (not location.assign): the login hand-off stays in
+            // the SPA, and the play page remounts fresh on the way back.
+            router.push(
+              `/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`,
+            );
+          }, 800);
+          return;
+        }
+
         if (!res.ok) {
           setError(
             typeof body.message === "string"
@@ -818,6 +906,19 @@ export function PlayClient({
         // screen, no retry, no re-submit.
         setError(t("toast.resetDead"));
         setPhaseAndRef("dead");
+        return;
+      }
+
+      if (res.status === 401) {
+        // audit-1 P1-12: expired auth mid-submit — every recorded answer is
+        // already server-side; re-auth and come straight back to the result.
+        setError(tAuth("sessionExpired"));
+        setTimeout(() => {
+          // See the answer-path comment: SPA hand-off, fresh remount back.
+          router.push(
+            `/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`,
+          );
+        }, 800);
         return;
       }
 
