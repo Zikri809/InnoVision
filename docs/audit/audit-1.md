@@ -153,3 +153,51 @@ Stop rule honored: keep attacking (new claims, fix proposals, unexamined surface
 **Kill count (anti-inflation):** 1 P0-claim refuted outright (closed-reveal silent), 1 mechanism corrected (frozen-frame), 1 sub-claim inverted (dead-branch direction), 5 P1s killed→P3 (palm-next, commitHold, PATCH-null, poll-override, sweep-incident-leg), 7 P1s weakened→P2 with confirmed mechanisms.
 
 *8 rounds (19 agents). No code changed. Surface exhausted per stop rule: R7 + R8 consecutive with zero new P0/P1 and nothing left named.*
+
+## 10. Implementation status (2026-09-12)
+
+> Implementation of this audit is COMPLETE for every P0 and P1 in the §9
+> ledger, plus the §5 harness top-5 — carried out and live-verified in one
+> session against local Supabase (migrations applied via `db reset`, unit
+> suite 1654 green, all eight `verify-*.mjs` harnesses green). The SQL,
+> app, and harness work landed as three commits; this section was added in
+> a fourth. Original findings above are preserved verbatim as the
+> historical record.
+
+| Finding | Status | Commit |
+|---|---|---|
+| P0-1 direct-RPC similarity forgery + forge loop | **FIXED** — HMAC proof + 60/10-min SQL throttle (service-role switch rejected per §9) | e114725 |
+| P0-2 frozen-frame presence fraud (client + server arms) | **FIXED** — isLiveFeed capture/pose gates + 3×-identical→paused | e114725 |
+| P0-3 `face_unavailable_at` permanent kill-switch | **FIXED** — report gates + 5-min re-arm + 10-min cron expiry + streak-2 clearing | e114725 |
+| P0-4 scoreless seal + bogus terminal mail | **FIXED** — seal-score trigger + GUC-suppressed notification | e114725 |
+| P0-5 submit-consequence gating (seal, don't block) | **FIXED** — auto-reveal gated on live + enrolled | e114725 |
+| P1-1 shared-practice bulk enumeration | **FIXED** — creator-only `student_quizzes` SELECT; code-gated RPC/view play paths kept (SQ-D2c inverted as the pin) | e114725 |
+| P1-2 manual single-add uncapped past 30 | **FIXED** — cap under the unified lock (clone fixture re-pinned) | e114725 |
+| P1-3 timer-credit asymmetry + stale `paused_at` | **FIXED** — unlock capped at 120 s, exempt clears `paused_at`, recover returns credited time | e114725 |
+| P1-4 incident upload TOCTOU | **FIXED** — post-upload re-select + object discard | 30fc30d |
+| P1-5 body caps header-only / unbounded routes | **FIXED** — streaming `readCappedJson/Text/FormData`; wired start/join/verify/enroll/advisory/answer/pause/incident | 30fc30d |
+| P1-6 retake auto-reveal livelock | **FIXED** — `quiz_autoclose` sweeper flips reveal after 2 h inactivity (pinned live) | 30fc30d |
+| P1-7 gradebook export sheet-name collision 500 | **FIXED** — case-insensitive dedupe + `Summary` reservation | 30fc30d |
+| P1-8 secondary-omission quorum (pad-don't-omit) | **OPEN (P2)** — pad-not-omit not yet implemented; §9 binding posture unchanged | — |
+| P1-9 empty gradebook `in.()` 400/503 | **FIXED** — empty-id guard on page + export | 30fc30d |
+| P1-10 AI cancel honesty + append idempotency | **FIXED** — per-run generationId dedupe + post-commit abort honesty | 30fc30d |
+| P1-11 advisory-lock namespace split | **FIXED** — unified `quiz_write:` across save/append/reorder | e114725 |
+| P1-12 expired-session 401 mid-exam | **FIXED** — GET 401/404 discipline + play/join 401 branches + unsent-answer stash + `login?redirect` | 30fc30d |
+| P1-13 timer honest-surprise (recover deadline) | **FIXED** — server `remainingMs` adopted by PlayClient | e114725 |
+| P1-14 notification poll wipe / badge / rollback | **FIXED** — merge-into-prev, id-seen badge guard, throw-path rollback | 30fc30d |
+| P1-15 quiz-sources / question / quiz delete orphans | **FIXED** — precise delete-time sweeps (storage sweep on question + quiz delete); `media-cleanup` NOT extended to quiz-sources per the R8 naive-sweep warning | 30fc30d |
+| P1-16 fullscreen-farm gradebook blindness | **FIXED** — face-fail/fullscreen/hand counters projected select → model → Summary sheet | 30fc30d |
+| Login limiter (P1) | **DEFERRED by owner** — testing-headache concern; bounded risk (GoTrue server-egress IP, platform limits). Use the `E2E_RATE_LIMIT_DISABLED` seam pattern when scheduled | — |
+| Matric gate (P1 by audit, P2 operationally) | **OPEN (P2)** | — |
+| §5.1 live pins: silence / grace / advisory-touch | **DONE** — `verify-silence.mjs` (9/9); **found + fixed a real 0044 bug**: the answer-count grace shipped inverted (`<= 1` flagged the honest returner, excluded the suppressed session); corrected to `>= 2` and pinned both ways | 2aee46f |
+| §5.2 floors under tested-but-ungated files | **DONE** — 15 files floored at measured coverage; masking 0-keys removed | 2aee46f |
+| §5.3 fail-on-fully-skipped runs + e51 signal split | **DONE** — min-exec reporter + dedicated `E51_HARDENING_E2E` | 2aee46f |
+| §5.4 unmocked InsightFace boundary test | **DONE** — real-client contract pinned against a local HTTP stand-in; client's 0-floor lifted | 2aee46f |
+| §5.5 `.env.local.example` parity check | **DONE** — `check-env-parity.mjs` in CI; 11 missing keys documented | 2aee46f |
+| §5 registerUser/fastRegisterUser helper holes | **OPEN** | — |
+| §6 P2 backlog + R4/R6/R8 P2s | **OPEN except:** ms consent footage-clause copy (30fc30d), advisory mic stops at terminal phases (e114725) | — |
+| §4 Chain 4 reset evidence-laundering (soft-void design) | **OPEN (P2, lecturer-mediated)** | — |
+
+**Deploy note:** migration `0045` must be applied to the hosted database
+(`npm run db:push` / `db:reset:remote`) BEFORE the app deploy — the verify
+route sends `p_proof`, which an un-migrated DB rejects.
