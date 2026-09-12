@@ -10,10 +10,11 @@ import {
   checkSameOrigin,
   firstIssueMessage,
   invalidBody,
-  invalidJson,
   internalError,
   jsonError,
+  MULTIPART_OVERHEAD_BYTES,
   payloadTooLarge,
+  readCappedJson,
 } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
@@ -69,14 +70,15 @@ export async function POST(request: Request) {
     return mapFaceError({ error: "rate_limited" }) ?? internalError("Something went wrong.");
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return invalidJson();
-  }
+  // audit-1 P1-5: pre-parse bound — EnrollSchema takes exactly 3 frames,
+  // each capped at MAX_FRAME_BASE64_CHARS; oversized chunked bodies used to
+  // buffer in full before the per-frame check ran.
+  const ENROLL_BODY_LIMIT_BYTES =
+    3 * MAX_FRAME_BASE64_CHARS + MULTIPART_OVERHEAD_BYTES;
+  const body = await readCappedJson(request, ENROLL_BODY_LIMIT_BYTES);
+  if (!body.ok) return body.response;
 
-  const parsed = EnrollSchema.safeParse(body);
+  const parsed = EnrollSchema.safeParse(body.data);
   if (!parsed.success) {
     return invalidBody(firstIssueMessage(parsed.error.issues, "Invalid enrollment payload."));
   }

@@ -18,6 +18,19 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: () => fakeHolder.current,
 }));
 
+// 0045 P0-1: the verify route reads the HMAC secret through the admin
+// client's service_role-only getter. Unit tests pin the route's proof
+// plumbing (secret fetch + mint + arg pass-through) with a deterministic
+// secret; the FakeSupabase record_face_check stub ignores the proof value.
+vi.mock("@/lib/supabase/admin", () => ({
+  createAdminClient: () => ({
+    rpc: (name: string) =>
+      name === "get_verify_proof_secret"
+        ? Promise.resolve({ data: "unit-test-verify-proof-secret", error: null })
+        : Promise.resolve({ data: null, error: { message: `unexpected admin rpc: ${name}` } }),
+  }),
+}));
+
 // Mock the InsightFace client so unit tests never touch Docker. Tests control
 // the responses via the mutable `insightfaceMock`.
 const insightfaceMock = {
