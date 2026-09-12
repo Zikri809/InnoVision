@@ -5,7 +5,14 @@ Contract (docs/PLAN_INSIGHTFACE_MIGRATION.md, v3):
   GET  /health   → {"status":"ok","model":"buffalo_l","providers":[...]}
   POST /extract  → {"frame": "data:image/jpeg;base64,..."} →
                    {"faces":[{embedding(512, L2-normalized), yaw, pitch,
-                              roll, det_score, bbox:[x1,y1,x2,y2]}]}
+                              roll, det_score, bbox:[x1,y1,x2,y2]}],
+                    "spoof": {"real": bool, "score": float} | null}
+
+  `spoof` is the audit-2 C-01 anti-spoofing verdict (averaged P(real) from
+  the MiniFASNet ensemble, app/spoof.py) for the LARGEST detected face —
+  null when no face was found or the weights are absent (dev builds
+  without the bake). The VERIFY ROUTE owns the policy (thresholds,
+  enforcement): see src/lib/face/spoof.ts.
 
 Privacy: frames are decoded in memory and NEVER written to disk.
 
@@ -77,10 +84,23 @@ logger.info(
     DET_THRESH,
 )
 
+# audit-2 C-01: MiniFASNet print/replay ensemble (weights baked by the
+# Dockerfile, pinned by sha256). Absent weights → available=False → the
+# /extract response carries "spoof": null and the route decides (record-only
+# or fail-closed via FACE_SPOOF_ENFORCE).
+from app.spoof import build_checker, primary_box  # noqa: E402
+
+_spoof = build_checker()
+
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "model": MODEL_PACK, "providers": ["CPUExecutionProvider"]}
+    return {
+        "status": "ok",
+        "model": MODEL_PACK,
+        "providers": ["CPUExecutionProvider"],
+        "spoof_model": _spoof.available,
+    }
 
 
 def _check_token(x_sidecar_token: str | None) -> None:
@@ -145,6 +165,16 @@ async def extract(request: Request, x_sidecar_token: str | None = Header(default
     # extracts overlap (ORT releases the GIL) and /health stays responsive
     # during a burst; running inline serialized everything behind one call.
     faces = await asyncio.to_thread(_ctx.get, img)
+
+    # audit-2 C-01: anti-spoof verdict on the LARGEST detected face (mirrors
+    # the route's primary-face selection). Runs in the same worker thread as
+    # detection (to_thread below keeps the loop free; the ensemble itself is
+    # ~1ms on 80x80 crops).
+    verdict = None
+    box = primary_box([tuple(float(v) for v in face.get("bbox", [0, 0, 0, 0])[:4]) for face in faces])
+    if box is not None:
+        verdict = _spoof.check(img, box)
+
     out = []
     for face in faces:
         pose = face.get("pose")
@@ -175,7 +205,7 @@ async def extract(request: Request, x_sidecar_token: str | None = Header(default
                 "bbox": bbox,
             }
         )
-    return JSONResponse({"faces": out})
+    return JSONResponse({"faces": out, "spoof": verdict})
 
 
 if __name__ == "__main__":

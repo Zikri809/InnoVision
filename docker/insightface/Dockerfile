@@ -44,6 +44,24 @@ RUN mkdir -p /root/.insightface/models \
     && rm /tmp/buffalo_l.zip \
     && apt-get purge -y unzip wget && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
+# audit-2 C-01: bake the MiniFASNet anti-spoofing ensemble (Silent-Face-
+# Anti-Spoofing, Apache-2.0; ONNX conversion by QingHeYang/
+# Silent-Face-Anti-Spoofing-onnx), pinned by sha256. app/spoof.py loads
+# BOTH members — a missing/failed weight set degrades the verdict to null
+# (route goes record-only or fail-closed per FACE_SPOOF_ENFORCE) instead
+# of breaking /extract.
+ARG SPOOF_V2_SHA256=0cbe5caec95c31de9d2ef845cb85407d76aecd1b6a2c0e343f7d35306bfbccb8
+ARG SPOOF_V1SE_SHA256=a25886a85cdcfa2c4ea23edb71de35f250c17827b4cadd253a972b28c80fdf1e
+RUN mkdir -p /srv/models/spoof \
+    && apt-get update && apt-get install -y --no-install-recommends ca-certificates wget \
+    && wget -q -O /srv/models/spoof/2.7_80x80_MiniFASNetV2.onnx \
+         https://raw.githubusercontent.com/QingHeYang/Silent-Face-Anti-Spoofing-onnx/main/onnx/2.7_80x80_MiniFASNetV2.onnx \
+    && echo "${SPOOF_V2_SHA256}  /srv/models/spoof/2.7_80x80_MiniFASNetV2.onnx" | sha256sum -c - \
+    && wget -q -O /srv/models/spoof/4_0_0_80x80_MiniFASNetV1SE.onnx \
+         https://raw.githubusercontent.com/QingHeYang/Silent-Face-Anti-Spoofing-onnx/main/onnx/4_0_0_80x80_MiniFASNetV1SE.onnx \
+    && echo "${SPOOF_V1SE_SHA256}  /srv/models/spoof/4_0_0_80x80_MiniFASNetV1SE.onnx" | sha256sum -c - \
+    && apt-get purge -y wget && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+
 ENV PORT=8000 \
     WEB_CONCURRENCY=1 \
     OMP_NUM_THREADS=2 \

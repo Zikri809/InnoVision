@@ -16,6 +16,16 @@
 | **API / integration** | Vitest + route-handler invocation + MSW (mock OpenAI-compatible endpoint) | Grading, face verify streaks, AI generate with retry, OCR route | Every commit |
 | **E2E** | Playwright (+ fake webcam via `--use-fake-device-for-media-stream` / custom `getUserMedia` stub) | Full lecturer→student→assessment flow, gesture sim, face sim | Pre-merge / pre-demo |
 
+**Face anti-spoofing (audit-2 C-01):** the InsightFace sidecar bakes a MiniFASNet
+print/replay ensemble (`docker/insightface/app/spoof.py`, weights pinned by
+sha256 in the Dockerfile) and returns a per-frame P(real) verdict with
+`/extract`. The verify route records the scores on `face_checks.frame_poses`
+always, and FORCES a FAIL vote when the spoofed frames are the majority and
+`FACE_SPOOF_ENFORCE=1` (set it in production; unset keeps record-only for
+sidecars without the weights). Rebuild the sidecar after pulling:
+`docker compose build insightface-service && npm run face:start`. E2E is
+unaffected — marker frames short-circuit before the sidecar.
+
 **Mocking strategy for vision:** MediaPipe models can't load in CI reliably. All vision code is behind interfaces (`IFaceTracker`, `IHandTracker`) — unit tests use fakes; E2E injects a **deterministic fake face tracker** (returns `FAKE_FRAME_MATCH`/`FAKE_FRAME_MISMATCH` frame markers that the route-level InsightFace mock maps to match/mismatch) and a **fake hand tracker** (scripted finger counts). Real-model smoke test is manual-only. The InsightFace sidecar is mocked server-side (`FACE_MOCK_ENABLED=1`) — E2E never needs the Docker container.
 
 ---

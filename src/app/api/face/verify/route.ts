@@ -7,6 +7,7 @@ import { VerifySchema } from "@/lib/face/schemas";
 import { MAX_FRAME_BASE64_CHARS, VERIFY_FRAMES_PER_CHECK } from "@/lib/face/constants";
 import { mapFaceError } from "@/lib/face/rpc-mapping";
 import { selectPrimaryFace } from "@/lib/face/embedding";
+import { spoofGateDecision, type SpoofFrameVerdict } from "@/lib/face/spoof";
 import { shouldReportSecondFace } from "@/lib/face/second-face";
 import { mintVerifyProof } from "@/lib/face/server/verify-proof";
 import * as insightface from "@/lib/face/server/insightface-client";
@@ -30,6 +31,17 @@ export const maxDuration = 20;
 
 // Per-user rate limit on verifies (10/min — cadence is 30–45s + Q-transitions).
 const VERIFY_RATE = { limit: 10, windowMs: 60 * 1000 };
+
+// audit-2 C-01: photo/replay gate posture. With FACE_SPOOF_ENFORCE=1 a
+// majority-spoofed frame set forces the whole check to a FAIL vote; without
+// it the MiniFASNet verdicts are recorded (frame_poses) but never enforce —
+// right for dev sidecars without the baked weights, wrong for production.
+if (process.env.NODE_ENV === "production" && process.env.FACE_SPOOF_ENFORCE !== "1") {
+  console.warn(
+    "FACE_SPOOF_ENFORCE is not set: anti-spoofing verdicts are recorded but do NOT force " +
+      "verify fails (audit-2 C-01). Set FACE_SPOOF_ENFORCE=1 in production.",
+  );
+}
 
 type Db = Awaited<ReturnType<typeof createClient>>;
 
@@ -183,18 +195,23 @@ export async function POST(request: Request) {
   // similarity 0 (never skipped silently — the row still lands as a fail when
   // the majority fails). Each frame's FULL face list is kept (not just the
   // primary's similarity) for the server-side second-face advisory below.
-  type FrameOutcome = { similarity: number; faces: insightface.InsightFaceExtractResult["faces"] } | { error: string };
+  type FrameOutcome = {
+    similarity: number;
+    faces: insightface.InsightFaceExtractResult["faces"];
+    spoof: insightface.SpoofVerdict | null;
+  } | { error: string };
   const results = await Promise.all(
     frames.map(async (frame): Promise<FrameOutcome> => {
-      if (frame === "") return { similarity: 0, faces: [] };
+      if (frame === "") return { similarity: 0, faces: [], spoof: null };
       // MISMATCH marker → 0-vote WITHOUT a sidecar call or RPC compare (no
       // sidecar exists in CI — a fetch would 503 instead of failing as a
       // vote, which would kill the pause/streak specs).
-      if (insightface.isMockMismatchFrame(frame)) return { similarity: 0, faces: [] };
+      if (insightface.isMockMismatchFrame(frame)) return { similarity: 0, faces: [], spoof: null };
       const extracted = await insightface.extractFace(frame, auth.userId);
       if ("error" in extracted) return { error: extracted.error };
       const sim = await comparePrimaryFace(supabase, extracted.faces);
-      if (typeof sim === "number") return { similarity: sim, faces: extracted.faces };
+      const spoof = extracted.spoof ?? null;
+      if (typeof sim === "number") return { similarity: sim, faces: extracted.faces, spoof };
       return sim;
     }),
   );
@@ -206,9 +223,31 @@ export async function POST(request: Request) {
     return mapFaceError(firstError) ?? internalError("Something went wrong.");
   }
 
-  const similarities = (results as Array<{ similarity: number }>).map((r) =>
+  let similarities = (results as Array<{ similarity: number }>).map((r) =>
     Math.min(1, Math.max(0, r.similarity)),
   );
+
+  // audit-2 C-01 — photo/replay gate: the sidecar's MiniFASNet ensemble
+  // judges the PRIMARY face of every extracted frame. When enforcement is
+  // on and spoofed frames are the majority of verdicts, the whole check is
+  // forced to a FAIL vote (recorded — the streak machinery and lecturer
+  // audit see it — but `matched` can never be true for a photo/replay).
+  // Verdict-less frames (mock markers, no face, weights absent) are
+  // "unknown" and never fail (see lib/face/spoof.ts).
+  const spoofEnforced = process.env.FACE_SPOOF_ENFORCE === "1";
+  const spoofVerdicts: SpoofFrameVerdict[] = (
+    results as Array<{ spoof: insightface.SpoofVerdict | null }>
+  ).map((r) => r.spoof);
+  const spoof = spoofGateDecision(spoofVerdicts);
+  if (spoofEnforced && spoof.forcedFail) {
+    console.error("verify: spoof gate forced a FAIL vote", {
+      sessionId: parsed.data.sessionId,
+      trigger: parsed.data.trigger,
+      ...spoof,
+      scores: spoofVerdicts.map((v) => v?.score ?? null),
+    });
+    similarities = similarities.map(() => 0);
+  }
 
   // The subject is ROUTE-derived (always the authenticated uid) — the RPC's
   // `p_subject = auth.uid()` check stays as defense in depth against direct
@@ -270,11 +309,15 @@ export async function POST(request: Request) {
     // audit: a photo-replay shows near-constant pose across every check of
     // the exam, which a live student does not produce. Fire-and-forget; a
     // failure must never fail the verify.
-    const poses = frameFaces.map((faces) => {
+    const poses = frameFaces.map((faces, i) => {
       const primary = selectPrimaryFace(faces);
+      // audit-2 C-01: the raw P(real) rides along with the pose so a
+      // lecturer can see borderline/spoofed frames even when the gate
+      // passed them (record-only mode) or failed them (enforced mode).
+      const spoofScore = spoofVerdicts[i]?.score ?? null;
       return primary
-        ? { yaw: primary.yaw, pitch: primary.pitch, roll: primary.roll }
-        : null;
+        ? { yaw: primary.yaw, pitch: primary.pitch, roll: primary.roll, spoof: spoofScore }
+        : { spoof: spoofScore };
     });
     void Promise.resolve(
       supabase.rpc("attach_frame_poses", {

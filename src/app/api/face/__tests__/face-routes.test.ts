@@ -296,6 +296,61 @@ describe("I-dup — duplicate identity detected at enroll → pending_review", (
   });
 });
 
+// audit-2 C-01: the photo/replay gate lives in the VERIFY ROUTE — the
+// sidecar's per-frame P(real) verdict either forces a FAIL vote (enforce
+// mode) or is recorded only. These tests pin the routing decision through
+// the mocked extractFace's spoof field.
+describe("audit-2 C-01 — spoof gate (FACE_SPOOF_ENFORCE)", () => {
+  it("forces matched:false when enforcement is ON and the verdict is spoofed", async () => {
+    faceContext();
+    process.env.FACE_SPOOF_ENFORCE = "1";
+    try {
+      insightfaceMock.extractFace.mockImplementation(async () => ({
+        faces: [mockFace()],
+        // The similarity side is a perfect self-match (MATCH marker) — the
+        // spoof verdict alone must flip this check to a FAIL vote.
+        spoof: { real: false, score: 0.01 },
+      }));
+      const res = await verify.POST(verifyReq({ trigger: "start" }));
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.matched).toBe(false);
+    } finally {
+      delete process.env.FACE_SPOOF_ENFORCE;
+    }
+  });
+
+  it("keeps matched:true when enforcement is ON and the verdict is real", async () => {
+    faceContext();
+    process.env.FACE_SPOOF_ENFORCE = "1";
+    try {
+      insightfaceMock.extractFace.mockImplementation(async () => ({
+        faces: [mockFace()],
+        spoof: { real: true, score: 0.97 },
+      }));
+      const res = await verify.POST(verifyReq({ trigger: "start" }));
+      const body = await res.json();
+      expect(res.status).toBe(200);
+      expect(body.matched).toBe(true);
+    } finally {
+      delete process.env.FACE_SPOOF_ENFORCE;
+    }
+  });
+
+  it("record-only when enforcement is unset (dev sidecars without baked weights)", async () => {
+    faceContext();
+    delete process.env.FACE_SPOOF_ENFORCE;
+    insightfaceMock.extractFace.mockImplementation(async () => ({
+      faces: [mockFace()],
+      spoof: { real: false, score: 0.01 },
+    }));
+    const res = await verify.POST(verifyReq({ trigger: "start" }));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.matched).toBe(true);
+  });
+});
+
 describe("I4 — verify match → active, streak reset, new nonce", () => {
   it("returns 200 with matched true, sessionStatus active, nextNonce", async () => {
     faceContext();

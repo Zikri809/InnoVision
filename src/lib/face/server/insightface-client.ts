@@ -38,7 +38,19 @@ import {
  * internals.
  */
 
-export type InsightFaceExtractResult = { faces: InsightFaceFace[] };
+/**
+ * audit-2 C-01: server-judged anti-spoofing verdict for a frame's PRIMARY
+ * face — averaged P(real) from the sidecar's MiniFASNet print/replay
+ * ensemble (docker/insightface/app/spoof.py). `score` is P(real) in [0,1];
+ * the ROUTE owns the policy (threshold/enforcement — see lib/face/spoof.ts).
+ */
+export type SpoofVerdict = { real: boolean; score: number };
+
+export type InsightFaceExtractResult = {
+  faces: InsightFaceFace[];
+  /** null when no face was found or the sidecar lacks the spoof weights. */
+  spoof?: SpoofVerdict | null;
+};
 
 export type InsightFaceError = {
   error: "insightface_unavailable" | "insightface_error" | "invalid_frame";
@@ -137,6 +149,8 @@ function mockExtractMatch(uid: string): InsightFaceExtractResult {
         bbox: [w * 0.25, h * 0.2, w * 0.75, h * 0.9],
       },
     ],
+    // Consistent with the live sidecar: the mocked face is "real".
+    spoof: { real: true, score: 0.99 },
   };
 }
 
@@ -179,7 +193,7 @@ export async function extractFace(
       return { error: "invalid_frame" };
     }
     if (!res.ok) return { error: "insightface_error" };
-    const json = (await res.json()) as { faces?: unknown };
+    const json = (await res.json()) as { faces?: unknown; spoof?: unknown };
     const faces: InsightFaceFace[] = [];
     for (const raw of Array.isArray(json.faces) ? json.faces : []) {
       const f = raw as Record<string, unknown>;
@@ -197,7 +211,23 @@ export async function extractFace(
         bbox: [bbox[0], bbox[1], bbox[2], bbox[3]],
       });
     }
-    return { faces };
+    // audit-2 C-01: parse the frame-level spoof verdict defensively — an
+    // old sidecar (no field) or a malformed one yields undefined, which the
+    // route treats as "unknown" (record-only, never a fail).
+    let spoof: SpoofVerdict | null = null;
+    if (
+      json.spoof &&
+      typeof json.spoof === "object" &&
+      typeof (json.spoof as { real?: unknown }).real === "boolean" &&
+      typeof (json.spoof as { score?: unknown }).score === "number" &&
+      Number.isFinite((json.spoof as { score: number }).score)
+    ) {
+      spoof = {
+        real: (json.spoof as { real: boolean }).real,
+        score: (json.spoof as { score: number }).score,
+      };
+    }
+    return { faces, spoof };
   } catch {
     return { error: "insightface_unavailable" };
   }
