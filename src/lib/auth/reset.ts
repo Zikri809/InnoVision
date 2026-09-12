@@ -2,6 +2,8 @@
 
 import { createServerActionClient } from "@/lib/supabase/server";
 import { rateLimit } from "@/lib/classes/rate-limit";
+import { clientIpFromHeaders } from "@/lib/request-ip";
+import { resolveSiteOrigin } from "@/lib/auth/site-url";
 
 import { cookies, headers } from "next/headers";
 import { LOCALE_COOKIE_NAME } from "@/i18n/config";
@@ -51,7 +53,7 @@ export async function requestReset({ email }: { email: string }): Promise<ResetR
   // combined-cap pattern.
   try {
     const hdrs = await headers();
-    const ip = hdrs.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+    const ip = clientIpFromHeaders(hdrs);
     if (!rateLimit(`reset-ip:${ip}`, RESET_IP_RATE)) {
       return { error: t("authErrors.tooManyAttempts") };
     }
@@ -63,22 +65,15 @@ export async function requestReset({ email }: { email: string }): Promise<ResetR
   }
 
   const supabase = await createServerActionClient();
-  // Build the absolute callback URL from the request host — there is no
-  // public site-URL env var (env.ts only validates the Supabase pair), and
-  // resetPasswordForEmail requires an absolute redirectTo. Falls back to a
-  // relative path if headers() is unavailable (non-request context); GoTrue
-  // then resolves it against the configured site URL.
-  let origin = "";
-  try {
-    const hdrs = await headers();
-    const host = hdrs.get("x-forwarded-host") ?? hdrs.get("host");
-    const proto = hdrs.get("x-forwarded-proto") ?? "http";
-    if (host) origin = `${proto}://${host}`;
-  } catch {
-    // headers() unavailable — keep empty origin fallback.
-  }
+  // audit-2 H-02: the origin for the emailed link comes from SITE_URL (or,
+  // in dev only, the request headers). It used to be assembled from
+  // x-forwarded-host verbatim, so requestReset({email: victim}) with a
+  // forged Host header pointed the recovery link at the attacker's origin.
+  // resolveSiteOrigin returns null in prod-without-env → the RELATIVE path
+  // below, which GoTrue resolves against its own configured Site URL.
+  const origin = resolveSiteOrigin(await headers().catch(() => undefined));
   const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail, {
-    redirectTo: `${origin}/auth/callback?redirect=/reset-password/confirm`,
+    redirectTo: `${origin ?? ""}/auth/callback?redirect=/reset-password/confirm`,
   });
 
   if (error) {
@@ -107,7 +102,7 @@ export async function confirmPassword({
 
   try {
     const hdrs = await headers();
-    const ip = hdrs.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+    const ip = clientIpFromHeaders(hdrs);
     if (!rateLimit(`reset-confirm:${ip}`, CONFIRM_RATE)) {
       return { error: t("authErrors.tooManyAttempts") };
     }

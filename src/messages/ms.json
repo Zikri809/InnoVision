@@ -81,7 +81,10 @@
     "promotionFailed": "Akaun dicipta tetapi kenaikan peranan gagal. Hubungi sokongan.",
     "consentFailed": "Akaun dicipta tetapi persetujuan tidak dapat direkodkan. Hubungi sokongan.",
     "loginFailed": "E-mel atau kata laluan tidak sah.",
-    "resetFailed": "Kata laluan tidak dapat dikemas kini. Pautan tetapan semula mungkin telah tamat — minta yang baharu."
+    "resetFailed": "Kata laluan tidak dapat dikemas kini. Pautan tetapan semula mungkin telah tamat — minta yang baharu.",
+    "ssoRequired": "Domain e-mel ini log masuk melalui SSO Microsoft institusi. Sila gunakan butang log masuk Microsoft.",
+    "matricAlreadySet": "Nombor matrik anda telah direkodkan dan tidak boleh diubah.",
+    "loginTooManyAttempts": "Terlalu banyak percubaan log masuk. Sila cuba lagi kemudian."
   },
   "nav": {
     "brand": "InnoVision",
@@ -1066,7 +1069,9 @@
     "stageActiveWord": "sedang berjalan",
     "stageFailedWord": "gagal",
     "stagePendingWord": "menunggu",
-    "webAugmentNote": "Halaman web baharu yang dijumpai ditambah SELEPAS bahan anda sebagai sokongan tambahan. Jika carian tidak menjumpai apa-apa — atau tidak tersedia — kuiz dijana daripada bahan anda sahaja, tanpa kehilangan apa-apa."
+    "webAugmentNote": "Halaman web baharu yang dijumpai ditambah SELEPAS bahan anda sebagai sokongan tambahan. Jika carian tidak menjumpai apa-apa — atau tidak tersedia — kuiz dijana daripada bahan anda sahaja, tanpa kehilangan apa-apa.",
+    "partialPagesTitle": "Sesetengah halaman tidak dapat dibaca",
+    "partialPagesDesc": "{failed} daripada {attempted} halaman gagal semasa OCR. Teks yang dikeluarkan tiada halaman tersebut — semak bahan di bawah dan jalankan semula pengekstrakan jika halaman hilang."
   },
   "errors": {
     "unauthorized": "Anda mesti log masuk untuk melakukan tindakan ini.",

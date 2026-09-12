@@ -81,7 +81,10 @@
     "promotionFailed": "Account created but role promotion failed. Contact support.",
     "consentFailed": "Account created but consent could not be recorded. Contact support.",
     "loginFailed": "Invalid email or password.",
-    "resetFailed": "Could not update the password. The reset link may have expired — request a new one."
+    "resetFailed": "Could not update the password. The reset link may have expired — request a new one.",
+    "ssoRequired": "This email domain signs in with Microsoft institutional SSO. Use the Microsoft sign-in button.",
+    "matricAlreadySet": "Your matric number is already captured and cannot be changed.",
+    "loginTooManyAttempts": "Too many sign-in attempts. Please try again later."
   },
   "nav": {
     "brand": "InnoVision",
@@ -1066,7 +1069,9 @@
     "stageActiveWord": "in progress",
     "stageFailedWord": "failed",
     "stagePendingWord": "waiting",
-    "webAugmentNote": "Fresh web pages found this way are added AFTER your material as extra grounding. If the search finds nothing usable — or is unavailable — the quiz is generated from your material alone, and nothing is lost."
+    "webAugmentNote": "Fresh web pages found this way are added AFTER your material as extra grounding. If the search finds nothing usable — or is unavailable — the quiz is generated from your material alone, and nothing is lost.",
+    "partialPagesTitle": "Some pages could not be read",
+    "partialPagesDesc": "{failed} of {attempted} page(s) failed during OCR. The extracted text is missing those pages — review the material below and re-run extraction if pages are missing."
   },
   "errors": {
     "unauthorized": "You must be signed in to perform this action.",

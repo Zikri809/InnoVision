@@ -2,6 +2,7 @@
 
 import { createServerActionClient } from "@/lib/supabase/server";
 import { rateLimit } from "@/lib/classes/rate-limit";
+import { clientIpFromHeaders } from "@/lib/request-ip";
 import { normalizeMatric } from "@/lib/auth/matric";
 
 import { cookies, headers } from "next/headers";
@@ -53,7 +54,7 @@ export async function captureOwnMatric({
 
   try {
     const hdrs = await headers();
-    const ip = hdrs.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+    const ip = clientIpFromHeaders(hdrs);
     if (!rateLimit(`matric-capture:${ip}`, CAPTURE_RATE)) {
       return { error: t("authErrors.tooManyAttempts") };
     }
@@ -102,10 +103,15 @@ export async function captureOwnMatric({
     return { error: t("authErrors.matricTaken") };
   }
 
-  const { error } = await supabase
+  // audit-2 M-12: set-once is enforced AT THE WRITE — the UPDATE carries
+  // `.is("matric_no", null)`, so a concurrent/racing second capture (or any
+  // overwrite attempt) matches zero rows instead of silently reassigning an
+  // identity. The 0046 DB trigger is the backstop for other callers.
+  const { error, count } = await supabase
     .from("profiles")
-    .update({ matric_no: matric.value })
-    .eq("id", user.id);
+    .update({ matric_no: matric.value }, { count: "exact" })
+    .eq("id", user.id)
+    .is("matric_no", null);
 
   if (error) {
     console.error("captureOwnMatric update error:", error.message);
@@ -115,6 +121,10 @@ export async function captureOwnMatric({
       return { error: t("authErrors.matricTaken") };
     }
     return { error: t("authErrors.matricInvalid") };
+  }
+  if ((count ?? 0) === 0) {
+    // The caller already holds a matric — refuse rather than reassign.
+    return { error: t("authErrors.matricAlreadySet") };
   }
 
   revalidatePath("/matric-capture");

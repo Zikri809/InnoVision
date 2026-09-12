@@ -34,6 +34,8 @@ function makeAdminClient(behavior: AdminBehavior = {}) {
           single: async () => ({ data: { id: "u", role: "lecturer" }, error: null }),
         }),
       }),
+      // audit-2 M-19: promotion now writes an audit_events row.
+      insert: async () => ({ data: null, error: null }),
     }),
     auth: {
       admin: {

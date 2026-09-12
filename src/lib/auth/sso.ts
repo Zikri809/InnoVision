@@ -2,7 +2,9 @@
 
 import { createServerActionClient } from "@/lib/supabase/server";
 import { rateLimit } from "@/lib/classes/rate-limit";
+import { clientIpFromHeaders } from "@/lib/request-ip";
 import { isSsoConfigured } from "@/lib/auth/institutional";
+import { resolveSiteOrigin } from "@/lib/auth/site-url";
 import { sanitizeRedirect } from "@/lib/auth/redirect";
 
 import { headers } from "next/headers";
@@ -43,7 +45,7 @@ export async function startInstitutionalSso({
 
   try {
     const hdrs = await headers();
-    const ip = hdrs.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+    const ip = clientIpFromHeaders(hdrs);
     if (!rateLimit(`sso-start:${ip}`, SSO_START_RATE)) {
       return { error: "too_many_attempts" };
     }
@@ -52,9 +54,11 @@ export async function startInstitutionalSso({
   }
 
   const supabase = await createServerActionClient();
-  // GoTrue's /authorize validates `redirect_to` against the Site URL, so it
-  // must be ABSOLUTE (reset.ts precedent — a relative value fails the hosted
-  // round-trip; see the headers() catch above for the degraded fallback).
+  // audit-2 H-02: the OAuth redirectTo origin resolves from SITE_URL (dev
+  // only: request headers) — never from caller-writable Host headers. A null
+  // origin degrades to a RELATIVE callback URL, which GoTrue resolves against
+  // its own configured Site URL (safe failure mode; sso.ts precedent).
+  const origin = resolveSiteOrigin(await headers().catch(() => undefined)) ?? "";
   // The callback defaults a missing `redirect` param to /dashboard
   // (sanitizeRedirect).
   // Post-login bounce-back (QR class join): when the login form passes a
@@ -62,18 +66,6 @@ export async function startInstitutionalSso({
   // param. The client copy is NEVER trusted — re-sanitized here server-side
   // (sanitizeRedirect is origin-aware; garbage folds to /dashboard), and
   // /auth/callback re-sanitizes AGAIN at the point of use.
-  let origin = "";
-  try {
-    const hdrs = await headers();
-    const host = hdrs.get("x-forwarded-host") ?? hdrs.get("host");
-    const proto = hdrs.get("x-forwarded-proto") ?? "http";
-    if (host) origin = `${proto}://${host}`;
-  } catch {
-    // headers() unavailable — redirectTo degrades to RELATIVE, which GoTrue
-    // may reject outright (graceful: the SSO start fails, nothing redirects
-    // anywhere unexpected). Practically unreachable inside a server action;
-    // the primary path below is always absolute.
-  }
   const safeRedirect = sanitizeRedirect(redirect ?? null, origin || "http://localhost");
   // NOTE on the empty-origin fallback: a relative redirectTo is resolved by
   // GoTrue against the configured Site URL, so the degraded path still works

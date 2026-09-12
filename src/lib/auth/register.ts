@@ -5,6 +5,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { isValidInviteCode } from "@/lib/auth/invite-code";
 import { normalizeMatric } from "@/lib/auth/matric";
 import { sanitizeRedirect } from "@/lib/auth/redirect";
+import { institutionalDomains } from "@/lib/auth/institutional";
+import { resolveSiteOrigin } from "@/lib/auth/site-url";
+import { clientIpFromHeaders } from "@/lib/request-ip";
 import { rateLimit } from "@/lib/classes/rate-limit";
 
 import { cookies, headers } from "next/headers";
@@ -78,6 +81,16 @@ export async function register({
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
     return { session: false, error: t("authErrors.invalidEmail") };
   }
+
+  // audit-2 M-16: institutional domains are SSO-ONLY. A password signup for
+  // `victim@uni.edu.my` is the first half of the same-email linking attack
+  // (victim later SSOs into an attacker-known credential set). Rejecting
+  // here forces the SSO path, where the callback's domain gate applies.
+  const emailDomain = trimmedEmail.slice(trimmedEmail.lastIndexOf("@") + 1);
+  if (institutionalDomains().includes(emailDomain)) {
+    return { session: false, error: t("authErrors.ssoRequired") };
+  }
+
   if (typeof password !== "string" || password.length < 6) {
     return { session: false, error: t("authErrors.passwordShort") };
   }
@@ -105,11 +118,13 @@ export async function register({
     normalizedMatric = matric.value;
   }
 
-  // Per-IP signup budget (see SIGNUP_IP_RATE). Best-effort x-forwarded-for
-  // key, mirroring the sq-resolve-ip pattern; runs before any DB work.
+  // Per-IP signup budget (see SIGNUP_IP_RATE). audit-2 M-02: keyed on the
+  // RIGHTMOST x-forwarded-for entry (the proxy-appended one) — the old
+  // leftmost key was client-writable, so one rotating header defeated the
+  // whole throttle.
   try {
     const hdrs = await headers();
-    const ip = hdrs.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+    const ip = clientIpFromHeaders(hdrs);
     if (!rateLimit(`signup-ip:${ip}`, SIGNUP_IP_RATE)) {
       return { session: false, error: t("authErrors.tooManyAttempts") };
     }
@@ -173,19 +188,9 @@ export async function register({
   if (redirect) {
     const safe = sanitizeRedirect(redirect, "http://localhost");
     if (safe !== "/dashboard") {
-      let origin = "";
-      try {
-        const hdrs = await headers();
-        const host = hdrs.get("x-forwarded-host") ?? hdrs.get("host");
-        const proto = hdrs.get("x-forwarded-proto") ?? "http";
-        if (host) origin = `${proto}://${host}`;
-      } catch {
-        // headers() unavailable — redirectTo degrades to RELATIVE, which
-        // GoTrue may reject outright (graceful: signup fails generically,
-        // nothing redirects unexpectedly). Practically unreachable inside a
-        // server action. (Same fallback posture as sso.ts.)
-      }
-      emailRedirectTo = `${origin}/auth/callback?redirect=${encodeURIComponent(safe)}`;
+      // audit-2 H-02: origin resolves from SITE_URL (dev only: request
+      // headers) — never from caller-writable Host headers.
+      emailRedirectTo = `${resolveSiteOrigin(await headers().catch(() => undefined)) ?? ""}/auth/callback?redirect=${encodeURIComponent(safe)}`;
     }
   }
 
@@ -266,6 +271,21 @@ export async function register({
           session: false,
           error: t("authErrors.promotionFailed"),
         };
+      }
+
+      // audit-2 M-19: a privilege grant must be attributable. This used to
+      // only console.error on failure — every promotion was invisible to
+      // audit_events, so a leaked invite code left no trail at all.
+      const { error: auditError } = await admin
+        .from("audit_events")
+        .insert({
+          actor_id: userId,
+          subject_id: userId,
+          action: "lecturer_promoted_via_invite",
+          metadata: { email: trimmedEmail },
+        });
+      if (auditError) {
+        console.error("Failed to audit lecturer promotion:", auditError);
       }
 
       // Keep auth.users metadata in sync (belt-and-suspenders). A failure

@@ -1,14 +1,29 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { sanitizeRedirect } from "@/lib/auth/redirect";
+import { rateLimit } from "@/lib/classes/rate-limit";
+import { clientIpFromHeaders } from "@/lib/request-ip";
 import { env, SUPABASE_AUTH_COOKIE } from "@/lib/env";
 import {
   institutionalDomains,
   isAllowedInstitutionalEmail,
 } from "@/lib/auth/institutional";
 
+// audit-2 M-18: the code-exchange endpoint is the one unauthenticated
+// auth endpoint with no budget. Codes are high-entropy and single-use (so
+// brute force stays Low), but the endpoint still enables login-CSRF
+// (exchange the ATTACKER's own code in a victim browser) and unbounded
+// probe traffic toward GoTrue — a per-IP budget mirrors the SSO-start limiter.
+const CALLBACK_RATE = { limit: 30, windowMs: 60_000 };
+
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
+
+  const ip = clientIpFromHeaders(request.headers);
+  if (!rateLimit(`auth-callback:${ip}`, CALLBACK_RATE)) {
+    return NextResponse.redirect(`${origin}/login?message=sso-error`);
+  }
+
   const code = searchParams.get("code");
   // Anti-open-redirect: only allow same-origin local paths (shared helper with
   // the login page). Handles protocol-relative, absolute, and backslash
@@ -71,10 +86,17 @@ export async function GET(request: NextRequest) {
     const identities = data.user.identities ?? [];
     const azureIdentity = identities.find((i) => i.provider === "azure");
     if (azureIdentity) {
+      // audit-2 M-16: the `?? data.user.email` fallback used to attest the
+      // GoTrue PRIMARY email (attacker-registerable password email) when the
+      // azure identity carried no email claim — the domain gate judged the
+      // WRONG address. Fail closed instead: no claim → reject (sso-domain).
       const email =
-        (azureIdentity.identity_data?.email as string | undefined) ??
-        data.user.email ??
-        null;
+        (azureIdentity.identity_data?.email as string | undefined) ?? null;
+      if (!email) {
+        await supabase.auth.signOut({ scope: "local" });
+        supabaseResponse.headers.set("Location", `${origin}/login?message=sso-domain`);
+        return supabaseResponse;
+      }
       const verdict = isAllowedInstitutionalEmail(email, allowedDomains);
       if (!verdict.ok) {
         // Personal Microsoft account (or a non-university tenant): the user
