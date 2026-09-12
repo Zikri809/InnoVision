@@ -270,7 +270,37 @@ describe("buildExportModel — per-question cells & derivation", () => {
     expect(citra.durationSec).toBe(1800);
     expect(citra.faceFails).toBe(1);
     expect(citra.focusPauses).toBe(2);
+    expect(citra.fullscreenPauses).toBeNull();
+    expect(citra.handPauses).toBeNull();
+    expect(citra.attempt).toBeNull();
     expect(citra.status).toBe("completed");
+  });
+
+  it("0044: faceFails prefers the LIFETIME counter over the resettable streak", () => {
+    // A flagged-then-unlocked student exports "streak 0, focus 0" but a
+    // non-zero lifetime fail count — the exact screen-vs-workbook
+    // contradiction the lifetime counter closes.
+    const model = buildExportModel(baseInput({
+      quiz: { title: "T", mode: "assessment", status: "live" },
+      sessions: [
+        {
+          id: "sess-unlocked",
+          student_id: "stu-2",
+          status: "active",
+          score: null,
+          started_at: new Date(NOW - HOUR).toISOString(),
+          submitted_at: null,
+          last_activity_at: new Date(NOW - 60 * 1000).toISOString(),
+          face_fail_streak: 0,
+          focus_pause_count: 0,
+          face_fail_count: 4,
+        },
+      ],
+      answers: [],
+    }));
+    const row = model.students.find((s) => s.studentId === "stu-2")!;
+    expect(row.faceFails).toBe(4);
+    expect(row.focusPauses).toBe(0);
   });
 
   it("derives abandoned for a stale active session on a live quiz (>2h)", () => {

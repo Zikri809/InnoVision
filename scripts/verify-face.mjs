@@ -1037,12 +1037,129 @@ async function main() {
       unlock.data?.sessionStatus === "active" && rowAfterUnlock?.focus_pause_count === 0,
       JSON.stringify(rowAfterUnlock));
 
+    // 0043: fullscreen_exit pauses are COUNTED but never auto-flag — repeat
+    // exit→think→recover cycling becomes lecturer-visible without flagging
+    // honest Escape/window gestures. Mirrors the focus-loss block's plumbing;
+    // unlike it, NO self-recover between pauses — pauses 2-3 intentionally
+    // exercise the already-paused branch, so the `=== 3` below covers counter
+    // accumulation across BOTH update branches.
+    const { sessionId: sFs } = await makeLiveAssessment("Fullscreen Pause Count", clientS3);
+    let lastFs = null;
+    for (let i = 0; i < 3; i++) {
+      lastFs = await clientS3.rpc("pause_session", { p_session_id: sFs, p_reason: "fullscreen_exit" });
+    }
+    const rowFs = (await admin.from("quiz_sessions")
+      .select("status, fullscreen_pause_count").eq("id", sFs).single()).data;
+    record("fullscreen-exit: 3 pauses stay paused (never auto-flag)",
+      lastFs.data?.sessionStatus === "paused" && rowFs?.status === "paused",
+      JSON.stringify(lastFs.data));
+    record("fullscreen-exit: fullscreen_pause_count accumulates",
+      rowFs?.fullscreen_pause_count === 3,
+      JSON.stringify(rowFs));
+    const unlockFs = await clientA.rpc("unlock_session", { p_session_id: sFs });
+    const rowFsUnlock = (await admin.from("quiz_sessions")
+      .select("fullscreen_pause_count").eq("id", sFs).single()).data;
+    record("fullscreen-exit: unlock resets fullscreen_pause_count",
+      unlockFs.data?.sessionStatus === "active" && rowFsUnlock?.fullscreen_pause_count === 0,
+      JSON.stringify(rowFsUnlock));
+
     // Invalid reason → typed error.
     const badReason = await clientS3.rpc("pause_session", {
       p_session_id: s2, p_reason: "party",
     });
     record("pause_session: invalid reason → invalid_reason",
       badReason.data?.error === "invalid_reason", JSON.stringify(badReason.data));
+  }
+
+  // ── 0044: hand_loss counting + 3-strike flag ────────────────────
+  {
+    const { sessionId: sH } = await makeLiveAssessment("Hand Pause Count", clientS3);
+    let lastH = null;
+    for (let i = 0; i < 3; i++) {
+      // Empty body on the wire = reason default 'hand_loss' — the exact
+      // shape the audit flagged as a plain pause with NO counter.
+      lastH = await clientS3.rpc("pause_session", { p_session_id: sH });
+    }
+    const rowH = (await admin.from("quiz_sessions")
+      .select("status, hand_pause_count").eq("id", sH).single()).data;
+    record("0044 hand-loss: 3rd hand_loss pause flags (was a plain pause)",
+      lastH.data?.sessionStatus === "flagged" && rowH?.status === "flagged",
+      JSON.stringify(lastH.data));
+    record("0044 hand-loss: hand_pause_count accumulates to 3",
+      rowH?.hand_pause_count === 3, JSON.stringify(rowH));
+    const unlockH = await clientA.rpc("unlock_session", { p_session_id: sH });
+    const rowHU = (await admin.from("quiz_sessions")
+      .select("hand_pause_count").eq("id", sH).single()).data;
+    record("0044 hand-loss: unlock resets hand_pause_count",
+      unlockH.data?.sessionStatus === "active" && rowHU?.hand_pause_count === 0,
+      JSON.stringify(rowHU));
+  }
+
+  // ── 0044: recovery timer credit is CAPPED ───────────────────────
+  {
+    const { sessionId: sR } = await makeLiveAssessment("Recovery Credit Cap", clientS3);
+    await clientS3.rpc("pause_session", { p_session_id: sR });
+    // Simulate a LONG absence: backdate paused_at so the uncapped RPC would
+    // have credited 3600s of exam time.
+    await admin.from("quiz_sessions").update({
+      paused_at: new Date(Date.now() - 3600 * 1000).toISOString(),
+    }).eq("id", sR);
+    const startedBefore = (await admin.from("quiz_sessions")
+      .select("started_at").eq("id", sR).single()).data.started_at;
+    const rec = await clientS3.rpc("self_recover_session", { p_session_id: sR });
+    const rowR = (await admin.from("quiz_sessions")
+      .select("started_at").eq("id", sR).single()).data;
+    const creditedSec = (new Date(rowR.started_at) - new Date(startedBefore)) / 1000;
+    record("0044 recover: long pause credited at most 120s (was full duration)",
+      rec.data?.sessionStatus === "active" && creditedSec > 0 && creditedSec <= 125,
+      `credited=${creditedSec.toFixed(1)}s ${JSON.stringify(rec.data)}`);
+  }
+
+  // ── 0044: face_fail_count lifetime counter ──────────────────────
+  {
+    const { sessionId: sF } = await makeLiveAssessment("Lifetime Fails", clientS3);
+    // Ensure enrollment (consent for S3 set earlier; enroll first — a
+    // duplicate_detected here means an earlier block enrolled this seed,
+    // which is fine for this probe).
+    await clientS3.rpc("enroll_face", { p_samples: enrollSamples(7) });
+    // Fail, pass, fail: the STREAK (flat last-5 window) reads 2 — the pass
+    // does NOT truncate standing fails (F,P,F ⇒ 2, that's the documented
+    // flatness) — while the LIFETIME counter also reads 2 but for the
+    // different reason that it survives the pass outright (fail=1, pass
+    // untouched, fail=2). The two columns agree numerically here but for
+    // distinct semantics; both are pinned.
+    await clientS3.rpc("record_face_check", { p_session_id: sF, ...mismatchProbe(), p_trigger: "periodic", p_nonce: await currentNonce(clientS3, sF) });
+    await clientS3.rpc("self_recover_session", { p_session_id: sF });
+    await clientS3.rpc("record_face_check", { p_session_id: sF, ...matchProbe(studentS3.id), p_trigger: "periodic", p_nonce: await currentNonce(clientS3, sF) });
+    const streakAfterPass = (await admin.from("quiz_sessions")
+      .select("face_fail_streak").eq("id", sF).single()).data.face_fail_streak;
+    record("0044 fails: pass resets the STREAK to 0 (window re-read after pass)",
+      streakAfterPass === 0, `streak after pass=${streakAfterPass}`);
+    const third = await clientS3.rpc("record_face_check", { p_session_id: sF, ...mismatchProbe(), p_trigger: "periodic", p_nonce: await currentNonce(clientS3, sF) });
+    const rowF = (await admin.from("quiz_sessions")
+      .select("face_fail_streak, face_fail_count, status").eq("id", sF).single()).data;
+    record("0044 fails: F,P,F window → streak 2, paused (not flagged)",
+      third.data?.sessionStatus === "paused" && rowF?.face_fail_streak === 2,
+      `${JSON.stringify(third.data)} row=${JSON.stringify(rowF)}`);
+    record("0044 fails: LIFETIME face_fail_count = 2 SURVIVES the pass",
+      rowF?.face_fail_count === 2, JSON.stringify(rowF));
+  }
+
+  // ── 0044: unlock/exempt audit attribution (session timeline) ────
+  {
+    const { sessionId: sA } = await makeLiveAssessment("Audit Attribution", clientS3);
+    await clientA.rpc("unlock_session", { p_session_id: sA });
+    await clientA.rpc("exempt_face_session", { p_session_id: sA, p_reason: "0044 probe" });
+    const audits = await clientA
+      .from("lecturer_audit_view")
+      .select("action, event_session_id")
+      .eq("event_session_id", sA);
+    record("0044 audit: unlock row carries session attribution",
+      (audits.data ?? []).some((a) => a.action === "unlock"),
+      JSON.stringify(audits.data));
+    record("0044 audit: exempt_face row carries session attribution",
+      (audits.data ?? []).some((a) => a.action === "exempt_face"),
+      JSON.stringify(audits.data));
   }
 
   // ── Session advisories (0020/0021): upsert + throttle ───────────

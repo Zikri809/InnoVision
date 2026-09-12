@@ -42,6 +42,20 @@ describe("VoiceActivityMonitor", () => {
   });
 });
 
+describe("VoiceActivityMonitor.reset", () => {
+  it("clears accumulated loud time — a fresh monitor needs a fresh episode", () => {
+    const m = new VoiceActivityMonitor();
+    // Feed sustained speech-level RMS to accumulate past the 2s threshold.
+    for (let t = 0; t < 2500; t += 100) {
+      m.feed(0.2, t);
+    }
+    m.reset();
+    // After reset, one loud sample must NOT fire (the prior accumulation is
+    // gone) — mirrors AttentionMonitor.reset's contract.
+    expect(m.feed(0.2, 600000)).toEqual([]);
+  });
+});
+
 describe("looksLikeHeadsetInput", () => {
   it("matches common BT/wired headset labels", () => {
     expect(looksLikeHeadsetInput("AirPods Pro")).toBe(true);

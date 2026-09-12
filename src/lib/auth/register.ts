@@ -4,6 +4,7 @@ import { createServerActionClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isValidInviteCode } from "@/lib/auth/invite-code";
 import { normalizeMatric } from "@/lib/auth/matric";
+import { sanitizeRedirect } from "@/lib/auth/redirect";
 import { rateLimit } from "@/lib/classes/rate-limit";
 
 import { cookies, headers } from "next/headers";
@@ -52,6 +53,7 @@ export async function register({
   matricNo,
   inviteCode,
   locale = "en",
+  redirect,
 }: {
   email: string;
   password: string;
@@ -60,6 +62,8 @@ export async function register({
   matricNo?: string;
   inviteCode?: string;
   locale?: SupportedLocale;
+  /** QR-class-join bounce-back: post-confirmation landing target. */
+  redirect?: string;
 }): Promise<RegisterResult> {
   const wantsLecturer = Boolean(inviteCode && inviteCode.trim().length > 0);
   const userLocale: SupportedLocale = locale === "ms" ? "ms" : "en";
@@ -159,10 +163,37 @@ export async function register({
     }
   }
 
+  // Email-confirmation round-trip (QR-class-join): when the caller supplies a
+  // post-signup target, the confirmation email's link must RETURN the user to
+  // a URL that re-threads it. GoTrue builds the email link from
+  // `emailRedirectTo` (absolute — same requirement as the SSO redirectTo);
+  // the callback re-sanitizes the forwarded param at the point of use, and
+  // the client copy is never trusted (re-sanitized here first).
+  let emailRedirectTo: string | undefined;
+  if (redirect) {
+    const safe = sanitizeRedirect(redirect, "http://localhost");
+    if (safe !== "/dashboard") {
+      let origin = "";
+      try {
+        const hdrs = await headers();
+        const host = hdrs.get("x-forwarded-host") ?? hdrs.get("host");
+        const proto = hdrs.get("x-forwarded-proto") ?? "http";
+        if (host) origin = `${proto}://${host}`;
+      } catch {
+        // headers() unavailable — redirectTo degrades to RELATIVE, which
+        // GoTrue may reject outright (graceful: signup fails generically,
+        // nothing redirects unexpectedly). Practically unreachable inside a
+        // server action. (Same fallback posture as sso.ts.)
+      }
+      emailRedirectTo = `${origin}/auth/callback?redirect=${encodeURIComponent(safe)}`;
+    }
+  }
+
   const { data, error } = await supabase.auth.signUp({
     email: trimmedEmail,
     password,
     options: {
+      emailRedirectTo,
       data: {
         // role is intentionally FIXED to "student" for self-signup.
         // The client role picker is display-only; never trust user_metadata.role.

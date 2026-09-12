@@ -36,6 +36,7 @@ function lecturerCtx() {
       last_activity_at: "2026-01-01T10:05:00Z",
       face_fail_streak: 0,
       focus_pause_count: 0,
+      fullscreen_pause_count: 2,
     },
   ];
   ctx.client.tables["questions"] = [
@@ -121,7 +122,17 @@ describe("GET /api/quizzes/[id]/export", () => {
     expect(results.getCell(5, 3).value).toBe("Ali Bin Abu"); // roster name
     expect(results.getCell(5, 2).value).toBe("231234"); // matric via roster view
     expect(results.getCell(5, 5).value).toBe(1); // score from the session
-    expect(results.getCell(5, 13).value).toBe("A — Alpha"); // chosen answer cell
+    // Integrity block: header col 11-14 (face fails / focus pauses / 0043
+    // fullscreen exits / 0044 hand pauses) — pins the SELECT actually
+    // carrying the new columns (a dropped select term would silently blank
+    // the data cell here).
+    expect(results.getCell(4, 13).value).toBe("Fullscreen exits");
+    expect(results.getCell(5, 13).value).toBe(2);
+    expect(results.getCell(4, 14).value).toBe("Hand pauses");
+    expect(results.getCell(4, 16).value).toBe("Attempt");
+    // Q cells start at col 15 in assessment mode (10 fixed + 4 integrity
+    // columns — 0044 added hand pauses; the Attempt ordinal trails the Qs).
+    expect(results.getCell(5, 15).value).toBe("A — Alpha"); // chosen answer cell
   });
 
   it("filename sanitizes a hostile quiz title", async () => {

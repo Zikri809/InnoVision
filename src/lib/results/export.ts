@@ -69,6 +69,19 @@ export type ExportSessionInput = {
   last_activity_at: string | number | null;
   face_fail_streak: number | null;
   focus_pause_count: number | null;
+  /** 0043: fullscreen-exit pauses (counted, never auto-flagged). */
+  fullscreen_pause_count?: number | null;
+  /** 0044: hand-loss pauses (counted; flags at 3 like focus loss). */
+  hand_pause_count?: number | null;
+  /**
+   * 0044: LIFETIME failed face checks. Exported INSTEAD of the raw
+   * face_fail_streak — the streak resets to 0 on every pass (and both pause
+   * counters reset on unlock/exempt), so a student who hit 3 strikes and was
+   * unlocked would otherwise export "Face fails: 0" while the on-screen
+   * dashboard (counting face_checks rows) shows a non-zero number. The
+   * counter is never reset by any RPC, so screen and workbook agree.
+   */
+  face_fail_count?: number | null;
   /** 0032 retake attempt number — optional; gradebook cells surface it. */
   attempt?: number | null;
 };
@@ -101,6 +114,12 @@ export type ExportStudentRow = {
   durationSec: number | null;
   faceFails: number | null;
   focusPauses: number | null;
+  /** 0043: fullscreen-exit pauses (assessment exports only). */
+  fullscreenPauses: number | null;
+  /** 0044: hand-loss pauses (assessment exports only). */
+  handPauses: number | null;
+  /** 0044: attempt ordinal ("Attempt #2"); null for first attempts/practice. */
+  attempt: number | null;
   /** Per-question cell text ("B — Photosynthesis"); null = unanswered. */
   answers: (string | null)[];
   answerCorrect: (boolean | null)[];
@@ -313,6 +332,9 @@ export function buildExportModel(input: BuildExportInput): ExportModel {
         durationSec: null,
         faceFails: null,
         focusPauses: null,
+        fullscreenPauses: null,
+        handPauses: null,
+        attempt: null,
         answers: Array.from({ length: total }, () => null),
         answerCorrect: Array.from({ length: total }, () => null),
       };
@@ -382,8 +404,15 @@ export function buildExportModel(input: BuildExportInput): ExportModel {
       startedAtISO: session.started_at,
       submittedAtISO: session.submitted_at,
       durationSec,
-      faceFails: session.face_fail_streak,
+      // LIFETIME fail counter (0044) — the streak resets on a pass and both
+      // pause counters reset on unlock/exempt, so those columns could read 0
+      // for a flagged-then-unlocked student while the dashboard showed
+      // non-zero. face_fail_count is never reset by any RPC.
+      faceFails: session.face_fail_count ?? session.face_fail_streak,
       focusPauses: session.focus_pause_count,
+      fullscreenPauses: session.fullscreen_pause_count ?? null,
+      handPauses: session.hand_pause_count ?? null,
+      attempt: session.attempt ?? null,
       answers,
       answerCorrect,
     };

@@ -48,7 +48,9 @@ import {
   BarChart3,
   Plus,
   MoreVertical,
+  QrCode,
 } from "lucide-react";
+import { JoinQrDialog } from "@/components/class/join-qr-dialog";
 import { formatDuration } from "@/lib/format/duration";
 import { windowLocalInputToIso } from "@/lib/format/window";
 import { HOURS_MAX, MINUTES_MAX, hmToSeconds } from "@/lib/quizzes/time-limit";
@@ -98,6 +100,9 @@ export function ClassDetailClient({
   const locale = useLocale();
   const t = useTranslations("lecturer.classDetail");
   const tCommon = useTranslations("common");
+  // QR join dialog copy lives in the shared `join` namespace (the /join page
+  // and student confirm island use the same keys).
+  const tJoin = useTranslations("join");
 
   const [title, setTitle] = useState("");
   const [mode, setMode] = useState<"practice" | "assessment">("practice");
@@ -118,6 +123,9 @@ export function ClassDetailClient({
 
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
   const [archiving, setArchiving] = useState(false);
+  // QR join (scan-to-enroll): dialog is mounted only for UNARCHIVED classes —
+  // joining an archived class always 409s, so the affordance would lie.
+  const [qrOpen, setQrOpen] = useState(false);
   const [archiveError, setArchiveError] = useState<string | null>(null);
 
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
@@ -798,6 +806,17 @@ export function ClassDetailClient({
                   <span className="font-mono font-black tracking-wider">{cls.join_code}</span>
                   <Copy className="size-3 text-muted-foreground" aria-hidden />
                 </button>
+                {!cls.archived_at && (
+                  <button
+                    type="button"
+                    onClick={() => setQrOpen(true)}
+                    className="inline-flex items-center gap-1.5 rounded-full border-[2.5px] border-border bg-card px-3 py-1 text-xs font-bold text-primary shadow-[var(--shadow-clay-sm)] active:scale-95 transition-transform"
+                    aria-label={tJoin("showQr")}
+                  >
+                    <QrCode className="size-3.5" aria-hidden />
+                    <span>{tJoin("showQr")}</span>
+                  </button>
+                )}
                 {copyError && (
                   <p className="text-xs font-bold text-destructive" role="alert">
                     {copyError}
@@ -822,6 +841,17 @@ export function ClassDetailClient({
                 >
                   <Copy className="size-4" aria-hidden />
                 </Button>
+                {!cls.archived_at && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => setQrOpen(true)}
+                    aria-label={tJoin("showQr")}
+                  >
+                    <QrCode className="size-4" aria-hidden />
+                  </Button>
+                )}
               </div>
               {copyError && (
                 <p className="mt-1 text-xs font-bold text-destructive" role="alert">
@@ -1398,6 +1428,11 @@ export function ClassDetailClient({
           </ResponsiveModalFooter>
         </ResponsiveModalContent>
       </ResponsiveModal>
+
+      {/* ── QR join dialog (unarchived classes only) ── */}
+      {!cls.archived_at && (
+        <JoinQrDialog code={cls.join_code} open={qrOpen} onOpenChange={setQrOpen} />
+      )}
     </div>
   );
 }

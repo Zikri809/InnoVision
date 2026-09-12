@@ -21,6 +21,11 @@ export default defineConfig({
         "src/lib/student-quizzes/**",
         "src/lib/media/**",
         "src/lib/format/**",
+        // Integrity hardening + audio VAD (audit 2026-09: both had tests but
+        // were invisible to the coverage run — deleting either test changed
+        // nothing).
+        "src/lib/integrity/**",
+        "src/lib/audio/**",
         // Report-only additions (no thresholds yet): auth wall, route guards,
         // shared HTTP primitives, middleware redirect matrix.
         "src/lib/classes/guards.ts",
@@ -106,6 +111,13 @@ export default defineConfig({
         // exercised via route tests (vi.mock) — 0-key.
         "src/lib/face/schemas.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/lib/face/liveness.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        "src/lib/face/challenge.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        // 0044: incident-flush privacy contract (pure predicate extracted from
+        // the recorder hook — the audit found the flush branch was dead code).
+        "src/lib/face/incident-transition.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        // Audit 2026-09: attention.ts drives the looked_away advisory and had
+        // no per-file gate (it was report-only).
+        "src/lib/face/attention.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/lib/face/streak.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/lib/face/recovery.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/lib/face/cadence.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
@@ -120,6 +132,14 @@ export default defineConfig({
         "src/app/api/sessions/[id]/pause/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
         "src/app/api/sessions/[id]/exempt-face/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
         "src/app/api/sessions/[id]/face-unavailable/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
+        // Audit 2026-09: the two newest session routes had no per-file gate
+        // (report-only) — sibling-route parity.
+        "src/app/api/sessions/[id]/advisory/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
+        "src/app/api/sessions/[id]/incident/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
+        // Integrity hardening gate (env-only kill switch + prod-baked-off warn).
+        "src/lib/integrity/hardening-gate.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        // Voice-activity advisory detector (pure, unit-tested).
+        "src/lib/audio/vad.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/app/api/sessions/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
         "src/app/api/sessions/[id]/answer/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
         "src/app/api/sessions/[id]/submit/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },

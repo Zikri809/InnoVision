@@ -52,6 +52,9 @@ function workbookLabels(locale: SupportedLocale): WorkbookLabels {
     colDuration: t("workbook.colDuration"),
     colFaceFails: t("workbook.colFaceFails"),
     colFocusPauses: t("workbook.colFocusPauses"),
+    colFullscreenPauses: t("workbook.colFullscreenPauses"),
+    colHandPauses: t("workbook.colHandPauses"),
+    colAttempt: t("workbook.colAttempt"),
     colType: t("workbook.colType"),
     colPrompt: t("workbook.colPrompt"),
     // Reuses the dashboard's student-name fallback label ("Student"/"Pelajar")
@@ -111,7 +114,7 @@ export async function GET(_request: Request, { params }: Params) {
     supabase
       .from("lecturer_session_view")
       .select(
-        "id, student_id, status, score, started_at, submitted_at, last_activity_at, face_fail_streak, focus_pause_count",
+        "id, student_id, status, score, started_at, submitted_at, last_activity_at, face_fail_streak, focus_pause_count, fullscreen_pause_count, hand_pause_count, face_fail_count, attempt",
       )
       .eq("quiz_id", id)
       // Newest-first, matching the results dashboard's read so both artifacts

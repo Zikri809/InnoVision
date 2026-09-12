@@ -1,7 +1,9 @@
 import type { IFaceTracker, LivePose } from "./types";
 import { BlinkDetector } from "./liveness";
+import { HeadTurnChallenge, type TurnSide } from "./challenge";
 import {
   FACE_TRACK_FRAME_INTERVAL_MS,
+  HEAD_TURN_TIMEOUT_MS,
   LIVENESS_TIMEOUT_MS,
   LUMINANCE_SAMPLE_INTERVAL_MS,
 } from "./constants";
@@ -131,6 +133,16 @@ export class FaceTracker implements IFaceTracker {
   private loadedMetadataHandler: (() => void) | null = null;
   private loadedMetadataTimer: ReturnType<typeof setTimeout> | null = null;
   private waitForBlinkResolvers: ((outcome: "passed" | "failed") => void)[] = [];
+  /**
+   * Head-turn challenge state (anti-replay liveness). The pose loop feeds the
+   * active challenge; `waitForHeadTurn` mirrors `waitForBlink`'s resolver
+   * pattern. Only turns that occur DURING the challenge resolve it — a turn
+   * made before the wait began doesn't count (mirrors the blink detector's
+   * "during the challenge" rule).
+   */
+  private turnChallenge: HeadTurnChallenge | null = null;
+  private turnChallengePrevSampleMs: number | null = null;
+  private waitForTurnResolvers: ((outcome: "passed" | "failed") => void)[] = [];
   private poseListeners: Set<(pose: LivePose) => void> = new Set();
   private errorListeners: Set<(err: unknown) => void> = new Set();
   private errored = false;
@@ -150,6 +162,14 @@ export class FaceTracker implements IFaceTracker {
    */
   private ratioBaseline: number | null = null;
   private lastRawRatio: number | null = null;
+  /**
+   * Neutral baseline for the pitch proxy (nose drop fraction) — calibrated
+   * alongside yaw by the same `calibrateNeutral` sampling (the enroll flow's
+   * "look straight" pose is the neutral for BOTH axes). Unset → 0.5, the
+   * geometric midpoint of the forehead→chin span.
+   */
+  private pitchBaseline: number | null = null;
+  private lastRawPitchRatio: number | null = null;
 
   /**
    * Sample the live nose ratio for `sampleMs` and store the mean as the
@@ -160,9 +180,11 @@ export class FaceTracker implements IFaceTracker {
   async calibrateNeutral(sampleMs: number = 900): Promise<void> {
     if (this.disposed) return;
     const samples: number[] = [];
+    const pitchSamples: number[] = [];
     const deadline = Date.now() + sampleMs;
     while (Date.now() < deadline && !this.disposed) {
       if (this.lastRawRatio !== null) samples.push(this.lastRawRatio);
+      if (this.lastRawPitchRatio !== null) pitchSamples.push(this.lastRawPitchRatio);
       await new Promise((r) => setTimeout(r, 50));
     }
     if (samples.length >= 5) {
@@ -170,6 +192,13 @@ export class FaceTracker implements IFaceTracker {
       samples.sort((a, b) => a - b);
       const kept = samples.slice(Math.floor(samples.length * 0.2), Math.ceil(samples.length * 0.8));
       this.ratioBaseline = kept.reduce((s, v) => s + v, 0) / kept.length;
+    }
+    // Pitch baseline: the same trimmed-mean pass over the samples captured
+    // in the same window (the "look straight" pose is neutral for both axes).
+    if (pitchSamples.length >= 5) {
+      pitchSamples.sort((a, b) => a - b);
+      const kept = pitchSamples.slice(Math.floor(pitchSamples.length * 0.2), Math.ceil(pitchSamples.length * 0.8));
+      this.pitchBaseline = kept.reduce((s, v) => s + v, 0) / kept.length;
     }
   }
 
@@ -312,6 +341,33 @@ export class FaceTracker implements IFaceTracker {
       };
       document.addEventListener("visibilitychange", this.visibilityHandler);
       this.rafId = requestAnimationFrame((now) => this.detectLoop(now));
+
+      // 4. Track-death watcher (integrity hardening): a camera track that
+      // ENDS (device unplug / OS-level revoke) or goes MUTED (e.g. an OS
+      // privacy kill-switch) leaves the <video> element showing its LAST
+      // frame forever. Without this, every periodic verify would re-upload
+      // that frozen frame of the right person and pass identity indefinitely
+      // (only the suspected_replay advisory would hint at it). Degradation
+      // mirrors the fatal loop error: onError → the pipeline's 'unavailable'
+      // passthrough — lecturer-visible, never a silent pass.
+      // NOTE: setting track.enabled = false from devtools does NOT fire
+      // mute/ended (per spec) — that freeze is caught instead by the frame
+      // pipeline: a black frame fails the server-side similarity vote →
+      // FAIL row → paused, and blink recovery cannot pass on a dead feed.
+      const track = stream.getVideoTracks()[0];
+      if (track) {
+        const onTrackGone = () => {
+          if (!this.disposed && !this.errored) {
+            console.warn("[face-tracker] video track ended/muted — degrading");
+            this.emitError(new Error("video_track_dead"));
+          }
+        };
+        track.addEventListener("ended", onTrackGone);
+        track.addEventListener("mute", onTrackGone);
+        // 'unmute' restores the live feed while the pipeline is still in its
+        // bounded transport-failure window; nothing to do — the pipeline
+        // surfaces 'unavailable' only after onError, which fires once.
+      }
       console.info("[face-tracker] start() completed successfully!");
     } catch (err) {
       this.closeModels();
@@ -521,6 +577,53 @@ export class FaceTracker implements IFaceTracker {
     this.waitForBlinkResolvers = this.waitForBlinkResolvers.filter((r) => r !== onBlink);
   }
 
+  /**
+   * Anti-replay head-turn challenge (integrity hardening): resolve 'passed'
+   * when the student turns their head toward `side` (user-relative — positive
+   * yaw = their left) and holds it past HEAD_TURN_YAW_MIN for
+   * HEAD_TURN_SUSTAIN_MS. Mirrors `waitForBlink`'s resolver pattern; the
+   * challenge object is created HERE (not at wait time by the caller) so only
+   * turns occurring during the challenge count.
+   */
+  waitForHeadTurn(
+    timeoutMs: number = HEAD_TURN_TIMEOUT_MS,
+    side: TurnSide = "left",
+  ): Promise<"passed" | "failed"> {
+    if (this.disposed) return Promise.resolve("failed");
+    if (typeof document !== "undefined" && document.hidden) return Promise.resolve("failed");
+    // A fresh challenge per wait — a turn made BEFORE the wait began must
+    // never resolve it (same posture as waitForBlink's during-challenge rule).
+    this.turnChallenge = new HeadTurnChallenge(side);
+    this.turnChallengePrevSampleMs = null;
+    return new Promise<"passed" | "failed">((resolve) => {
+      const waiter = (outcome: "passed" | "failed") => {
+        clearTimeout(timer);
+        this.removeTurnListener(waiter);
+        this.turnChallenge = null;
+        resolve(outcome);
+      };
+      const timer = setTimeout(() => {
+        this.removeTurnListener(waiter);
+        this.turnChallenge = null;
+        resolve("failed");
+      }, timeoutMs);
+      this.waitForTurnResolvers.push(waiter);
+    });
+  }
+
+  private removeTurnListener(
+    onTurn: (outcome: "passed" | "failed") => void,
+  ): void {
+    this.waitForTurnResolvers = this.waitForTurnResolvers.filter((r) => r !== onTurn);
+  }
+
+  private resolveAllTurns(outcome: "passed" | "failed"): void {
+    const resolvers = this.waitForTurnResolvers;
+    this.waitForTurnResolvers = [];
+    this.turnChallenge = null;
+    for (const r of resolvers) r(outcome);
+  }
+
   private handleBlinkObserved(): void {
     this.lastBlinkAt = Date.now();
     const resolvers = this.waitForBlinkResolvers;
@@ -555,6 +658,7 @@ export class FaceTracker implements IFaceTracker {
     const resolvers = this.waitForBlinkResolvers;
     this.waitForBlinkResolvers = [];
     for (const r of resolvers) r("failed");
+    this.resolveAllTurns("failed");
   }
 
   private releaseCamera(): void {
@@ -585,6 +689,7 @@ export class FaceTracker implements IFaceTracker {
         ) {
           const results = this.landmarker.detectForVideo(this.video, now);
           let yaw = 0;
+          let pitch = 0;
           let centered = false;
           let faceDetected = false;
           const facesSeen = results.faceLandmarks?.length ?? 0;
@@ -615,11 +720,33 @@ export class FaceTracker implements IFaceTracker {
                 const neutral = this.ratioBaseline ?? 0.5;
                 yaw = Math.round((ratio - neutral) * 100);
               }
+              // Pitch proxy (look-away advisory): nose drop as a fraction of
+              // the forehead→chin span, RELATIVE to the same neutral pose as
+              // yaw. In image space y grows DOWNWARD, so a head-down tilt
+              // moves the nose toward the chin — POSITIVE = head down (a lap
+              // glance), negative = chin up. Reuses pitchBaseline via the
+              // same trimmed-mean calibration as yaw.
+              const forehead = landmarks[10];
+              const chin = landmarks[152];
+              if (forehead && chin) {
+                const vSpan = chin.y - forehead.y;
+                if (vSpan > 0.01) {
+                  const vRatio = (nose.y - forehead.y) / vSpan;
+                  this.lastRawPitchRatio = vRatio;
+                  const pitchNeutral = this.pitchBaseline ?? 0.5;
+                  pitch = Math.round((vRatio - pitchNeutral) * 100);
+                } else {
+                  // Degenerate vertical span (extreme roll) — drop the stale
+                  // sample so a later calibration never averages it in.
+                  this.lastRawPitchRatio = null;
+                }
+              }
               centered = nose.x >= 0.30 && nose.x <= 0.70 && nose.y >= 0.20 && nose.y <= 0.80;
             }
           } else {
             this.currentLandmarks = null;
             this.lastRawRatio = null;
+            this.lastRawPitchRatio = null;
           }
           const isTurned = Math.abs(yaw) >= 10;
           this.feedLiveness(results, isTurned);
@@ -640,9 +767,18 @@ export class FaceTracker implements IFaceTracker {
               this.currentLighting = lighting;
             }
           }
-          const pose: LivePose = { yaw, centered, faceDetected, lighting, facesSeen };
+          const pose: LivePose = { yaw, pitch, centered, faceDetected, lighting, facesSeen };
           this.currentPose = pose;
           this.loopErrorCount = 0;
+          // Feed the active head-turn challenge BEFORE the pose listeners so
+          // the wait resolves in the same frame the sustained turn completes.
+          if (this.turnChallenge) {
+            const prevMs = this.turnChallengePrevSampleMs;
+            this.turnChallengePrevSampleMs = now;
+            if (this.turnChallenge.feed({ yaw, faceDetected }, now, prevMs)) {
+              this.resolveAllTurns("passed");
+            }
+          }
           if (this.poseListeners.size > 0) {
             for (const listener of this.poseListeners) {
               listener(pose);

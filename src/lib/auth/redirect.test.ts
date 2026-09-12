@@ -39,6 +39,21 @@ describe("sanitizeRedirect", () => {
     expect(sanitizeRedirect("/login\r\nX:y", ORIGIN)).toBe("/dashboard");
   });
 
+  it("rejects dot-segment paths that re-enter as protocol-relative output", () => {
+    // WHATWG resolution turns "/a/..//evil.com" into an OUTPUT of
+    // "//evil.com" — the origin check alone passes (resolution happened
+    // against baseOrigin), so the sanitizer must re-check its own output.
+    expect(sanitizeRedirect("/a/..//evil.com", ORIGIN)).toBe("/dashboard");
+    expect(sanitizeRedirect("/..//evil.com", ORIGIN)).toBe("/dashboard");
+    expect(sanitizeRedirect("/x/%2e%2e//evil.com", ORIGIN)).toBe("/dashboard");
+    expect(sanitizeRedirect("/a/%2e%2e/%2e%2e//evil.com", ORIGIN)).toBe("/dashboard");
+  });
+
+  it("resolves benign dot-segments to local paths", () => {
+    expect(sanitizeRedirect("/a/../dashboard", ORIGIN)).toBe("/dashboard");
+    expect(sanitizeRedirect("/a/./b", ORIGIN)).toBe("/a/b");
+  });
+
   it("rejects values that don't start with a slash", () => {
     expect(sanitizeRedirect("evil.com", ORIGIN)).toBe("/dashboard");
     expect(sanitizeRedirect("javascript:alert(1)", ORIGIN)).toBe("/dashboard");

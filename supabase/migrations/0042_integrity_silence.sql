@@ -100,7 +100,7 @@ begin
        )
      order by s.last_activity_at desc
      limit 100
-  then
+  loop
     v_seconds_since_check := extract(epoch from (
       clock_timestamp() - coalesce(
         (select max(fc.checked_at) from public.face_checks fc where fc.session_id = v_row.id),
@@ -165,7 +165,7 @@ begin
         )
       );
     end if;
-  end if;
+  end loop;
   return v_flagged;
 end;
 $$;

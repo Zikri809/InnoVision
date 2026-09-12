@@ -149,6 +149,8 @@ export function FaceVerifier({
   consentGiven,
   remainingMs,
   pausedReason = "face",
+  challengeSide = null,
+  challengeFailed = false,
   stream = null,
   quizTitle,
   resume,
@@ -165,6 +167,13 @@ export function FaceVerifier({
   remainingMs: number | null;
   /** Why the student is paused — focus-loss gets its own overlay copy. */
   pausedReason?: PausedReason;
+  /**
+   * Required head-turn direction while an anti-replay challenge is live
+   * (gate/recovering) — the overlay copy names it. Null = no challenge.
+   */
+  challengeSide?: "left" | "right" | null;
+  /** True after a turn-challenge failure — the gate shows the retry copy. */
+  challengeFailed?: boolean;
   /** Shared camera stream (FaceTracker.stream) — powers the recovery self-view. */
   stream?: MediaStream | null;
   /** Quiz title (mobile plan W3): shown once, in the gate — never on the question flow. */
@@ -222,6 +231,8 @@ export function FaceVerifier({
         remainingMs={remainingMs}
         livenessState={livenessState}
         status={status}
+        challengeSide={challengeSide}
+        challengeFailed={challengeFailed}
         quizTitle={quizTitle}
         resume={resume}
         onBegin={onBegin}
@@ -258,6 +269,18 @@ export function FaceVerifier({
                     ? t("focusLostBody")
                     : t("pausedBody")}
             </p>
+            {/* Anti-replay challenge copy: the recovering overlay names the
+                RANDOM direction (a pre-recorded blink video can't match it).
+                Rendered only while the challenge is live. */}
+            {status === "recovering" && challengeSide !== null && (
+              <p
+                role="status"
+                className="mx-auto mt-3 max-w-xs rounded-2xl border-[3px] border-primary/40 bg-primary/10 px-3 py-2 text-sm font-extrabold text-primary"
+                data-testid="challenge-prompt"
+              >
+                {challengeSide === "left" ? t("challengeTurnLeft") : t("challengeTurnRight")}
+              </p>
+            )}
             {/* Live self-view (plan W3): reposition with real feedback. The
                 stream comes from the SAME shared MediaStream as the tracker. */}
             <div className="mt-4">

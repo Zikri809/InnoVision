@@ -14,6 +14,13 @@ export type { FaceCheckTrigger };
 
 export type LivePose = {
   yaw: number;
+  /**
+   * Head pitch proxy in the same units as yaw (nose-drop fraction ×100
+   * relative to the calibrated neutral). POSITIVE = head tilted DOWN (a lap
+   * glance); negative = chin up. Optional: fakes/legacy trackers without it
+   * are treated as pitch 0 by the look-away advisory.
+   */
+  pitch?: number;
   centered: boolean;
   faceDetected: boolean;
   lighting?: "good" | "too_dark" | "too_bright";
@@ -52,6 +59,13 @@ export interface IFaceTracker {
   }): Promise<string | null>;
   /** Wait for a blink within `timeoutMs`; resolves 'passed' or 'failed'. */
   waitForBlink(timeoutMs: number): Promise<"passed" | "failed">;
+  /**
+   * Anti-replay head-turn challenge: resolve 'passed' when the student turns
+   * their head toward `side` and holds it (see `challenge.ts`). OPTIONAL —
+   * callers feature-detect and auto-pass when absent, so trackers/fakes
+   * without it stay valid (the real tracker and the E2E fake implement it).
+   */
+  waitForHeadTurn?(timeoutMs: number, side: "left" | "right"): Promise<"passed" | "failed">;
   /** Optional subscriber for real-time face pose updates (yaw, balance, centering). */
   onPoseChange?(cb: (pose: LivePose) => void): () => void;
   /**
@@ -98,6 +112,13 @@ export type FakeFaceControl = {
   setVerifyMode(mode: "match" | "mismatch"): void;
   /** Resolve the current (or next) `waitForBlink` with a blink. */
   triggerBlink(): void;
+  /**
+   * Resolve the current (or next) `waitForHeadTurn` with a head turn
+   * (anti-replay challenge). Optional: fakes without it stay valid — the
+   * pipeline auto-passes the challenge when the tracker lacks
+   * `waitForHeadTurn`.
+   */
+  triggerHeadTurn?(): void;
   /** Override the periodic cadence for the E2E seam (keys match `PeriodicCadence`). */
   setFacePeriodic(opts: { minMs: number; maxMs: number }): void;
   /**
@@ -108,6 +129,7 @@ export type FakeFaceControl = {
    */
   setFacePose?(opts: {
     yaw?: number;
+    pitch?: number;
     centered?: boolean;
     faceDetected?: boolean;
     facesSeen?: number;

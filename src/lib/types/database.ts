@@ -478,11 +478,15 @@ export type Database = {
         Row: {
           attempt: number
           face_exempt: boolean
+          face_fail_count: number
           face_fail_streak: number
           face_unavailable_at: string | null
           focus_pause_count: number
+          fullscreen_pause_count: number
+          hand_pause_count: number
           id: string
           last_activity_at: string
+          last_pause_reason: string | null
           mode: Database["public"]["Enums"]["quiz_mode"]
           paused_at: string | null
           quiz_id: string
@@ -496,11 +500,15 @@ export type Database = {
         Insert: {
           attempt?: number
           face_exempt?: boolean
+          face_fail_count?: number
           face_fail_streak?: number
           face_unavailable_at?: string | null
           focus_pause_count?: number
+          fullscreen_pause_count?: number
+          hand_pause_count?: number
           id?: string
           last_activity_at?: string
+          last_pause_reason?: string | null
           mode: Database["public"]["Enums"]["quiz_mode"]
           paused_at?: string | null
           quiz_id: string
@@ -514,11 +522,15 @@ export type Database = {
         Update: {
           attempt?: number
           face_exempt?: boolean
+          face_fail_count?: number
           face_fail_streak?: number
           face_unavailable_at?: string | null
           focus_pause_count?: number
+          fullscreen_pause_count?: number
+          hand_pause_count?: number
           id?: string
           last_activity_at?: string
+          last_pause_reason?: string | null
           mode?: Database["public"]["Enums"]["quiz_mode"]
           paused_at?: string | null
           quiz_id?: string
@@ -937,9 +949,12 @@ export type Database = {
         Row: {
           attempt: number | null
           face_exempt: boolean | null
+          face_fail_count: number | null
           face_fail_streak: number | null
           face_unavailable_at: string | null
           focus_pause_count: number | null
+          fullscreen_pause_count: number | null
+          hand_pause_count: number | null
           id: string | null
           last_activity_at: string | null
           mode: Database["public"]["Enums"]["quiz_mode"] | null
@@ -953,9 +968,12 @@ export type Database = {
         Insert: {
           attempt?: number | null
           face_exempt?: boolean | null
+          face_fail_count?: number | null
           face_fail_streak?: number | null
           face_unavailable_at?: string | null
           focus_pause_count?: number | null
+          fullscreen_pause_count?: number | null
+          hand_pause_count?: number | null
           id?: string | null
           last_activity_at?: string | null
           mode?: Database["public"]["Enums"]["quiz_mode"] | null
@@ -969,9 +987,12 @@ export type Database = {
         Update: {
           attempt?: number | null
           face_exempt?: boolean | null
+          face_fail_count?: number | null
           face_fail_streak?: number | null
           face_unavailable_at?: string | null
           focus_pause_count?: number | null
+          fullscreen_pause_count?: number | null
+          hand_pause_count?: number | null
           id?: string | null
           last_activity_at?: string | null
           mode?: Database["public"]["Enums"]["quiz_mode"] | null
@@ -1437,6 +1458,7 @@ export type Database = {
         Returns: Json
       }
       face_baseline_status: { Args: never; Returns: Json }
+      flag_verify_silent_sessions: { Args: never; Returns: number }
       grant_face_consent: { Args: never; Returns: Json }
       is_enrolled_in_class: { Args: { p_class_id: string }; Returns: boolean }
       is_lecturer: { Args: never; Returns: boolean }
@@ -1517,10 +1539,10 @@ export type Database = {
           p_questions: Json
           p_quiz_id: string
           p_source_file_url: string
+          p_source_paths?: Json
           p_source_text: string
           p_title: string
           p_web_sources?: Json
-          p_source_paths?: Json
         }
         Returns: undefined
       }

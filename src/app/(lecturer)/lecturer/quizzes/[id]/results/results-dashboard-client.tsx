@@ -81,6 +81,59 @@ function initialsOf(name: string | null): string {
   return parts.map((p) => p[0]?.toUpperCase() ?? "").join("") || "?";
 }
 
+/**
+ * Per-event integrity timeline for one expanded session row (restored after
+ * the i18n rewrite dropped it): face checks with verdict + trigger +
+ * replay/too-frequent hints, the camera-unavailable marker, and
+ * session-attributable audit rows (unlock / exempt / reset / auto-flags).
+ * Data is ALREADY on the row (derive.ts buildIntegrityTimeline) — this only
+ * renders it, newest first.
+ */
+function TimelineEvents({ row, formatTime }: { row: ResultsSessionRow; formatTime: (iso: string | null | undefined) => string }) {
+  const t = useTranslations("lecturer.results");
+  const events = [...row.integrityTimeline].reverse();
+  if (events.length === 0) return null;
+  return (
+    <ul className="space-y-1" data-testid="integrity-timeline">
+      {events.map((ev) => {
+        const at = formatTime(new Date(ev.at).toISOString());
+        if (ev.kind === "face_check") {
+          const hints: string[] = [];
+          if (ev.suspectedReplay) hints.push(t("hintReplay"));
+          if (ev.tooFrequent) hints.push(t("hintTooFrequent"));
+          return (
+            <li key={ev.id} className="text-xs font-semibold text-muted-foreground">
+              <span className={ev.matched ? "text-emerald-700 dark:text-emerald-300" : "text-red-700 dark:text-red-300"}>
+                {ev.matched ? t("timelineMatched") : t("timelineMismatch")}
+              </span>
+              {ev.distance !== null && <span> · {(ev.distance * 100).toFixed(0)}%</span>}
+              <span> · {t(`triggers.${ev.trigger}`)}</span>
+              <span> · {at}</span>
+              {hints.length > 0 && <span className="text-amber-700 dark:text-amber-300"> · {hints.join(" · ")}</span>}
+            </li>
+          );
+        }
+        if (ev.kind === "unavailable") {
+          return (
+            <li key={ev.id} className="text-xs font-semibold text-amber-700 dark:text-amber-300">
+              {t("cameraUnavailable")} · {at}
+            </li>
+          );
+        }
+        return (
+          <li key={ev.id} className="text-xs font-semibold text-muted-foreground">
+            {/* Every session-timeline action has a key in BOTH locales
+                (auto_flag_focus_loss / auto_flag_verify_silence included —
+                0044 routes them onto timelines via the metadata fix). next-intl
+                has no defaultMessage: a missing key renders the raw path. */}
+            {t(`actions.${ev.action}`)}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 export function ResultsDashboardClient({
   quizId,
   quizTitle,
@@ -92,6 +145,7 @@ export function ResultsDashboardClient({
   totalQuestions,
   unrevealedCompleted,
   rows,
+  faceChecksTruncated = false,
   incidentClips = {},
   questionInsights = null,
 }: {
@@ -106,6 +160,12 @@ export function ResultsDashboardClient({
   /** Completed assessment sessions whose results are still hidden (QC-2 close-dialog warning). */
   unrevealedCompleted: number;
   rows: ResultsSessionRow[];
+  /**
+   * True when the face_checks read hit its cap (RESULTS_AUDIT_LIMIT): the
+   * per-row summaries/timelines are newest-wins slices, so the dashboard
+   * must say so instead of showing a missing line as "no face checks".
+   */
+  faceChecksTruncated?: boolean;
   /** Signed (1h) playback URLs per session — empty for clean sessions. */
   incidentClips?: Record<
     string,
@@ -618,6 +678,14 @@ export function ResultsDashboardClient({
           </p>
         ) : (
           <>
+            {faceChecksTruncated && (
+              <p
+                role="note"
+                className="rounded-2xl border-[3px] border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs font-bold text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200"
+              >
+                {t("faceChecksTruncated")}
+              </p>
+            )}
             <ul className="space-y-3">
               {visibleRows.map((row) => (
                 <li
@@ -655,22 +723,39 @@ export function ResultsDashboardClient({
                       <span className={cn("size-1.5 rounded-full", STATUS_DOT[row.displayStatus])} aria-hidden />
                       {getStatusLabel(row.displayStatus)}
                     </span>
+                    {row.face_exempt && (
+                      <span className="inline-flex shrink-0 items-center rounded-full border-2 border-sky-500/40 bg-sky-500/10 px-2.5 py-0.5 text-2xs font-extrabold text-sky-700 dark:text-sky-300">
+                        {t("exemptChip")}
+                      </span>
+                    )}
                     <p className="min-w-0 text-xs font-semibold text-muted-foreground">
                       {t("startedAt", { time: formatTime(row.started_at) })}
                       {row.submitted_at ? ` · ${t("submittedAt", { time: formatTime(row.submitted_at) })}` : ""}
                     </p>
                   </div>
 
-                  {(row.faceSummary.lastAt != null || (row.focus_pause_count ?? 0) > 0 || row.face_unavailable_at) && (
+                  {(row.faceSummary.lastAt != null || (row.focus_pause_count ?? 0) > 0 || (row.fullscreen_pause_count ?? 0) > 0 || (row.hand_pause_count ?? 0) > 0 || row.face_unavailable_at) && (
                     <div className="mt-2 space-y-0.5 pl-[52px]">
                       {row.faceSummary.lastAt != null && (
                         <p className="text-xs font-semibold text-muted-foreground">
                           {t("faceChecksSummary", { fails: row.faceSummary.fails, replays: row.faceSummary.replays })}
+                          {" · "}
+                          {t("lastActivity", { time: formatTime(new Date(row.faceSummary.lastAt).toISOString()) })}
                         </p>
                       )}
                       {(row.focus_pause_count ?? 0) > 0 && (
                         <p className="text-xs font-semibold text-muted-foreground">
                           {t("focusPauses", { count: row.focus_pause_count ?? 0 })}
+                        </p>
+                      )}
+                      {(row.fullscreen_pause_count ?? 0) > 0 && (
+                        <p className="text-xs font-semibold text-muted-foreground">
+                          {t("fullscreenPauses", { count: row.fullscreen_pause_count ?? 0 })}
+                        </p>
+                      )}
+                      {(row.hand_pause_count ?? 0) > 0 && (
+                        <p className="text-xs font-semibold text-muted-foreground">
+                          {t("handPauses", { count: row.hand_pause_count ?? 0 })}
                         </p>
                       )}
                       {row.face_unavailable_at && (
@@ -769,6 +854,15 @@ export function ResultsDashboardClient({
                       </DropdownMenu>
                     )}
                   </div>
+
+                  {expanded[row.id] && row.integrityTimeline.length > 0 && (
+                    <div className="mt-3 border-t-2 border-border/60 pt-2">
+                      <p className="mb-1 text-xs font-extrabold uppercase tracking-wide text-muted-foreground">
+                        {t("timelineTitle")}
+                      </p>
+                      <TimelineEvents row={row} formatTime={formatTime} />
+                    </div>
+                  )}
 
                   {(incidentClips[row.id]?.length ?? 0) > 0 && expanded[row.id] && (
                     <div className="mt-3 space-y-2">

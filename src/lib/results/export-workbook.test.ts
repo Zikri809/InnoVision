@@ -23,6 +23,9 @@ const labels: WorkbookLabels = {
   colDuration: "Duration",
   colFaceFails: "Face fails",
   colFocusPauses: "Focus pauses",
+  colFullscreenPauses: "Fullscreen exits",
+  colHandPauses: "Hand pauses",
+  colAttempt: "Attempt",
   colType: "Type",
   colPrompt: "Question",
   unknownStudent: "Student",
@@ -80,6 +83,10 @@ function input(): BuildExportInput {
         last_activity_at: new Date(NOW).toISOString(),
         face_fail_streak: 0,
         focus_pause_count: 0,
+        face_fail_count: 2,
+        fullscreen_pause_count: 1,
+        hand_pause_count: 3,
+        attempt: 2,
       },
     ],
     answers: [
@@ -113,7 +120,20 @@ describe("buildWorkbook (smoke)", () => {
     // Row 4 header; data starts at row 5 (no truncation warning).
     expect(results.getCell(4, 2).value).toBe("Matric No");
     expect(results.getCell(5, 2).value).toBe("A23CS0001");
-    expect(results.getCell(5, 13).value).toBe("B — Beta");
+    // Q cells start at col 15: 10 fixed columns + 4 integrity columns
+    // (face fails / focus pauses / fullscreen exits / hand pauses — 0043+
+    // 0044); the Attempt column trails AFTER the Q cells (1 question here).
+    expect(results.getCell(4, 11).value).toBe("Face fails");
+    expect(results.getCell(4, 14).value).toBe("Hand pauses");
+    expect(results.getCell(4, 16).value).toBe("Attempt");
+    // Integrity VALUES (0044): face fails exports the LIFETIME counter
+    // (face_fail_count=2 — the streak is 0 here), pauses, and attempt.
+    expect(results.getCell(5, 11).value).toBe(2);
+    expect(results.getCell(5, 12).value).toBe(0);
+    expect(results.getCell(5, 13).value).toBe(1);
+    expect(results.getCell(5, 14).value).toBe(3);
+    expect(results.getCell(5, 15).value).toBe("B — Beta");
+    expect(results.getCell(5, 16).value).toBe("#2");
     // Not-started roster student present in row 6 (status column = 4).
     expect(results.getCell(6, 4).value).toBe("Not started");
   });
@@ -208,10 +228,11 @@ describe("buildWorkbook (smoke)", () => {
     await wb.xlsx.load(buffer as unknown as ArrayBuffer);
 
     // Results: joined letters "," + " — " + joined texts " / " (Q cells start
-    // at col 13 in assessment mode).
+    // at col 15 in assessment mode — 10 fixed + 4 integrity; Attempt trails
+    // after the last Q).
     const results = wb.getWorksheet("Results")!;
-    expect(results.getCell(5, 13).value).toBe("A,C — Alpha / Gamma");
-    expect(results.getCell(5, 14).value).toBe("B — Beta");
+    expect(results.getCell(5, 15).value).toBe("A,C — Alpha / Gamma");
+    expect(results.getCell(5, 16).value).toBe("B — Beta");
 
     // Questions & Key: BOTH correct options carry ✓, the wrong ones do not,
     // and the Correct Answer column carries the joined letters "A,C" while

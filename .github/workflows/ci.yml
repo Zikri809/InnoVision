@@ -120,3 +120,69 @@ jobs:
         # (plan §6): the m1 journeys add ~4-7 min at workers:1 on top of the
         # desktop budget, hence 15 -> 25.
         timeout-minutes: 25
+
+  integrity-e2e:
+    # Opt-in hardening suite (e51): the main job's build bakes
+    # NEXT_PUBLIC_INTEGRITY_HARDENING_OFF=1 (playwright.config.ts), which is
+    # exactly right for every other spec but makes the clipboard/fullscreen
+    # hardening inert — e51 could never run there and would drift silently.
+    # This job runs ONLY e51 against a build with the hardening baked IN
+    # (INTEGRITY_E2E=1 makes the webServer env omit the kill switch). E51's
+    # full two-role journeys cost a second `next build` + ~5 min of specs.
+    runs-on: ubuntu-latest
+    env:
+      # Same CI-only invite code as the `test` job (see its comment there).
+      LECTURER_INVITE_CODE: ci-invite-code-7f3a9c2e4b8d1f6a0e5c7b3a
+      # Drives playwright.config.ts: the webServer env OMITS
+      # NEXT_PUBLIC_INTEGRITY_HARDENING_OFF, so `next build` bakes the
+      # hardening IN; e51's own test.skip gate keys on the same var.
+      INTEGRITY_E2E: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Start local Supabase
+        run: npx supabase start
+        timeout-minutes: 10
+
+      - name: Write .env.local from Supabase status
+        run: |
+          npx supabase status -o env > .env.local
+          echo "NEXT_PUBLIC_SUPABASE_URL=$(grep '^API_URL=' .env.local | cut -d= -f2- | tr -d '\"')" >> .env.local
+          echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$(grep '^ANON_KEY=' .env.local | cut -d= -f2- | tr -d '\"')" >> .env.local
+          echo "SUPABASE_SERVICE_ROLE_KEY=$(grep '^SERVICE_ROLE_KEY=' .env.local | cut -d= -f2- | tr -d '\"')" >> .env.local
+          echo "LECTURER_INVITE_CODE=${{ env.LECTURER_INVITE_CODE }}" >> .env.local
+          echo "AI_BASE_URL=https://api.openai.com/v1" >> .env.local
+          echo "AI_API_KEY=test-key" >> .env.local
+          echo "AI_MODEL=gpt-4o-mini" >> .env.local
+          echo "OCR_DEFAULT_ENGINE=tesseract" >> .env.local
+          echo "GLM_BASE_URL=http://localhost:11434" >> .env.local
+          echo "OCR_GLM_MODEL=glm-ocr" >> .env.local
+          echo "OCR_VISION_MODEL=gpt-4o-mini" >> .env.local
+
+      - name: Reset DB (apply migrations)
+        run: npx supabase db reset
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Build (hardening-ON: INTEGRITY_E2E omits the kill switch)
+        run: npm run build
+        # Playwright starts ALL FOUR webServers on every run regardless of
+        # --project filtering; the :3002 server polls .next/BUILD_ID with a
+        # 120s timeout. Without this pre-step the BUILD_ID only appears when
+        # the main webServer finishes its own build (budgeted 300s), so any
+        # build slower than 120s would abort the job before e51 runs.
+
+      - name: E2E integrity hardening (e51 only, hardening-ON build)
+        run: npx playwright test e2e/e51-integrity-hardening.spec.ts --project=chromium
+        # Build (~5 min, no cache sharing with the main job) + two full
+        # two-role journeys at workers:1 (CI forces workers=1).
+        timeout-minutes: 25

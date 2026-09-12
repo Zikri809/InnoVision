@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 
 import { register } from "@/lib/auth/register";
 import { normalizeMatric } from "@/lib/auth/matric";
+import { sanitizeRedirect } from "@/lib/auth/redirect";
 import type { UserRole, SupportedLocale } from "@/lib/types/aliases";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,9 +31,40 @@ import { AuthBot } from "@/components/auth/auth-bot";
 import type { BotState } from "@/lib/bot/engine";
 
 export default function RegisterPage() {
+  // ?redirect= is read through useSearchParams inside a Suspense boundary
+  // (login-page pattern): the value participates in render output (the
+  // login/register link hrefs), so an SSR-safe read is required — a bare
+  // window.location.search during render would hydrate-mismatch.
+  return (
+    <Suspense fallback={<RegisterSuspenseFallback />}>
+      <RegisterForm />
+    </Suspense>
+  );
+}
+
+function RegisterSuspenseFallback() {
+  const tCommon = useTranslations("common");
+  return (
+    <div className="flex min-h-dvh items-center justify-center font-bold text-muted-foreground">
+      {tCommon("loading")}
+    </div>
+  );
+}
+
+function RegisterForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const t = useTranslations("auth");
   const tCommon = useTranslations("common");
+
+  // QR-class-join bounce-back: the login form forwards ?redirect= here so a
+  // first-day student who has to REGISTER (not sign in) still lands on the
+  // join after signup. Same sanitize contract as the login form — local
+  // paths only, /dashboard fallback.
+  const redirect = sanitizeRedirect(
+    searchParams.get("redirect"),
+    typeof window !== "undefined" ? window.location.origin : "http://localhost",
+  );
 
   const activeLocale = useLocale() as SupportedLocale;
   const [fullName, setFullName] = useState("");
@@ -104,6 +136,10 @@ export default function RegisterPage() {
         matricNo: normalizedMatric,
         inviteCode: role === "lecturer" ? inviteCode : undefined,
         locale,
+        // QR bounce-back: only forwarded when it's a real local target —
+        // the action re-sanitizes and uses it as the email-confirmation
+        // emailRedirectTo so the confirm round-trip lands on it too.
+        redirect: redirect !== "/dashboard" ? redirect : undefined,
       });
 
       if (error) {
@@ -112,11 +148,17 @@ export default function RegisterPage() {
       }
 
       if (session) {
-        router.push("/dashboard");
+        router.push(redirect);
         router.refresh();
       } else {
-        // Email confirmation required — redirect to login with a message
-        router.push("/login?message=check-email");
+        // Email confirmation required — back to login with the message;
+        // re-thread the post-signup target so the login that follows
+        // confirmation still lands there (login-form consumes ?redirect=).
+        router.push(
+          redirect !== "/dashboard"
+            ? `/login?message=check-email&redirect=${encodeURIComponent(redirect)}`
+            : "/login?message=check-email",
+        );
       }
     } catch {
       setError(tCommon("errorGeneric"));
@@ -335,7 +377,7 @@ export default function RegisterPage() {
               <p className="text-sm font-semibold text-muted-foreground">
                 {t("haveAccount")}{" "}
                 <Link
-                  href="/login"
+                  href={redirect !== "/dashboard" ? `/login?redirect=${encodeURIComponent(redirect)}` : "/login"}
                   className="inline-block py-1 font-extrabold text-primary hover:underline"
                 >
                   {t("loginLink")}

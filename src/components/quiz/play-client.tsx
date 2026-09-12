@@ -410,6 +410,10 @@ export function PlayClient({
     enabled: quiz.mode === "assessment" && Boolean(face) && !isFakeFace,
     status: faceStatus,
     phase,
+    // The clip's stored reason is the PAUSE CAUSE, not the bare status — the
+    // dashboard renders it to the lecturer ("face" vs focus loss vs
+    // fullscreen exit vs a flagged/unavailable degradation).
+    reason: faceStatus === "paused" ? pipeline.pausedReason : faceStatus,
     micStreamRef,
   });
 
@@ -620,6 +624,14 @@ export function PlayClient({
           if (realStatus === "paused") {
             setError(t("toast.sessionPaused"));
             setPhaseAndRef("question");
+            // Mirror the server truth into the face pipeline (audit fix): the
+            // pause may have originated in another tab or raced the local
+            // pause POST, leaving this client's pipeline `ready` with NO
+            // overlay and NO Recover button — the student would sit on a
+            // live-looking quiz that refuses every answer. pauseLocally is a
+            // no-op unless the pipeline really is `ready`, so a pipeline that
+            // already mirrored the pause is untouched.
+            pipeline.pauseLocally("face");
             return;
           }
           if (realStatus === "flagged") {
@@ -1098,6 +1110,8 @@ export function PlayClient({
         consentGiven={face?.consentGiven ?? false}
         remainingMs={remainingMs}
         pausedReason={pipeline.pausedReason}
+        challengeSide={pipeline.challengeSide}
+        challengeFailed={pipeline.challengeFailed}
         stream={faceTracker.stream ?? null}
         quizTitle={quiz.title}
         resume={

@@ -186,7 +186,16 @@ Login/register flows: `src/app/(auth)/login/page.tsx`,
 `src/app/(auth)/register/page.tsx` (client components calling server actions
 in `src/lib/auth/*.ts`). Redirects after login pass through
 `sanitizeRedirect` (kills protocol-relative, backslash, encoded-CRLF, and
-cross-origin targets).
+cross-origin targets; ALSO re-checks its own output for dot-segment
+re-entry — `/a/..//evil.com` normalizes to a `//host` path that would
+otherwise pass the input checks). The same `?redirect=` contract is threaded
+by the QR class-join feature through ALL THREE auth paths: password login
+(`login-form.tsx`), register (`register/page.tsx` reads + sanitizes, pushes
+post-signup; `register.ts` additionally passes it as the email-confirmation
+`emailRedirectTo` so the confirm round-trip lands on the target), and SSO
+(`startInstitutionalSso({redirect})` re-sanitizes server-side and appends
+the param to the callback `redirectTo`; `SSO_START_RATE` is 60/min —
+classroom-NAT scale, since a lecture hall shares one egress IP).
 
 ---
 
@@ -307,6 +316,22 @@ GET /api/classes/[id]               GET /api/classes (student projection
 Archiving (`PATCH {archived:true}` sets `archived_at`) propagates everywhere:
 joins rejected (`class_archived`), new quizzes blocked, listings filtered.
 Migration 0018 added the partial index that makes archived filtering cheap.
+
+**QR scan-to-enroll deep link (2026-09-12)**: the lecturer class detail page
+renders a QR (`react-qr-code`, pure SVG) of `{origin}/join/{joinCode}` —
+hidden on archived classes. `/join/[code]` is a TOP-LEVEL route (the
+`/matric-capture` pattern) reachable by both roles: middleware bounces
+anonymous scanners to `/login?redirect=/join/CODE` (`/join` is deliberately
+NOT in `PUBLIC_ROUTES` — the authenticated-bounce would destroy the lecturer
+branch), then the page branches by `profiles.role`: students get a
+confirm-and-join island (POST `/api/classes/join`; every typed error mapped
+to a localized `join.*` key via the pure `joinErrorKey` table), lecturers
+get an informational card, and malformed codes get a neutral card. The page
+performs ZERO class lookups by code — the API stays the sole authority (the
+no-oracle rule). The return journey threads `?redirect=` through the password
+login, the register signup (including `emailRedirectTo` on the
+email-confirmation round-trip), and the SSO `redirectTo` — see §4. Plan:
+docs/plans/PLAN_QR_CLASS_JOIN.md.
 
 ### 7.2 Quiz authoring (manual + AI generation)
 
@@ -880,7 +905,7 @@ into `${uid}/${quizId}/…`.
 | Route tests | Vitest + `fake-supabase.ts` (a fake that mimics RLS/RPC semantics and THROWS on unknown filters) | every API route's guard/CSRF/rate-limit/validation/error-mapping contracts |
 | AI boundary | MSW (`src/test/msw`) | mocked OpenAI-compatible endpoints |
 | Live-SQL harnesses | `npm run verify:*` (needs local supabase) | RLS policies, RPC state machines, caps, secrecy probes (e.g. `verify:student-quizzes` SQ-D1–D9 + QT1-D8b/D10, `verify:media` MEDIA-D1–D12, `verify:quizzes` QT3-D1–D6 + QT1-D1/D2, `verify:sessions` D42–D55 + QT1-D3–D8a/D7, `verify:clone` AP2-D1–D11 + QT1-D9) |
-| E2E | Playwright, chromium, dev-server + mock AI + CompreFace mock seam | full user journeys; `e16` is the integrity reference spec; specs skip loudly if `LECTURER_INVITE_CODE` unset; `e45` covers the multi-select journey (authoring, practice set-feedback, resume, keyless assessment + canonical-set probe, gesture-disabled contract) |
+| E2E | Playwright, chromium, dev-server + mock AI + CompreFace mock seam | full user journeys; `e16` is the integrity reference spec; `e52` is the QR-join reference spec (deep-link + auth bounce chain); specs skip loudly if `LECTURER_INVITE_CODE` unset; `e45` covers the multi-select journey (authoring, practice set-feedback, resume, keyless assessment + canonical-set probe, gesture-disabled contract) |
 | Types/schema drift | `gen:types` + CI diff | database.ts vs migrated schema |
 | Copy drift | `check:i18n` | en/ms parity + referenced-key existence |
 

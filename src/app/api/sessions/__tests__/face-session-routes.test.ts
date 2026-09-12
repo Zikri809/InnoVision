@@ -452,4 +452,37 @@ describe("incident upload � ring-buffer clip route", () => {
     const res = await incident.POST(incidentReq(), { params: Promise.resolve({ id: SESSION_ID }) });
     expect(res.status).toBe(503);
   });
+
+  it("metadata insert failure ? 503 AND the uploaded object is removed (orphan cleanup)", async () => {
+    assessmentContext();
+    const remove = vi.fn().mockResolvedValue({ error: null });
+    adminMock.storage.from = vi.fn(() => ({
+      upload: vi.fn().mockResolvedValue({ error: null }),
+      remove,
+    }));
+    // Metadata row write fails AFTER the object landed in the bucket —
+    // the route must not leave an unlisted object behind (dead weight).
+    adminMock.from = vi.fn(() => ({
+      insert: vi.fn().mockResolvedValue({ error: { message: "row write failed" } }),
+    }));
+    const res = await incident.POST(incidentReq(), { params: Promise.resolve({ id: SESSION_ID }) });
+    expect(res.status).toBe(503);
+    expect(remove).toHaveBeenCalledTimes(1);
+  });
+
+  it("metadata insert failure with a failing cleanup STILL returns 503 (best-effort cleanup never throws)", async () => {
+    assessmentContext();
+    // The orphan cleanup's own rejection must not escape the route — the
+    // 503 from the insert failure is the operator signal; a broken remove
+    // is swallowed by the catch handler.
+    adminMock.storage.from = vi.fn(() => ({
+      upload: vi.fn().mockResolvedValue({ error: null }),
+      remove: vi.fn().mockRejectedValue(new Error("storage api gone")),
+    }));
+    adminMock.from = vi.fn(() => ({
+      insert: vi.fn().mockResolvedValue({ error: { message: "row write failed" } }),
+    }));
+    const res = await incident.POST(incidentReq(), { params: Promise.resolve({ id: SESSION_ID }) });
+    expect(res.status).toBe(503);
+  });
 });

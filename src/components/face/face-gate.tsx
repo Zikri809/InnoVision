@@ -22,6 +22,8 @@ export function FaceGate({
   remainingMs,
   livenessState,
   status,
+  challengeSide = null,
+  challengeFailed = false,
   quizTitle,
   resume = null,
   onBegin,
@@ -32,6 +34,10 @@ export function FaceGate({
   remainingMs: number | null;
   livenessState: "idle" | "waiting" | "passed" | "failed";
   status: FaceStatus;
+  /** Required head-turn direction while the anti-replay challenge is live. */
+  challengeSide?: "left" | "right" | null;
+  /** True after a turn-challenge failure — shows the retry copy, not silence. */
+  challengeFailed?: boolean;
   /** Mobile plan W3: the quiz title lives HERE (shown once, before the flow
       starts) instead of eating vertical space above every question. */
   quizTitle?: string;
@@ -135,7 +141,22 @@ export function FaceGate({
             {livenessState === "passed" && t("livenessPassed")}
             {livenessState === "failed" && t("livenessFailed")}
             {status === "paused" && t("livenessPaused")}
+            {/* A turn-challenge failure lands back ON the gate with the idle
+                liveness state — without this line the student who cannot
+                produce the turn retries against silent silence. */}
+            {challengeFailed && livenessState === "idle" && t("challengeFailedRetry")}
           </p>
+          {/* Anti-replay challenge: names the RANDOM direction — a blink
+              recording can't contain it. Only while the challenge is live. */}
+          {livenessState === "waiting" && challengeSide !== null && (
+            <p
+              role="status"
+              className="mt-3 rounded-2xl border-[3px] border-primary/40 bg-primary/10 px-3 py-2 text-sm font-extrabold text-primary"
+              data-testid="challenge-prompt"
+            >
+              {challengeSide === "left" ? t("challengeTurnLeft") : t("challengeTurnRight")}
+            </p>
+          )}
         </div>
 
         <div className="mt-7 flex flex-col-reverse items-stretch justify-between gap-3 sm:flex-row sm:flex-wrap sm:items-center">

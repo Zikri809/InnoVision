@@ -12,6 +12,11 @@ import {
   INCIDENT_TIMESTRICE_MS,
   MAX_INCIDENT_BYTES,
 } from "@/lib/face/constants";
+import {
+  shouldFlushIncident,
+  incidentClipReason,
+  type IncidentFlushStatus,
+} from "@/lib/face/incident-transition";
 
 /**
  * useIncidentRecorder — privacy-first ring-buffer webcam/mic footage.
@@ -23,6 +28,12 @@ import {
  * paused/flagged/unavailable, the last ~5 minutes are POSTed to
  * /api/sessions/[id]/incident and recording continues into a fresh buffer.
  * A clean submit stops and DISCARDS the buffer — no upload, no trace.
+ *
+ * KNOWN DEV LIMITATION: React StrictMode's double-mount sets the machine's
+ * `stopping` flag on the unmount leg and nothing resets it on remount, so in
+ * `next dev` the recorder is inert for the session — clips never upload in
+ * dev. This is dev-only (production builds don't double-mount); smoke-testing
+ * the upload path requires a production build.
  */
 export function useIncidentRecorder(opts: {
   sessionId: string;
@@ -30,18 +41,23 @@ export function useIncidentRecorder(opts: {
   /** Recording runs only while verified; transitions out trigger the flush. */
   status: FaceStatus;
   phase: "question" | "locked" | "feedback" | "submitting" | "submitted" | "timeUp" | "dead";
+  /**
+   * WHY the session left `ready` — stored on the clip so the lecturer can
+   * tie footage to a cause (face fail / focus loss / fullscreen exit).
+   * Captured via ref at flush time, not closure, so the reason that arrived
+   * with the transition is the one recorded.
+   */
+  reason?: string;
   /** Latest mic stream from the advisories hook (optional audio track). */
   micStreamRef: React.RefObject<MediaStream | null>;
 }) {
-  const { sessionId, enabled, status, phase, micStreamRef } = opts;
+  const { sessionId, enabled, status, phase, reason, micStreamRef } = opts;
 
   const sessionIdRef = useRef(sessionId);
-  const statusRef = useRef(status);
-  const phaseRef = useRef(phase);
+  const reasonRef = useRef(reason ?? "paused");
   useEffect(() => {
     sessionIdRef.current = sessionId;
-    statusRef.current = status;
-    phaseRef.current = phase;
+    if (reason !== undefined) reasonRef.current = reason;
   });
 
   // Mutable recorder machinery lives outside React state entirely. The
@@ -56,6 +72,11 @@ export function useIncidentRecorder(opts: {
     startedAt: number;
     flushing: boolean;
     stopping: boolean;
+    /** Last observed face status — lives ON the machine so the effect
+     * cleanup cannot null it (a status change tears the effect down and
+     * re-runs it; the PREVIOUS status must survive that cycle or the
+     * ready→paused flush edge is unreachable). */
+    prevStatus: FaceStatus | null;
   }>({
     recorder: null,
     stream: null,
@@ -65,8 +86,8 @@ export function useIncidentRecorder(opts: {
     startedAt: 0,
     flushing: false,
     stopping: false,
+    prevStatus: null,
   });
-  const prevStatusRef = useRef<FaceStatus | null>(null);
 
   useEffect(() => {
     if (!enabled || typeof window === "undefined" || typeof MediaRecorder === "undefined") return;
@@ -267,21 +288,25 @@ export function useIncidentRecorder(opts: {
     }
 
     // ── Status-transition driver ────────────────────────────────────
-    const prev = prevStatusRef.current;
-    if (status === "ready") {
+    // BUGFIX (audit 2026-09): the previous status lives on the MACHINE
+    // (module-lifetime) — a ref the effect cleanup nulled on EVERY dependency
+    // change made `prev` always null at effect entry, so the flush branch was
+    // dead code and NO incident clip was ever uploaded. The predicate itself
+    // is pure (`incident-transition.ts`) and unit-pinned.
+    const prev = machineRef.current.prevStatus as IncidentFlushStatus | null;
+    const next = status as IncidentFlushStatus;
+    if (next === "ready") {
       // null prev (first run / post-cleanup) counts as a transition: a
       // RESUMED session seeds initialFaceStatus='ready' and must start
       // recording immediately.
       if (prev !== "ready") void startRecording();
-    } else if (
-      (prev === "ready" || prev === "recovering") &&
-      (status === "paused" || status === "flagged" || status === "unavailable")
-    ) {
-      // 'recovering' origins count too — the unlock re-verify path routes
-      // flagged→recovering→paused; those incidents deserve footage as well.
-      void flush(status);
+    } else if (shouldFlushIncident(prev, next)) {
+      // The clip reason is the PAUSE CAUSE (face/focus_lost/fullscreen_exit),
+      // not the bare status token — a lecturer reading the dashboard must be
+      // able to tell which cause produced the footage.
+      void flush(incidentClipReason(next, reasonRef.current));
     }
-    prevStatusRef.current = status;
+    machineRef.current.prevStatus = status;
 
     if (phase === "submitted") {
       // Clean completion: stop and DROP the buffer (privacy default).
@@ -290,10 +315,14 @@ export function useIncidentRecorder(opts: {
 
     return () => {
       disposed = true;
-      // Reset so a remount (StrictMode / enabled flip) treats whatever
-      // status it boots with as a fresh transition — otherwise a resumed
-      // 'ready' session would never start recording after remount.
-      prevStatusRef.current = null;
+      // The machine's prevStatus deliberately SURVIVES this cleanup (a status
+      // change tears the effect down and re-runs it mid-session — the flush
+      // edge depends on the previous status surviving). Only a real
+      // enabled-flip remount should treat the next status as fresh, so the
+      // machine resets ONLY when the hook is being disabled entirely.
+      if (!enabled) {
+        machineRef.current.prevStatus = null;
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, status, phase]);

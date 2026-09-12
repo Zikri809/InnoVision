@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { PeriodicCadence, shouldScheduleFaceCheck } from "./cadence";
+import { PeriodicCadence, minClientVerifyGapMs, shouldScheduleFaceCheck } from "./cadence";
 
 /**
  * I22 — cadence unit tests: jitter bounds, no-stack (clear-then-set), phase
@@ -70,5 +70,20 @@ describe("shouldScheduleFaceCheck", () => {
     // 'ready'-scheduling. This is enforced by the pipeline passing a status
     // that reflects visibility, so we just assert status-gating covers it.
     expect(shouldScheduleFaceCheck("ready", "question")).toBe(true);
+  });
+});
+
+// ── 0044: verify-POST gap floor ─────────────────────────────────────────
+// The audit found the old `Math.min(MIN_VERIFY_INTERVAL_MS, 8000)` evaluated
+// to 2000 — 30 POSTs/min against the route's 10/min budget. The floor is now
+// a pure function pinned here so the docs' "8 s floor" cannot silently drift
+// back to 2 s.
+describe("minClientVerifyGapMs", () => {
+  it("production floor is 8s (protects the verify route's 10/min budget)", () => {
+    expect(minClientVerifyGapMs(false)).toBe(8000);
+  });
+
+  it("E2E fast path relaxes to the 2s advisory mirror (fast-cadence specs)", () => {
+    expect(minClientVerifyGapMs(true)).toBe(2000);
   });
 });

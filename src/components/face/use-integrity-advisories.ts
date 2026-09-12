@@ -101,22 +101,24 @@ export function useIntegrityAdvisories(opts: {
       for (const e of events) void report(e.type);
     }
 
+    function handlePose(pose: LivePose): void {
+      if (!armedRef.current || disposed) return;
+      handleEvents(
+        attention.feed(
+          {
+            yaw: pose.yaw,
+            pitch: pose.pitch,
+            centered: pose.centered,
+            faceDetected: pose.faceDetected,
+            facesSeen: pose.facesSeen,
+          },
+          Date.now(),
+        ),
+      );
+    }
+
     if (tracker && typeof tracker.onPoseChange === "function") {
-      const onPose = (pose: LivePose) => {
-        if (!armedRef.current || disposed) return;
-        handleEvents(
-          attention.feed(
-            {
-              yaw: pose.yaw,
-              centered: pose.centered,
-              faceDetected: pose.faceDetected,
-              facesSeen: pose.facesSeen,
-            },
-            Date.now(),
-          ),
-        );
-      };
-      poseUnsubscribe = tracker.onPoseChange(onPose);
+      poseUnsubscribe = tracker.onPoseChange(handlePose);
     }
 
     async function requestMic(): Promise<void> {

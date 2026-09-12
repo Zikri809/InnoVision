@@ -27,6 +27,7 @@ export function fakeFaceInit(): void {
 
   type FakePose = {
     yaw: number;
+    pitch?: number;
     centered: boolean;
     faceDetected: boolean;
     facesSeen: number;
@@ -39,6 +40,7 @@ export function fakeFaceInit(): void {
     captureFrame(): Promise<string | null>;
     captureBestFrame?(): Promise<string | null>;
     waitForBlink(timeoutMs: number): Promise<"passed" | "failed">;
+    waitForHeadTurn?(timeoutMs: number, side: "left" | "right"): Promise<"passed" | "failed">;
     onPoseChange?(cb: (pose: FakePose) => void): () => void;
     getFaceHealth?(): { aligned: boolean; lightingOk: boolean; faceDetected: boolean };
   };
@@ -49,11 +51,25 @@ export function fakeFaceInit(): void {
   // Latch: a `triggerBlink` before any `waitForBlink` registers resolves the
   // NEXT wait immediately (removes the click→register race in the E2E helper).
   let pendingBlink = false;
+  // Head-turn challenge (anti-replay): same latched-resolver pattern as the
+  // blink. `triggerHeadTurn` resolves the current wait (or latches for the
+  // next one); the side is accepted but not enforced — the fake has no real
+  // pose stream the challenge could judge.
+  let turnResolver: ((r: "passed" | "failed") => void) | null = null;
+  let turnTimer: ReturnType<typeof setTimeout> | null = null;
+  let pendingTurn = false;
   let periodic: { minMs: number; maxMs: number } = { minMs: 30000, maxMs: 45000 };
   // Scriptable pose state — the advisories hook (AttentionMonitor) and the
   // pipeline's lighting precheck consume this through onPoseChange /
   // getFaceHealth.
-  let pose: FakePose = { yaw: 0, centered: true, faceDetected: true, facesSeen: 1, lighting: "good" };
+  let pose: FakePose = {
+    yaw: 0,
+    pitch: 0,
+    centered: true,
+    faceDetected: true,
+    facesSeen: 1,
+    lighting: "good",
+  };
   const poseListeners = new Set<(p: FakePose) => void>();
   let poseTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -73,14 +89,23 @@ export function fakeFaceInit(): void {
         clearTimeout(blinkTimer);
         blinkTimer = null;
       }
+      if (turnTimer !== null) {
+        clearTimeout(turnTimer);
+        turnTimer = null;
+      }
       if (poseTimer !== null) {
         clearInterval(poseTimer);
         poseTimer = null;
       }
       pendingBlink = false;
+      pendingTurn = false;
       if (blinkResolver) {
         blinkResolver("failed");
         blinkResolver = null;
+      }
+      if (turnResolver) {
+        turnResolver("failed");
+        turnResolver = null;
       }
     },
     async captureFrame(): Promise<string | null> {
@@ -103,6 +128,24 @@ export function fakeFaceInit(): void {
         blinkTimer = setTimeout(() => {
           blinkResolver = null;
           blinkTimer = null;
+          resolve("failed");
+        }, timeoutMs);
+      });
+    },
+    async waitForHeadTurn(timeoutMs: number, _side: "left" | "right"): Promise<"passed" | "failed"> {
+      return new Promise((resolve) => {
+        // A turn latched before this wait → resolve immediately.
+        if (pendingTurn) {
+          pendingTurn = false;
+          resolve("passed");
+          return;
+        }
+        // StrictMode-idempotent: a second wait supersedes the first.
+        if (turnTimer !== null) clearTimeout(turnTimer);
+        turnResolver = resolve;
+        turnTimer = setTimeout(() => {
+          turnResolver = null;
+          turnTimer = null;
           resolve("failed");
         }, timeoutMs);
       });
@@ -147,11 +190,25 @@ export function fakeFaceInit(): void {
         pendingBlink = true;
       }
     },
+    triggerHeadTurn(): void {
+      if (turnTimer !== null) {
+        clearTimeout(turnTimer);
+        turnTimer = null;
+      }
+      if (turnResolver) {
+        const r = turnResolver;
+        turnResolver = null;
+        r("passed");
+      } else {
+        pendingTurn = true;
+      }
+    },
     setFacePeriodic(opts: { minMs: number; maxMs: number }): void {
       periodic = { minMs: opts.minMs, maxMs: opts.maxMs };
     },
     setFacePose(opts: {
       yaw?: number;
+      pitch?: number;
       centered?: boolean;
       faceDetected?: boolean;
       facesSeen?: number;
@@ -159,6 +216,7 @@ export function fakeFaceInit(): void {
     }): void {
       pose = {
         yaw: opts.yaw ?? pose.yaw,
+        pitch: opts.pitch ?? pose.pitch,
         centered: opts.centered ?? pose.centered,
         faceDetected: opts.faceDetected ?? pose.faceDetected,
         facesSeen: opts.facesSeen ?? pose.facesSeen,

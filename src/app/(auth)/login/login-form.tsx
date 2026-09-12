@@ -58,7 +58,12 @@ export function LoginForm({ ssoConfigured }: { ssoConfigured: boolean }) {
     setError(null);
     setSsoStarting(true);
     try {
-      const result = await startInstitutionalSso();
+      const result = await startInstitutionalSso({
+        // QR-class-join bounce-back: the SSO round-trip must preserve the
+        // post-login target (the action re-sanitizes server-side; this value
+        // is already sanitized at :33).
+        redirect,
+      });
       if (result.disabled || result.error || !result.url) {
         setError(tErrors("ssoFailed"));
         return;
@@ -231,7 +236,10 @@ export function LoginForm({ ssoConfigured }: { ssoConfigured: boolean }) {
               )}
               <p className="text-sm font-semibold text-muted-foreground">
                 {t("noAccount")}{" "}
-                <Link href="/register" className="inline-block py-1 font-extrabold text-primary hover:underline">
+                <Link
+                  href={redirect !== "/dashboard" ? `/register?redirect=${encodeURIComponent(redirect)}` : "/register"}
+                  className="inline-block py-1 font-extrabold text-primary hover:underline"
+                >
                   {t("registerLink")}
                 </Link>
               </p>

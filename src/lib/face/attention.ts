@@ -20,6 +20,11 @@ export type AdvisoryType = "second_face" | "looked_away" | "voice_activity" | "h
 
 export type AttentionSample = {
   yaw: number;
+  /**
+   * Head pitch in yaw's units (positive = head DOWN — a lap glance).
+   * Optional: absent/0 keeps the pre-pitch behavior (yaw + centering only).
+   */
+  pitch?: number;
   centered: boolean;
   faceDetected: boolean;
   /** Number of faces the tracker saw in this frame (1 when absent). */
@@ -30,6 +35,7 @@ export type AttentionEvent = { type: AdvisoryType; atMs: number };
 
 import {
   LOOK_AWAY_ACCUMULATE_MS,
+  LOOK_AWAY_PITCH_DEG,
   LOOK_AWAY_WINDOW_MS,
   LOOK_AWAY_YAW_DEG,
   SECOND_FACE_SUSTAIN_MS,
@@ -75,8 +81,16 @@ export class AttentionMonitor {
     }
 
     // ── Looked away ────────────────────────────────────────────────
+    // A deep lap-glance already trips `!centered` (the centered box is
+    // generous); pitch catches MODERATE downward glances that stay inside
+    // it — reading a phone flat on the lap tilts the head down without
+    // leaving the box. |pitch| counts both directions (chin-up at a
+    // ceiling/second screen is equally off-task).
     const lookingAway =
-      sample.faceDetected && (!sample.centered || Math.abs(sample.yaw) > LOOK_AWAY_YAW_DEG);
+      sample.faceDetected &&
+      (!sample.centered ||
+        Math.abs(sample.yaw) > LOOK_AWAY_YAW_DEG ||
+        Math.abs(sample.pitch ?? 0) > LOOK_AWAY_PITCH_DEG);
     if (lookingAway) {
       const last = this.episodes[this.episodes.length - 1];
       if (last && this.prevSampleAway) {

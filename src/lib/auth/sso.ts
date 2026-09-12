@@ -3,10 +3,17 @@
 import { createServerActionClient } from "@/lib/supabase/server";
 import { rateLimit } from "@/lib/classes/rate-limit";
 import { isSsoConfigured } from "@/lib/auth/institutional";
+import { sanitizeRedirect } from "@/lib/auth/redirect";
 
 import { headers } from "next/headers";
 
-const SSO_START_RATE = { limit: 10, windowMs: 60_000 };
+// Classroom-NAT scale: an entire lecture hall can share ONE egress IP
+// (campus Wi-Fi / eduroam), and mass QR onboarding is exactly when SSO
+// starts spike. 10/min per IP locked out SSO login #11+; 60/min keeps the
+// classroom flowing while still blunting scripted abuse (join abuse itself
+// is throttled per-USER by /api/classes/join + the DB lockout, so this
+// limiter is not the join-attack control).
+const SSO_START_RATE = { limit: 60, windowMs: 60_000 };
 
 export interface SsoStartResult {
   error?: string;
@@ -25,7 +32,11 @@ export interface SsoStartResult {
  * INSTITUTIONAL_EMAIL_DOMAINS is configured, so an error here is a
  * misconfiguration, not a user mistake — still surfaced generically.
  */
-export async function startInstitutionalSso(): Promise<SsoStartResult> {
+export async function startInstitutionalSso({
+  redirect,
+}: {
+  redirect?: string;
+} = {}): Promise<SsoStartResult> {
   if (!isSsoConfigured()) {
     return { disabled: true };
   }
@@ -43,9 +54,14 @@ export async function startInstitutionalSso(): Promise<SsoStartResult> {
   const supabase = await createServerActionClient();
   // GoTrue's /authorize validates `redirect_to` against the Site URL, so it
   // must be ABSOLUTE (reset.ts precedent — a relative value fails the hosted
-  // round-trip). The callback defaults a missing `redirect` param to
-  // /dashboard (sanitizeRedirect), so no query param is needed — one fewer
-  // string for the allow-list to match.
+  // round-trip; see the headers() catch above for the degraded fallback).
+  // The callback defaults a missing `redirect` param to /dashboard
+  // (sanitizeRedirect).
+  // Post-login bounce-back (QR class join): when the login form passes a
+  // redirect target, it is forwarded to the callback as its `redirect` query
+  // param. The client copy is NEVER trusted — re-sanitized here server-side
+  // (sanitizeRedirect is origin-aware; garbage folds to /dashboard), and
+  // /auth/callback re-sanitizes AGAIN at the point of use.
   let origin = "";
   try {
     const hdrs = await headers();
@@ -53,15 +69,30 @@ export async function startInstitutionalSso(): Promise<SsoStartResult> {
     const proto = hdrs.get("x-forwarded-proto") ?? "http";
     if (host) origin = `${proto}://${host}`;
   } catch {
-    // headers() unavailable — GoTrue resolves a relative redirectTo against
-    // the configured site URL; keep the empty-origin fallback.
+    // headers() unavailable — redirectTo degrades to RELATIVE, which GoTrue
+    // may reject outright (graceful: the SSO start fails, nothing redirects
+    // anywhere unexpected). Practically unreachable inside a server action;
+    // the primary path below is always absolute.
   }
+  const safeRedirect = sanitizeRedirect(redirect ?? null, origin || "http://localhost");
+  // NOTE on the empty-origin fallback: a relative redirectTo is resolved by
+  // GoTrue against the configured Site URL, so the degraded path still works
+  // hosted (reset.ts documents the round-trip requirement that the PRIMARY
+  // path must stay absolute). sanitizeRedirect against the localhost fallback
+  // base preserves local-path targets — the origin check passes for any base.
+  // Only append when the caller actually supplied a target: an absent param
+  // must keep the bare callback URL (byte-identical to the pre-QR flow), so
+  // existing SSO logins are unaffected and the redirect stays the exception.
+  const callbackUrl =
+    redirect && safeRedirect !== "/dashboard"
+      ? `${origin}/auth/callback?redirect=${encodeURIComponent(safeRedirect)}`
+      : `${origin}/auth/callback`;
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: "azure",
     options: {
       // `email` is the only claim the callback needs — no Graph API access.
       scopes: "email profile",
-      redirectTo: `${origin}/auth/callback`,
+      redirectTo: callbackUrl,
     },
   });
 

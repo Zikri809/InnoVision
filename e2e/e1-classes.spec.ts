@@ -92,7 +92,7 @@ test.describe("E1 — Class create → join via code → roster", () => {
     const codeOne = await createClass(lecturerPage, "E1 Isolation One");
 
     // Second class: the helper's unanchored /create/i collides with the
-    // dashed "Create a class" card once ≥1 class exists (§5.1 #7) — anchor.
+    // dashed "Create a class" card once ≥1 class exists (§5.3 #7) — anchor.
     await lecturerPage.getByLabel("Class title").fill("E1 Isolation Two");
     await lecturerPage.getByRole("button", { name: /^create class$/i }).click();
     const cardTwo = lecturerPage.locator("li").filter({ hasText: "E1 Isolation Two" });
@@ -118,7 +118,7 @@ test.describe("E1 — Class create → join via code → roster", () => {
 
     // Join the FIRST class, then REJOIN it → sonner info toast (en.json:429),
     // not a duplicated roster row. Post-first-join the dashed "Join a class"
-    // card appears — anchor the submit exactly (§5.1 #7).
+    // card appears — anchor the submit exactly (§5.3 #7).
     await studentPage.getByLabel("Join code").clear();
     await studentPage.getByLabel("Join code").fill(codeOne);
     await studentPage.getByRole("button", { name: /^join class$/i }).click();

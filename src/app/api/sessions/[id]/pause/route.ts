@@ -27,9 +27,11 @@ const PauseSchema = z.object({
  *
  * `reason: 'focus_lost'` additionally accumulates `focus_pause_count`; the
  * RPC FLAGS the session at the threshold (3) — a lecturer decision — and
- * audits it. `reason: 'fullscreen_exit'` (client hardening) is a PLAIN pause
- * with hand_loss semantics — no counter increment (deferred one release). The
- * response's `sessionStatus` is authoritative.
+ * audits it. `reason: 'fullscreen_exit'` (client hardening) accumulates
+ * `fullscreen_pause_count` (0043) but NEVER auto-flags — repeat
+ * exit→think→recover cycling is lecturer-visible on the results dashboard,
+ * while the escalation decision stays with the lecturer. The response's
+ * `sessionStatus` is authoritative.
  *
  * Preamble: guard → CSRF → rate-limit → RPC → `mapFaceError`.
  *

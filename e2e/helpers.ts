@@ -119,6 +119,21 @@ export async function registerUser(
 }
 
 /**
+ * Deterministic student matric derived from an email (the registerUser
+ * scheme, exported for specs that must fill the field INLINE — e.g. the
+ * /join redirect chain where registerUser's bare goto would drop the
+ * ?redirect= contract). Same hash ⇒ same collision-freedom guarantees.
+ */
+export function matricForEmail(email: string, salt = 0): string {
+  let h = 0;
+  const source = `${email}#${salt}`;
+  for (let i = 0; i < source.length; i++) {
+    h = (h * 31 + source.charCodeAt(i)) % 100000;
+  }
+  return `8${String(h).padStart(5, "0")}`;
+}
+
+/**
  * Fast registration: If local admin seam is available (via resolveServiceClient),
  * creates user and profile directly via DB admin API, then signs in cleanly via /login.
  * Avoids long /register multi-field typing and reduces setup time from ~3s to <0.5s.
@@ -570,6 +585,32 @@ export async function triggerFaceBlink(page: Page) {
   });
 }
 
+/**
+ * Resolve the anti-replay head-turn challenge via the fake control. The
+ * pipeline's `waitForHeadTurn` starts right AFTER the blink resolves, so a
+ * `triggerHeadTurn` fired immediately after `triggerFaceBlink` LATCHES and
+ * satisfies the wait even when the wait registers a tick later.
+ */
+export async function triggerFaceTurn(page: Page) {
+  await page.evaluate(() => {
+    const ctrl = (window as unknown as {
+      __INNOVISION_FAKE_FACE_CONTROL__?: { triggerHeadTurn?(): void };
+    }).__INNOVISION_FAKE_FACE_CONTROL__;
+    if (!ctrl) throw new Error("fake face control not installed");
+    if (ctrl.triggerHeadTurn) ctrl.triggerHeadTurn();
+  });
+}
+
+/**
+ * Blink + head turn — the full liveness the gate and recovery now demand.
+ * The turn resolves the challenge regardless of the randomly chosen side
+ * (the fake has no directional pose judgment).
+ */
+export async function triggerFaceLiveness(page: Page) {
+  await triggerFaceBlink(page);
+  await triggerFaceTurn(page);
+}
+
 /** Override the periodic cadence (E12 deterministic observation). */
 export async function setFacePeriodic(page: Page, opts: { minMs: number; maxMs: number }) {
   await page.evaluate((o) => {
@@ -687,17 +728,21 @@ export async function clickBeginAndBlink(page: Page) {
   const begin = page.getByRole("button", { name: "Begin assessment", exact: true });
   await expect(begin).toBeEnabled({ timeout: 15_000 });
   await begin.click();
-  await triggerFaceBlink(page);
+  await triggerFaceLiveness(page);
   await page.mouse.move(0, 0);
 }
 
-/** Pass the assessment gate: click Begin (beginGate waits for liveness), then trigger the blink. */
+/**
+ * Pass the assessment gate: click Begin (beginGate runs blink liveness + the
+ * anti-replay head-turn challenge), then trigger both via the fake seam.
+ */
 export async function passAssessmentGate(page: Page) {
   const begin = page.getByRole("button", { name: "Begin assessment", exact: true });
   await expect(begin).toBeEnabled({ timeout: 15_000 });
   await begin.click();
-  // beginGate runs blink liveness first — the fake resolves it via triggerBlink.
-  await triggerFaceBlink(page);
+  // beginGate runs blink liveness, then the head-turn challenge — the fake
+  // resolves both via triggerFaceLiveness (the turn latches).
+  await triggerFaceLiveness(page);
   // Gate disappears → the quiz content mounts.
   await expect(page.getByRole("button", { name: "Begin assessment", exact: true })).toBeHidden({
     timeout: 10_000,
@@ -732,13 +777,14 @@ export async function waitForPauseOverlay(page: Page) {
   await expect(page.getByText("Face check paused", { exact: true })).toBeVisible({ timeout: 15_000 });
 }
 
-/** Click "Blink to recover", then trigger the fake blink to recover from paused. */
+/** Click "Blink to recover", then trigger blink + head turn to recover from paused. */
 export async function recoverFromPause(page: Page) {
   const btn = page.getByRole("button", { name: "Blink to recover", exact: true });
   await expect(btn).toBeVisible({ timeout: 10_000 });
   await btn.click();
-  // runRecovery calls waitForBlink — resolve it via the fake.
-  await triggerFaceBlink(page);
+  // runRecovery calls waitForBlink, then the anti-replay head-turn challenge
+  // — resolve both via the fake.
+  await triggerFaceLiveness(page);
   // The paused overlay clears once recovered.
   await expect(page.getByText("Face check paused", { exact: true })).toBeHidden({ timeout: 10_000 });
 }

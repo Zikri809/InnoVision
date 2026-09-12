@@ -59,3 +59,21 @@ export function shouldScheduleFaceCheck(
   if (status !== "ready") return false;
   return phase === "question" || phase === "locked";
 }
+
+/**
+ * Client-side floor between verify POSTs (latest-wins deferral). `Math.max`
+ * with an 8 s target: the raw `MIN_VERIFY_INTERVAL_MS` (2 s) mirrors the SQL
+ * `too_frequent` advisory window, NOT a pace — at 2 s the client could emit
+ * 30 POSTs/min against the verify route's 10/min budget and spend it into a
+ * bricking 429 (the exact failure the floor exists to prevent).
+ *
+ * `e2eFastPath` relaxes the floor to the raw advisory mirror: the E2E fake
+ * seam drives fast cadences (`setFacePeriodic({2500,3500})`) and asserts
+ * POST timing against them — a hard 8 s floor would break those specs while
+ * adding nothing in production (the seam is build-flagged OFF there).
+ *
+ * PURE (the caller decides seam membership): unit-testable, env-free.
+ */
+export function minClientVerifyGapMs(e2eFastPath: boolean): number {
+  return e2eFastPath ? 2000 : 8000;
+}

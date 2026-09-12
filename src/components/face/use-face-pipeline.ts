@@ -2,10 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { IFaceTracker, FaceStatus } from "@/lib/face/types";
-import { PeriodicCadence, shouldScheduleFaceCheck } from "@/lib/face/cadence";
+import type { TurnSide } from "@/lib/face/challenge";
+import { randomTurnSide } from "@/lib/face/challenge";
+import { PeriodicCadence, minClientVerifyGapMs, shouldScheduleFaceCheck } from "@/lib/face/cadence";
 import { shouldDeferFaceCheck } from "@/lib/face/face-check-gate";
 import { resolveVerifyOutcome } from "@/lib/face/outcome";
-import { recoverFlow, recoveryLanding } from "@/lib/face/recovery";
+import { recoveryLanding } from "@/lib/face/recovery";
 import { getFakeFaceControl } from "@/lib/face/fake-seam";
 import { isFakeFaceSeamEnabled } from "@/lib/face/seam-gate";
 import {
@@ -13,9 +15,9 @@ import {
   FACE_TRACK_SLOW_INTERVAL_MS,
   FOCUS_BLUR_DEBOUNCE_MS,
   FLAGGED_POLL_MS,
+  HEAD_TURN_TIMEOUT_MS,
   LIGHTING_RETRY_DELAY_MS,
   LIVENESS_TIMEOUT_MS,
-  MIN_VERIFY_INTERVAL_MS,
   PERIODIC_MAX_MS,
   PERIODIC_MIN_MS,
   VERIFY_FRAMES_PER_CHECK,
@@ -26,11 +28,14 @@ import {
 import { FULLSCREEN_PAUSE_DEDUPE_MS } from "@/lib/integrity/use-fullscreen-guard";
 
 /**
- * Client-side floor between verify POSTs (latest-wins deferral). Below the
- * route's 10/min limit so Q-transition + periodic + catch-up bursts never
- * spend the budget into a bricking 429.
+ * Client-side floor between verify POSTs (latest-wins deferral): 8 s in
+ * production, so Q-transition + periodic + catch-up bursts (30 POSTs/min at
+ * the raw 2 s advisory mirror) never spend the route's 10/min budget into a
+ * bricking 429. The E2E fake seam relaxes to the 2 s mirror so specs driving
+ * fast cadences (`setFacePeriodic({2500,3500})`) keep their POST timing.
+ * (Pure computation lives in cadence.ts — see `minClientVerifyGapMs`.)
  */
-const MIN_CLIENT_VERIFY_GAP_MS = Math.min(MIN_VERIFY_INTERVAL_MS, 8000);
+const MIN_CLIENT_VERIFY_GAP_MS = minClientVerifyGapMs(isFakeFaceSeamEnabled());
 
 /**
  * Bounded deferrals before a precheck-gated check proceeds unconditionally.
@@ -158,6 +163,21 @@ export function useFacePipeline(props: FacePipelineProps) {
     return initialFaceStatus === "ready" ? "ready" : "gate";
   });
   const [pausedReason, setPausedReason] = useState<PausedReason>("face");
+  /**
+   * The anti-replay head-turn challenge's required direction while a blink
+   * liveness wait is active (gate/recovering) — the overlays render "turn
+   * your head LEFT/RIGHT" from it. Null = no challenge running (or the
+   * tracker lacks `waitForHeadTurn` — feature-detected, auto-pass).
+   */
+  const [challengeSide, setChallengeSide] = useState<TurnSide | null>(null);
+  /**
+   * True after a turn-challenge FAILURE at the gate — flips the gate's
+   * liveness card from the idle copy to the failed/retry copy so a student
+   * who cannot produce the turn isn't soft-locked behind silent silence
+   * (Begin re-offers the full liveness; the lecturer exemption remains the
+   * escape hatch for a camera that genuinely can't see a turn).
+   */
+  const [challengeFailed, setChallengeFailed] = useState(false);
 
   // Latest-ref mirrors (synced in an effect — React Compiler-safe).
   const statusRef = useRef(status);
@@ -761,14 +781,56 @@ export function useFacePipeline(props: FacePipelineProps) {
   }
 
   // ── Blink recovery ─────────────────────────────────────────────
+  /**
+   * Anti-replay head-turn challenge, run AFTER a blink pass (gate + recovery).
+   * The side is chosen at random so a pre-recorded blink+turn video can't
+   * match it; trackers without `waitForHeadTurn` (legacy fakes, E2E fake
+   * before wiring) feature-detect to an auto-pass. Returns the challenge side
+   * (for overlay copy) and whether it passed; failure uses the SAME landing
+   * as a failed blink.
+   */
+  async function runTurnChallenge(
+    tracker: IFaceTracker,
+  ): Promise<{ side: TurnSide; passed: boolean }> {
+    const side = randomTurnSide();
+    if (typeof tracker.waitForHeadTurn !== "function") {
+      return { side, passed: true };
+    }
+    // Calibrate the pose baselines FIRST (yaw AND pitch share the "look
+    // straight" neutral): the play-time tracker is freshly booted with
+    // baseline null, and the uncalibrated geometric midpoint sits INSIDE the
+    // documented per-anatomy/webcam offset band (~15-20 yaw units at honest
+    // neutral). Without this, one challenge direction can auto-pass with no
+    // turn (halving the anti-replay guarantee) and the pitch advisory
+    // straddles its threshold for honest students. The student is necessarily
+    // facing the screen here — blink just passed.
+    await tracker.calibrateNeutral?.(900);
+    setChallengeSide(side);
+    const passed = (await tracker.waitForHeadTurn(HEAD_TURN_TIMEOUT_MS, side)) === "passed";
+    setChallengeSide(null);
+    setChallengeFailed(!passed);
+    return { side, passed };
+  }
+
   async function runRecovery() {
     const tracker = trackerRef.current;
     if (!tracker || disposedRef.current || isTerminalRef.current) return;
+    // Re-entrancy guard: a fast double-click on Recover must not run two
+    // blink/turn challenges concurrently — the second wait would overwrite
+    // the first's tracker challenge and the interleaved landings can bounce
+    // a recovered student back to `paused`. setStatusBoth updates statusRef
+    // synchronously, so this check closes the same-frame race.
+    if (statusRef.current === "recovering") return;
     setStatusBoth("recovering");
     const blink = await tracker.waitForBlink(LIVENESS_TIMEOUT_MS);
     if (disposedRef.current || isTerminalRef.current) return;
-    const step = recoverFlow(blink);
-    if (step === "failed") {
+    if (blink === "failed") {
+      setStatusBoth("paused");
+      return;
+    }
+    const challenge = await runTurnChallenge(tracker);
+    if (disposedRef.current || isTerminalRef.current) return;
+    if (!challenge.passed) {
       setStatusBoth("paused");
       return;
     }
@@ -783,7 +845,20 @@ export function useFacePipeline(props: FacePipelineProps) {
       if (res.ok && body.sessionStatus === "active") {
         nonceRef.current = body.nextNonce ?? nonceRef.current;
         setStatusBoth(recoveryLanding(hadStartVerifyRef.current));
-        if (hadStartVerifyRef.current) scheduleCadence();
+        if (hadStartVerifyRef.current) {
+          // Immediate identity re-check after recovery (mirrors the
+          // flagged-poll path): without it the next face verify is a full
+          // 30–45s cadence away, and whoever is at the desk can answer
+          // unverified. Safe to call here — cadence is clear-then-set (no
+          // stacking) and runVerify's min-gap deferral absorbs a POST <2s
+          // old. During feedback dwell shouldScheduleFaceCheck no-ops it
+          // (I22: feedback answers are locked, so no verification is owed
+          // until the next Q-transition fires one). On success the ready
+          // branch re-arms cadence itself; on any early return this arm
+          // stands as the safety net.
+          void runVerify("periodic");
+          scheduleCadence();
+        }
       } else if (body.error === "flagged") {
         setStatusBoth("flagged");
         startFlaggedPoll();
@@ -1002,7 +1077,8 @@ export function useFacePipeline(props: FacePipelineProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [questionId, questionVisible]);
 
-  // Gate Begin: run blink liveness, then the `'start'` verify (the authority).
+  // Gate Begin: run blink liveness, then the anti-replay head-turn
+  // challenge, then the `'start'` verify (the authority).
   async function beginGate() {
     const tracker = trackerRef.current;
     if (!tracker || disposedRef.current || isTerminalRef.current) return;
@@ -1010,6 +1086,12 @@ export function useFacePipeline(props: FacePipelineProps) {
     const blink = await tracker.waitForBlink(LIVENESS_TIMEOUT_MS);
     if (disposedRef.current || isTerminalRef.current) return;
     if (blink !== "passed") {
+      setStatusBoth("gate");
+      return;
+    }
+    const challenge = await runTurnChallenge(tracker);
+    if (disposedRef.current || isTerminalRef.current) return;
+    if (!challenge.passed) {
       setStatusBoth("gate");
       return;
     }
@@ -1048,6 +1130,8 @@ export function useFacePipeline(props: FacePipelineProps) {
   return {
     status,
     pausedReason,
+    challengeSide,
+    challengeFailed,
     beginGate,
     checkAgain,
     runRecovery,

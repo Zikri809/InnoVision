@@ -97,7 +97,7 @@ export default async function LecturerQuizResultsPage({
         .from("lecturer_session_view")
         // GET-envelope columns MINUS verify_nonce (the student replay token).
         .select(
-          "id, quiz_id, student_id, mode, status, score, started_at, submitted_at, last_activity_at, face_unavailable_at, face_exempt, face_fail_streak, focus_pause_count, attempt",
+          "id, quiz_id, student_id, mode, status, score, started_at, submitted_at, last_activity_at, face_unavailable_at, face_exempt, face_fail_streak, focus_pause_count, attempt, fullscreen_pause_count, face_fail_count, hand_pause_count",
         )
         .eq("quiz_id", id)
         // id DESC secondary keeps the representative-session pick deterministic
@@ -288,6 +288,15 @@ export default async function LecturerQuizResultsPage({
     nowMs: Date.now(),
   });
 
+  // Face-check truncation: the audit read is capped (RESULTS_AUDIT_LIMIT
+  // rows, newest-first, across ALL sessions of the quiz). At the documented
+  // 30-45s cadence a 1-hour assessment generates ~80-120 checks per student,
+  // so classes of ~6+ students overflow the cap and the OLDEST checks are
+  // dropped — a student whose checks all fall outside the window would
+  // otherwise silently render NO face-check line at all. Surface the flag so
+  // the dashboard can warn instead of lying.
+  const faceChecksTruncated = (faceChecks?.length ?? 0) >= RESULTS_AUDIT_LIMIT;
+
   // QC-2 prevention data: completed assessment sessions whose results are
   // still hidden — drives the close dialog's reveal-first CTA.
   const unrevealedCompleted = sessionRows.filter(
@@ -328,6 +337,7 @@ export default async function LecturerQuizResultsPage({
       totalQuestions={totalQuestions ?? 0}
       unrevealedCompleted={quiz.results_revealed_at == null ? unrevealedCompleted : 0}
       rows={rows}
+      faceChecksTruncated={faceChecksTruncated}
       incidentClips={incidentClips}
       questionInsights={insights}
     />

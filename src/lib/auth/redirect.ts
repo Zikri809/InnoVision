@@ -29,7 +29,14 @@ export function sanitizeRedirect(
   try {
     const resolved = new URL(raw, baseOrigin);
     if (resolved.origin !== baseOrigin) return "/dashboard";
-    return resolved.pathname + resolved.search + resolved.hash;
+    const out = resolved.pathname + resolved.search + resolved.hash;
+    // Dot-segment re-entry: WHATWG normalization resolves "/a/..//evil.com"
+    // (and %2e variants) to an OUTPUT of "//evil.com" — the origin check
+    // above passes because resolution happens against baseOrigin, but the
+    // returned path would be protocol-relative and router.push() treats that
+    // as an external navigation. Re-check the OUTPUT, not just the input.
+    if (out.startsWith("//")) return "/dashboard";
+    return out;
   } catch {
     return "/dashboard";
   }

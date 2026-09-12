@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { AttentionMonitor } from "./attention";
+import { LOOK_AWAY_ACCUMULATE_MS } from "./constants";
 
 describe("AttentionMonitor — second_face advisory", () => {
   it("does not fire for a single face", () => {
@@ -73,5 +74,65 @@ describe("AttentionMonitor — looked_away advisory", () => {
     for (let t = 0; t < 20000; t += 100) {
       expect(m.feed({ yaw: 90, centered: false, faceDetected: false }, t)).toEqual([]);
     }
+  });
+
+  it("accumulates head-DOWN pitch time (lap glance) even while centered", () => {
+    const m = new AttentionMonitor();
+    const firedAt: number[] = [];
+    // Sustained moderate downward tilt (inside the centered box, yaw fine).
+    for (let t = 0; t <= 12000; t += 100) {
+      const events = m.feed(
+        { yaw: 5, pitch: 30, centered: true, faceDetected: true },
+        t,
+      );
+      if (events.length > 0) firedAt.push(t);
+    }
+    expect(firedAt.length).toBeGreaterThanOrEqual(1);
+    expect(firedAt[0]).toBeGreaterThanOrEqual(LOOK_AWAY_ACCUMULATE_MS - 500);
+  });
+
+  it("accumulates chin-UP pitch time (|pitch| is bidirectional)", () => {
+    const m = new AttentionMonitor();
+    const firedAt: number[] = [];
+    for (let t = 0; t <= 12000; t += 100) {
+      const events = m.feed(
+        { yaw: 5, pitch: -30, centered: true, faceDetected: true },
+        t,
+      );
+      if (events.length > 0) firedAt.push(t);
+    }
+    expect(firedAt.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("moderate pitch inside the threshold never accumulates", () => {
+    const m = new AttentionMonitor();
+    for (let t = 0; t < 30000; t += 100) {
+      const events = m.feed(
+        { yaw: 5, pitch: 15, centered: true, faceDetected: true },
+        t,
+      );
+      expect(events).toEqual([]);
+    }
+  });
+
+  it("absent pitch keeps the pre-pitch behavior (legacy fakes)", () => {
+    const m = new AttentionMonitor();
+    for (let t = 0; t < 30000; t += 100) {
+      const events = m.feed({ yaw: 5, centered: true, faceDetected: true }, t);
+      expect(events).toEqual([]);
+    }
+  });
+
+  it("reset() clears accumulated state — a fresh monitor forgets prior away time", () => {
+    const m = new AttentionMonitor();
+    // Accumulate some away time (off-center samples build an episode).
+    for (let t = 0; t < 5000; t += 100) {
+      m.feed({ yaw: 40, pitch: 0, centered: false, faceDetected: true }, t);
+    }
+    m.reset();
+    // After reset, the monitor must behave like a brand-new instance: a
+    // single short away blip does NOT fire (the pre-reset episode is gone).
+    const events = m.feed({ yaw: 40, pitch: 0, centered: false, faceDetected: true }, 600000);
+    expect(events).toEqual([]);
   });
 });

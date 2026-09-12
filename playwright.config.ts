@@ -130,7 +130,7 @@ export default defineConfig({
         // Kill-switch for the ~60 hardcoded per-route budgets (VERIFY_RATE,
         // START_RATE, the non-tunable `invite:global` 100/min signup bucket,
         // ...) which the suite's 6-worker burst overflows mid-run — the
-        // 2026-09-04 mass-failure root cause (see TESTING §5.1). Inert in
+        // 2026-09-04 mass-failure root cause (see TESTING §5.3). Inert in
         // production (flag unset); rate limiting is still proven by the
         // route-level vitest tests, which seed buckets directly.
         E2E_RATE_LIMIT_DISABLED: "1",
@@ -163,9 +163,14 @@ export default defineConfig({
         // hardening-gate.ts): clipboard/fullscreen lockdown must not fight
         // headless runs (fullscreen events are flaky headless; copy guards
         // would break fixture-building copy). Build-time inlined like the
-        // seam above — a run without this var bakes the hardening IN, which
-        // is exactly what the opt-in e51 spec wants.
-        NEXT_PUBLIC_INTEGRITY_HARDENING_OFF: "1",
+        // seam above — a run WITHOUT this var bakes the hardening IN, which
+        // is exactly what the opt-in e51 spec wants: running the harness
+        // with INTEGRITY_E2E=1 omits the kill switch (run e51 ONLY in that
+        // mode — see TESTING §5.2; the main suite would fail against a
+        // hardening-ON build).
+        ...(process.env.INTEGRITY_E2E === "1"
+          ? {}
+          : { NEXT_PUBLIC_INTEGRITY_HARDENING_OFF: "1" }),
       },
     },
     {

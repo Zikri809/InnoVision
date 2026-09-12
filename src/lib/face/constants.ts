@@ -34,6 +34,24 @@ export const MAX_FRAME_BASE64_CHARS = 200_000;
 export const LIVENESS_TIMEOUT_MS = 8000;
 
 /**
+ * Anti-replay head-turn challenge (integrity hardening): after the blink
+ * passes at the gate or during recovery, the student must turn their head in
+ * a RANDOMLY CHOSEN direction. A pre-recorded blink video passes blink
+ * liveness AND the 1:1 face match; a live random turn cannot be pre-recorded.
+ * These are client mirrors (the challenge is client-side liveness, the server
+ * re-checks identity via the verify match anyway).
+ */
+
+/** How long the challenge waits for the required head turn before failing. */
+export const HEAD_TURN_TIMEOUT_MS = 10_000;
+
+/** |yaw| (user-relative proxy units) beyond which a turn counts as complete. */
+export const HEAD_TURN_YAW_MIN = 15;
+
+/** How long the yaw must STAY past the threshold before the turn resolves. */
+export const HEAD_TURN_SUSTAIN_MS = 300;
+
+/**
  * Adaptive duty-cycle tiers for the FaceTracker detection loop
  * (`setFrameInterval`). FULL runs during liveness-critical states (gate,
  * recovering): a blink's blendshape crossing lasts ~100ms, and the
@@ -165,6 +183,14 @@ export const LOOK_AWAY_WINDOW_MS = 60000;
 
 /** Head yaw beyond which the student counts as "looking away" (degrees). */
 export const LOOK_AWAY_YAW_DEG = 25;
+
+/**
+ * Head pitch beyond which the student counts as "looking away" (same proxy
+ * units as yaw; |pitch| counts BOTH directions — head-down lap glances and
+ * chin-up ceiling gazing are equally off-task). Advisory-only: consumed by
+ * `attention.ts` alongside the yaw threshold; no SQL twin to mirror.
+ */
+export const LOOK_AWAY_PITCH_DEG = 20;
 
 /** Throttle between identical advisory reports of one type (ms). */
 export const ADVISORY_THROTTLE_MS = 55000;

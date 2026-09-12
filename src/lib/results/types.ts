@@ -95,6 +95,12 @@ export type ResultsSessionRow = {
   face_exempt: boolean;
   face_fail_streak: number;
   focus_pause_count?: number | null;
+  /** 0043: fullscreen-exit pauses (counted, never auto-flagged). */
+  fullscreen_pause_count?: number | null;
+  /** 0044: hand-loss pauses (counted; flags at 3 like focus loss). */
+  hand_pause_count?: number | null;
+  /** 0044: LIFETIME failed face checks (face_fail_streak resets on a pass). */
+  face_fail_count?: number | null;
   /** QC-4 retakes: 1-based attempt ordinal (null/undefined for practice or pre-0032 rows). */
   attempt?: number | null;
   studentName: string | null;
@@ -120,6 +126,12 @@ export type ResultsSessionInput = {
   face_exempt: boolean;
   face_fail_streak: number;
   focus_pause_count?: number | null;
+  /** 0043: fullscreen-exit pauses (counted, never auto-flagged). */
+  fullscreen_pause_count?: number | null;
+  /** 0044: hand-loss pauses (counted; flags at 3 like focus loss). */
+  hand_pause_count?: number | null;
+  /** 0044: LIFETIME failed face checks (face_fail_streak resets on a pass). */
+  face_fail_count?: number | null;
   /** QC-4 retakes: 1-based attempt ordinal (null for pre-0032 rows). */
   attempt?: number | null;
 };

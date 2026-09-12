@@ -26,6 +26,9 @@ export type WorkbookLabels = {
   colDuration: string;
   colFaceFails: string;
   colFocusPauses: string;
+  colFullscreenPauses: string;
+  colHandPauses: string;
+  colAttempt: string;
   colType: string;
   colPrompt: string;
   unknownStudent: string;
@@ -128,9 +131,16 @@ export async function buildWorkbook(
     labels.colStarted,
     labels.colSubmitted,
     labels.colDuration,
-    ...(showIntegrity ? [labels.colFaceFails, labels.colFocusPauses] : []),
+    ...(showIntegrity
+      ? [labels.colFaceFails, labels.colFocusPauses, labels.colFullscreenPauses, labels.colHandPauses]
+      : []),
     ...model.questions.map((q) => `Q${q.index}`),
   ];
+
+  // Attempt column: only meaningful for retake-enabled assessments — appended
+  // after the per-question cells so the Q-columns stay contiguous.
+  const showAttempt = model.meta.mode === "assessment";
+  if (showAttempt) headerCells.push(labels.colAttempt);
 
   results.mergeCells(1, 1, 1, headerCells.length);
   const titleCell = results.getCell(1, 1);
@@ -171,17 +181,22 @@ export async function buildWorkbook(
       s.startedAtISO ? formatDateTime(s.startedAtISO) : "",
       s.submittedAtISO ? formatDateTime(s.submittedAtISO) : "",
       formatDurationSec(s.durationSec),
-      ...(showIntegrity ? [s.faceFails ?? "", s.focusPauses ?? ""] : []),
+      ...(showIntegrity
+        ? [s.faceFails ?? "", s.focusPauses ?? "", s.fullscreenPauses ?? "", s.handPauses ?? ""]
+        : []),
       ...s.answers.map((a) => a ?? labels.unanswered),
     ];
+    if (showAttempt) base.push(s.attempt != null ? `#${s.attempt}` : "");
     row.values = base;
 
     // Percentage column: real numeric percent format (sortable).
     const percentCell = row.getCell(7);
     percentCell.numFmt = "0%";
 
-    // Color the per-question cells by correctness.
-    const firstQCol = (showIntegrity ? 12 : 10) + 1;
+    // Color the per-question cells by correctness. firstQCol mirrors the
+    // header layout: 10 fixed columns + 4 integrity columns in assessment
+    // mode (2 in practice) — keep in sync with the headerCells spread above.
+    const firstQCol = (showIntegrity ? 14 : 10) + 1;
     s.answerCorrect.forEach((ok, qi) => {
       const cell = row.getCell(firstQCol + qi);
       if (ok === true) cell.font = { color: { argb: CORRECT_GREEN } };

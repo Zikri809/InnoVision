@@ -6,7 +6,7 @@ import {
   installFakeFaceTracker,
   enrollViaFacePage,
   setFaceVerifyMode,
-  triggerFaceBlink,
+  triggerFaceLiveness,
   setFacePeriodic,
   setFacePose,
 } from "./helpers";
@@ -89,7 +89,8 @@ test.describe("E16 — integrity suite", () => {
       const begin = sp.getByRole("button", { name: "Begin assessment", exact: true });
       await expect(begin).toBeEnabled({ timeout: 15_000 });
       await begin.click();
-      await triggerFaceBlink(sp);
+      // Blink + anti-replay head-turn challenge.
+      await triggerFaceLiveness(sp);
       await expect(sp.getByText("What is 3+3?", { exact: true })).toBeVisible({
         timeout: 15_000,
       });
@@ -146,8 +147,19 @@ test.describe("E16 — integrity suite", () => {
           await expect(
             studentPage.getByText("You left the exam window", { exact: false }),
           ).toBeVisible();
+          // An identity re-verify must FOLLOW the recovery (immediate
+          // post-recovery check, not the next 30–45s cadence tick). The 2s
+          // client min-gap defers the POST when a verify landed just before
+          // the pause, so 25s covers the worst case with wide margin;
+          // matching the round-tripped POST (any status) is the signal — the
+          // overlay-hidden assertion below pins that the recovery succeeded.
+          const reverify = studentPage.waitForResponse(
+            (r) => r.url().includes("/api/face/verify") && r.request().method() === "POST",
+            { timeout: 25_000 },
+          );
           await returnBtn.click();
-          await triggerFaceBlink(studentPage);
+          await triggerFaceLiveness(studentPage);
+          await reverify;
           await expect(returnBtn).toBeHidden({ timeout: 15_000 });
         }
       }
