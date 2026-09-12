@@ -31,16 +31,15 @@ import {
   type GenerationEvent,
 } from "@/lib/ai/events";
 import {
-  checkBodyLimit,
   checkSameOrigin,
   firstIssueMessage,
   internalError,
   invalidBody,
-  invalidJson,
   jsonError,
   notFound,
   payloadTooLarge,
   rateLimited,
+  readCappedJson,
   timeout,
   unprocessable,
 } from "@/lib/http";
@@ -92,9 +91,6 @@ export async function POST(request: Request, { params }: Params) {
   const originError = checkSameOrigin(request);
   if (originError) return originError;
 
-  const sizeError = checkBodyLimit(request, BODY_LIMIT_BYTES);
-  if (sizeError) return sizeError;
-
   const supabase = await createClient();
   const { id } = await params;
   if (!isUuid(id)) return notFound();
@@ -106,14 +102,10 @@ export async function POST(request: Request, { params }: Params) {
     return rateLimited("Too many AI generations. Try again in an hour.");
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return invalidJson();
-  }
+  const body = await readCappedJson(request, BODY_LIMIT_BYTES);
+  if (!body.ok) return body.response;
 
-  const parsed = GenerateStudentQuizSchema.safeParse(body);
+  const parsed = GenerateStudentQuizSchema.safeParse(body.data);
   if (!parsed.success) {
     return invalidBody(firstIssueMessage(parsed.error.issues, "Invalid generation payload."));
   }
@@ -323,6 +315,11 @@ async function runAiGeneration(
 
 /** Map a failed GenerateQuizResult to the exact legacy error response. */
 function generationErrorResponse(result: Exclude<GenerateQuizResult, { ok: true }>): NextResponse {
+  if (result.error === "cancelled") {
+      // audit-2 M-21: caller abort reads as `cancelled` 409, not the retryable
+      // timeout 503 (a mislabeled cancel provoked retries with fresh spend).
+      return jsonError("cancelled", "Generation cancelled.", 409);
+    }
   if (result.error === "timeout") {
     return timeout("The AI request timed out. Please try again.");
   }

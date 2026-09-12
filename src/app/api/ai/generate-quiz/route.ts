@@ -26,16 +26,15 @@ import {
   type WebSourceEntry,
 } from "@/lib/ai/tinyfish";
 import {
-  checkBodyLimit,
   firstIssueMessage,
   internalError,
   invalidBody,
-  invalidJson,
   jsonError,
   notDraft,
   notFound,
   payloadTooLarge,
   rateLimited,
+  readCappedJson,
   checkSameOrigin,
   timeout,
   unprocessable,
@@ -111,11 +110,6 @@ export async function POST(request: Request, context?: { params?: Promise<{ id?:
   const originError = checkSameOrigin(request);
   if (originError) return originError;
 
-  // Reject oversized bodies BEFORE buffering: extractedText can legitimately
-  // approach ~400 KB, so this generous cap only stops abusive payloads.
-  const sizeError = checkBodyLimit(request, 512 * 1024);
-  if (sizeError) return sizeError;
-
   // Authenticate before parsing — an unauthenticated caller must not be able
   // to force large-body materialization on the server.
   const {
@@ -123,14 +117,12 @@ export async function POST(request: Request, context?: { params?: Promise<{ id?:
   } = await supabase.auth.getUser();
   if (!user) return notFound();
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return invalidJson();
-  }
+  // Streaming-capped read (512 KB): extractedText can legitimately approach
+  // ~400 KB, so this generous cap only stops abusive payloads.
+  const body = await readCappedJson(request, 512 * 1024);
+  if (!body.ok) return body.response;
 
-  const parsed = GenerateQuizSchema.safeParse(body);
+  const parsed = GenerateQuizSchema.safeParse(body.data);
   if (!parsed.success) {
     return invalidBody(firstIssueMessage(parsed.error.issues, "Invalid generation payload."));
   }
@@ -519,6 +511,13 @@ async function runAiGeneration(
 
 /** Map a failed GenerateQuizResult to the exact legacy error response. */
 function generationErrorResponse(result: Exclude<GenerateQuizResult, { ok: true }>): NextResponse {
+  if (result.error === "cancelled") {
+    // audit-2 M-21: a caller abort (navigate/close) that raced past the save
+    // checkpoint must read as `cancelled` 409 — the old collapse to the
+    // retryable timeout 503 provoked instant retries that re-appended
+    // batches (compounding M-26). Same shape as the save checkpoint below.
+    return jsonError("cancelled", "Generation cancelled.", 409);
+  }
   if (result.error === "timeout") {
     return timeout("The AI request timed out. Please try again.");
   }
@@ -678,7 +677,28 @@ async function saveGeneration(
     .order("order_index", { ascending: true });
 
   if (readBackError) {
-    console.error("Saved question readback error:", readBackError);
+    // audit-2 L-11: a failed readback used to degrade to an ok-with-[]
+    // response — the client was told "success, 0 questions" for a committed
+    // save, which provoked a retry that could duplicate the appended batch
+    // (compounding M-26). Retry once; if it still fails, return the same
+    // honest saved_refresh_failed contract the quiz-object arm uses.
+    console.error("Saved question readback error (retrying once):", readBackError);
+    const retry = await supabase
+      .from("questions")
+      .select("id, quiz_id, order_index, type, prompt, options, correct_index, correct_indices, explanation")
+      .eq("quiz_id", quizId)
+      .order("order_index", { ascending: true });
+    if (retry.error) {
+      console.error("Saved question readback retry failed:", retry.error);
+      return { kind: "saved_refresh_failed", questions: [] };
+    }
+    return {
+      kind: "ok",
+      payload: {
+        quiz,
+        questions: retry.data ?? [],
+      },
+    };
   }
 
   return {

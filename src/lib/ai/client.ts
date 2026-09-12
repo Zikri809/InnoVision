@@ -38,7 +38,11 @@ export type ChatMessage = {
 
 export type ChatResult =
   | { ok: true; text: string }
-  | { ok: false; error: "timeout" | "ai_error"; message?: string };
+  // audit-2 M-21: "cancelled" (caller aborted — navigate/close/client
+  // timeout) is distinct from "timeout" (deadline). The legacy
+  // chatCompletions path used to collapse both, so a user-cancel surfaced as
+  // the retryable 503 timeout.
+  | { ok: false; error: "timeout" | "cancelled" | "ai_error"; message?: string };
 
 /**
  * Salvage the last JSON object embedded in a reasoning trace (Kenari docs:
@@ -174,7 +178,13 @@ export async function chatCompletions(opts: {
     const aborted =
       controller.signal.aborted ||
       (err instanceof Error && (err.name === "AbortError" || err.name === "TimeoutError"));
-    if (aborted) return { ok: false, error: "timeout" };
+    if (aborted) {
+      // audit-2 M-21: the outer (caller) abort and the deadline both abort
+      // this controller — tell them apart so a cancel never reads as the
+      // retryable timeout.
+      if (opts.signal?.aborted) return { ok: false, error: "cancelled" };
+      return { ok: false, error: "timeout" };
+    }
     const msg = err instanceof Error ? err.message : "Unknown AI error";
     return { ok: false, error: "ai_error", message: msg };
   } finally {

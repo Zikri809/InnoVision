@@ -107,8 +107,12 @@ export async function* readGenerationEvents(
           yield JSON.parse(line) as GenerationEvent;
         } catch {
           // A torn line means the route died mid-write; the caller's
-          // dead-stream/EOF handling owns the recovery.
-          yield { type: "error", code: "stream_corrupt", message: line.slice(0, 200) };
+          // dead-stream/EOF handling owns the recovery. audit-2 L-04: the
+          // raw fragment (partial model content_delta/reasoning text) used
+          // to be reflected into the client error — confusing at best,
+          // phishable at worst. Log it server-side, send static copy.
+          console.error("stream_corrupt fragment:", line.slice(0, 200));
+          yield { type: "error", code: "stream_corrupt", message: "Stream interrupted. Try again." };
         }
       }
     }
@@ -119,7 +123,8 @@ export async function* readGenerationEvents(
       try {
         yield JSON.parse(tail.trim()) as GenerationEvent;
       } catch {
-        yield { type: "error", code: "stream_corrupt", message: tail.trim().slice(0, 200) };
+        console.error("stream_corrupt tail fragment:", tail.trim().slice(0, 200));
+        yield { type: "error", code: "stream_corrupt", message: "Stream interrupted. Try again." };
       }
     }
   } finally {

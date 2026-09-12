@@ -9,15 +9,14 @@ import { createAiClient, chatCompletions, AI_MODEL } from "@/lib/ai/client";
 import { regenerateQuestion } from "@/lib/ai/quiz-prompt";
 import { normalizeOptions, GENERATION_BUDGET_MS, type AiQuestion } from "@/lib/ai/quiz-schema";
 import {
-  checkBodyLimit,
   firstIssueMessage,
   internalError,
   invalidBody,
-  invalidJson,
   jsonError,
   notDraft,
   notFound,
   rateLimited,
+  readCappedJson,
   checkSameOrigin,
   timeout,
   unprocessable,
@@ -65,17 +64,10 @@ export async function POST(request: Request, context?: { params?: Promise<{ id?:
   const auth = await requireLecturer(supabase);
   if (!auth.ok) return auth.response;
 
-  const sizeError = checkBodyLimit(request);
-  if (sizeError) return sizeError;
+  const body = await readCappedJson(request);
+  if (!body.ok) return body.response;
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return invalidJson();
-  }
-
-  const parsed = RegenerateQuestionSchema.safeParse(body);
+  const parsed = RegenerateQuestionSchema.safeParse(body.data);
   if (!parsed.success) {
     return invalidBody(firstIssueMessage(parsed.error.issues, "Invalid regenerate payload."));
   }
@@ -192,6 +184,11 @@ async function handleRegenerate(ctx: {
   });
 
   if (!result.ok) {
+    if (result.error === "cancelled") {
+      // audit-2 M-21: caller abort reads as `cancelled` 409, not the retryable
+      // timeout 503 (a mislabeled cancel provoked retries with fresh spend).
+      return jsonError("cancelled", "Generation cancelled.", 409);
+    }
     if (result.error === "timeout") {
       return timeout("The AI request timed out. Please try again.");
     }

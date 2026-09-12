@@ -131,7 +131,10 @@ describe("chatCompletions", () => {
     controller.abort();
     const res = await promise;
     expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.error).toBe("timeout");
+    // audit-2 M-21: a CALLER abort maps to `cancelled` (409 at the route),
+    // not the retryable `timeout` 503 — collapsing them provoked instant
+    // retries after a user cancel.
+    if (!res.ok) expect(res.error).toBe("cancelled");
   });
 
   it("passes temperature and jsonMode through to the provider", async () => {

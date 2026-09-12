@@ -372,7 +372,7 @@ export function parseQuestionJson(text: string): ParsedQuestion {
 
 export type GenerateQuizResult =
   | { ok: true; quiz: AiQuiz }
-  | { ok: false; error: "invalid_ai_output" | "ai_unavailable" | "timeout"; message?: string };
+  | { ok: false; error: "invalid_ai_output" | "ai_unavailable" | "timeout" | "cancelled"; message?: string };
 
 /** Compute the remaining budget for the next call (clamped to a minimum of 1s). */
 export function remainingBudgetMs(deadline: number, safetyMs = 1_000): number {
@@ -452,6 +452,7 @@ export async function generateQuiz(opts: {
     ];
     const res = await chat(messages, remaining);
     if (!res.ok) {
+      if (res.error === "cancelled") return { ok: false, error: "cancelled" };
       return res.error === "timeout"
         ? { ok: false, error: "timeout" }
         : { ok: false, error: "ai_unavailable", message: res.message };
@@ -509,7 +510,7 @@ export async function generateQuiz(opts: {
 
 export type RegenerateResult =
   | { ok: true; question: AiQuestion }
-  | { ok: false; error: "invalid_ai_output" | "ai_unavailable" | "timeout"; message?: string };
+  | { ok: false; error: "invalid_ai_output" | "ai_unavailable" | "timeout" | "cancelled"; message?: string };
 
 /**
  * Regenerate a single question with one validation retry. The caller only
@@ -539,6 +540,7 @@ export async function regenerateQuestion(opts: {
 
     const res = await chat(messages, remaining);
     if (!res.ok) {
+      if (res.error === "cancelled") return { ok: false, error: "cancelled" };
       return res.error === "timeout"
         ? { ok: false, error: "timeout" }
         : { ok: false, error: "ai_unavailable", message: res.message };
