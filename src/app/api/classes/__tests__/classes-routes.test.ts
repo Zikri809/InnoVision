@@ -501,7 +501,7 @@ describe("I-C5 & Dispute Audit — GET /api/classes/[id] on archived classes", (
 });
 
 describe("I-C6 — POST /api/classes/join on archived classes", () => {
-  it("I-C6: student join attempt on archived class → 400 class_archived", async () => {
+  it("I-C6: student join attempt on archived class folds to 404 invalid_code (audit-2 M-04: no existence oracle)", async () => {
     const client = studentContext();
     client.rpcResult = { data: { error: "class_archived" }, error: null };
 
@@ -513,9 +513,43 @@ describe("I-C6 — POST /api/classes/join on archived classes", () => {
     });
 
     const res = await joinRoute.POST(req);
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(404);
     const body = await res.json();
-    expect(body.error).toBe("class_archived");
+    expect(body.error).toBe("invalid_code");
+  });
+
+  it("audit-2 H-11: NULL-matric refusal (RPC matric_required) → 403 matric_required", async () => {
+    const client = studentContext();
+    client.rpcResult = { data: { error: "matric_required" }, error: null };
+
+    const { joinRoute } = await importHandlers();
+    const req = new Request("http://localhost/api/classes/join", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({ code: "ABCDEF" }),
+    });
+
+    const res = await joinRoute.POST(req);
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error).toBe("matric_required");
+  });
+
+  it("audit-2 L-14: a null RPC payload violates the never-500 contract → typed 503, not a crash", async () => {
+    const client = studentContext();
+    client.rpcResult = { data: null, error: null };
+
+    const { joinRoute } = await importHandlers();
+    const req = new Request("http://localhost/api/classes/join", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({ code: "ABCDEF" }),
+    });
+
+    const res = await joinRoute.POST(req);
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.error).toBe("internal");
   });
 });
 

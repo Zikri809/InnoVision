@@ -17,8 +17,7 @@ import { joinErrorKey } from "./join-errors";
 
 /**
  * /join/[code] confirm island — the scan target for the lecturer's QR code.
- *
- * The page (server component) resolved the auth branch; this island only
+ * * The page (server component) resolved the auth branch; this island only
  * renders for logged-in students with a format-valid code. The POST is
  * user-initiated on purpose: link-preview bots and scanners hitting a shared
  * /join URL must not fire enrollment RPCs or burn DB lockout counters
@@ -49,6 +48,14 @@ export function JoinConfirmClient({ code }: { code: string }) {
       });
       const body = await res.json();
       if (!res.ok) {
+        // audit-2 H-11: the RPC (authority) can still refuse a NULL-matric
+        // student (e.g. the profile changed between page render and click) —
+        // route them into the capture flow instead of showing an error.
+        if (body?.error === "matric_required") {
+          router.replace("/matric-capture");
+          router.refresh();
+          return;
+        }
         const key = joinErrorKey(res.status, body?.error);
         setError(key === "generic" ? tCommon("errorGeneric") : t(key));
         return;

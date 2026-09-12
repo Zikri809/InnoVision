@@ -21,14 +21,16 @@ export function joinErrorKey(status: number, apiError: string | undefined): Join
       return "invalidCode";
     case "already_enrolled":
       return "alreadyEnrolled";
-    case "class_archived":
-      return "classArchived";
     case "join_locked":
       return "joinLocked";
     case "rate_limited":
       return "rateLimited";
     case "forbidden":
       return "forbidden";
+    // NOTE (audit-2): "class_archived" no longer exists on the wire (M-04:
+    // folded to 404 invalid_code — no existence oracle) and "matric_required"
+    // is intercepted by the island (router.replace to /matric-capture, H-11)
+    // before this mapper runs. Neither case belongs here.
     // Session died between render and click (requireStudent 401) or the
     // CSRF origin check tripped — join-specific copy would lie here.
     case "unauthorized":

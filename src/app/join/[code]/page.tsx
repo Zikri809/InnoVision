@@ -86,7 +86,7 @@ export default async function JoinPage({ params }: Params) {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, matric_no")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -109,6 +109,13 @@ export default async function JoinPage({ params }: Params) {
         cta={t("lecturerBack")}
       />
     );
+  }
+
+  // audit-2 H-11: the matric gate is enforced by join_class (the authority),
+  // but catching it HERE turns the refusal into the normal AU-2 capture flow
+  // instead of a dead-end error after the student clicks confirm.
+  if (!profile.matric_no) {
+    redirect("/matric-capture");
   }
 
   return (

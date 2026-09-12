@@ -10,10 +10,13 @@ describe("joinErrorKey", () => {
   it("maps every typed business error from /api/classes/join", () => {
     expect(joinErrorKey(400, "invalid_code")).toBe("invalidCode");
     expect(joinErrorKey(409, "already_enrolled")).toBe("alreadyEnrolled");
-    expect(joinErrorKey(400, "class_archived")).toBe("classArchived");
     expect(joinErrorKey(429, "join_locked")).toBe("joinLocked");
     expect(joinErrorKey(429, "rate_limited")).toBe("rateLimited");
     expect(joinErrorKey(403, "forbidden")).toBe("forbidden");
+    // audit-2 M-04: class_archived is folded to invalid_code ROUTE-side (no
+    // existence oracle), so the mapper must never see it; audit-2 H-11:
+    // matric_required is intercepted by the island (router.replace) before
+    // the mapper runs. Both absent here on purpose.
   });
 
   it("maps transport/auth/CSRF errors to the generic key", () => {

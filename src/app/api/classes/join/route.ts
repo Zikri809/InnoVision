@@ -21,8 +21,16 @@ const JOIN_RATE = { limit: 20, windowMs: 60_000 };
  * Errors (typed, never a 500):
  *   400 malformed code   → invalid_code (format)
  *   404 unknown code     → invalid_code (not found; generic, no oracle)
+ *   403 matric required  → matric_required (route to /matric-capture)
  *   409 already enrolled → already_enrolled
  *   403 not a student    → forbidden
+ *
+ * audit-2 M-04: archived classes answer with the SAME 404 invalid_code as
+ * unknown codes — the previous distinct 400 class_archived was a code-
+ * existence oracle (the alphabet is public; one POST confirmed a guessed
+ * code belongs to a real class without enrolling). already_enrolled stays
+ * distinct: it is self-information (the caller's own enrollment state), not
+ * an oracle.
  */
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -78,7 +86,18 @@ export async function POST(request: Request) {
 
   const result = data as
     | { class: { id: string; title: string } }
-    | { error: "invalid_code" | "already_enrolled" | "not_student" | "class_archived" | "join_locked" };
+    | { error: "invalid_code" | "already_enrolled" | "not_student" | "matric_required" | "class_archived" | "join_locked" };
+
+  // audit-2 L-14 hardening: the typed-never-500 contract holds only if the
+  // DB honors the RPC's return shape. A null/primitive payload (transport
+  // layer violation) must fold to a typed 503, not `"class" in null` → 500.
+  if (!result || typeof result !== "object") {
+    console.error("join_class RPC returned a non-object payload:", data);
+    return NextResponse.json(
+      { error: "internal", message: "Could not join the class right now." },
+      { status: 503 },
+    );
+  }
 
   if ("class" in result && result.class) {
     return NextResponse.json({ class: result.class }, { status: 200 });
@@ -98,10 +117,19 @@ export async function POST(request: Request) {
       );
     case "not_student":
       return NextResponse.json({ error: "forbidden" }, { status: 403 });
-    case "class_archived":
+    case "matric_required":
+      // audit-2 H-11: NULL-matric students are refused at the authority (the
+      // RPC); the client routes them to the one-time capture page.
       return NextResponse.json(
-        { error: "class_archived", message: "This class has been archived and cannot be joined." },
-        { status: 400 },
+        { error: "matric_required", message: "Capture your matric number before joining a class." },
+        { status: 403 },
+      );
+    case "class_archived":
+      // audit-2 M-04: folded into the unknown-code answer — no existence
+      // oracle. (Honest UX cost: an archived class QR says "invalid code".)
+      return NextResponse.json(
+        { error: "invalid_code", message: "That join code is not valid." },
+        { status: 404 },
       );
     case "invalid_code":
     default:
