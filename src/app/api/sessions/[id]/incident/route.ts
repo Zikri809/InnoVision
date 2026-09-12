@@ -116,7 +116,10 @@ export async function POST(request: Request, { params }: Params) {
   // is unsupported); storing mp4 bytes under a .webm path breaks playback.
   const ext = isMp4 ? "mp4" : "webm";
   const contentType = isMp4 ? "video/mp4" : "video/webm";
-  const path = `${id}/${Date.now()}.${ext}`;
+  // audit-2 L-10: a random suffix de-duplicates same-ms double-submits —
+  // with upsert:false the loser used to 500 (clip lost) instead of storing
+  // both forensic clips.
+  const path = `${id}/${Date.now()}-${crypto.randomUUID()}.${ext}`;
   const admin = createAdminClient();
 
   const { error: uploadError } = await admin.storage
@@ -144,7 +147,10 @@ export async function POST(request: Request, { params }: Params) {
     ["active", "paused", "flagged"].includes(recheck.status as string);
   if (!stillCollectable) {
     // Orphan cleanup (best-effort, same posture as the insert-failure arm).
-    await admin.storage.from("incident-footage").remove([path]);
+    // audit-2 L-10: a failed remove used to be swallowed silently — log the
+    // path so the ≤30-day SQL prune window is known to have started late.
+    const { error: discardError } = await admin.storage.from("incident-footage").remove([path]);
+    if (discardError) console.error("incident discard remove failed:", path, discardError);
     return invalidBody("This session no longer accepts incident clips.");
   }
 
@@ -163,8 +169,10 @@ export async function POST(request: Request, { params }: Params) {
     await admin.storage
       .from("incident-footage")
       .remove([path])
-      .catch(function ignoreRemoveFailure() {
-        /* cleanup is best-effort — the 503 below is the operator signal */
+      .catch(function ignoreRemoveFailure(err) {
+        // audit-2 L-10: best-effort, but the failure must be visible — the
+        // rowless object now lingers until the 30-day SQL prune.
+        console.error("incident cleanup remove failed:", path, err);
       });
     console.error("incident insert error:", insertError);
     return internalError("Could not store the incident clip right now.");

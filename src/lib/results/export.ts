@@ -237,23 +237,29 @@ export function computeDistributions(
  *
  * Deliberate grading semantics, NOT strict dashboard parity: the dashboard
  * ranks in_progress above completed (GROUP_RANK), while the export keeps the
- * completed attempt because that is where a score exists. Within terminal
- * attempts the newest wins (route feeds sessions started_at DESC, id DESC —
- * deterministic ties). Results rows, distribution math, and attemptedCount all
- * draw from exactly this session set so the workbook can never contradict
- * itself.
+ * completed attempt because that is where a score exists.
+ *
+ * audit-2 H-09: WITHIN terminal attempts, COMPLETED outranks FLAGGED. The
+ * old "newest terminal wins" let a newer FLAGGED retake (score NULL —
+ * a flagged attempt never records one) hide a valid completed score: the
+ * gradebook cell rendered "—", the student was excluded from the average,
+ * and the distribution ran on the flagged partial, while the student's own
+ * EndScreen still showed the attempt-1 score. A flagged attempt is now the
+ * representative ONLY when no completed attempt exists (which is exactly the
+ * integrity-conservative fallback the flag semantics intend).
  *
  * ORDER CONTRACT (RA-1 gradebook consumes this too): the input MUST be fed
  * started_at DESC, id DESC (the export route's order, api/quizzes/[id]/export/
- * route.ts) — the loop keeps the FIRST terminal row encountered, so "newest
- * terminal wins" only holds under that feed order. The gradebook read/sort
- * replicates it; a differently-ordered feed yields nondeterministic retake
- * cells.
+ * route.ts) — the loop keeps the FIRST completed row encountered, then the
+ * first flagged row; "newest completed wins" only holds under that feed
+ * order. The gradebook read/sort replicates it; a differently-ordered feed
+ * yields nondeterministic retake cells.
  */
 export function selectRepresentativeSessions(
   sessions: ExportSessionInput[],
 ): ExportSessionInput[] {
   const byStudent = new Map<string, ExportSessionInput>();
+  const isCompleted = (s: ExportSessionInput) => s.status === "completed";
   const isTerminal = (s: ExportSessionInput) =>
     s.status === "completed" || s.status === "flagged";
   for (const s of sessions) {
@@ -262,6 +268,14 @@ export function selectRepresentativeSessions(
       byStudent.set(s.student_id, s);
       continue;
     }
+    // Newest completed wins outright — nothing displaces it.
+    if (isCompleted(cur)) continue;
+    // Any completed attempt beats the held flagged/in_progress one.
+    if (isCompleted(s)) {
+      byStudent.set(s.student_id, s);
+      continue;
+    }
+    // Held terminal (flagged) keeps beating non-terminal challengers.
     if (isTerminal(cur)) continue;
     if (!isTerminal(s) && (toEpochMs(s.started_at) ?? 0) <= (toEpochMs(cur.started_at) ?? 0)) {
       continue;

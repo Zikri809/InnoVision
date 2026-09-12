@@ -92,12 +92,13 @@ export async function GET(_request: Request, { params }: Params) {
   const owner = await requireQuizOwner(supabase, id);
   if (!owner.ok) return owner.response;
 
+  // audit-2 M-22: origin check ABOVE the limiter (reveal-route precedent).
+  const originError = checkSameOrigin(_request);
+  if (originError) return originError;
+
   if (!rateLimit(`export:${owner.userId}`, EXPORT_RATE)) {
     return rateLimited("Too many exports. Try again in a minute.");
   }
-
-  const originError = checkSameOrigin(_request);
-  if (originError) return originError;
 
   // Lecturer's locale drives workbook label language.
   const [{ data: profile }, { data: cls }] = await Promise.all([

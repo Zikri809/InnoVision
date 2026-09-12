@@ -53,12 +53,14 @@ export async function GET(_request: Request, { params }: Params) {
   const owner = await requireClassOwner(supabase, id);
   if (!owner.ok) return owner.response;
 
+  // audit-2 M-22: origin check ABOVE the limiter — a rejected cross-origin
+  // probe must not burn export budget (reveal-route precedent).
+  const originError = checkSameOrigin(_request);
+  if (originError) return originError;
+
   if (!rateLimit(`gradebook-export:${owner.userId}`, EXPORT_RATE)) {
     return rateLimited("Too many exports. Try again in a minute.");
   }
-
-  const originError = checkSameOrigin(_request);
-  if (originError) return originError;
 
   const [{ data: profile }, { data: cls }] = await Promise.all([
     supabase.from("profiles").select("locale").eq("id", owner.userId).maybeSingle(),

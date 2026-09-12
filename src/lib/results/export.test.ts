@@ -147,6 +147,70 @@ describe("buildExportModel — roster-driven rows", () => {
     expect(row.score).toBe(2);
   });
 
+  it("audit-2 H-09: a newer FLAGGED (scoreless) retake does not hide the older completed score", () => {
+    // Feed order mirrors the route: started_at DESC, id DESC — the flagged
+    // attempt is seen FIRST (newest). Under the old "newest terminal wins"
+    // rule it displaced the completed attempt and the gradebook rendered "—".
+    const input = baseInput({
+      quiz: { title: "T", mode: "practice", status: "live" },
+      sessions: [
+        {
+          id: "flagged-retake",
+          student_id: "stu-2",
+          status: "flagged",
+          score: null,
+          started_at: new Date(NOW - 1000).toISOString(), // NEWEST start
+          submitted_at: null,
+          last_activity_at: new Date(NOW - 1000).toISOString(),
+          face_fail_streak: 0,
+          focus_pause_count: 0,
+        },
+        {
+          id: "completed-first",
+          student_id: "stu-2",
+          status: "completed",
+          score: 1,
+          started_at: new Date(NOW - HOUR).toISOString(),
+          submitted_at: new Date(NOW - 30 * 60 * 1000).toISOString(),
+          last_activity_at: new Date(NOW - 30 * 60 * 1000).toISOString(),
+          face_fail_streak: 0,
+          focus_pause_count: 0,
+        },
+      ],
+      answers: [
+        { session_id: "completed-first", question_id: "q1", selected_index: 1, is_correct: true },
+      ],
+    });
+    const model = buildExportModel(input);
+    const row = model.students.find((s) => s.studentId === "stu-2")!;
+    expect(row.status).toBe("completed");
+    expect(row.score).toBe(1);
+    // Distribution must run on the completed attempt's answers.
+    expect(model.meta.attemptedCount).toBe(1);
+  });
+
+  it("audit-2 H-09: flagged remains the representative when NO completed attempt exists", () => {
+    const input = baseInput({
+      quiz: { title: "T", mode: "practice", status: "live" },
+      sessions: [
+        {
+          id: "flagged-only",
+          student_id: "stu-2",
+          status: "flagged",
+          score: null,
+          started_at: new Date(NOW - 1000).toISOString(),
+          submitted_at: null,
+          last_activity_at: new Date(NOW - 1000).toISOString(),
+          face_fail_streak: 0,
+          focus_pause_count: 0,
+        },
+      ],
+    });
+    const model = buildExportModel(input);
+    const row = model.students.find((s) => s.studentId === "stu-2")!;
+    expect(row.status).toBe("flagged");
+  });
+
   it("breaks equal-started_at terminal ties deterministically by id DESC", () => {
     const input = baseInput({
       quiz: { title: "T", mode: "practice", status: "live" },

@@ -22,7 +22,25 @@ const MAX_BUCKETS = 10_000;
 // asserts a 429 — limits are proven by route-level vitest tests that seed
 // buckets directly (_seedRateLimit) in their own process — so disabling here
 // is test-only and inert in production (flag unset).
+//
+// audit-2 M-03: the flag deadens EVERY throttle with no signal if it ever
+// reaches a production runtime (leaked env or a promoted harness-built
+// artifact). The kill-switch now announces itself loudly when it fires in a
+// production process — mirroring hardening-gate.ts's warn posture — so the
+// condition is visible in prod logs instead of silently deadening the
+// join/invite/AI-cost guards. CI/deploy checks should additionally assert
+// the flag is absent from the prod image (see audit-2 M-14 for the same
+// posture on the seam flags).
 const RATE_LIMIT_DISABLED = process.env.E2E_RATE_LIMIT_DISABLED === "1";
+const IS_PROD_RUNTIME = process.env.NODE_ENV === "production";
+if (RATE_LIMIT_DISABLED && IS_PROD_RUNTIME && process.env.NEXT_PHASE !== "phase-production-build") {
+  console.warn(
+    "⚠️ E2E_RATE_LIMIT_DISABLED=1 is active in a PRODUCTION runtime — " +
+      "every rate limit in this process is DISABLED (audit-2 M-03). " +
+      "This must only ever be the e2e harness; if you see this in a real " +
+      "deployment, remove the flag and redeploy.",
+  );
+}
 
 /** Prune + record a hit for `key`; returns true if within limit, false if exceeded. */
 export function rateLimit(
