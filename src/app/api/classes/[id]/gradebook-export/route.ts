@@ -88,23 +88,28 @@ export async function GET(_request: Request, { params }: Params) {
   const columnQuizzes = (quizzes ?? []).slice(0, GRADEBOOK_QUIZ_LIMIT);
   const quizIds = columnQuizzes.map((q) => q.id);
 
+  // audit-1 P1-9: an EMPTY id set makes PostgREST's `.in()` a 400/503 — a
+  // brand-new class must export an (empty) workbook, not a 500. Skip both
+  // bounded reads when there are no column quizzes.
   const [{ data: sessionRows, error: sessionsError }, { data: questionCountRows, error: questionCountError }] =
-    await Promise.all([
-      supabase
-        .from("lecturer_session_view")
-        .select(
-          "id, quiz_id, student_id, status, score, started_at, submitted_at, last_activity_at, face_fail_streak, focus_pause_count, attempt",
-        )
-        .in("quiz_id", quizIds)
-        .order("started_at", { ascending: false })
-        .order("id", { ascending: false })
-        .limit(SESSIONS_LIMIT),
-      supabase
-        .from("questions")
-        .select("quiz_id")
-        .in("quiz_id", quizIds)
-        .limit(QUESTION_COUNT_LIMIT),
-    ]);
+    quizIds.length === 0
+      ? [{ data: [], error: null }, { data: [], error: null }]
+      : await Promise.all([
+          supabase
+            .from("lecturer_session_view")
+            .select(
+              "id, quiz_id, student_id, status, score, started_at, submitted_at, last_activity_at, face_fail_streak, focus_pause_count, fullscreen_pause_count, hand_pause_count, face_fail_count, attempt",
+            )
+            .in("quiz_id", quizIds)
+            .order("started_at", { ascending: false })
+            .order("id", { ascending: false })
+            .limit(SESSIONS_LIMIT),
+          supabase
+            .from("questions")
+            .select("quiz_id")
+            .in("quiz_id", quizIds)
+            .limit(QUESTION_COUNT_LIMIT),
+        ]);
 
   if (sessionsError || questionCountError) {
     console.error("Gradebook export read error:", sessionsError ?? questionCountError);
@@ -127,6 +132,9 @@ export async function GET(_request: Request, { params }: Params) {
       last_activity_at: s.last_activity_at,
       face_fail_streak: s.face_fail_streak,
       focus_pause_count: s.focus_pause_count,
+      fullscreen_pause_count: s.fullscreen_pause_count,
+      hand_pause_count: s.hand_pause_count,
+      face_fail_count: s.face_fail_count,
       attempt: s.attempt,
     });
     sessionsByQuiz.set(s.quiz_id, list);
@@ -169,6 +177,9 @@ export async function GET(_request: Request, { params }: Params) {
           (q) => `${q.title} (/${q.questionCount})${q.revealed ? "" : " *"}`,
         ),
         t("lecturer.gradebook.colCumulative"),
+        t("workbook.colFaceFails"),
+        t("workbook.colFullscreenPauses"),
+        t("workbook.colHandPauses"),
       ],
       ...model.rows.map((row, i): SheetRow => [
         i + 1,
@@ -176,12 +187,18 @@ export async function GET(_request: Request, { params }: Params) {
         row.fullName,
         ...row.cells.map((cell) => (cell ? cell.percent : null)),
         row.cumulativePercent,
+        row.faceFails,
+        row.fullscreenPauses,
+        row.handPauses,
       ]),
       [
         null,
         null,
         t("lecturer.gradebook.footerAverage"),
         ...model.quizzes.map((q) => q.averagePercent),
+        null,
+        null,
+        null,
         null,
       ],
     ],
@@ -245,7 +262,8 @@ export async function GET(_request: Request, { params }: Params) {
     });
 
     sheets.push({
-      name: sanitizeSheetName(quiz.title),
+      // Raw title here — the assembly loop sanitizes + dedupes centrally.
+      name: quiz.title,
       rows: [
         [
           t("workbook.colNum"),
@@ -272,7 +290,20 @@ export async function GET(_request: Request, { params }: Params) {
   // ── Assemble the workbook ──────────────────────────────────────────
   const { default: ExcelJS } = await import("exceljs");
   const wb = new ExcelJS.Workbook();
-  for (const sheet of sheets) {
+  // audit-1 P1-7: ExcelJS THROWS on a duplicate sheet name (case-insensitive)
+  // and "Summary" is reserved by the sheet above — two quizzes titled
+  // "midterm"/"MIDTERM" (or a quiz literally named "Summary") used to 500 the
+  // whole export. Sanitized names are deduped within Excel's 31-char budget
+  // (" (2)", " (3)"…), matching the per-quiz route's try/catch posture.
+  const usedSheetNames = new Set<string>();
+  for (const [idx, sheet] of sheets.entries()) {
+    if (idx === 0) {
+      // The reserved Summary mirror keeps its name AND blocks quiz sheets
+      // from claiming it (or any case variant) below.
+      usedSheetNames.add(sheet.name.toLowerCase());
+    } else {
+      sheet.name = sanitizeSheetName(sheet.name, usedSheetNames);
+    }
     const ws = wb.addWorksheet(sheet.name);
     for (const row of sheet.rows) ws.addRow(row);
     ws.getRow(1).font = { bold: true };
@@ -293,7 +324,15 @@ export async function GET(_request: Request, { params }: Params) {
   });
 }
 
-function sanitizeSheetName(name: string): string {
-  const cleaned = name.replace(/[\\/*?:[\]]/g, "").trim();
-  return cleaned.slice(0, 31) || "Quiz";
+function sanitizeSheetName(name: string, used: Set<string>): string {
+  const base = name.replace(/[\/*?:[\]]/g, "").trim().slice(0, 31) || "Quiz";
+  let candidate = base;
+  let n = 2;
+  while (used.has(candidate.toLowerCase())) {
+    const suffix = ` (${n})`;
+    candidate = base.slice(0, 31 - suffix.length) + suffix;
+    n += 1;
+  }
+  used.add(candidate.toLowerCase());
+  return candidate;
 }

@@ -325,10 +325,28 @@ async function main() {
   record("AP2-D9 archived destination denied (class_archived)", Boolean(archivedDestErr) && archivedDestErr.message.includes("class_archived"), archivedDestErr?.message ?? "no error");
 
   // AP2-D10 — the 30-cap is deliberately NOT enforced on clone.
+  // 0045 §11: append_question now enforces the 30 cap itself, so the
+  // over-cap fixture is built 30-via-RPC + the 31st via service-role table
+  // insert; the pins then assert BOTH the APPEND cap and the uncapped clone.
   const bigQuiz = await createDraftQuiz(clientA, lecturerA.id, classA1, "Big Source");
-  for (let i = 1; i <= 31; i++) {
+  for (let i = 1; i <= 30; i++) {
     await appendQuestion(clientA, bigQuiz, i);
   }
+  const overCap = await clientA.rpc("append_question", {
+    p_quiz_id: bigQuiz,
+    p_type: "mcq",
+    p_prompt: "Question 31?",
+    p_options: ["opt 31A", "opt 31B", "opt 31C"],
+    p_correct_index: 1,
+    p_explanation: "",
+  });
+  record("AP2-D10b append_question 31st question → quiz_question_limit_exceeded (0045 cap)",
+    Boolean(overCap.error) && overCap.error.message.includes("quiz_question_limit_exceeded"),
+    overCap.error?.message ?? "no error");
+  const { error: q31Err } = await admin
+    .from("questions")
+    .insert({ quiz_id: bigQuiz, order_index: 30, type: "mcq", prompt: "Question 31 (direct)?", options: ["opt 31A", "opt 31B", "opt 31C"], correct_index: 1 });
+  assertNoError("direct insert question 31", { error: q31Err });
   const { data: bigCloneId, error: bigCloneErr } = await clientA.rpc("clone_quiz", {
     p_src_quiz_id: bigQuiz,
     p_dest_class_id: classA1,

@@ -178,3 +178,127 @@ describe("typed builder sanity", () => {
     await expect(res.json()).resolves.toMatchObject({ error: "invalid_body" });
   });
 });
+
+// ── audit-1 P1-5: streaming-capped body readers ────────────────────────
+import { readCappedFormData, readCappedJson, readCappedText } from "@/lib/http";
+
+/** A genuinely CHUNKED request: stream body, no content-length header. */
+function chunkedRequest(
+  body: string,
+  chunkSize = 7,
+  headers: Record<string, string> = {},
+): Request {
+  const encoder = new TextEncoder();
+  const bytes = encoder.encode(body);
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        controller.enqueue(bytes.slice(i, i + chunkSize));
+      }
+      controller.close();
+    },
+  });
+  return new Request("http://localhost/api/x", {
+    method: "POST",
+    headers,
+    body: stream,
+    duplex: "half",
+  } as RequestInit & { duplex: "half" });
+}
+
+describe("readCappedJson (audit-1 P1-5)", () => {
+  it("parses a body within the cap", async () => {
+    const r = await readCappedJson(chunkedRequest('{"a":1}'), 1024);
+    expect(r).toEqual({ ok: true, data: { a: 1 } });
+  });
+
+  it("413s a chunked body over the cap EVEN WITHOUT content-length (the bypass)", async () => {
+    const big = JSON.stringify({ blob: "x".repeat(4096) });
+    const r = await readCappedJson(chunkedRequest(big), 1024);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.response.status).toBe(413);
+  });
+
+  it("413s a lying content-length header without reading the body", async () => {
+    const r = await readCappedJson(
+      req("http://localhost/api/x", { "content-length": "999999" }),
+      1024,
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.response.status).toBe(413);
+  });
+
+  it("accepts a body exactly AT the cap (boundary is inclusive)", async () => {
+    const payload = JSON.stringify({ a: "x".repeat(1010) });
+    const r = await readCappedJson(chunkedRequest(payload), payload.length);
+    expect(r.ok).toBe(true);
+  });
+
+  it("400s malformed JSON within the cap", async () => {
+    const r = await readCappedJson(chunkedRequest("{nope"), 1024);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.response.status).toBe(400);
+  });
+
+  it("400s a missing body", async () => {
+    const r = await readCappedJson(req("http://localhost/api/x"));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.response.status).toBe(400);
+  });
+});
+
+describe("readCappedText (audit-1 P1-5)", () => {
+  it("returns text within the cap (pause optional-body path)", async () => {
+    const r = await readCappedText(chunkedRequest('{"reason":"focus_lost"}'), 1024);
+    expect(r).toEqual({ ok: true, text: '{"reason":"focus_lost"}' });
+  });
+
+  it("413s an unbounded text() attempt over the cap", async () => {
+    const r = await readCappedText(chunkedRequest("x".repeat(4096)), 1024);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.response.status).toBe(413);
+  });
+});
+
+describe("readCappedFormData (audit-1 P1-5)", () => {
+  function multipartRequest(parts: Record<string, string | Blob>): Request {
+    const form = new FormData();
+    for (const [k, v] of Object.entries(parts)) form.append(k, v);
+    return new Request("http://localhost/api/x", { method: "POST", body: form });
+  }
+
+  it("parses a small multipart body", async () => {
+    const r = await readCappedFormData(
+      multipartRequest({ clip: new Blob([new Uint8Array([0x1a, 0x45, 0xdf, 0xa3])]), reason: "focus_lost" }),
+      64 * 1024,
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.form.get("reason")).toBe("focus_lost");
+      expect((r.form.get("clip") as Blob).size).toBe(4);
+    }
+  });
+
+  it("413s a streamed multipart body over the cap (chunked, no header)", async () => {
+    // Build the multipart ENVELOPE from a real form, then stream a body that
+    // exceeds the cap mid-flight.
+    const envelope = multipartRequest({ clip: "x" });
+    const contentType = envelope.headers.get("content-type") ?? "";
+    const big = new Uint8Array(128 * 1024).fill(0x78);
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(big);
+        controller.close();
+      },
+    });
+    const lying = new Request("http://localhost/api/x", {
+      method: "POST",
+      headers: { "content-type": contentType },
+      body: stream,
+      duplex: "half",
+    } as RequestInit & { duplex: "half" });
+    const r = await readCappedFormData(lying, 64 * 1024);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.response.status).toBe(413);
+  });
+});

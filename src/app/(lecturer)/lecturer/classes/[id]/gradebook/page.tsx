@@ -75,16 +75,20 @@ export default async function GradebookPage({
   // Over-cap flag from the same filtered source list (not raw class quizzes).
   const truncated = quizList.length > GRADEBOOK_QUIZ_LIMIT;
   const columnQuizzes = quizList.slice(0, GRADEBOOK_QUIZ_LIMIT);
+  const quizIds = columnQuizzes.map((q) => q.id);
 
   // One bounded read for question counts (quiz_id only — no prompt leakage).
-  const { data: questionRows, error: questionsError } = await supabase
-    .from("questions")
-    .select("quiz_id")
-    .in(
-      "quiz_id",
-      columnQuizzes.map((q) => q.id),
-    )
-    .limit(QUESTION_COUNT_LIMIT);
+  // audit-1 P1-9: an EMPTY id set makes PostgREST's `.in()` a 400/503 — a
+  // brand-new class (no published assessment quizzes yet) must degrade to an
+  // empty matrix, not an error panel, so both bounded reads below are
+  // skipped when there are no column quizzes.
+  const { data: questionRows, error: questionsError } = quizIds.length
+    ? await supabase
+        .from("questions")
+        .select("quiz_id")
+        .in("quiz_id", quizIds)
+        .limit(QUESTION_COUNT_LIMIT)
+    : { data: [], error: null };
   if (questionsError) {
     console.error("Gradebook questions fetch error:", questionsError);
     return <LoadErrorPanel />;
@@ -96,18 +100,17 @@ export default async function GradebookPage({
 
   // Sessions for all column quizzes in ONE read, ordered to satisfy
   // selectRepresentativeSessions' contract (started_at DESC, id DESC).
-  const { data: sessionRows, error: sessionsError } = await supabase
-    .from("lecturer_session_view")
-    .select(
-      "id, quiz_id, student_id, status, score, started_at, submitted_at, last_activity_at, face_fail_streak, focus_pause_count, attempt",
-    )
-    .in(
-      "quiz_id",
-      columnQuizzes.map((q) => q.id),
-    )
-    .order("started_at", { ascending: false })
-    .order("id", { ascending: false })
-    .limit(20_000);
+  const { data: sessionRows, error: sessionsError } = quizIds.length
+    ? await supabase
+        .from("lecturer_session_view")
+        .select(
+          "id, quiz_id, student_id, status, score, started_at, submitted_at, last_activity_at, face_fail_streak, focus_pause_count, fullscreen_pause_count, hand_pause_count, face_fail_count, attempt",
+        )
+        .in("quiz_id", quizIds)
+        .order("started_at", { ascending: false })
+        .order("id", { ascending: false })
+        .limit(20_000)
+    : { data: [], error: null };
   if (sessionsError) {
     console.error("Gradebook sessions fetch error:", sessionsError);
     return <LoadErrorPanel />;
@@ -129,6 +132,9 @@ export default async function GradebookPage({
       last_activity_at: s.last_activity_at,
       face_fail_streak: s.face_fail_streak,
       focus_pause_count: s.focus_pause_count,
+      fullscreen_pause_count: s.fullscreen_pause_count,
+      hand_pause_count: s.hand_pause_count,
+      face_fail_count: s.face_fail_count,
       attempt: s.attempt,
     });
     sessionsByQuiz.set(s.quiz_id, list);

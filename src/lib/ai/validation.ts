@@ -164,6 +164,10 @@ export const GenerateStudentQuizSchema = z.object({
     .optional(),
   difficulty: QuizDifficultySchema.optional().default("mixed"),
   language: z.enum(["en", "ms", "auto"]).optional().default("auto"),
+  // audit-1 P1-10: stable per-RUN id (client keeps one UUID across retries
+  // of the same run). An APPEND retry after a post-commit abort returns the
+  // already-saved rows instead of duplicating them.
+  generationId: z.string().uuid("generationId must be a valid UUID.").optional(),
 }).strict();
 
 export type GenerateStudentQuizInput = z.infer<typeof GenerateStudentQuizSchema>;

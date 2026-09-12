@@ -8,9 +8,9 @@ import {
   checkSameOrigin,
   firstIssueMessage,
   invalidBody,
-  invalidJson,
   internalError,
   notFound,
+  readCappedJson,
 } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
@@ -51,14 +51,11 @@ export async function POST(request: Request, { params }: Params) {
     return mapFaceError({ error: "rate_limited" }) ?? internalError("Something went wrong.");
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return invalidJson();
-  }
+  // audit-1 P1-5: streaming-capped read (had no body cap at all).
+  const body = await readCappedJson(request);
+  if (!body.ok) return body.response;
 
-  const parsed = AdvisorySchema.safeParse(body);
+  const parsed = AdvisorySchema.safeParse(body.data);
   if (!parsed.success) {
     return invalidBody(firstIssueMessage(parsed.error.issues, "Invalid advisory payload."));
   }

@@ -3,7 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { isUuid } from "@/lib/classes/roster";
 import { rateLimit } from "@/lib/classes/rate-limit";
 import { isWellFormedQuestionImagePath, QUESTION_IMAGES_BUCKET } from "@/lib/media/validation";
-import { internalError, notFound, rateLimited } from "@/lib/http";
+import { internalError, notFound, rateLimited, unauthorized } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +31,9 @@ export async function GET(_request: Request, { params }: Params) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return notFound();
+  // audit-1 P1-12: 401 (not 404) for logged-out — honest signal, same
+  // rendering outcome for an <img>, no oracle change for signed-in callers.
+  if (!user) return unauthorized();
 
   if (!rateLimit(`q-image-sign:${user.id}`, SIGN_RATE)) {
     return rateLimited("Too many image requests. Try again shortly.");

@@ -4,7 +4,13 @@ import { isUuid } from "@/lib/classes/roster";
 import { rateLimit } from "@/lib/classes/rate-limit";
 import { mapFaceError } from "@/lib/face/rpc-mapping";
 import { z } from "zod";
-import { checkSameOrigin, internalError, invalidBody, invalidJson } from "@/lib/http";
+import {
+  checkSameOrigin,
+  internalError,
+  invalidBody,
+  invalidJson,
+  readCappedText,
+} from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 
@@ -57,9 +63,13 @@ export async function POST(request: Request, { params }: Params) {
 
   // Body is OPTIONAL: the hand-loss client sends `{}`, the focus-loss client
   // sends `{reason:'focus_lost'}`, and an empty body defaults to hand_loss.
-  // (Read via text() — Request.content-length is unreliable across runtimes.)
+  // audit-1 P1-5: the raw `request.text()` here was UNBOUNDED — a chunked
+  // request could buffer arbitrarily before the tiny PauseSchema ran. 1 KB
+  // is far above any honest body ({"reason":"fullscreen_exit"} ≈ 30 B).
   let reason = "hand_loss";
-  const text = await request.text();
+  const textRead = await readCappedText(request, 1024);
+  if (!textRead.ok) return textRead.response;
+  const text = textRead.text;
   if (text.trim().length > 0) {
     let body: unknown;
     try {

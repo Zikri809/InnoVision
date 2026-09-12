@@ -32,6 +32,7 @@ const JOIN_CODE_LENGTH = 6;
 export function StudentClassesClient({ classes }: { classes: StudentClassCard[] }) {
   const router = useRouter();
   const t = useTranslations("student.classes");
+  const tAuth = useTranslations("authErrors");
   const tCommon = useTranslations("common");
 
   const [joinOpen, setJoinOpen] = useState(false);
@@ -56,6 +57,10 @@ export function StudentClassesClient({ classes }: { classes: StudentClassCard[] 
       if (!res.ok) {
         if (res.status === 409) {
           toast.info(t("alreadyEnrolled"));
+        } else if (res.status === 401) {
+          // audit-1 P1-12: an expired auth session must not surface as a raw
+          // "unauthorized" code — show the dedicated copy.
+          setError(tAuth("sessionExpired"));
         } else {
           setError(body.message ?? body.error ?? tCommon("errorGeneric"));
         }

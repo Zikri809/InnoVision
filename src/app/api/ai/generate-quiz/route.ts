@@ -928,6 +928,15 @@ function streamGeneration(ctx: GenerationContext, request: Request): Response {
           send({ type: "saved_refresh_failed", questions: saved.questions });
           return;
         }
+        // audit-1 P1-10 (post-commit abort honesty): the save RPC has no
+        // abort signal — an abort landing mid-RPC still commits, and the
+        // old code answered a possibly-dead stream with `done`. The user
+        // asked to cancel; tell them cancelled (rows remain tagged and the
+        // builder refresh shows the truth on return).
+        if (internal.signal.aborted) {
+          send({ type: "cancelled" });
+          return;
+        }
         send({ type: "done", payload: saved.payload });
       } catch (err) {
         console.error("generation stream error:", err);

@@ -379,6 +379,9 @@ async function saveGeneration(
       p_quiz_id: quizId,
       p_questions: rows,
       p_mode: mode,
+      // audit-1 P1-10: an append retry after a post-commit abort is deduped
+      // by this tag (the RPC returns the saved rows instead of re-appending).
+      p_generation_id: ctx.body.generationId ?? null,
     } as unknown as never,
   );
 
@@ -551,6 +554,15 @@ function streamGeneration(ctx: GenerationContext, request: Request): Response {
           } else {
             await sendError(saved.response);
           }
+          return;
+        }
+        // audit-1 P1-10 (post-commit abort honesty): the RPC has NO
+        // abort signal — an abort landing mid-RPC still commits, and the
+        // old code answered the dead stream with `done` (never delivered)
+        // or nothing. Say CANCELLED: the user asked to cancel, and the
+        // idempotency key makes the retry safe either way.
+        if (internal.signal.aborted) {
+          send({ type: "cancelled" });
           return;
         }
         send({ type: "done", payload: saved.payload });

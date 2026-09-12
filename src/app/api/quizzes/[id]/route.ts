@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { QUESTION_IMAGES_BUCKET } from "@/lib/media/validation";
 import { requireQuizOwner } from "@/lib/quizzes/guards";
 import { isUuid } from "@/lib/classes/roster";
 import { rateLimit } from "@/lib/classes/rate-limit";
@@ -179,10 +181,53 @@ export async function DELETE(request: Request, { params }: Params) {
     );
   }
 
+  // audit-1 P1-15: capture every referenced storage path BEFORE the delete
+  // (questions cascade away with the quiz row — after it, the references no
+  // longer exist to be read). Sweep is best-effort AFTER the delete commits:
+  // failure mode = swept orphan, never a dangling pointer on a live quiz.
+  const paths = new Map<string, string[]>();
+  const push = (bucket: string, path: string) => {
+    if (!path) return;
+    paths.set(bucket, [...(paths.get(bucket) ?? []), path]);
+  };
+  const { data: questionRows } = await supabase
+    .from("questions")
+    .select("image_path")
+    .eq("quiz_id", id);
+  for (const row of questionRows ?? []) {
+    if (row.image_path) push(QUESTION_IMAGES_BUCKET, row.image_path);
+  }
+  const { data: quizRow } = await supabase
+    .from("quizzes")
+    .select("source_file_url, sources")
+    .eq("id", id)
+    .maybeSingle();
+  if (quizRow?.source_file_url) push("quiz-sources", quizRow.source_file_url);
+  if (Array.isArray(quizRow?.sources)) {
+    for (const entry of quizRow.sources) {
+      if (
+        entry &&
+        typeof entry === "object" &&
+        typeof (entry as { storage_path?: unknown }).storage_path === "string"
+      ) {
+        push("quiz-sources", (entry as { storage_path: string }).storage_path);
+      }
+    }
+  }
+
   const { error } = await supabase.from("quizzes").delete().eq("id", id);
   if (error) {
     console.error("Delete quiz error:", error);
     return internalError("Could not delete the quiz right now.");
+  }
+
+  if (paths.size > 0) {
+    const admin = createAdminClient();
+    for (const [bucket, bucketPaths] of paths) {
+      // storage.remove takes a path list; ≤31 paths per quiz (30 questions
+      // + sources) — a single call per bucket, bounded by construction.
+      void admin.storage.from(bucket).remove(bucketPaths).catch(() => {});
+    }
   }
 
   return NextResponse.json({ ok: true });

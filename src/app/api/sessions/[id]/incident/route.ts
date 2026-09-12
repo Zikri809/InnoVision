@@ -4,7 +4,15 @@ import { requireStudent } from "@/lib/classes/guards";
 import { isUuid } from "@/lib/classes/roster";
 import { rateLimit } from "@/lib/classes/rate-limit";
 import { MAX_INCIDENT_BYTES } from "@/lib/face/constants";
-import { checkSameOrigin, internalError, invalidBody, notFound, payloadTooLarge } from "@/lib/http";
+import {
+  checkSameOrigin,
+  internalError,
+  invalidBody,
+  MULTIPART_OVERHEAD_BYTES,
+  notFound,
+  payloadTooLarge,
+  readCappedFormData,
+} from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 // A ~5-minute WebM at 250 kbps is ≈9 MB; give the upload + storage write room.
@@ -59,22 +67,17 @@ export async function POST(request: Request, { params }: Params) {
     return invalidBody("This session no longer accepts incident clips.");
   }
 
-  // Cheap pre-parse rejection: formData() buffers the WHOLE multipart body —
-  // refuse oversized bodies before materializing them.
-  const declaredLength = Number(request.headers.get("content-length") ?? "0");
-  if (
-    Number.isFinite(declaredLength) &&
-    declaredLength > MAX_INCIDENT_BYTES + 64 * 1024
-  ) {
-    return payloadTooLarge(`Clip exceeds the ${MAX_INCIDENT_BYTES}-byte limit.`);
-  }
-
-  let form: FormData;
-  try {
-    form = await request.formData();
-  } catch {
-    return invalidBody("Expected multipart/form-data with a `clip` file.");
-  }
+  // audit-1 P1-5: STREAM-SAFE cap. formData() buffers the whole multipart
+  // body, and the old content-length pre-check was spoofable (chunked
+  // transfers carry no header) — a lying request could buffer gigabytes
+  // before the per-file size check ever ran. The capped reader pipes the
+  // body through a counting stream that aborts at the limit.
+  const formRead = await readCappedFormData(
+    request,
+    MAX_INCIDENT_BYTES + MULTIPART_OVERHEAD_BYTES,
+  );
+  if (!formRead.ok) return formRead.response;
+  const form = formRead.form;
 
   const clip = form.get("clip");
   const reason = String(form.get("reason") ?? "unknown").slice(0, 40);
@@ -122,6 +125,27 @@ export async function POST(request: Request, { params }: Params) {
   if (uploadError) {
     console.error("incident upload error:", uploadError);
     return internalError("Could not store the incident clip right now.");
+  }
+
+  // audit-1 P1-4 (TOCTOU): the collectable-status gate ran BEFORE the slow
+  // multipart buffer + storage upload (seconds of wall clock, maxDuration
+  // 60). Re-select through the USER client now — if the session stopped
+  // collecting in that window (submit / reset / removal), discard the
+  // freshly-uploaded object and refuse; post-submit clips must not land.
+  const { data: recheck } = await supabase
+    .from("quiz_sessions")
+    .select("student_id, mode, status")
+    .eq("id", id)
+    .maybeSingle();
+  const stillCollectable =
+    recheck &&
+    recheck.student_id === auth.userId &&
+    recheck.mode === "assessment" &&
+    ["active", "paused", "flagged"].includes(recheck.status as string);
+  if (!stillCollectable) {
+    // Orphan cleanup (best-effort, same posture as the insert-failure arm).
+    await admin.storage.from("incident-footage").remove([path]);
+    return invalidBody("This session no longer accepts incident clips.");
   }
 
   const { error: insertError } = await admin.from("incident_clips").insert({

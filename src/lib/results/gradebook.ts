@@ -71,6 +71,16 @@ export type GradebookRow = {
   cells: (GradebookCell | null)[];
   /** Cumulative % over attempted quizzes; null = attempted nothing. */
   cumulativePercent: number | null;
+  /**
+   * Integrity sums over the row's REPRESENTATIVE sessions (audit-1 P1-16:
+   * fullscreen/hand farming used to be invisible in the cross-quiz
+   * gradebook while the per-quiz export showed the counters). faceFails
+   * mirrors the per-quiz export convention: lifetime face_fail_count when
+   * present, else the resettable streak.
+   */
+  faceFails: number;
+  fullscreenPauses: number;
+  handPauses: number;
 };
 
 export type GradebookModel = {
@@ -164,12 +174,29 @@ export function buildGradebookModel(input: BuildGradebookInput): GradebookModel 
     const cumulativePercent =
       sumTotal > 0 ? Math.round((sumScore / sumTotal) * 100) : null;
 
+    // Integrity sums run over the representative sessions THEMSELVES —
+    // not the score-bearing cells — so a flagged/0-score session's
+    // counter still shows (that is exactly the session worth seeing).
+    let faceFails = 0;
+    let fullscreenPauses = 0;
+    let handPauses = 0;
+    for (const col of columns) {
+      const s = col.repByStudent.get(r.student_id);
+      if (!s) continue;
+      faceFails += s.face_fail_count ?? s.face_fail_streak ?? 0;
+      fullscreenPauses += s.fullscreen_pause_count ?? 0;
+      handPauses += s.hand_pause_count ?? 0;
+    }
+
     return {
       studentId: r.student_id,
       fullName: r.full_name,
       matricNo: r.matric_no,
       cells,
       cumulativePercent,
+      faceFails,
+      fullscreenPauses,
+      handPauses,
     };
   });
 

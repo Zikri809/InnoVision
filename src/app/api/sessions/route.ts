@@ -9,10 +9,10 @@ import {
   forbidden,
   internalError,
   invalidBody,
-  invalidJson,
   jsonError,
   notFound,
   rateLimited,
+  readCappedJson,
   unauthorized,
 } from "@/lib/http";
 
@@ -48,14 +48,12 @@ export async function POST(request: Request) {
     return rateLimited("Too many quiz starts. Try again in a minute.");
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return invalidJson();
-  }
+  // audit-1 P1-5: streaming-capped read (chunked/lying-header bodies used
+  // to materialize unbounded before Zod ran).
+  const body = await readCappedJson(request);
+  if (!body.ok) return body.response;
 
-  const parsed = StartSessionSchema.safeParse(body);
+  const parsed = StartSessionSchema.safeParse(body.data);
   if (!parsed.success) {
     return invalidBody(firstIssueMessage(parsed.error.issues, "Invalid start payload."));
   }

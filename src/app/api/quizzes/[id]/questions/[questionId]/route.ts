@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { QUESTION_IMAGES_BUCKET } from "@/lib/media/validation";
 import { requireQuizOwner } from "@/lib/quizzes/guards";
 import { isUuid } from "@/lib/classes/roster";
 import { rateLimit } from "@/lib/classes/rate-limit";
@@ -155,7 +157,7 @@ export async function DELETE(request: Request, { params }: Params) {
     .delete()
     .eq("id", questionId)
     .eq("quiz_id", id)
-    .select("id")
+    .select("id, image_path")
     .maybeSingle();
 
   if (error) {
@@ -165,6 +167,17 @@ export async function DELETE(request: Request, { params }: Params) {
   }
   if (!deleted) {
     return notFound();
+  }
+
+  // audit-1 P1-15: the row is gone — its image object must not linger as a
+  // permanent orphan. Read from the DELETED row (delete-first keeps the
+  // failure mode a swept orphan, never a dangling pointer).
+  const imagePath = (deleted as { image_path: string | null }).image_path;
+  if (imagePath) {
+    void createAdminClient()
+      .storage.from(QUESTION_IMAGES_BUCKET)
+      .remove([imagePath])
+      .catch(() => {});
   }
 
   return NextResponse.json({ ok: true });

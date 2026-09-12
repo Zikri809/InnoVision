@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { requireStudent } from "@/lib/classes/guards";
 import { normalizeJoinCode } from "@/lib/classes/join-code";
 import { rateLimit } from "@/lib/classes/rate-limit";
-import { checkSameOrigin } from "@/lib/http";
+import { checkSameOrigin, readCappedJson } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 
@@ -41,18 +41,16 @@ export async function POST(request: Request) {
     );
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
+  // audit-1 P1-5: streaming-capped read (no cap here at all before).
+  const body = await readCappedJson(request);
+  if (!body.ok) return body.response;
+
+  const raw: unknown = body.data;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
 
-  if (!body || typeof body !== "object" || Array.isArray(body)) {
-    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
-  }
-
-  const rawBody = body as Record<string, unknown>;
+  const rawBody = raw as Record<string, unknown>;
   const normalized = normalizeJoinCode(
     typeof rawBody.code === "string" ? rawBody.code : undefined,
   );

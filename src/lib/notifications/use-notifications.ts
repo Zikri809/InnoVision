@@ -69,8 +69,13 @@ export function useNotifications({
   const handleInsert = useCallback((row: RawNotificationRow) => {
     const item = mapRawRow(row);
     if (!item) return;
+    // audit-1 P1-14: a realtime reconnect can REPLAY an INSERT the poll
+    // already delivered — count the badge only for ids the list has not
+    // seen, or every replay double-counts an unread. The next poll's
+    // absolute badge recount heals any residual drift.
+    const seen = new Set(itemsRef.current.map((n) => n.id));
     setItems((prev) => mergeNotifications(prev, [item], LIST_CAP));
-    if (item.readAt == null) setUnreadCount((n) => n + 1);
+    if (item.readAt == null && !seen.has(item.id)) setUnreadCount((n) => n + 1);
   }, []);
 
   /** Badge count — index-only scan over the partial unread index. */
@@ -105,7 +110,10 @@ export function useNotifications({
         const mapped = listRes.data
           .map((r) => mapRawRow(r as RawNotificationRow))
           .filter((x): x is NotificationItem => x !== null);
-        setItems(mergeNotifications([], mapped, LIST_CAP));
+        // audit-1 P1-14: MERGE into the current list (incoming rows win on
+        // duplicate ids, so read-state stays fresh) — the old replace wiped
+        // everything a loadMore had appended, 8s later, every poll.
+        setItems((prev) => mergeNotifications(prev, mapped, LIST_CAP));
         setHasMore(mapped.length >= PAGE_SIZE);
       }
       if (typeof badge.count === "number") setUnreadCount(badge.count);
@@ -158,10 +166,18 @@ export function useNotifications({
             snapshot.filter((x) => target.has(x.id) && x.readAt == null).length,
         ),
       );
-      const { error } = await supabase.rpc("mark_notifications_read", {
-        p_ids: ids,
-      });
-      if (error) {
+      try {
+        const { error } = await supabase.rpc("mark_notifications_read", {
+          p_ids: ids,
+        });
+        if (error) {
+          setItems(snapshot);
+          void refreshBadge();
+        }
+      } catch {
+        // audit-1 P1-14: PostgREST THROWS on network failure (the
+        // refreshBadge comment documents exactly this) — the optimistic
+        // mark-read must roll back here as well, not only on {error}.
         setItems(snapshot);
         void refreshBadge();
       }
@@ -185,10 +201,16 @@ export function useNotifications({
         n - snapshot.filter((x) => x.seq <= cursor && x.readAt == null).length,
       ),
     );
-    const { error } = await supabase.rpc("mark_notifications_read_before", {
-      p_seq: cursor,
-    });
-    if (error) {
+    try {
+      const { error } = await supabase.rpc("mark_notifications_read_before", {
+        p_seq: cursor,
+      });
+      if (error) {
+        setItems(snapshot);
+        void refreshBadge();
+      }
+    } catch {
+      // Same throw-path rollback as markRead (audit-1 P1-14).
       setItems(snapshot);
       void refreshBadge();
     }

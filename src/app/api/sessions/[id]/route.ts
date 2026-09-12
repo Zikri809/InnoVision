@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { isUuid } from "@/lib/classes/roster";
 import { rateLimit } from "@/lib/classes/rate-limit";
-import { internalError, notFound, rateLimited } from "@/lib/http";
+import { internalError, notFound, rateLimited, unauthorized } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 
@@ -45,7 +45,10 @@ export async function GET(_request: Request, { params }: Params) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return notFound();
+  // audit-1 P1-12: a logged-out caller gets 401 (recoverable — the play
+  // client redirects to login); a signed-in caller probing foreign sessions
+  // still gets 404 (no-oracle discipline unchanged).
+  if (!user) return unauthorized();
 
   // Rate-limit BEFORE the profile read (cheap, and an unauthenticated caller
   // with a session cookie is still throttled).

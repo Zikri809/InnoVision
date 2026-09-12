@@ -130,14 +130,23 @@ async function main() {
   });
   record("SQ-D2b creator sets share code via RPC", !shareErr && sharedRow?.share_code === finalCode);
 
+  // 0045 §14 (audit-1 §2.1): the shared arm of the SELECT policy is GONE —
+  // a shared quiz is invisible to B at the TABLE level (no corpus/share-code
+  // enumeration without the code); shared reads go through the code-gated
+  // resolve RPC and the code-less player view below.
   const { data: visible } = await B.from("student_quizzes")
-    .select("id, title, created_by")
+    .select("id, title, created_by, share_code")
     .eq("id", quiz.id);
-  record("SQ-D2c B sees SHARED quiz", (visible ?? []).length === 1);
-  record(
-    "SQ-D2d shared read does not expose created_by to B? (RLS row-level only — column strip is API-layer)",
-    (visible ?? [])[0]?.created_by !== undefined, // RLS exposes the column; API layer strips it. Documented.
-  );
+  record("SQ-D2c B sees ZERO rows of a SHARED quiz (creator-only table SELECT)",
+    (visible ?? []).length === 0,
+    `rows=${(visible ?? []).length}`);
+
+  // The code-gated path still resolves for B (hold the code → play).
+  const { data: resolvedB, error: resolveBErr } = await B.rpc("resolve_shared_student_quiz", {
+    p_code: finalCode,
+  });
+  record("SQ-D2c-b resolve RPC with the code still works for B",
+    !resolveBErr && !!resolvedB, resolveBErr?.message ?? JSON.stringify(resolvedB));
 
   // ── SQ-D3: questions TABLE stays creator-only; VIEW hides the key ──
   const { data: bRows } = await B.from("student_quiz_questions")

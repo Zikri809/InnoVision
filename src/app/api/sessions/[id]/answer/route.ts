@@ -5,16 +5,15 @@ import { isUuid } from "@/lib/classes/roster";
 import { rateLimit } from "@/lib/classes/rate-limit";
 import { AnswerSchema } from "@/lib/sessions/validation";
 import {
-  checkBodyLimit,
   checkSameOrigin,
   firstIssueMessage,
   forbidden,
   internalError,
   invalidBody,
-  invalidJson,
   jsonError,
   notFound,
   rateLimited,
+  readCappedJson,
   unauthorized,
 } from "@/lib/http";
 
@@ -70,17 +69,12 @@ export async function POST(request: Request, { params }: Params) {
 
   // Body cap: selectedIndices is Zod-capped at 5 elements, but a huge JSON
   // body would be parsed BEFORE Zod sees it (sibling-route convention).
-  const sizeError = checkBodyLimit(request);
-  if (sizeError) return sizeError;
+  // audit-1 P1-5: streaming-capped read replaces the header-only
+  // checkBodyLimit (chunked bodies bypassed it) + unbounded json() pair.
+  const body = await readCappedJson(request);
+  if (!body.ok) return body.response;
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return invalidJson();
-  }
-
-  const parsed = AnswerSchema.safeParse(body);
+  const parsed = AnswerSchema.safeParse(body.data);
   if (!parsed.success) {
     return invalidBody(firstIssueMessage(parsed.error.issues, "Invalid answer payload."));
   }

@@ -144,6 +144,11 @@ export function GenerateFromFileDialog({
   const [error, setError] = useState<string | null>(null);
   const submitLock = useRef(false);
   const activeAbortRef = useRef<AbortController | null>(null);
+  // audit-1 P1-10: stable per-RUN idempotency id. Created at the FIRST
+  // submit of a run, REUSED across Try-again retries, cleared only when a
+  // run definitively succeeds — so a retry after a post-commit abort
+  // dedupes server-side instead of duplicating the append.
+  const generationIdRef = useRef<string | null>(null);
 
   function reset() {
     activeAbortRef.current?.abort();
@@ -301,6 +306,8 @@ export function GenerateFromFileDialog({
     activeAbortRef.current = controller;
     const timer = setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
 
+    if (!generationIdRef.current) generationIdRef.current = crypto.randomUUID();
+
     try {
       // Student-only legacy path: the lecturer surface returned above (its
       // body lives in generationBody for the NDJSON stream).
@@ -311,6 +318,8 @@ export function GenerateFromFileDialog({
         language,
         // Omit when empty — an explicit [] would trip the schema's min(1).
         ...(files.length > 0 ? { sourcePaths: files.map((f) => f.path) } : {}),
+        // audit-1 P1-10: reused across retries; cleared on success below.
+        generationId: generationIdRef.current,
       };
 
       const res = await fetch(target, {
@@ -406,6 +415,9 @@ export function GenerateFromFileDialog({
    * reset. error/cancelled keep the dialog open (trace + Try again). */
   function handleGenerationOutcome(kind: string) {
     if (kind === "done" || kind === "saved_refresh_failed") {
+      // Success: retire the run's idempotency id — a deliberate NEXT
+      // generation must mint a fresh one (intended appends stay intended).
+      generationIdRef.current = null;
       toast.success(t("questionsGenerated"));
       router.refresh();
       submitLock.current = false;

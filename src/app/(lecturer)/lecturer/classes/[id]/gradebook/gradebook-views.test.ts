@@ -20,6 +20,9 @@ function row(overrides: {
     matricNo: overrides.matricNo ?? null,
     cells: overrides.cells ?? [],
     cumulativePercent: overrides.cumulativePercent ?? null,
+    faceFails: 0,
+    fullscreenPauses: 0,
+    handPauses: 0,
   };
 }
 

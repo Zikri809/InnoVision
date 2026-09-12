@@ -389,14 +389,15 @@ async function main() {
         JSON.stringify(keys) === JSON.stringify(["action", "actor_id", "created_at", "event_quiz_id", "event_session_id", "id", "subject_id"].sort()),
         keys.join(","));
 
-      // (a) L sees BOTH branches for S1: a quiz-attributable session_reset row
-      // (event_quiz_id set) and the legacy unlock row (event_quiz_id NULL).
+      // (a) L sees BOTH rows for S1: the unlock row (0044 attributes it with
+      // quiz_id/session_id metadata → quiz-attributable branch) and the
+      // quiz-attributable session_reset row.
       const lView = await clientL.from("lecturer_audit_view").select("*").eq("subject_id", studentS1.id);
       const actions = (lView.data ?? []).map((r) => r.action);
-      const hasLegacyUnlock = actions.includes("unlock");
+      const hasUnlock = actions.includes("unlock");
       const hasResetWithQuiz = (lView.data ?? []).some((r) => r.action === "session_reset" && r.event_quiz_id !== null);
-      record("D-view lecturer sees S1's rows: legacy unlock + quiz-attributable session_reset",
-        hasLegacyUnlock && hasResetWithQuiz,
+      record("D-view lecturer sees S1's rows: unlock (0044-attributed) + quiz-attributable session_reset",
+        hasUnlock && hasResetWithQuiz,
         `actions=${actions.join(",")}`);
 
       // (c) cross-class isolation: L2's reset of the SAME shared student in a
@@ -410,15 +411,18 @@ async function main() {
       record("D-view raw audit_events SELECT as lecturer → denied",
         Boolean(raw.error), raw.error?.message ?? JSON.stringify(raw.data));
 
-      // (d) legacy cross-lecturer visibility while enrolled: BOTH L and L2
-      // see the shared student's legacy unlock row (documented trade-off).
-      const l2Legacy = await clientL2.from("lecturer_audit_view").select("*").eq("action", "unlock").eq("subject_id", studentS1.id);
-      record("D-view documented legacy cross-lecturer visibility (L2 sees unlock while enrolled)",
-        (l2Legacy.data ?? []).length >= 1, `count=${(l2Legacy.data ?? []).length}`);
+      // (d) 0044 attribution: the unlock row carries quiz_id/session_id
+      // metadata, so it routes through the QUIZ-attributable branch — L2
+      // (lecturer of the OTHER class only) no longer sees it. The 0042-era
+      // "legacy cross-lecturer visibility" trade-off is dead for new rows.
+      const l2Unlock = await clientL2.from("lecturer_audit_view").select("*").eq("action", "unlock").eq("subject_id", studentS1.id);
+      record("D-view 0044 attribution: L2 does NOT see L's unlock row (quiz-attributable)",
+        (l2Unlock.data ?? []).length === 0, `count=${(l2Unlock.data ?? []).length}`);
     }
 
-    // (e) self-unenroll: S1 leaves class A. Legacy rows vanish; quiz-
-    // attributable session_reset rows (event_quiz_id set) survive.
+    // (e) self-unenroll: S1 leaves class A. Since 0044 the unlock row is
+    // quiz-attributable, so it SURVIVES (like session_reset) — the legacy
+    // subject-granular bucket is only reachable by metadata-less rows.
     const { error: unenrollErr } = await clientS1
       .from("class_enrollments")
       .delete()
@@ -428,10 +432,72 @@ async function main() {
 
     const lAfter = await clientL.from("lecturer_audit_view").select("*").eq("subject_id", studentS1.id);
     const afterActions = (lAfter.data ?? []).map((r) => r.action);
-    const legacyGone = !afterActions.includes("unlock");
+    const unlockSurvives = afterActions.includes("unlock");
     const resetSurvives = afterActions.includes("session_reset");
-    record("D-view self-unenroll: legacy rows invisible, session_reset rows survive",
-      legacyGone && resetSurvives, `actions=${afterActions.join(",")}`);
+    record("D-view self-unenroll: unlock + session_reset rows survive (0044 attribution)",
+      unlockSurvives && resetSurvives, `actions=${afterActions.join(",")}`);
+  }
+
+  // ── 0045 §15: auto-reveal livelock sweeper (audit-1 P1-6) ────────
+  {
+    // allow_retake + auto_reveal: the LAST submitter with residual budget
+    // used to hold the global reveal forever (no event re-evaluates after
+    // the final submit). The cron sweeper must (a) hold during the 2h
+    // quiet window, then (b) flip once the quiz goes quiet REGARDLESS of
+    // the residual budget.
+    const { data: cfgQuiz, error: cfgErr } = await clientL
+      .from("quizzes")
+      .insert({
+        class_id: clsA.id,
+        created_by: lecturerL.id,
+        title: "P06 AutoReveal Livelock",
+        status: "draft",
+        mode: "assessment",
+        time_limit_sec: null,
+        allow_retake: true,
+        max_attempts: 2,
+        auto_reveal_on_complete: true,
+      })
+      .select("id")
+      .single();
+    assertNoError("create retake quiz", { error: cfgErr });
+    createdQuizIds.push(cfgQuiz.id);
+    for (let i = 0; i < 2; i++) {
+      const { error: qErr } = await clientL
+        .from("questions")
+        .insert({ quiz_id: cfgQuiz.id, order_index: i, type: "mcq", prompt: `P06 Q${i}`, options: ["a", "b"], correct_index: 0 })
+        .select("id")
+        .single();
+      assertNoError("insert retake question", { error: qErr });
+    }
+    await publish(clientL, cfgQuiz.id);
+
+    // S2 completes attempt 1 of 2 — budget REMAINS (the livelock shape).
+    const sess = await startSession(clientS2, cfgQuiz.id);
+    const qid = await firstQuestionId(clientL, cfgQuiz.id);
+    const ans = await clientS2.rpc("answer_question", { p_session_id: sess.id, p_question_id: qid, p_selected_index: 0 });
+    assertNoError("answer on retake quiz", { error: ans.error });
+    await clientS2.rpc("submit_session", { p_session_id: sess.id });
+
+    const afterSubmit = (await clientL.from("quizzes").select("results_revealed_at").eq("id", cfgQuiz.id).single()).data.results_revealed_at;
+    // (a) At submit time the budget hold keeps it unrevealed...
+    record("0045 P1-6: submit with residual budget leaves reveal held (submitter holds)",
+      afterSubmit === null, `revealed_at=${afterSubmit}`);
+    // ...and the sweeper honours the FRESH quiet window (session activity
+    // is seconds old): the cron must not flip under a 2h-fresh quiz.
+    await admin.rpc("quiz_autoclose");
+    const afterFreshCron = (await clientL.from("quizzes").select("results_revealed_at").eq("id", cfgQuiz.id).single()).data.results_revealed_at;
+    record("0045 P1-6: sweeper honours the 2h quiet window (no flip while fresh)",
+      afterFreshCron === null, `revealed_at=${afterFreshCron}`);
+
+    // (b) Age EVERY session's activity past the 2h window → the next cron
+    // tick flips the reveal even though attempt budget remains.
+    const stale = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+    await admin.from("quiz_sessions").update({ last_activity_at: stale }).eq("quiz_id", cfgQuiz.id);
+    await admin.rpc("quiz_autoclose");
+    const afterStaleCron = (await clientL.from("quizzes").select("results_revealed_at").eq("id", cfgQuiz.id).single()).data.results_revealed_at;
+    record("0045 P1-6: sweeper flips reveal after 2h inactivity regardless of residual budget",
+      afterStaleCron !== null, `revealed_at=${afterStaleCron}`);
   }
 
   // ── Summary ──────────────────────────────────────────────────

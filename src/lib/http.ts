@@ -74,6 +74,150 @@ export function checkBodyLimit(
   return null;
 }
 
+type CappedRead =
+  | { ok: true; bytes: Uint8Array }
+  | { ok: false; response: NextResponse };
+
+/**
+ * Consume `request.body` chunk-by-chunk under a HARD byte cap (audit-1 P1-5).
+ *
+ * `checkBodyLimit` trusts the `content-length` header; a chunked transfer
+ * (no header) or a lying one bypasses it and the body materializes in full
+ * before any Zod cap runs. This reader aborts the moment accumulated bytes
+ * exceed `maxBytes`, so the cap holds regardless of what the headers claim.
+ */
+async function readCappedBytes(
+  request: Request,
+  maxBytes: number,
+): Promise<CappedRead> {
+  const lenHeader = request.headers.get("content-length");
+  const declared = Number(lenHeader);
+  if (lenHeader && Number.isFinite(declared) && declared > maxBytes) {
+    return { ok: false, response: payloadTooLarge("Request body too large.") };
+  }
+  const stream = request.body;
+  if (!stream) {
+    // No body at all: yield EMPTY bytes and let each reader decide —
+    // readCappedJson 400s on the unparseable empty string, while
+    // readCappedText returns "" for routes whose body is optional (pause).
+    return { ok: true, bytes: new Uint8Array(0) };
+  }
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        return { ok: false, response: payloadTooLarge("Request body too large.") };
+      }
+      chunks.push(value);
+    }
+  } catch {
+    // Stream died mid-read (aborted / malformed framing) — never a 500.
+    return { ok: false, response: invalidJson() };
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { ok: true, bytes };
+}
+
+/**
+ * Streaming-capped JSON body reader — the drop-in replacement for the
+ * `checkBodyLimit(request)` + `await request.json()` pair on the heaviest
+ * endpoints (verify/enroll/start/join/advisory/answer). Returns a typed
+ * result instead of throwing so routes stay linear:
+ *   `{ ok: true, data }`               — parsed JSON, within the cap
+ *   `{ ok: false, response }`          — 413 over cap (header OR stream),
+ *                                        400 for missing/malformed JSON
+ */
+export async function readCappedJson(
+  request: Request,
+  maxBytes: number = JSON_BODY_LIMIT_BYTES,
+): Promise<{ ok: true; data: unknown } | { ok: false; response: NextResponse }> {
+  const read = await readCappedBytes(request, maxBytes);
+  if (!read.ok) return read;
+  try {
+    return { ok: true, data: JSON.parse(new TextDecoder().decode(read.bytes)) };
+  } catch {
+    return { ok: false, response: invalidJson() };
+  }
+}
+
+/**
+ * Streaming-capped raw-text reader for routes with OPTIONAL bodies (pause:
+ * an empty body defaults the reason; `{}` and `{"reason":"focus_lost"}` are
+ * both valid). The cap still binds — an unbounded `request.text()` lets a
+ * chunked request buffer gigabytes before JSON.parse ever runs.
+ */
+export async function readCappedText(
+  request: Request,
+  maxBytes: number = JSON_BODY_LIMIT_BYTES,
+): Promise<{ ok: true; text: string } | { ok: false; response: NextResponse }> {
+  const read = await readCappedBytes(request, maxBytes);
+  if (!read.ok) return read;
+  return { ok: true, text: new TextDecoder().decode(read.bytes) };
+}
+
+/** Multipart overhead slack (boundary, part headers) over the file cap. */
+export const MULTIPART_OVERHEAD_BYTES = 64 * 1024;
+
+/**
+ * Streaming-capped `formData()` reader (audit-1 P1-5, incident clip upload).
+ *
+ * `request.formData()` buffers the ENTIRE multipart body before the route
+ * can measure anything, so a lying `content-length` pre-check reads gigabytes
+ * first. The body is piped through a counting TransformStream that errors the
+ * moment the cap is exceeded — the multipart parse then fails fast on an
+ * aborted stream instead of materializing the oversized payload.
+ */
+export async function readCappedFormData(
+  request: Request,
+  maxBytes: number,
+): Promise<{ ok: true; form: FormData } | { ok: false; response: NextResponse }> {
+  const lenHeader = request.headers.get("content-length");
+  const declared = Number(lenHeader);
+  if (lenHeader && Number.isFinite(declared) && declared > maxBytes) {
+    return { ok: false, response: payloadTooLarge("Request body too large.") };
+  }
+  const stream = request.body;
+  if (!stream) {
+    return { ok: false, response: invalidBody("Expected multipart/form-data.") };
+  }
+  let total = 0;
+  const counting = new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      total += chunk.byteLength;
+      if (total > maxBytes) {
+        controller.error(new Error("body_too_large"));
+        return;
+      }
+      controller.enqueue(chunk);
+    },
+  });
+  try {
+    const capped = new Request(request.url, {
+      method: request.method,
+      headers: request.headers,
+      body: stream.pipeThrough(counting),
+      duplex: "half",
+    } as RequestInit & { duplex: "half" });
+    return { ok: true, form: await capped.formData() };
+  } catch (err) {
+    if (err instanceof Error && err.message === "body_too_large") {
+      return { ok: false, response: payloadTooLarge("Request body too large.") };
+    }
+    return { ok: false, response: invalidBody("Expected multipart/form-data.") };
+  }
+}
+
 /** 422 — AI output invalid / extraction needs browser OCR. */
 export function unprocessable(message: string, error = "unprocessable"): NextResponse {
   return jsonError(error, message, 422);

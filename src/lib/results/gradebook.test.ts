@@ -215,3 +215,79 @@ describe("buildGradebookModel — aggregates", () => {
     expect(model.quizzes.map((q) => q.revealed)).toEqual([true, false]);
   });
 });
+
+describe("buildGradebookModel — integrity sums (audit-1 P1-16)", () => {
+  it("sums face-fail / fullscreen / hand counters over representative sessions", () => {
+    const model = buildGradebookModel(
+      baseInput({
+        quizzes: [quiz({ id: "qz-1" }), quiz({ id: "qz-2", created_at: "2026-08-02T00:00:00Z" })],
+        questionCounts: [
+          { quiz_id: "qz-1", count: 10 },
+          { quiz_id: "qz-2", count: 10 },
+        ],
+        sessionsByQuiz: new Map([
+          [
+            "qz-1",
+            [
+              session({
+                id: "s-1",
+                student_id: "stu-1",
+                score: 8,
+                face_fail_streak: 1,
+                face_fail_count: 4,
+                fullscreen_pause_count: 2,
+                hand_pause_count: 0,
+              }),
+            ],
+          ],
+          [
+            "qz-2",
+            [
+              session({
+                id: "s-2",
+                student_id: "stu-1",
+                score: 9,
+                face_fail_streak: 0,
+                face_fail_count: 5,
+                fullscreen_pause_count: 3,
+                hand_pause_count: 1,
+              }),
+            ],
+          ],
+        ]),
+      }),
+    );
+    // faceFails mirrors the per-quiz export: lifetime face_fail_count sum.
+    expect(model.rows[0].faceFails).toBe(9);
+    expect(model.rows[0].fullscreenPauses).toBe(5);
+    expect(model.rows[0].handPauses).toBe(1);
+  });
+
+  it("counts a counter-bearing UNSCORED session even though its cell is an em dash", () => {
+    // A sealed/scoreless terminal session em-dashes its cell (score null),
+    // but its integrity counters are exactly what the lecturer must see.
+    const model = buildGradebookModel(
+      baseInput({
+        sessionsByQuiz: new Map([
+          [
+            "qz-1",
+            [
+              session({
+                id: "s-0",
+                student_id: "stu-1",
+                score: null,
+                face_fail_count: 2,
+                fullscreen_pause_count: 7,
+                hand_pause_count: 3,
+              }),
+            ],
+          ],
+        ]),
+      }),
+    );
+    expect(model.rows[0].cells[0]).toBeNull(); // score null → em dash cell
+    expect(model.rows[0].faceFails).toBe(2);
+    expect(model.rows[0].fullscreenPauses).toBe(7);
+    expect(model.rows[0].handPauses).toBe(3);
+  });
+});
