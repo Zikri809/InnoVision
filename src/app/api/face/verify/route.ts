@@ -143,6 +143,27 @@ export async function POST(request: Request) {
     .maybeSingle();
   const faceExempt = sessionRow.data?.face_exempt === true;
 
+  // audit-2 C-02: corroborate that a verify ATTEMPT reached the server for
+  // this session (any outcome — even a sidecar 503). The silence cron's
+  // outage-claim exemption (0046) now requires recent corroboration: a
+  // tampered client that blocks verify POSTs while re-arming
+  // report_face_unavailable every few minutes produces NO attempts and is no
+  // longer exempt forever. Fire-and-forget, owner-scoped (the row above
+  // proves the caller owns the session); an admin write because RLS exposes
+  // no update policy and a failure must never fail the verify.
+  if (sessionRow.data) {
+    void Promise.resolve(
+      createAdminClient()
+        .from("quiz_sessions")
+        .update({ face_verify_attempted_at: new Date().toISOString() })
+        .eq("id", parsed.data.sessionId),
+    )
+      .then((r) => {
+        if (r.error) console.error("face_verify_attempted_at touch error:", r.error);
+      })
+      .catch(() => {});
+  }
+
   // Cutover / integrity guard: the student must have a stored baseline
   // BEFORE any sidecar work. `present=false` covers pre-migration enrollees
   // (samples never stored); the honest response is not_enrolled (the
@@ -242,6 +263,30 @@ export async function POST(request: Request) {
         })
         .catch(() => {});
     }
+    // audit-2 C-01 (minimum viable): bind the sidecar's per-frame pose to
+    // the recorded check. The route still cannot gate liveness server-side
+    // (no spoof model — a static photo with plausible yaw passes), but the
+    // yaw/pitch/roll trail now lives in face_checks.frame_poses for lecturer
+    // audit: a photo-replay shows near-constant pose across every check of
+    // the exam, which a live student does not produce. Fire-and-forget; a
+    // failure must never fail the verify.
+    const poses = frameFaces.map((faces) => {
+      const primary = selectPrimaryFace(faces);
+      return primary
+        ? { yaw: primary.yaw, pitch: primary.pitch, roll: primary.roll }
+        : null;
+    });
+    void Promise.resolve(
+      supabase.rpc("attach_frame_poses", {
+        p_session_id: parsed.data.sessionId,
+        p_nonce: parsed.data.nonce,
+        p_poses: poses,
+      }),
+    )
+      .then((r) => {
+        if (r.error) console.error("attach_frame_poses error:", r.error);
+      })
+      .catch(() => {});
     const result: FaceCheckResult = {
       matched: payload.matched,
       distance: typeof payload.distance === "number" ? payload.distance : null,
