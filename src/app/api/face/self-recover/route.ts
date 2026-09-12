@@ -3,7 +3,7 @@ import { requireStudent } from "@/lib/classes/guards";
 import { rateLimit } from "@/lib/classes/rate-limit";
 import { mapFaceError } from "@/lib/face/rpc-mapping";
 import { SessionIdSchema } from "@/lib/face/schemas";
-import { checkSameOrigin, firstIssueMessage, internalError, invalidBody, invalidJson } from "@/lib/http";
+import { checkSameOrigin, firstIssueMessage, internalError, invalidBody, readCappedJson } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 
@@ -32,13 +32,10 @@ export async function POST(request: Request) {
     return mapFaceError({ error: "rate_limited" }) ?? internalError("Something went wrong.");
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return invalidJson();
-  }
-  const parsed = SessionIdSchema.safeParse(body);
+  const body = await readCappedJson(request);
+  if (!body.ok) return body.response;
+
+  const parsed = SessionIdSchema.safeParse(body.data);
   if (!parsed.success) {
     return invalidBody(firstIssueMessage(parsed.error.issues, "sessionId must be a valid UUID."));
   }

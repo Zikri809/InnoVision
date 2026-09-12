@@ -6,15 +6,14 @@ import { isUuid } from "@/lib/classes/roster";
 import { rateLimit } from "@/lib/classes/rate-limit";
 import { QuestionInputSchema } from "@/lib/quizzes/validation";
 import {
-  checkBodyLimit,
   checkSameOrigin,
   firstIssueMessage,
   internalError,
   invalidBody,
-  invalidJson,
   notDraft,
   notFound,
   rateLimited,
+  readCappedJson,
   unprocessable,
 } from "@/lib/http";
 
@@ -81,17 +80,10 @@ export async function POST(request: Request, { params }: Params) {
     return rateLimited("Too many imports. Try again later.");
   }
 
-  const sizeError = checkBodyLimit(request, IMPORT_BODY_LIMIT_BYTES);
-  if (sizeError) return sizeError;
+  const body = await readCappedJson(request, IMPORT_BODY_LIMIT_BYTES);
+  if (!body.ok) return body.response;
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return invalidJson();
-  }
-
-  const parsed = ImportSchema.safeParse(body);
+  const parsed = ImportSchema.safeParse(body.data);
   if (!parsed.success) {
     return invalidBody(firstIssueMessage(parsed.error.issues, "Invalid import payload."));
   }

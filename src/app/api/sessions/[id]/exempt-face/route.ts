@@ -8,8 +8,8 @@ import {
   checkSameOrigin,
   firstIssueMessage,
   invalidBody,
-  invalidJson,
   internalError,
+  readCappedJson,
 } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
@@ -47,14 +47,10 @@ export async function POST(request: Request, { params }: Params) {
     return mapFaceError({ error: "rate_limited" }) ?? internalError("Something went wrong.");
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return invalidJson();
-  }
+  const body = await readCappedJson(request);
+  if (!body.ok) return body.response;
 
-  const parsed = ExemptSchema.safeParse(body);
+  const parsed = ExemptSchema.safeParse(body.data);
   if (!parsed.success) {
     return invalidBody(firstIssueMessage(parsed.error.issues, "Invalid exemption payload."));
   }

@@ -8,8 +8,8 @@ import {
   firstIssueMessage,
   internalError,
   invalidBody,
-  invalidJson,
   rateLimited,
+  readCappedJson,
 } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
@@ -43,14 +43,6 @@ export async function POST(request: Request) {
   const originError = checkSameOrigin(request);
   if (originError) return originError;
 
-  const lenHeader = request.headers.get("content-length");
-  if (lenHeader && Number(lenHeader) > BODY_LIMIT_BYTES) {
-    return NextResponse.json(
-      { error: "payload_too_large", message: "Request body too large." },
-      { status: 413 },
-    );
-  }
-
   const supabase = await createClient();
 
   const auth = await requireAnyUser(supabase);
@@ -60,14 +52,10 @@ export async function POST(request: Request) {
     return rateLimited("Too many answers. Slow down a little.");
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return invalidJson();
-  }
+  const body = await readCappedJson(request, BODY_LIMIT_BYTES);
+  if (!body.ok) return body.response;
 
-  const parsed = AnswerSchema.safeParse(body);
+  const parsed = AnswerSchema.safeParse(body.data);
   if (!parsed.success) {
     return invalidBody(firstIssueMessage(parsed.error.issues, "Select an answer first."));
   }

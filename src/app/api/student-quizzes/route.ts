@@ -8,9 +8,8 @@ import {
   firstIssueMessage,
   internalError,
   invalidBody,
-  invalidJson,
-  payloadTooLarge,
   rateLimited,
+  readCappedJson,
 } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
@@ -75,11 +74,6 @@ export async function POST(request: Request) {
   const originError = checkSameOrigin(request);
   if (originError) return originError;
 
-  const lenHeader = request.headers.get("content-length");
-  if (lenHeader && Number(lenHeader) > BODY_LIMIT_BYTES) {
-    return payloadTooLarge("Request body too large.");
-  }
-
   const supabase = await createClient();
   const auth = await requireStudent(supabase);
   if (!auth.ok) return auth.response;
@@ -88,14 +82,10 @@ export async function POST(request: Request) {
     return rateLimited("Too many quizzes created. Try again later.");
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return invalidJson();
-  }
+  const body = await readCappedJson(request, BODY_LIMIT_BYTES);
+  if (!body.ok) return body.response;
 
-  const parsed = CreateStudentQuizSchema.safeParse(body);
+  const parsed = CreateStudentQuizSchema.safeParse(body.data);
   if (!parsed.success) {
     return invalidBody(firstIssueMessage(parsed.error.issues, "Invalid quiz data."));
   }

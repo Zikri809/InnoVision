@@ -9,10 +9,9 @@ import {
   firstIssueMessage,
   internalError,
   invalidBody,
-  invalidJson,
   notFound,
-  payloadTooLarge,
   rateLimited,
+  readCappedJson,
 } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
@@ -32,11 +31,6 @@ export async function PATCH(request: Request, { params }: Params) {
   const originError = checkSameOrigin(request);
   if (originError) return originError;
 
-  const lenHeader = request.headers.get("content-length");
-  if (lenHeader && Number(lenHeader) > BODY_LIMIT_BYTES) {
-    return payloadTooLarge("Request body too large.");
-  }
-
   const supabase = await createClient();
   const { id, questionId } = await params;
   if (!isUuid(id) || !isUuid(questionId)) return notFound();
@@ -48,17 +42,13 @@ export async function PATCH(request: Request, { params }: Params) {
     return rateLimited("Too many question updates. Try again later.");
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return invalidJson();
-  }
+  const body = await readCappedJson(request, BODY_LIMIT_BYTES);
+  if (!body.ok) return body.response;
 
   // Strict single-answer schema: multi-select is lecturer-quiz only (the
   // student_quiz_questions table carries a CHECK rejecting the type) — the
   // boundary 400s here instead of dying on the direct UPDATE as a 500.
-  const parsed = StudentQuestionInputSchema.safeParse(body);
+  const parsed = StudentQuestionInputSchema.safeParse(body.data);
   if (!parsed.success) {
     return invalidBody(firstIssueMessage(parsed.error.issues, "Invalid question data."));
   }

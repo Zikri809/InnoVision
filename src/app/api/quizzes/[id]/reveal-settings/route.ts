@@ -9,9 +9,9 @@ import {
   firstIssueMessage,
   internalError,
   invalidBody,
-  invalidJson,
   notFound,
   rateLimited,
+  readCappedJson,
 } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
@@ -43,14 +43,10 @@ export async function PATCH(request: Request, { params }: Params) {
   const originError = checkSameOrigin(request);
   if (originError) return originError;
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return invalidJson();
-  }
+  const body = await readCappedJson(request);
+  if (!body.ok) return body.response;
 
-  const parsed = RevealSettingsSchema.safeParse(body);
+  const parsed = RevealSettingsSchema.safeParse(body.data);
   if (!parsed.success) {
     return invalidBody(firstIssueMessage(parsed.error.issues, "Invalid reveal settings."));
   }

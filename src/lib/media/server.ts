@@ -1,10 +1,5 @@
-import {
-  checkMultipartLength,
-  contentTypeFor,
-  extFor,
-  sniffImageType,
-  type SniffedImageType,
-} from "./validation";
+import { readCappedFormData } from "@/lib/http";
+import { MULTIPART_FRAMING_SLACK_BYTES, contentTypeFor, extFor, sniffImageType, type SniffedImageType } from "./validation";
 
 export type ParsedImageUpload =
   | { ok: true; buffer: Buffer; type: SniffedImageType; ext: string; contentType: string }
@@ -13,7 +8,17 @@ export type ParsedImageUpload =
 /**
  * Shared multipart intake for image upload routes (question images, avatars).
  * Order matters and mirrors the incident-clips pattern:
- *   declared-length gate → formData() → Blob/size checks → magic-byte sniff.
+ *   streaming-capped formData() → Blob/size checks → magic-byte sniff.
+ *
+ * audit-2 H-04: the intake used to gate on the DECLARED content-length only
+ * and then call `request.formData()` unbounded — a lied-small or headerless
+ * multipart body fully materialized before the real `file.size` check ran.
+ * `readCappedFormData` streams the body through a counting TransformStream
+ * that errors the moment `maxBytes + framing slack` is exceeded, so the cap
+ * holds regardless of what the headers claim. (The old `checkMultipartLength`
+ * header-only pre-check — which also rejected chunked uploads outright — is
+ * superseded: the streaming cap is strictly stronger and no longer 413s
+ * honest headerless clients.)
  *
  * The sniff result — never the client-declared MIME — decides the stored
  * extension and content-type, so a mislabeled payload can't land in storage
@@ -24,16 +29,10 @@ export async function parseImageUpload(
   maxBytes: number,
   fieldName = "image",
 ): Promise<ParsedImageUpload> {
-  const lengthError = checkMultipartLength(request, maxBytes);
-  if (lengthError) return { ok: false, response: lengthError };
+  const read = await readCappedFormData(request, maxBytes + MULTIPART_FRAMING_SLACK_BYTES);
+  if (!read.ok) return { ok: false, response: read.response };
 
-  let form: FormData;
-  try {
-    form = await request.formData();
-  } catch {
-    return { ok: false, response: invalidBodyResponse(`Expected multipart/form-data with an \`${fieldName}\` file.`) };
-  }
-
+  const form = read.form;
   const file = form.get(fieldName);
   if (!(file instanceof Blob)) {
     return { ok: false, response: invalidBodyResponse(`An \`${fieldName}\` file is required.`) };

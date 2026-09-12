@@ -252,14 +252,20 @@ export function invalidOrigin(): NextResponse {
  * — non-browser callers won't send Origin).
  *
  * "This app's host" resolves in order:
- *   1. `x-forwarded-host` — what a well-behaved reverse proxy sets
- *   2. the literal request host (direct access)
- *   3. `TRUSTED_ORIGINS` (comma-separated, scheme included) — proxies like
+ *   1. the literal request host (direct access)
+ *   2. `TRUSTED_ORIGINS` (comma-separated, scheme included) — proxies like
  *      cloudflared rewrite `Host` to the upstream service address and strip
- *      forwarding headers, so neither 1 nor 2 matches the public origin.
+ *      forwarding headers, so neither 1 matches the public origin.
  *      Full origin match (scheme + host): an `http://` entry must not admit
  *      the `https://` variant of the same host. An empty list keeps the
  *      original direct-access behavior.
+ *
+ * audit-2 M-01: `x-forwarded-host` is NO LONGER trusted as "this app's
+ * host" — it is a caller-writable header on any direct-access deployment,
+ * so `Origin: https://evil.com` + `x-forwarded-host: evil.com` used to pass
+ * the check on one header. Proxies that legitimately set XFH but rewrite
+ * Host are covered by TRUSTED_ORIGINS; a browser cannot forge a same-origin
+ * Host+Origin pair, so no honest flow regresses.
  */
 export function checkSameOrigin(request: Request): NextResponse | null {
   const origin = request.headers.get("origin");
@@ -270,13 +276,6 @@ export function checkSameOrigin(request: Request): NextResponse | null {
   } catch {
     return invalidOrigin();
   }
-
-  const forwardedHost = request.headers
-    .get("x-forwarded-host")
-    ?.split(",")[0]
-    ?.trim()
-    .toLowerCase();
-  if (forwardedHost && originHost === forwardedHost) return null;
 
   try {
     const reqHost = new URL(request.url).host.toLowerCase();

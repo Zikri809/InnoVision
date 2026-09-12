@@ -59,7 +59,11 @@ describe("checkSameOrigin", () => {
     expect(checkSameOrigin(req(url, { origin: "::not-a-url" }))).not.toBeNull();
   });
 
-  it("allows requests whose Origin matches x-forwarded-host (reverse proxy)", () => {
+  // audit-2 M-01: x-forwarded-host is NO LONGER trusted as "this app's
+  // host" — it is caller-writable on direct-access deployments, so
+  // `Origin: evil` + `x-forwarded-host: evil` used to pass on one header.
+  // Proxies that rewrite Host are covered by TRUSTED_ORIGINS (next test).
+  it("rejects an Origin that only matches a caller-supplied x-forwarded-host", () => {
     expect(
       checkSameOrigin(
         req(url, {
@@ -67,10 +71,10 @@ describe("checkSameOrigin", () => {
           "x-forwarded-host": "app.example.com",
         }),
       ),
-    ).toBeNull();
+    ).not.toBeNull();
   });
 
-  it("uses the first entry of a comma-separated x-forwarded-host", () => {
+  it("rejects when only the first entry of a comma-separated x-forwarded-host matches", () => {
     expect(
       checkSameOrigin(
         req(url, {
@@ -78,7 +82,7 @@ describe("checkSameOrigin", () => {
           "x-forwarded-host": "app.example.com, inner.example.com",
         }),
       ),
-    ).toBeNull();
+    ).not.toBeNull();
   });
 
   it("allows Origins listed in TRUSTED_ORIGINS (host-blind proxy)", async () => {
