@@ -30,7 +30,7 @@ The service:
 
 | Setting | Value | Why |
 |---|---|---|
-| Image | `innovision-glm-ocr:local` (built from `docker/glm-ocr/Dockerfile`) | Official vLLM OpenAI-compatible server + a Transformers-from-source layer (the stock vLLM image's bundled Transformers predates the `glm_ocr` architecture) |
+| Image | `innovision-glm-ocr:local` (built from `docker/glm-ocr/Dockerfile`) | Official vLLM OpenAI-compatible server + a Transformers-from-source layer. **No released Transformers tag knows the `glm_ocr` architecture** (`glm_ocr` first appears in the source tree at commit `4854dbf9da40`), so the layer installs from git at a PINNED COMMIT (`TRANSFORMERS_REF`). Verified by building the image and resolving the model config. See the Dockerfile header before changing the pin — the previous `@v4.49.0` pin made the server fail to import (`Gemma3Config` missing). |
 | Model | `zai-org/GLM-OCR` | Official GLM-OCR weights (Hugging Face) |
 | Revision | `${GLM_OCR_REVISION:-2e85a62840ccac27daa451df36c736c4636b8628}` | audit-3 R3-DEP-F3: pinned commit of the HF repo, so a default-branch change cannot silently swap the OCR engine's weights on a cold start. Override the env var to move the pin deliberately (a bad revision fails loudly at model load). |
 | Served name | `glm-ocr` | Matches `OCR_GLM_MODEL` |

@@ -514,3 +514,95 @@ The daily/weekly ones are simply not due yet on a fresh DB, so this is expected
 locally — but it is exactly the signal R2-FACE-F2 said was missing, and it
 demonstrates `/api/health` would surface a genuinely dead schedule. Confirm the
 three have run on any long-lived deployment.
+
+---
+
+## Docker image builds (verified 2026-09-14)
+
+Both images were rebuilt and their changes verified **by running them**, not
+just by a green build. This closes the "Docker image builds" gap.
+
+### insightface-service — R3-DEP-F4 verified live
+
+| Check | Result |
+|---|---|
+| Runs as non-root | `uid=1001(app) gid=1001(app)` |
+| `HOME` | `/home/app` |
+| Model trees | `/home/app/.insightface/models/buffalo_l` + `/srv/models/spoof`, both owned `app:app` |
+| Startup | loads all 5 buffalo_l ONNX files from `/home/app/.insightface/...` with **no runtime download** |
+| `/health` | `{"status":"ok","model":"buffalo_l","spoof_model":true}` |
+| Spoof ensemble | log: "anti-spoof ensemble ready (2 models)" |
+| Token auth (R3-DEP-F5) | no token → 401; wrong token → 401; right token → 400 (the frame, not auth); `/health` stays open |
+| Real inference | `person-a.jpg` → 1 face, det 0.441, yaw 7.5, 512-dim embedding, spoof `{real:true, score:0.9975}`; `blank-wall.jpg` → 0 faces |
+
+The `hmac.compare_digest` change is behaviorally equivalent for valid/invalid
+tokens (verified) while removing the timing side channel.
+
+### glm-ocr — TWO deployment-blocking defects found and fixed
+
+Building this image exposed that **the OCR service could not start at all** as
+previously configured. Neither defect is visible from a green build; both
+required running the image.
+
+**Defect 1 — the container crashed on startup (torch `getpwuid`).**
+`USER 1001` had no matching passwd entry, and torch's inductor cache resolves
+its directory via `getpass.getuser()` → `pwd.getpwuid(os.getuid())[0]`, which
+raises `KeyError: 'getpwuid(): uid not found: 1001'` for a bare uid. The
+container died before loading any model, so OCR was entirely dead in any
+deployment built from the Dockerfile. Fixed by creating a real user (with a
+home directory) instead of a bare uid. Note this is the *same class* of latent
+problem the audit's R3-DEP-F4 addressed on the sibling image — where a
+`useradd` was done — but the glm-ocr image had only `USER 1001`.
+
+**Defect 2 — the Transformers pin made vLLM unable to import.**
+The Dockerfile installed `transformers@v4.49.0` with a comment claiming the
+stock image's bundled version "predates the `glm_ocr` architecture". That claim
+is wrong, and the pin is actively harmful:
+
+| Transformers | `import vllm.entrypoints.openai.api_server` | Resolves GLM-OCR config |
+|---|---|---|
+| `@v4.49.0` (previous pin) | **FAILS** — `ImportError: cannot import name 'Gemma3Config'` | no |
+| 4.57.6 (base image's own) | OK | **FAILS** — "does not recognize this architecture" |
+| `@4177486a9f19` (new pin) | OK | **OK** — `glm_ocr` / `GlmOcrForConditionalGeneration` |
+
+The real constraint is that vLLM 0.19.0 imports `Gemma3Config` (needs ≥4.56)
+*and* resolves the checkpoint config through Transformers, while `glm_ocr` only
+exists in the Transformers SOURCE tree (it landed at commit `4854dbf9da40`;
+no released tag has it). The fix pins a git **commit** — not `main`, which
+would silently change engine behavior — and the Dockerfile header now carries
+the two verification commands that catch a bad pin.
+
+**Verified working after the fix** (RTX 4050, the documented benchmark GPU):
+
+- `Resolved architecture: GlmOcrForConditionalGeneration`
+- `Application startup complete` + `/health` → 200
+- `/v1/models` → `["glm-ocr"]` — the exact id the app's `probeGlmModel` matches
+- **Real OCR inference**: a rendered image containing "Chapter 3:
+  Photosynthesis" was transcribed correctly
+- `VLLM_API_KEY` auth: 401 without the key, 200 with it, `/health` still 200
+  (so the compose healthcheck survives auth being on) — the R3-DEP-F2 client
+  wiring in `http-compat.ts` sends this same header
+
+`docker compose config` validates with both services, and the R3-DEP-F3 model
+revision pin was confirmed to be a real upstream commit (`sha` matches,
+last modified 2026-09-11).
+
+### Docker context (R3-DEP-F1) verified with the real builder
+
+The `.dockerignore` was checked by building an image that `COPY`s the context
+and lists what arrived — not by reasoning about the file:
+
+- `.env.local` and `.env.production.local` (the latter holding the hosted
+  service-role key): **NOT in the context**
+- `.env.local.example`: present, as intended
+- 845 files total (vs. the whole working tree)
+
+(An earlier `tar`-based check falsely reported a leak; tar's `--exclude-from`
+does not implement Docker's pattern semantics. The build-based check is the
+authoritative one.)
+
+### Disk note
+
+`innovision-glm-ocr:local` is ~32 GB (the vLLM base image is large). Both
+images are rebuilt in place; `docker system df` shows ~6 GB reclaimable from
+dangling layers if space is needed.
