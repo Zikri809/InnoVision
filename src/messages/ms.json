@@ -952,6 +952,7 @@
     "engineLabel": "Pengimbas Dokumen (untuk PDF & Imej)",
     "engineTesseract": "Pengimbas Standard (Terbina Dalam, Pantas)",
     "engineGlm": "Pengimbas Penglihatan AI (Ketepatan Tinggi)",
+    "engineGlmRemote": "Pengimbas Penglihatan AI (Awan)",
     "questionCountLabel": "Bilangan soalan",
     "warningReplace": "Saya faham ini akan menggantikan soalan sedia ada",
     "generateBtn": "Jana kuiz",
@@ -1009,6 +1010,9 @@
     "glmBusy": "Pengimbas Penglihatan AI sedang sibuk dengan halaman lain. Tunggu sebentar dan cuba lagi.",
     "glmTimeout": "Masa membaca dokumen tamat. Sila cuba fail yang lebih kecil atau gunakan Pengimbas Standard.",
     "glmUnavailable": "Perkhidmatan Pengimbas Penglihatan AI sedang di luar talian. Sila tukar kepada Pengimbas Standard.",
+    "glmPagesExceeded": "Pengimbas Penglihatan AI boleh memproses sehingga {max} halaman bagi setiap fail. Pecahkan PDF tersebut atau gunakan Pengimbas Standard.",
+    "glmSpendCap": "Had harian Pengimbas Penglihatan AI untuk akaun anda telah habis digunakan. Cuba lagi esok atau gunakan Pengimbas Standard.",
+    "invalidPdf": "Fail ini dinamakan sebagai PDF tetapi kandungannya bukan PDF yang boleh dibaca. Eksport semula fail tersebut atau gunakan Pengimbas Standard.",
     "canvasUnavailable": "Paparan visual dokumen tidak disokong dalam penyemak imbas ini.",
     "badgeNative": "Pembacaan Pantas",
     "badgePdf": "Dokumen PDF",
@@ -1083,7 +1087,10 @@
     "partialPagesTitle": "Sesetengah halaman tidak dapat dibaca",
     "partialPagesDesc": "{failed} daripada {attempted} halaman gagal semasa OCR. Teks yang dikeluarkan tiada halaman tersebut — semak bahan di bawah dan jalankan semula pengekstrakan jika halaman hilang.",
     "partialPagesRateLimitedDesc": "{count} halaman dilangkau kerana had kadar OCR dicapai, bukan kerana tidak boleh dibaca. Tunggu kira-kira seminit, kemudian cuba semula halaman yang gagal.",
-    "retryFailedPages": "Cuba semula halaman yang gagal"
+    "retryFailedPages": "Cuba semula halaman yang gagal",
+    "documentRetryTitle": "Hasil separa daripada pengimbas Penglihatan AI",
+    "documentRetryDesc": "Pengimbas jauh mengembalikan bacaan separa untuk: {files}. Cuba semula akan menghantar semula keseluruhan dokumen dan dicaj sekali lagi.",
+    "retryWholeDocument": "Cuba semula keseluruhan dokumen"
   },
   "errors": {
     "unauthorized": "Anda mesti log masuk untuk melakukan tindakan ini.",

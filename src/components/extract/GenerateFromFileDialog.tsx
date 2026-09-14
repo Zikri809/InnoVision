@@ -38,9 +38,26 @@ import { EnginePicker } from "./EnginePicker";
 import { OcrProgress } from "./OcrProgress";
 import { GenerationProgress } from "./GenerationProgress";
 import { BotAvatar } from "@/components/bot/bot-avatar";
+import {
+  documentRetryOutcomes,
+  extractErrorI18nKey,
+  failedRetryPaths,
+  isLowDensityOutcome,
+  mergeOutcomes,
+  outcomeSkippedReason,
+  outcomeText,
+  planGlmRun,
+  planRetry,
+  shouldReuseProbe,
+  shouldSpliceRetry,
+  spliceRetriedPages,
+  summarizeOutcomes,
+  type ExtractionOutcome,
+} from "@/lib/extract/pipeline";
 import { runExtractionPipeline, type PipelineProgress } from "@/lib/extract/pipeline";
-import { MAX_AGGREGATE_CHARS } from "@/lib/extract/types";
-import type { ExtractEngine, OcrConfig } from "@/lib/extract/types";
+import { glmEngineInfo, OcrPageError } from "@/lib/extract/glm-ocr";
+import { MAX_AGGREGATE_CHARS, MAX_OCR_PAGES_REMOTE } from "@/lib/extract/types";
+import type { ExtractEngine, GlmEngineInfo, OcrConfig } from "@/lib/extract/types";
 import type {
   QuizDifficulty,
   QuestionFormatDistribution,
@@ -55,37 +72,11 @@ const CLIENT_TIMEOUT_MS = 20 * 60_000;
  * file that contributed nothing still counted as a source. Outcomes let the
  * summary report only files that actually produced text, name the ones that
  * were skipped and why, and re-run just the failed subset (F-F2).
+ *
+ * The shape + every fold/retry rule over it live in `@/lib/extract/pipeline`
+ * (defect #6) so the retry machine is unit-testable; this is an alias.
  */
-type FileOutcome = {
-  path: string;
-  name: string;
-  /** 1-based position in the uploaded list — keeps SOURCE headers stable. */
-  index: number;
-  /** Trimmed extracted text ("" when the file contributed nothing). */
-  text: string;
-  /**
-   * audit-3 F-F2: per-page text when the engine reports it (GLM). Lets a
-   * retry re-OCR only the failed pages and splice them back into position.
-   */
-  pageTexts?: string[];
-  /** Full page count of the file (the density denominator across retries). */
-  totalPages: number;
-  /** 1-based pages that produced nothing, as of the latest attempt. */
-  failedPages: number[];
-  /** audit-3 F-F2/F-F10: failed pages rejected by the OCR rate limit. */
-  rateLimitedPages: number;
-  /** Engine's own density/partial flag (feeds the low-density advisory). */
-  lowConfidence: boolean;
-  /** Why this file contributed no text at all (audit-3 F-F5). */
-  skippedReason?: "empty";
-};
-
-/** The text an outcome contributes: per-page parts when available, else the
- * engine's combined text. */
-function outcomeText(o: FileOutcome): string {
-  if (o.pageTexts) return o.pageTexts.filter((t) => t.trim()).join("\n\n").trim();
-  return o.text.trim();
-}
+type FileOutcome = ExtractionOutcome;
 
 /** Render the combined corpus from the outcomes that produced text. */
 function combineOutcomes(outcomes: FileOutcome[], fileCount: number): string {
@@ -197,6 +188,28 @@ export function GenerateFromFileDialog({
   // others were skipped. Drives an honest "{contributing} of {uploaded} files"
   // summary instead of counting uploads as sources.
   const [outcomes, setOutcomes] = useState<FileOutcome[]>([]);
+  /**
+   * gate G6: the provider + caps the picker's probe reported. Forwarded into
+   * every extraction so the pipeline knows which leg (and which page cap) it is
+   * running under.
+   *
+   * Defect #1: this is stored as the RAW verdict (including the fail-closed
+   * `available:false` / `provider:"unknown"` shape), and the extract path gates
+   * on it via `planGlmRun` — the old code spread `provider`/`maxPages`
+   * straight into the pipeline without ever reading `available`, which drove
+   * the METERED per-page loop off a failed probe.
+   */
+  const [engineInfo, setEngineInfo] = useState<GlmEngineInfo | null>(null);
+  /**
+   * One-shot fallback probe, used only when an extraction is about to run the
+   * GLM engine while the picker's verdict is still missing (a fast click after
+   * the dialog opens, or a restored `glm` selection from localStorage). Without
+   * this, the pipeline would silently take the LOCAL per-page branch against a
+   * remote server — N billed image calls instead of ONE whole-document call,
+   * which is precisely the 10-200× overspend gate G3 exists to prevent.
+   * Cached so a multi-file batch probes once (the server bucket is 6/min).
+   */
+  const engineInfoProbeRef = useRef<Promise<GlmEngineInfo> | null>(null);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -211,6 +224,13 @@ export function GenerateFromFileDialog({
   function reset() {
     activeAbortRef.current?.abort();
     activeAbortRef.current = null;
+    // Defect #2: drop the cached probe. It is only reused while it is a USABLE
+    // verdict (`shouldReuseProbe`), but a reset is the natural point to forget
+    // it entirely — one transient blip must not poison every later run in this
+    // dialog session, and the next open re-probes against the server's 30 s
+    // negative cache.
+    engineInfoProbeRef.current = null;
+    setEngineInfo(null);
     setStep(1);
     setInputMode("file");
     setFiles([]);
@@ -256,6 +276,38 @@ export function GenerateFromFileDialog({
     setRateLimitedPages(null);
   }
 
+  /**
+   * The engine info to extract under: the picker's verdict when it has landed,
+   * else a one-shot probe (see `engineInfoProbeRef`). `glmEngineInfo()` never
+   * throws — a failure resolves to its own fail-closed shape.
+   *
+   * Defect #2 (recovery): a verdict is only REUSED when it is definitive
+   * (`shouldReuseProbe`). A probe that failed resolves to
+   * `provider:"unknown"` — an absence of information, not a verdict about the
+   * engine — so it is re-probed on the next run instead of poisoning the whole
+   * dialog session. The re-probe is cheap in the blip case: the server caches
+   * its NEGATIVE verdict for only 30 s, so the retry either gets the recovered
+   * truth or the same fast failure.
+   */
+  async function resolveEngineInfo(): Promise<GlmEngineInfo | null> {
+    if (shouldReuseProbe(engineInfo)) return engineInfo;
+    if (engine !== "glm") return null;
+    // A stored-but-transient failure is dropped so the probe runs again; a
+    // definitive verdict never reaches here.
+    if (engineInfo) setEngineInfo(null);
+    engineInfoProbeRef.current ??= glmEngineInfo();
+    const info = await engineInfoProbeRef.current;
+    if (!shouldReuseProbe(info)) {
+      // Transient failure: forget it so the NEXT run probes again.
+      engineInfoProbeRef.current = null;
+    } else {
+      // Cache the definitive verdict in state so the extract path's gate and
+      // the picker agree on one answer.
+      setEngineInfo(info);
+    }
+    return info;
+  }
+
   /** Extract one uploaded file into a FileOutcome (never throws for a single
    * file's low-confidence result — that is reported, not fatal). */
   async function extractOne(
@@ -263,8 +315,22 @@ export function GenerateFromFileDialog({
     index: number,
     signal: AbortSignal,
     onProgress?: (p: PipelineProgress) => void,
-    retry?: { pages: number[]; previous: FileOutcome },
+    retry?: { pages: number[]; previous: FileOutcome; whole?: boolean },
   ): Promise<FileOutcome> {
+    // Resolved per file (cheap after the first call — cached, and a failed
+    // verdict is re-probed rather than replayed).
+    const info = await resolveEngineInfo();
+    // Defect #1: GATE the extract path on the verdict. The dialog must not run
+    // extraction on an engine whose probe failed — the old code spread
+    // `provider`/`maxPages` into the pipeline without reading `available`, so a
+    // failed probe (which reported `provider:"local"`) drove the METERED
+    // per-page loop: 12 billed calls for a 12-page deck instead of one.
+    // `planGlmRun` is the single, tested decision (it applies the same
+    // predicate the pipeline does, so the refusal is expressed once).
+    const decision = planGlmRun(engine, info);
+    if (decision.action === "refuse") {
+      throw new OcrPageError(decision.code);
+    }
     const result = await runExtractionPipeline({
       file: item.file,
       engine,
@@ -272,6 +338,12 @@ export function GenerateFromFileDialog({
       onProgress,
       signal,
       ...(retry ? { pagesToRetry: retry.pages } : {}),
+      // gate G6: the remote leg's retry unit is the WHOLE document.
+      ...(retry?.whole ? { retryWhole: true } : {}),
+      // Defect #1: the FULL verdict (or null for a non-GLM engine / no probe)
+      // so the pipeline gates on `available` instead of trusting a provider it
+      // was handed without a liveness answer.
+      engineInfo: decision.engineInfo,
     });
     const attempted = result.pagesAttempted ?? (result.pages || 1);
     const text = result.text ?? "";
@@ -286,10 +358,15 @@ export function GenerateFromFileDialog({
       failedPages: result.failedPages ?? [],
       rateLimitedPages: result.rateLimitedPages?.length ?? 0,
       lowConfidence: result.lowConfidence === true,
+      wholeDocumentRetry: result.wholeDocumentRetry === true,
       // A retry keeps the file's "contributed" status from its earlier
       // attempt — only the failed pages were re-run, so an all-failed retry
-      // must not erase pages that succeeded before.
-      ...(text.trim() || retry?.previous.text.trim() ? {} : { skippedReason: "empty" as const }),
+      // must not erase pages that succeeded before. A WHOLE-document retry is
+      // the exception: it replaces the outcome wholesale, so an empty re-run
+      // really does mean this file contributed nothing.
+      ...(outcomeSkippedReason({ text, retry })
+        ? { skippedReason: "empty" as const }
+        : {}),
     };
   }
 
@@ -297,9 +374,15 @@ export function GenerateFromFileDialog({
    * Extract files and fold the outcomes into the dialog's derived state.
    * `onlyPaths` re-runs just the failed subset for the F-F2 retry affordance;
    * omitted, it runs every uploaded file.
+   *
+   * `opts.retryWhole` (gate G6) marks a WHOLE-DOCUMENT retry for the remote
+   * leg: the file is re-sent as a unit (and re-billed), `pagesToRetry` is
+   * meaningless, and the page-splice branch is skipped because a whole-doc
+   * retry REPLACES the file's outcome rather than patching pages into it.
    */
-  async function handleExtractAll(onlyPaths?: string[]) {
+  async function handleExtractAll(onlyPaths?: string[], opts?: { retryWhole?: boolean }) {
     if (files.length === 0 || busy) return;
+    const retryWhole = opts?.retryWhole === true;
     setBusy(true);
     setError(null);
 
@@ -309,7 +392,7 @@ export function GenerateFromFileDialog({
 
     try {
       const priorOutcomes = outcomes;
-      const retarget = onlyPaths && onlyPaths.length > 0;
+      const retarget = onlyPaths !== undefined && onlyPaths.length > 0;
       const priorByPath = new Map(priorOutcomes.map((o) => [o.path, o]));
       const targets = files
         .map((item, index) => ({ item, index }))
@@ -324,31 +407,22 @@ export function GenerateFromFileDialog({
 
         setCurrentExtractingFile(`${item.file.name} (${index + 1}/${files.length})`);
         const previous = priorByPath.get(item.path);
-        const retryPages =
-          retarget && previous && previous.failedPages.length > 0
-            ? previous.failedPages
-            : undefined;
+        // A whole-document retry has no page set to re-run (the remote leg
+        // returns one markdown string); the page machine is bypassed entirely.
+        const retry = planRetry({ retryWhole, retarget, previous });
         const fresh = await extractOne(
           item,
           index,
           controller.signal,
           (p) => setProgress(p),
-          retryPages && previous ? { pages: retryPages, previous } : undefined,
+          retry,
         );
         // Splice retried pages back into the prior per-page corpus so the
-        // recovered text lands in its original position (F-F2).
-        if (retryPages && previous?.pageTexts) {
-          const merged = [...previous.pageTexts];
-          fresh.pageTexts?.forEach((t, i) => {
-            if (t.trim()) merged[i] = t;
-          });
-          produced.push({
-            ...fresh,
-            pageTexts: merged,
-            text: merged.filter((t) => t.trim()).join("\n\n").trim(),
-            // Recovered pages drop out of the failure set.
-            failedPages: fresh.failedPages.filter((p) => !retryPages.includes(p)),
-          });
+        // recovered text lands in its original position (F-F2). A WHOLE-doc
+        // retry must NOT run this: the fresh outcome replaces the old one
+        // (and it has no `pageTexts` to splice).
+        if (shouldSpliceRetry({ retryWhole, retryPages: retry?.pages, previous })) {
+          produced.push(spliceRetriedPages(fresh, previous!, retry!.pages));
         } else {
           produced.push(fresh);
         }
@@ -357,14 +431,12 @@ export function GenerateFromFileDialog({
       // Merge: a retry replaces only the re-run files; everything else keeps
       // its prior outcome (F-F2 — the user retries the lost pages, not the
       // whole batch).
-      const byPath = new Map(priorOutcomes.map((o) => [o.path, o]));
-      for (const outcome of produced) byPath.set(outcome.path, outcome);
-      const merged = retarget
-        ? files
-            .map((item) => byPath.get(item.path))
-            .filter((o): o is FileOutcome => o !== undefined)
-        : produced;
-      const finalOutcomes = merged.length > 0 ? merged : produced;
+      const finalOutcomes = mergeOutcomes({
+        prior: priorOutcomes,
+        produced,
+        paths: files.map((item) => item.path),
+        retarget,
+      });
       setOutcomes(finalOutcomes);
 
       const combinedText = combineOutcomes(finalOutcomes, files.length);
@@ -372,17 +444,22 @@ export function GenerateFromFileDialog({
         throw new Error(t("emptyTextError"));
       }
 
-      const totalAttemptedPages = finalOutcomes.reduce((n, o) => n + o.totalPages, 0);
-      const totalFailedPages = finalOutcomes.reduce((n, o) => n + o.failedPages.length, 0);
-      const totalRateLimitedPages = finalOutcomes.reduce((n, o) => n + o.rateLimitedPages, 0);
-      const hasLowConfidence = finalOutcomes.some((o) => o.lowConfidence);
+      const summary = summarizeOutcomes(finalOutcomes);
+      const { totalAttemptedPages, totalFailedPages, totalRateLimitedPages } = summary;
 
       const words = combinedText.trim().split(/\s+/).filter(Boolean).length;
-      const avgWordsPerPage = totalAttemptedPages > 0 ? Math.round(words / totalAttemptedPages) : 0;
-      const avgCharsPerPage = totalAttemptedPages > 0 ? Math.round(combinedText.length / totalAttemptedPages) : 0;
 
-      // Heuristic: Flag presentation/office decks where text density is suspiciously low (<12 words or <50 chars per page)
-      const lowDensityDetected = hasOfficeFiles && (hasLowConfidence || avgWordsPerPage < 12 || avgCharsPerPage < 50);
+      // Heuristic: Flag presentation/office decks where text density is
+      // suspiciously low (<12 words or <50 chars per page). Defect #7: when an
+      // engine reported no page count the denominator is a LOWER BOUND, so the
+      // per-page averages are over-estimates and `isLowDensityOutcome` refuses
+      // to make the "very little text" claim from them.
+      const lowDensityDetected = isLowDensityOutcome({
+        hasOfficeFiles,
+        summary,
+        words,
+        chars: combinedText.length,
+      });
       setIsLowDensity(lowDensityDetected);
 
       // audit-2 M-17: surface partial-OCR loss for ALL file types (the old
@@ -406,22 +483,24 @@ export function GenerateFromFileDialog({
       const msg = err instanceof Error ? err.message : "";
       if (aborted) {
         setError(t("timeout"));
-      } else if (msg === "glm_rate_limited") {
-        setError(t("glmRateLimited"));
-      } else if (msg === "glm_busy") {
-        setError(t("glmBusy"));
-      } else if (msg === "glm_error") {
-        setError(t("glmError"));
-      } else if (msg === "glm_timeout") {
-        setError(t("glmTimeout"));
-      } else if (msg === "glm_model_unavailable") {
-        setError(t("glmUnavailable"));
-      } else if (msg === "canvas_unavailable") {
-        setError(t("canvasUnavailable"));
-      } else if (msg === "unsupported_file_type") {
-        setError(t("unsupportedType"));
       } else {
-        setError(msg || tCommon("errorGeneric"));
+        // The typed-code → i18n map lives in `@/lib/extract/pipeline` (defect
+        // #6) so every branch — including gate G3/G8's `glm_pages_exceeded` /
+        // `glm_spend_cap` and defect #5's `invalid_pdf` — is unit-tested
+        // rather than only reachable through a rendered dialog.
+        const key = extractErrorI18nKey(msg);
+        if (key === "glmPagesExceeded") {
+          // gate G3: the remote leg's interim page cap. The server reports the
+          // cap via the probe; the dialog only has to name the remedy. A
+          // failed/unknown probe carries `maxPages: 0`, so fall back to the
+          // documented default rather than rendering "up to 0 pages".
+          const max = engineInfo?.maxPages || MAX_OCR_PAGES_REMOTE;
+          setError(t("glmPagesExceeded", { max }));
+        } else if (key) {
+          setError(t(key));
+        } else {
+          setError(msg || tCommon("errorGeneric"));
+        }
       }
     } finally {
       clearTimeout(timer);
@@ -435,11 +514,24 @@ export function GenerateFromFileDialog({
   /** audit-3 F-F2: re-run only the files whose OCR pages failed (rate limit
    * or otherwise), then fold the fresh outcomes back into the corpus. */
   function handleRetryFailedFiles() {
-    const failedPaths = outcomes
-      .filter((o) => o.failedPages.length > 0 || o.skippedReason === "empty")
-      .map((o) => o.path);
+    const failedPaths = failedRetryPaths(outcomes);
     if (failedPaths.length === 0) return;
     void handleExtractAll(failedPaths);
+  }
+
+  /**
+   * gate G6: files whose reading came from the REMOTE leg and must be retried
+   * as a WHOLE DOCUMENT (one markdown string, no page boundaries). Kept apart
+   * from `handleRetryFailedFiles` because the cost model is different: a
+   * whole-document retry re-sends and RE-BILLS the entire file.
+   */
+  const documentRetryFiles = documentRetryOutcomes(outcomes);
+
+  /** Re-send the whole document for each file that needs a whole-doc retry. */
+  function handleRetryWholeDocuments() {
+    const paths = documentRetryFiles.map((o) => o.path);
+    if (paths.length === 0) return;
+    void handleExtractAll(paths, { retryWhole: true });
   }
 
   /** Files that produced no text at all (audit-3 F-F5). */
@@ -707,6 +799,7 @@ export function GenerateFromFileDialog({
                     onChange={setEngine}
                     files={files}
                     disabled={busy}
+                    onEngineInfo={setEngineInfo}
                   />
                 </div>
               ) : (
@@ -930,6 +1023,41 @@ export function GenerateFromFileDialog({
                     >
                       <RefreshCw className="size-3.5" />
                       {t("retryFailedPages")}
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* gate G6: the REMOTE (Z.ai) leg returns ONE whole-document
+                  markdown string with no page boundaries, so a degraded reading
+                  cannot be page-spliced — the retry unit is the DOCUMENT, and
+                  re-running it re-sends AND re-bills the whole file. This is
+                  deliberately a SEPARATE affordance from the per-page retry
+                  above so the cost model is explicit. */}
+              {documentRetryFiles.length > 0 && (
+                <div className="flex items-start gap-3 rounded-2xl border-[3px] border-amber-500/30 bg-amber-500/10 p-3.5 shadow-[var(--shadow-clay-sm)]">
+                  <div className="rounded-xl bg-amber-500/20 p-2 text-amber-700 dark:text-amber-300 shrink-0 mt-0.5">
+                    <AlertCircle className="size-4" />
+                  </div>
+                  <div className="min-w-0 space-y-1.5 flex-1">
+                    <p className="text-xs font-bold font-heading text-amber-950 dark:text-amber-200">
+                      {t("documentRetryTitle")}
+                    </p>
+                    <p className="text-2xs font-semibold text-amber-900/90 dark:text-amber-300/90 leading-relaxed">
+                      {t("documentRetryDesc", {
+                        files: documentRetryFiles.map((o) => o.name).join(", "),
+                      })}
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleRetryWholeDocuments()}
+                      disabled={busy}
+                      className="h-8 gap-1.5 rounded-xl border-[2px] border-amber-500/50 bg-card px-3 text-2xs font-extrabold text-amber-900 hover:bg-amber-500/10 dark:text-amber-200"
+                    >
+                      <RefreshCw className="size-3.5" />
+                      {t("retryWholeDocument")}
                     </Button>
                   </div>
                 </div>

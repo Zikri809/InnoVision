@@ -952,6 +952,7 @@
     "engineLabel": "Document Scanner (for PDFs & Images)",
     "engineTesseract": "Standard Scanner (Built-in, Fast)",
     "engineGlm": "AI Vision Scanner (High Accuracy)",
+    "engineGlmRemote": "AI Vision Scanner (Cloud)",
     "questionCountLabel": "Number of questions",
     "warningReplace": "I understand this will replace existing questions",
     "generateBtn": "Generate quiz",
@@ -1009,6 +1010,9 @@
     "glmBusy": "The AI Vision scanner is busy with another page. Wait a moment and try again.",
     "glmTimeout": "Reading the document took too long. Please try a smaller file or use Standard Scanner.",
     "glmUnavailable": "The AI Vision scanner is currently offline. Please switch to Standard Scanner.",
+    "glmPagesExceeded": "The AI Vision scanner handles up to {max} pages per file. Split the PDF or use the Standard Scanner.",
+    "glmSpendCap": "The daily AI Vision limit for your account is used up. Try again tomorrow or use the Standard Scanner.",
+    "invalidPdf": "This file is named as a PDF but its contents are not a readable PDF. Re-export it or use the Standard Scanner.",
     "canvasUnavailable": "Document visual display is not supported in this browser.",
     "badgeNative": "Instant Read",
     "badgePdf": "PDF Document",
@@ -1083,7 +1087,10 @@
     "partialPagesTitle": "Some pages could not be read",
     "partialPagesDesc": "{failed} of {attempted} page(s) failed during OCR. The extracted text is missing those pages — review the material below and re-run extraction if pages are missing.",
     "partialPagesRateLimitedDesc": "{count} page(s) were skipped because the OCR rate limit was reached, not because they were unreadable. Wait about a minute, then retry the failed pages.",
-    "retryFailedPages": "Retry failed pages"
+    "retryFailedPages": "Retry failed pages",
+    "documentRetryTitle": "Partial result from the AI Vision scanner",
+    "documentRetryDesc": "The remote scanner returned a partial reading for: {files}. Retrying re-sends the whole document and bills it again.",
+    "retryWholeDocument": "Retry whole document"
   },
   "errors": {
     "unauthorized": "You must be signed in to perform this action.",

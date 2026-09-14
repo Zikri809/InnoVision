@@ -10,6 +10,12 @@ export type ExtractEngine = "native" | "tesseract" | "glm";
 
 export type ExtractionResult = {
   text: string;
+  /**
+   * Pages that produced text. `0` means the engine did NOT report a page count
+   * (the remote leg reports `numPages: null` when `data_info.num_pages` is
+   * absent) — never a fabricated `1`. Callers must treat `0` as "unknown" and
+   * stand their per-page math down (see `resolvePageCounts` in pipeline.ts).
+   */
   pages: number;
   engine: ExtractEngine;
   /** Heuristic: too little text per page for reliable question generation. */
@@ -39,6 +45,52 @@ export type ExtractionResult = {
   /** Pages actually attempted on this call (a retry attempts only the
    * requested subset, so `pages`/`pagesAttempted` describe just that call). */
   totalPages?: number;
+  /**
+   * gate G6: the REMOTE (Z.ai) leg returns ONE whole-document markdown string
+   * with NO page boundaries, so `pageTexts` is `undefined` for it and the retry
+   * unit is the WHOLE DOCUMENT, not a page. This flag tells the dialog's
+   * per-page splice machine to stand down and offer a whole-document retry
+   * instead (which re-sends — and re-bills — the entire file).
+   */
+  wholeDocumentRetry?: boolean;
+  /**
+   * Explicit "the engine did not report a page count" signal. Set to `false`
+   * when the remote leg's `data_info.num_pages` is absent (the server reports
+   * `numPages: null` / `pages: null`), in which case `pages`/`totalPages`/
+   * `pagesAttempted` are all `0`. The dialog's density heuristic keys on
+   * `totalPages` and already guards `> 0`, so a fabricated count is what used
+   * to make it divide by a lie. Absent = the count is trustworthy.
+   */
+  pageCountKnown?: boolean;
+  /** Which leg produced this result (informational; gate G6). */
+  provider?: OcrProvider;
+};
+
+/**
+ * The provider the client last observed from the server's OCR probe
+ * (`GET /api/extract/ocr` → `GlmHealth.provider`).
+ *
+ * `"unknown"` is the honest state for a probe that FAILED (non-OK response,
+ * network error, abort, unparseable body): the client could not determine
+ * which leg the server runs, so it must not assert one. It is deliberately NOT
+ * `"local"` — defaulting to local would drive the LOCAL per-page loop (N
+ * rasterized `{image}` calls) against a REMOTE server, which is the 10-200x
+ * overspend gate G3 exists to prevent. `glmExtract` refuses to guess on it.
+ */
+export type OcrProvider = "local" | "remote" | "unknown";
+
+/**
+ * Probe payload for the engine picker + provider-aware caps (contract §4.7).
+ * Mirrors the server's `GlmHealth` minus the cache-only fields.
+ */
+export type GlmEngineInfo = {
+  available: boolean;
+  /** Server reason union (`ok` / `unreachable` / `auth` / `rate_limited` / …). */
+  reason: string;
+  provider: OcrProvider;
+  maxPages: number;
+  maxImageBytes: number;
+  maxPdfBytes: number;
 };
 
 /** Config passed from the builder page (server component reads env).
@@ -54,6 +106,24 @@ export const MIN_CHARS_PER_PAGE = 40;
  * audit-3 F-F3: this cap bounds CPU/page count only — MEMORY is bounded by the
  * streaming rasterizer (one page in flight), not by this number. */
 export const MAX_OCR_PAGES = 200;
+/**
+ * gate G3/G8: page cap for the REMOTE (Z.ai `layout_parsing`) leg. INTERIM 30 —
+ * the Z.ai docs conflict (guide says 100, API ref says 30); the lower bound is
+ * the safe one until the live curl resolves it. The server is authoritative
+ * (`GLM_REMOTE_MAX_PAGES`, reported by the probe as `maxPages`); this constant
+ * is the client-side fallback and the documented default.
+ *
+ * `MAX_OCR_PAGES` (200) deliberately stays as-is: it is the LOCAL rasterizer's
+ * CPU bound, and the two legs are capped independently.
+ */
+export const MAX_OCR_PAGES_REMOTE = 30;
+/**
+ * `maxPages` value meaning "the client could not determine the cap" (a failed
+ * probe). Never a real cap: both legs enforce at least 1 page, so `0` cannot be
+ * confused with a legitimate limit. Callers must fall back to their own default
+ * rather than treating it as "no pages allowed".
+ */
+export const UNKNOWN_MAX_PAGES = 0;
 /** Client-side file size cap (single file). */
 export const MAX_FILE_BYTES = 25_000_000;
 /** Maximum number of source files allowed in a multi-file batch upload. */
