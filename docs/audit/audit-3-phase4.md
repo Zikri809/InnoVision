@@ -601,6 +601,35 @@ and lists what arrived — not by reasoning about the file:
 does not implement Docker's pattern semantics. The build-based check is the
 authoritative one.)
 
+### Compose end-to-end (closes the remaining caveat)
+
+Both services were recreated from the REBUILT images via `docker compose up -d
+--force-recreate` and verified serving real traffic — not just `docker run`:
+
+| Check | glm-ocr | insightface |
+|---|---|---|
+| Compose healthcheck | **healthy** | **healthy** |
+| Runtime identity | `uid=1001(app)`, `HOME=/home/app` | `uid=1001(app)`, `HOME=/home/app` |
+| `/health` | 200 | 200 (`spoof_model: true`) |
+| App-facing probe | `/v1/models` → `["glm-ocr"]` (matches `probeGlmModel`) | n/a |
+| Real inference | transcribed "Photosynthesis: light reactions" correctly | 1 face, 512-dim embedding, spoof `{real:true, 0.9975}` |
+
+This also settles the `transformers<5` question: the constraint exists ONLY in
+pip metadata (`vllm-0.19.0.dist-info/METADATA: Requires-Dist:
+transformers<5,>=4.56.0`). There is no runtime version gate anywhere in vLLM —
+grepping for `transformers.__version__` checks finds none — and the service
+starts and serves correctly with `5.17.0.dev0`. It is a soft declaration, not a
+breaking change.
+
+### A note on the previously-running container
+
+Before the rebuild, the running `innovision-glm-ocr-1` was root with
+`transformers 5.16.0.dev0` and no `HOME`/`HF_HOME` — i.e. built from the
+Dockerfile as it stood BEFORE commit `27a786b` (which added `USER 1001` but
+also introduced the fatal `@v4.49.0` pin). That older build worked only because
+it installed transformers unpinned from `main` and ran as root. It is now
+replaced by a build that is pinned, non-root, and verified.
+
 ### Disk note
 
 `innovision-glm-ocr:local` is ~32 GB (the vLLM base image is large). Both
