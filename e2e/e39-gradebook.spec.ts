@@ -140,14 +140,20 @@ test.describe("E39 — gradebook", () => {
     // Header row: Num/Matric/Name + 2 quiz columns + Overall.
     expect(summary.getCell(1, 4).value).toBe(`${QUIZ_1} (/2)`);
     expect(summary.getCell(1, 5).value).toBe(`${QUIZ_2} (/1) *`);
-    // Student A row (row 2): 100, 100, cumulative 100.
-    expect(summary.getCell(2, 4).value).toBe(100);
-    expect(summary.getCell(2, 5).value).toBe(100);
-    expect(summary.getCell(2, 6).value).toBe(100);
-    // Student B row (row 3): 50, null (em-dash → empty cell), cumulative 50.
-    expect(summary.getCell(3, 4).value).toBe(50);
+    // audit-3 B-F2: percent cells are 0-1 fractions carrying a `0%` number
+    // format (the per-quiz export convention) — Excel renders them as 100%,
+    // not the old bare 0-100 integer.
+    // Student A row (row 2): 100%, 100%, cumulative 100%.
+    expect(summary.getCell(2, 4).value).toBe(1);
+    expect(summary.getCell(2, 5).value).toBe(1);
+    expect(summary.getCell(2, 6).value).toBe(1);
+    expect(summary.getCell(2, 4).numFmt).toBe("0%");
+    expect(summary.getCell(2, 6).numFmt).toBe("0%");
+    // Student B row (row 3): 50%, null (em-dash → empty cell), cumulative 50%.
+    expect(summary.getCell(3, 4).value).toBe(0.5);
     expect(summary.getCell(3, 5).value).toBe(null);
-    expect(summary.getCell(3, 6).value).toBe(50);
+    expect(summary.getCell(3, 6).value).toBe(0.5);
+    expect(summary.getCell(3, 6).numFmt).toBe("0%");
 
     await lecturerCtx.close();
     await studentACtx.close();

@@ -16,9 +16,9 @@ export type ParsedImageUpload =
  * `readCappedFormData` streams the body through a counting TransformStream
  * that errors the moment `maxBytes + framing slack` is exceeded, so the cap
  * holds regardless of what the headers claim. (The old `checkMultipartLength`
- * header-only pre-check — which also rejected chunked uploads outright — is
- * superseded: the streaming cap is strictly stronger and no longer 413s
- * honest headerless clients.)
+ * header-only pre-check — which also rejected chunked uploads outright — was
+ * dead code and has been DELETED in audit-3 G-F7: the streaming cap is
+ * strictly stronger and no longer 413s honest headerless clients.)
  *
  * The sniff result — never the client-declared MIME — decides the stored
  * extension and content-type, so a mislabeled payload can't land in storage

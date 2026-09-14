@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  checkBodyLimit,
   checkSameOrigin,
   firstIssueMessage,
   invalidBody,
   jsonError,
-  JSON_BODY_LIMIT_BYTES,
 } from "@/lib/http";
 
 function req(
@@ -116,41 +114,6 @@ describe("checkSameOrigin", () => {
       if (prev === undefined) delete process.env.TRUSTED_ORIGINS;
       else process.env.TRUSTED_ORIGINS = prev;
     }
-  });
-});
-
-describe("checkBodyLimit", () => {
-  it("passes when no content-length header is present (chunked)", () => {
-    expect(checkBodyLimit(req("http://localhost/api/x"))).toBeNull();
-  });
-
-  it("passes when content-length is within budget", () => {
-    expect(
-      checkBodyLimit(
-        req("http://localhost/api/x", { "content-length": "64" }),
-        JSON_BODY_LIMIT_BYTES,
-      ),
-    ).toBeNull();
-  });
-
-  it("rejects declared length over the default cap with a typed 413", async () => {
-    const over = String(JSON_BODY_LIMIT_BYTES + 1);
-    const res = checkBodyLimit(
-      req("http://localhost/api/x", { "content-length": over }),
-    );
-    expect(res).not.toBeNull();
-    expect(res!.status).toBe(413);
-    await expect(res!.json()).resolves.toMatchObject({
-      error: "payload_too_large",
-    });
-  });
-
-  it("honors an explicit smaller cap", () => {
-    const res = checkBodyLimit(
-      req("http://localhost/api/x", { "content-length": "100" }),
-      50,
-    );
-    expect(res?.status).toBe(413);
   });
 });
 

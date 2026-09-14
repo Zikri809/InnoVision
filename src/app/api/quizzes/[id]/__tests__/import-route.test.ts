@@ -412,3 +412,62 @@ describe("QT-1 — multi-select import rows", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("H3-RACE-F3 — import idempotency key", () => {
+  const GEN = "00000000-0000-4000-8000-0000000000aa";
+
+  it("accepts a well-formed generationId alongside the rows → 200", async () => {
+    ownerContext();
+    const res = await importRoute.POST(
+      req({ questions: [VALID_ROW], generationId: GEN }),
+      { params: Promise.resolve({ id: QUIZ }) },
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("rejects a malformed generationId → 400 (typed boundary)", async () => {
+    ownerContext();
+    const res = await importRoute.POST(
+      req({ questions: [VALID_ROW], generationId: "not-a-uuid" }),
+      { params: Promise.resolve({ id: QUIZ }) },
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("H3-RACE-F3 rejects a concurrent import for the SAME quiz → 429 already_running", async () => {
+    const ctx = ownerContext();
+    // Gate the first request's RPC so it is still in-flight when the second
+    // POST for the same quiz arrives (scripted double-submit / second tab).
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const originalRpc = ctx.client.rpc.bind(ctx.client);
+    ctx.client.rpc = (async (name: string, args?: Record<string, unknown>) => {
+      await gate;
+      return originalRpc(name, args);
+    }) as typeof ctx.client.rpc;
+
+    const first = importRoute.POST(req({ questions: [VALID_ROW] }), {
+      params: Promise.resolve({ id: QUIZ }),
+    });
+    // Let the first request pass the head-count and register in-flight.
+    await new Promise((r) => setTimeout(r, 20));
+
+    const second = await importRoute.POST(req({ questions: [VALID_ROW] }), {
+      params: Promise.resolve({ id: QUIZ }),
+    });
+    expect(second.status).toBe(429);
+    expect((await second.json()).error).toBe("already_running");
+
+    // Releasing the first must complete it AND clear the in-flight slot, so a
+    // later legitimate import is not wedged.
+    release();
+    expect((await first).status).toBe(200);
+
+    const after = await importRoute.POST(req({ questions: [VALID_ROW] }), {
+      params: Promise.resolve({ id: QUIZ }),
+    });
+    expect(after.status).toBe(200);
+  });
+});

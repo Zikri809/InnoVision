@@ -32,8 +32,12 @@ The service:
 |---|---|---|
 | Image | `innovision-glm-ocr:local` (built from `docker/glm-ocr/Dockerfile`) | Official vLLM OpenAI-compatible server + a Transformers-from-source layer (the stock vLLM image's bundled Transformers predates the `glm_ocr` architecture) |
 | Model | `zai-org/GLM-OCR` | Official GLM-OCR weights (Hugging Face) |
+| Revision | `${GLM_OCR_REVISION:-2e85a62840ccac27daa451df36c736c4636b8628}` | audit-3 R3-DEP-F3: pinned commit of the HF repo, so a default-branch change cannot silently swap the OCR engine's weights on a cold start. Override the env var to move the pin deliberately (a bad revision fails loudly at model load). |
 | Served name | `glm-ocr` | Matches `OCR_GLM_MODEL` |
-| Port | `127.0.0.1:11434:11434` | Loopback-only — the browser OCR path talks to localhost, never the LAN |
+| Port | `127.0.0.1:11434:11434` | Loopback-only — the server-side OCR proxy talks to localhost, never the LAN |
+| `VLLM_API_KEY` | `${VLLM_API_KEY:-}` (empty = auth off) | audit-3 R3-DEP-F2: bearer auth on `/v1/*`, the mirror of `FACE_SIDECAR_TOKEN`. Empty keeps local dev working; vLLM only installs the auth middleware for a NON-EMPTY key. The Next.js proxy sends the matching `Authorization: Bearer` header from the app's own `VLLM_API_KEY`, so **both sides must be set to the same value** — see §7. |
+| Memory / CPU | `mem_limit: 16g`, `cpus: "8.0"` | audit-3 R3-DEP-F2: one bad request cannot take down the host |
+| Logging | `json-file`, `max-size: 10m`, `max-file: 3` | audit-3 R3-DEP-F2: vLLM is chatty and `restart: unless-stopped`; unbounded logs fill the disk |
 | GPU | NVIDIA reservation (falls back to CPU) | Fast inference |
 | `--max-model-len` | `8192` | Bound for a 6 GB GPU; the stock `32768` forces an encoder-cache budget that OOMs / SIGKILLs the engine core |
 | `--gpu-memory-utilization` | `0.7` | 6 GB VRAM has ~1 GB used by desktop apps; `0.9` fails startup |
@@ -71,11 +75,15 @@ stays the default otherwise.
 
 ## 5. Notes
 
-- The lecturer's browser talks to the container directly over loopback. The
-  Next.js server never proxies this endpoint (SSRF guard).
+- The lecturer's browser no longer talks to the container directly: the
+  server-side proxy `/api/extract/ocr` (`src/lib/extract/glm-ocr.ts` →
+  `/api/extract/ocr`) forwards page images, so a remote/tunnelled browser can
+  use the engine while the container stays loopback-bound. The target URL comes
+  only from server env (`GLM_BASE_URL` / `OCR_GLM_MODEL`) — never from the
+  request body (SSRF guard).
 - First start downloads the model weights from Hugging Face — allow a few
-  minutes. The compose healthcheck waits for `/v1/models` before reporting
-  healthy.
+  minutes. The compose healthcheck probes `/health` (unauthenticated even with
+  `VLLM_API_KEY` set, so it stays green with auth on).
 - **Port conflict:** the old native-Ollama install binds `127.0.0.1:11434`.
   Stop it (quit the Ollama tray app) before `docker compose up` — the GLM
   container needs that port.
@@ -86,6 +94,33 @@ stays the default otherwise.
 - **Troubleshooting:** `npm run glm:logs` streams vLLM output. A healthy
   startup logs `Resolved architecture: GlmOcrForConditionalGeneration` and
   ends with `Application startup complete.`
+
+## 7. Enabling API-key auth (production)
+
+`VLLM_API_KEY` is read by vLLM natively and installs a bearer-token middleware
+only when the value is non-empty (so `docker compose up` with the var unset is
+unchanged). To turn it on:
+
+```bash
+# project-root .env (compose reads this, NOT .env.local) or the shell env
+VLLM_API_KEY=<a-long-random-secret>
+```
+
+The Next.js side must send the matching header, and it reads the SAME variable
+name from its own process env. Add it to `.env.local` as well:
+
+```bash
+# .env.local — read by the Next process (/api/extract/ocr proxy)
+VLLM_API_KEY=<the-same-secret>
+```
+
+`src/lib/ai/http-compat.ts` (`httpChatCompletions` / `probeGlmModel`) sends
+`Authorization: Bearer ${process.env.VLLM_API_KEY}` when set, so the probe and
+the transcription call both authenticate. Set the two sides to the same value:
+the compose-side var (project-root `.env`) enables vLLM's middleware, and the
+app-side var (`.env.local`) satisfies it. A mismatch makes `/api/extract/ocr`
+return `glm_model_unavailable` (the probe 401s) — the loopback publish remains
+the primary control either way.
 
 ## 6. Benchmark
 

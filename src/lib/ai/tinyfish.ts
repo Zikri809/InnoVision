@@ -233,15 +233,18 @@ export async function tinyfishFetch(opts: {
     const failures: Array<{ url: string; error: string; status?: number }> = [];
     for (const r of parsed.data.results) {
       const text = (r.text ?? "").trim();
+      // INJ-F2: normalize final_url to a real http(s) URL; an unparseable or
+      // non-http value falls back to the requested (server-derived) URL.
+      const finalUrl = safeHttpUrl(r.final_url);
       if (!text) {
         // An empty-body success is a fetch failure for grounding purposes —
         // counting it as such lets the caller distinguish "page had no
         // content" (thin) from "every page failed" (outage) correctly.
-        failures.push({ url: r.final_url?.trim() || r.url, error: "empty_content" });
+        failures.push({ url: finalUrl ?? r.url, error: "empty_content" });
         continue;
       }
       pages.push({
-        url: r.final_url?.trim() || r.url,
+        url: finalUrl ?? r.url,
         title: r.title?.trim() || r.url,
         text,
       });
@@ -374,11 +377,45 @@ export function tokenize(text: string): string[] {
   );
 }
 
+/**
+ * Parse + normalize an http(s) URL from the wire; null when it is not one.
+ * INJ-F2: `final_url` is echoed back by the upstream and flows into the
+ * untrusted-corpus envelope header, so it must be a REAL URL (or be dropped)
+ * rather than an arbitrary attacker-shaped string.
+ */
+function safeHttpUrl(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  try {
+    const u = new URL(trimmed);
+    return u.protocol === "http:" || u.protocol === "https:" ? u.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sanitize a host label for the envelope header (INJ-F2). `hostnameOf`'s catch
+ * path used to return the RAW URL — attacker-influenced and interpolated
+ * UN-sanitized — so a forged `=== WEB SOURCE` line could be minted inside the
+ * corpus the model is told to treat as fenced untrusted data. Strip control
+ * chars, the forged envelope prefix, and fences; collapse to one line.
+ */
+function sanitizeHostLabel(text: string): string {
+  return text
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/===\s*WEB\s+SOURCE/gi, "===")
+    .replace(/```/g, "'''")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+}
+
 function hostnameOf(url: string): string {
   try {
-    return new URL(url).hostname.toLowerCase();
+    return sanitizeHostLabel(new URL(url).hostname.toLowerCase());
   } catch {
-    return url.toLowerCase();
+    return sanitizeHostLabel(url).toLowerCase();
   }
 }
 
@@ -451,7 +488,7 @@ export function buildWebCorpus(
   let bodySum = 0;
   for (let i = 0; i < pages.length; i += 1) {
     const p = pages[i];
-    const header = `=== WEB SOURCE [${i + 1}/${pages.length}]: ${sanitizeEnvelopeText(p.title, 120)} (${hostnameOf(p.url)}) — retrieved ${p.retrievedAt}, query: ${sanitizeEnvelopeText(p.query, 120)} ===`;
+    const header = `=== WEB SOURCE [${i + 1}/${pages.length}]: ${sanitizeEnvelopeText(p.title, 120)} (${sanitizeEnvelopeText(hostnameOf(p.url), 120)}) — retrieved ${p.retrievedAt}, query: ${sanitizeEnvelopeText(p.query, 120)} ===`;
     // Scrub forged envelope prefixes + control chars, escape fences.
     const body = p.text
       .replace(/===\s*WEB\s+SOURCE/gi, "===")

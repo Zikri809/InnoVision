@@ -13,3 +13,11 @@ export const RESULTS_SESSION_LIMIT = 200;
 
 /** Cap on the lecturer_audit_view read (symmetry with the session cap). */
 export const RESULTS_AUDIT_LIMIT = 500;
+
+/**
+ * Cap on the incident_clips read (audit-3 R2-INC-F4). Every row also costs a
+ * service-role `createSignedUrl` call, so an uncapped read turned a single
+ * page load into an unbounded burst of 1-hour bearer-URL mints. Newest-first,
+ * so the most recent (most relevant) incidents survive truncation.
+ */
+export const RESULTS_CLIP_LIMIT = 500;

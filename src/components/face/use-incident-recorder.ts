@@ -157,10 +157,24 @@ export function useIncidentRecorder(opts: {
         const rec = m.recorder;
         rec.onerror = () => {
           if (machineRef.current.recorder !== rec) return; // superseded by drain/discard
+          // audit-3 R2-INC-F10: the buffer used to be ZEROED here, so the very
+          // incident that killed the recorder produced no clip. The error is
+          // precisely when footage matters, so keep the chunks and hand them to
+          // a best-effort upload — the recorder is dead either way, but the
+          // evidence survives.
+          const salvaged =
+            machineRef.current.chunks.length > 0
+              ? {
+                  blob: concat(machineRef.current.chunks),
+                  durationMs: machineRef.current.totalMs,
+                  from: machineRef.current.startedAt,
+                }
+              : null;
           machineRef.current.recorder = null;
           machineRef.current.chunks = [];
           machineRef.current.totalMs = 0;
           stopTracksOnly();
+          if (salvaged) void uploadClip(salvaged, "recorder_error");
         };
         m.recorder.start(INCIDENT_TIMESTRICE_MS);
       } catch {
@@ -223,37 +237,67 @@ export function useIncidentRecorder(opts: {
       m.flushing = true;
       try {
         const drained = await drain();
-        // Gate on the MACHINE-level stop flag, not this effect run's
-        // `disposed`: a status transition (paused→recovering on unlock) tears
-        // the effect down mid-upload, but the drained clip belongs to the
-        // incident that just happened and must still be uploaded. Only a real
-        // stop (discard / terminal unmount) drops it.
-        if (m.stopping) return;
         if (drained) {
-          if (drained.blob.size <= MAX_INCIDENT_BYTES) {
-            // Trust the ACTUAL container (Safari defaults to mp4 when WebM
-            // is unsupported — storing mp4 bytes as .webm breaks playback).
-            const isMp4 = drained.blob.type.includes("mp4");
-            const form = new FormData();
-            form.append("clip", drained.blob, isMp4 ? "clip.mp4" : "clip.webm");
-            form.append("reason", reason.slice(0, 40));
-            form.append("durationMs", String(drained.durationMs));
-            form.append("recordedFrom", new Date(drained.from).toISOString());
-            await fetch(`/api/sessions/${sessionIdRef.current}/incident`, {
-              method: "POST",
-              body: form,
-            }).catch(() => {});
-          } else {
-            console.warn(
-              "[incident-recorder] ring buffer exceeds the upload cap — clip dropped:",
-              drained.blob.size,
-            );
-          }
+          // audit-3 R2-INC-F9: a stop that lands while the drain is in flight
+          // (clean submit racing the flush) used to DROP the payload — the
+          // stopping gate swallowed drained footage. A clip that reached this
+          // point belongs to an incident that already happened and must still
+          // be uploaded; `stopping` only means "stop capturing now".
+          await uploadClip(drained, reason);
         }
       } finally {
         m.flushing = false;
-        // Keep capturing so SUBSEQUENT incidents have footage too.
-        void startRecording();
+        // Keep capturing so SUBSEQUENT incidents have footage too — unless a
+        // stop is in progress (the terminal path must not re-acquire the
+        // camera; audit-3 R2-INC-F2).
+        if (!m.stopping) void startRecording();
+      }
+    }
+
+    /**
+     * Best-effort clip upload. audit-3 R2-INC-F1: the previous form only
+     * `.catch(() => {})`-ed network throws and never checked `response.ok`, so
+     * a resolved 429 (the route's 6/min incident limiter), 413, 400 or 500 was
+     * silently discarded — losing evidence for exactly the incidents that
+     * break uploads. Every failure now logs with the status and the clip size
+     * so the loss is observable instead of invisible.
+     */
+    async function uploadClip(
+      payload: { blob: Blob; durationMs: number; from: number },
+      clipReason: string,
+    ): Promise<void> {
+      if (payload.blob.size > MAX_INCIDENT_BYTES) {
+        console.warn(
+          "[incident-recorder] ring buffer exceeds the upload cap — clip dropped:",
+          payload.blob.size,
+        );
+        return;
+      }
+      // Trust the ACTUAL container (Safari defaults to mp4 when WebM is
+      // unsupported — storing mp4 bytes as .webm breaks playback).
+      const isMp4 = payload.blob.type.includes("mp4");
+      const form = new FormData();
+      form.append("clip", payload.blob, isMp4 ? "clip.mp4" : "clip.webm");
+      form.append("reason", clipReason.slice(0, 40));
+      form.append("durationMs", String(payload.durationMs));
+      form.append("recordedFrom", new Date(payload.from).toISOString());
+      try {
+        const res = await fetch(`/api/sessions/${sessionIdRef.current}/incident`, {
+          method: "POST",
+          body: form,
+        });
+        if (!res.ok) {
+          console.error(
+            `[incident-recorder] clip upload rejected (${res.status}) — footage lost:`,
+            { reason: clipReason, bytes: payload.blob.size },
+          );
+        }
+      } catch (err) {
+        console.error("[incident-recorder] clip upload failed (network) — footage lost:", {
+          reason: clipReason,
+          bytes: payload.blob.size,
+          err,
+        });
       }
     }
 
@@ -308,8 +352,11 @@ export function useIncidentRecorder(opts: {
     }
     machineRef.current.prevStatus = status;
 
-    if (phase === "submitted") {
-      // Clean completion: stop and DROP the buffer (privacy default).
+    if (phase === "submitted" || phase === "dead") {
+      // Clean completion OR session death: stop and DROP the buffer (privacy
+      // default). audit-3 R2-INC-F2: `dead` must be treated like submitted —
+      // it used to leave the camera streaming with no upload path and no
+      // discard, so a reset mid-flight kept the webcam light on indefinitely.
       discard();
     }
 
@@ -326,6 +373,44 @@ export function useIncidentRecorder(opts: {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, status, phase]);
+
+  // audit-3 R2-INC-F2: the effect cleanup above deliberately does NOT stop the
+  // recorder (a status change tears it down and re-runs it mid-session, and the
+  // buffer must survive that). But when `enabled` itself goes false the hook is
+  // being switched OFF for good — so the capture must actually stop and the
+  // camera be released. Without this the only teardown was the unmount effect
+  // below, and an `enabled`-flip (phase → submitted/dead) left the recorder and
+  // the camera tracks alive: the webcam light stayed on with no upload path.
+  // Runs on mount too, where `enabled` is already false — discard() is
+  // idempotent, so that is a no-op.
+  const enabledNow = enabled;
+  useEffect(() => {
+    const m = machineRef.current;
+    if (enabledNow) {
+      // Re-enabling (or the first enable): clear any stop flag left by a
+      // previous disable so the capture can actually start. Without this the
+      // machine would stay inert after a disable→enable cycle.
+      m.stopping = false;
+      return;
+    }
+    m.stopping = true;
+    const rec = m.recorder;
+    if (rec && rec.state !== "inactive") {
+      try {
+        rec.stop();
+      } catch {
+        /* already inactive */
+      }
+    }
+    m.recorder = null;
+    m.chunks = [];
+    m.totalMs = 0;
+    if (m.cameraToken !== null) {
+      releaseCameraStream(m.cameraToken);
+      m.cameraToken = null;
+    }
+    m.stream = null;
+  }, [enabledNow]);
 
   // Terminal unmount teardown. The machine object is module-lifetime (created
   // once in useRef's initializer), so reading it here is safe — but copy the

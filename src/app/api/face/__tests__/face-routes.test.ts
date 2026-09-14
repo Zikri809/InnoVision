@@ -351,6 +351,80 @@ describe("audit-2 C-01 — spoof gate (FACE_SPOOF_ENFORCE)", () => {
   });
 });
 
+// audit-3 E-F7: the enroll path now applies the SAME majority spoof policy as
+// verify — a poisoned baseline must not be planted by a photo/replay.
+describe("audit-3 E-F7 — enroll spoof gate", () => {
+  it("rejects a majority-spoofed capture → 400 spoof_detected (nothing stored)", async () => {
+    // Enforcement is gated on FACE_SPOOF_ENFORCE, matching verify: without it
+    // the verdicts are recorded/logged but not enforced.
+    vi.stubEnv("FACE_SPOOF_ENFORCE", "1");
+    const ctx = faceContext({ seedSession: false, withBaseline: false });
+    insightfaceMock.extractFace.mockImplementation(async () => ({
+      faces: [mockFace()],
+      spoof: { real: false, score: 0.01 },
+    }));
+    const res = await enroll.POST(req({ frames: [FRONT_FRAME, LEFT_FRAME, RIGHT_FRAME] }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("spoof_detected");
+    // The gate fires BEFORE the enroll RPC — no poisoned baseline is written
+    // and no enrollment audit row is emitted.
+    expect(ctx.client.tables["profile_face_samples"] ?? []).toHaveLength(0);
+    expect(ctx.client.tables["audit_events"] ?? []).toHaveLength(0);
+    vi.unstubAllEnvs();
+  });
+
+  it("records but does NOT enforce the verdicts when FACE_SPOOF_ENFORCE is unset", async () => {
+    // The documented record-only posture (sidecars without baked weights) must
+    // stay consistent between enroll and verify — a false-positive verdict
+    // must not be able to block enrollment with no env remedy.
+    vi.stubEnv("FACE_SPOOF_ENFORCE", "");
+    const ctx = faceContext({ seedSession: false, withBaseline: false });
+    insightfaceMock.extractFace.mockImplementation(async () => ({
+      faces: [mockFace()],
+      spoof: { real: false, score: 0.01 },
+    }));
+    const res = await enroll.POST(req({ frames: [FRONT_FRAME, LEFT_FRAME, RIGHT_FRAME] }));
+    expect(res.status).toBe(200);
+    vi.unstubAllEnvs();
+  });
+
+  it("allows a capture whose verdicts are all real → 200", async () => {
+    const ctx = faceContext({ seedSession: false, withBaseline: false });
+    insightfaceMock.extractFace.mockImplementation(async () => ({
+      faces: [mockFace()],
+      spoof: { real: true, score: 0.97 },
+    }));
+    const res = await enroll.POST(req({ frames: [FRONT_FRAME, LEFT_FRAME, RIGHT_FRAME] }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).status).toBe("enrolled");
+    expect(ctx.client.tables["profile_face_samples"]).toHaveLength(3);
+  });
+
+  it("allows a capture with NO verdicts (old sidecar / weights absent) → 200", async () => {
+    const ctx = faceContext({ seedSession: false, withBaseline: false });
+    // The default beforeEach mock omits `spoof` entirely → unknownCount=3.
+    const res = await enroll.POST(req({ frames: [FRONT_FRAME, LEFT_FRAME, RIGHT_FRAME] }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).status).toBe("enrolled");
+    expect(ctx.client.tables["profile_face_samples"]).toHaveLength(3);
+  });
+
+  it("a single fake verdict among real ones does NOT force a fail → 200", async () => {
+    faceContext({ seedSession: false, withBaseline: false });
+    let call = 0;
+    insightfaceMock.extractFace.mockImplementation(async () => {
+      call += 1;
+      return {
+        faces: [mockFace()],
+        spoof: call === 1 ? { real: false, score: 0.2 } : { real: true, score: 0.9 },
+      };
+    });
+    const res = await enroll.POST(req({ frames: [FRONT_FRAME, LEFT_FRAME, RIGHT_FRAME] }));
+    expect(res.status).toBe(200);
+  });
+});
+
 describe("I4 — verify match → active, streak reset, new nonce", () => {
   it("returns 200 with matched true, sessionStatus active, nextNonce", async () => {
     faceContext();

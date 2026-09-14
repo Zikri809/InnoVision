@@ -15,8 +15,23 @@ const envLimit = (name: string, fallback: number): number => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
 const RESET_EMAIL_RATE = { limit: envLimit("RESET_RATE_LIMIT", 5), windowMs: 60_000 };
-const RESET_IP_RATE = { limit: envLimit("RESET_IP_RATE_LIMIT", 10), windowMs: 60_000 };
+// audit-3 R2-TOP-F5: the per-IP budget was 10/min, sized below classroom-NAT
+// reality — one lecture hall shares an egress IP, so a handful of honest reset
+// requests 429'd everyone else. Match the login-IP precedent (login.ts:19-22,
+// 30/min, explicitly justified by classroom NAT): the per-EMAIL budget above
+// is what stops single-victim abuse, the IP cap only stops victim rotation.
+const RESET_IP_RATE = { limit: envLimit("RESET_IP_RATE_LIMIT", 30), windowMs: 60_000 };
 const CONFIRM_RATE = { limit: envLimit("RESET_CONFIRM_RATE_LIMIT", 10), windowMs: 60_000 };
+// audit-3 R2-TOP-F3: the per-minute budgets bound the RATE but not the DAY —
+// a sustained probe (5/min) still sends ~7,200 real recovery emails per
+// address per day and can exhaust the SMTP quota. This second, long-window
+// budget is the DAILY ceiling. It is in-memory like the rest of the limiter
+// (single Node process per the ledger); the windowMs is carried per bucket, so
+// it does not interact with the per-minute bucket of the same address.
+const RESET_EMAIL_DAILY_RATE = {
+  limit: envLimit("RESET_EMAIL_DAILY_LIMIT", 10),
+  windowMs: 24 * 60 * 60_000,
+};
 
 export interface ResetResult {
   error?: string;
@@ -61,6 +76,14 @@ export async function requestReset({ email }: { email: string }): Promise<ResetR
     // headers() unavailable outside a request scope — never block the flow.
   }
   if (!rateLimit(`reset-email:${trimmedEmail}`, RESET_EMAIL_RATE)) {
+    return { error: t("authErrors.tooManyAttempts") };
+  }
+  // audit-3 R2-TOP-F3: daily ceiling. Independent long-window bucket for the
+  // same address (see RESET_EMAIL_DAILY_RATE) — a sustained probe that stays
+  // under the per-minute cap still runs out of daily sends, protecting the
+  // SMTP quota. Same enumeration-safe response as every other throttle: the
+  // caller learns nothing about whether the account exists.
+  if (!rateLimit(`reset-email-daily:${trimmedEmail}`, RESET_EMAIL_DAILY_RATE)) {
     return { error: t("authErrors.tooManyAttempts") };
   }
 

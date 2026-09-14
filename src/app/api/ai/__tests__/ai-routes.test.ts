@@ -282,6 +282,29 @@ describe("I-A4b — regenerate trigger-error backstop", () => {
   });
 });
 
+describe("I-A4c — regenerate honours caller cancellation (audit-3 F-F1)", () => {
+  it("an aborted request → 409 cancelled, model not called, row untouched", async () => {
+    const ctx = ownerContext({
+      questions: [{ id: QUESTION_D, quiz_id: QUIZ_C, order_index: 0, type: "mcq", prompt: "Old", options: ["a", "b"], correct_index: 0 }],
+    });
+    const controller = new AbortController();
+    const abortedReq = new Request("http://localhost", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ questionId: QUESTION_D }),
+      signal: controller.signal,
+    });
+    controller.abort();
+    const { regenerate: regen } = await importHandlers();
+    const res = await regen.POST(abortedReq, { params: Promise.resolve({ id: QUIZ_C }) });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("cancelled");
+    // The question row is NOT silently overwritten.
+    const row = ctx.client.tables["questions"]?.find((q) => q.id === QUESTION_D);
+    expect(row?.prompt).toBe("Old");
+  });
+});
+
 describe("I-A5 — non-owner → 404", () => {
   it("generate by a different lecturer's context → 404", async () => {
     const other = new FakeSupabase();
@@ -455,6 +478,43 @@ describe("Phase 9 — Append mode, steering, difficulty, and multi-source paths"
       { params: Promise.resolve({ id: QUIZ_C }) },
     );
     expect(res.status).toBe(400);
+  });
+
+  // audit-3 F-F5: a multi-file batch where one file yields no text must not
+  // claim that file as a source — provenance carries only contributors, and
+  // the run still succeeds on the surviving files.
+  it("multi-source: an empty file is not claimed as a provenance source", async () => {
+    const ctx = ownerContext();
+    ctx.client.seedStorageFile(
+      `${OWNER_ID}/${QUIZ_C}/good.txt`,
+      new TextEncoder().encode("Velocity is the rate of change of displacement in a direction."),
+    );
+    // An empty file yields no text at all → contributes nothing and (unlike
+    // a low-confidence single file) must not fail the whole batch.
+    ctx.client.seedStorageFile(
+      `${OWNER_ID}/${QUIZ_C}/scan.txt`,
+      new Uint8Array(0),
+    );
+    const { generate } = await importHandlers();
+    const res = await generate.POST(
+      req({
+        quizId: QUIZ_C,
+        questionCount: 3,
+        sourcePaths: [
+          `${OWNER_ID}/${QUIZ_C}/good.txt`,
+          `${OWNER_ID}/${QUIZ_C}/scan.txt`,
+        ],
+      }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(200);
+    const quizRow = ctx.client.tables["quizzes"]?.find((q) => q.id === QUIZ_C);
+    const fileChips = ((quizRow?.sources ?? []) as Array<{ storage_path?: string }>).filter(
+      (s) => typeof s.storage_path === "string",
+    );
+    // Only the contributing file is cited.
+    expect(fileChips).toHaveLength(1);
+    expect(fileChips[0].storage_path?.split("/").pop()).toBe("good.txt");
   });
 });
 

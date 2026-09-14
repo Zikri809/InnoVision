@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { sanitizeRedirect } from "@/lib/auth/redirect";
+import { resolveSiteOrigin } from "@/lib/auth/site-url";
 import { rateLimit } from "@/lib/classes/rate-limit";
 import { clientIpFromHeaders } from "@/lib/request-ip";
 import { env, SUPABASE_AUTH_COOKIE } from "@/lib/env";
@@ -19,9 +20,20 @@ const CALLBACK_RATE = { limit: 30, windowMs: 60_000 };
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
 
+  // audit-3 A-F2: post-auth redirects must land on a PUBLIC origin. The old
+  // form used `new URL(request.url).origin`, which Next builds from the Host it
+  // sees — behind the documented cloudflare tunnel that is the INTERNAL host
+  // (next.config.ts records the ops incident proving it), so a successful
+  // SSO/confirm exchange 307'd the browser to an unreachable address and the
+  // user dead-ended immediately after authenticating. `resolveSiteOrigin` is
+  // the same authority the reset/register link flows already use, so there is
+  // ONE answer to "what is this deployment's public origin". It falls back to
+  // the request origin when SITE_URL is unset, preserving local dev.
+  const siteOrigin = resolveSiteOrigin(request.headers) ?? origin;
+
   const ip = clientIpFromHeaders(request.headers);
   if (!rateLimit(`auth-callback:${ip}`, CALLBACK_RATE)) {
-    return NextResponse.redirect(`${origin}/login?message=sso-error`);
+    return NextResponse.redirect(`${siteOrigin}/login?message=sso-error`);
   }
 
   const code = searchParams.get("code");
@@ -29,7 +41,7 @@ export async function GET(request: NextRequest) {
   // the login page). Handles protocol-relative, absolute, and backslash
   // variants. The middleware sets this param from pathname, which is always a
   // local path, so this only rejects attacker-supplied values.
-  const redirect = sanitizeRedirect(searchParams.get("redirect"), origin);
+  const redirect = sanitizeRedirect(searchParams.get("redirect"), siteOrigin);
 
   // GoTrue error round-trips (OAuth provider denials, misconfigurations) land
   // here WITHOUT a code and WITH error params — surface the generic auth
@@ -37,12 +49,12 @@ export async function GET(request: NextRequest) {
   const oauthError = searchParams.get("error_description") ?? searchParams.get("error");
   if (!code) {
     const target = oauthError
-      ? `${origin}/login?message=sso-error`
-      : `${origin}/login`;
+      ? `${siteOrigin}/login?message=sso-error`
+      : `${siteOrigin}/login`;
     return NextResponse.redirect(target);
   }
 
-  const supabaseResponse = NextResponse.redirect(`${origin}${redirect}`);
+  const supabaseResponse = NextResponse.redirect(`${siteOrigin}${redirect}`);
 
   //developer note: seperate this so that it can be reused
   const supabase = createServerClient(
@@ -72,7 +84,7 @@ export async function GET(request: NextRequest) {
     // setAll hook bound to supabaseResponse, so the browser actually
     // receives them (returning a fresh redirect would DISCARD them).
     await supabase.auth.signOut({ scope: "local" });
-    supabaseResponse.headers.set("Location", `${origin}/login?message=sso-error`);
+    supabaseResponse.headers.set("Location", `${siteOrigin}/login?message=sso-error`);
     return supabaseResponse;
   }
 
@@ -94,7 +106,7 @@ export async function GET(request: NextRequest) {
         (azureIdentity.identity_data?.email as string | undefined) ?? null;
       if (!email) {
         await supabase.auth.signOut({ scope: "local" });
-        supabaseResponse.headers.set("Location", `${origin}/login?message=sso-domain`);
+        supabaseResponse.headers.set("Location", `${siteOrigin}/login?message=sso-domain`);
         return supabaseResponse;
       }
       const verdict = isAllowedInstitutionalEmail(email, allowedDomains);
@@ -107,7 +119,7 @@ export async function GET(request: NextRequest) {
         // pre-creation rejection is not achievable app-side (documented
         // deviation, AU-2 pre-flight log).
         await supabase.auth.signOut({ scope: "local" });
-        supabaseResponse.headers.set("Location", `${origin}/login?message=sso-domain`);
+        supabaseResponse.headers.set("Location", `${siteOrigin}/login?message=sso-domain`);
         return supabaseResponse;
       }
     }

@@ -10,6 +10,7 @@ import {
   isOwnedQuestionImagePath,
 } from "@/lib/media/validation";
 import { checkSameOrigin, internalError, invalidOrigin, notFound, rateLimited, notDraft } from "@/lib/http";
+import { removeStorageObjects } from "@/lib/media/cleanup";
 
 export const dynamic = "force-dynamic";
 
@@ -77,7 +78,7 @@ export async function POST(request: Request, { params }: Params) {
     .eq("quiz_id", id);
   if (updateError) {
     // Column unchanged → roll the orphan back immediately.
-    await admin.storage.from(QUESTION_IMAGES_BUCKET).remove([path]).catch(() => {});
+    await removeStorageObjects(admin, QUESTION_IMAGES_BUCKET, [path]);
     console.error("question image update error:", updateError);
     return internalError("Could not attach the image right now.");
   }
@@ -91,7 +92,7 @@ export async function POST(request: Request, { params }: Params) {
     // log (the orphan sweeper reaps whatever this misses).
     if (isOwnedQuestionImagePath(oldPath, owner.userId)) {
       // Only AFTER the new state is durable. Failure mode = swept orphan.
-      void admin.storage.from(QUESTION_IMAGES_BUCKET).remove([oldPath]).catch(() => {});
+      void removeStorageObjects(admin, QUESTION_IMAGES_BUCKET, [oldPath]);
     } else {
       console.error("question image replace: refusing malformed old image_path", {
         quizId: id,
@@ -152,7 +153,7 @@ export async function DELETE(request: Request, { params }: Params) {
     // log; the column is already cleared so the app stays consistent.
     if (isOwnedQuestionImagePath(oldPath, owner.userId)) {
       // Best-effort: a failed object delete leaves a swept orphan, not an error.
-      void admin.storage.from(QUESTION_IMAGES_BUCKET).remove([oldPath]).catch(() => {});
+      void removeStorageObjects(admin, QUESTION_IMAGES_BUCKET, [oldPath]);
     } else {
       console.error("question image delete: refusing malformed image_path", {
         quizId: id,

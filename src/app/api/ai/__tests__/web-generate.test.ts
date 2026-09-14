@@ -350,4 +350,46 @@ describe("legacy protocol: topic mode", () => {
     const res = await generateRoute.POST(req(WEB_TOPIC_BODY, { stream: false }));
     expect(res.status).toBe(200);
   });
+
+  // audit-3 F-F6: the web corpus was merged LAST and then the aggregate was
+  // sliced to MAX_AGGREGATE_CHARS — a near-cap material corpus removed the
+  // entire web contribution while its citations were still persisted and the
+  // payoff still reported "N web pages". The reserve keeps the web share.
+  it("W-L5: a near-cap material corpus cannot slice the web corpus away", async () => {
+    const ctx = ownerContext();
+    stubAiContent(JSON.stringify(VALID_AI_BODY));
+    // Build a REAL corpus (envelope headers included) so survival is testable.
+    const { buildWebCorpus } = await import("@/lib/ai/tinyfish");
+    const corpus = buildWebCorpus(
+      WEB_SOURCES.map((s) => ({
+        url: s.url,
+        title: s.title,
+        text: "Fresh web knowledge sentence. ".repeat(400),
+        query: s.query,
+        retrievedAt: s.retrieved_at,
+      })),
+    );
+    expect(corpus.ok).toBe(true);
+    if (!corpus.ok) return;
+    searchStub.impl = () => Promise.resolve({ ok: true, text: corpus.text, sources: WEB_SOURCES });
+
+    // Material that nearly fills the 400k aggregate cap on its own.
+    const material = "M".repeat(395_000);
+    const res = await generateRoute.POST(
+      req({ ...WEB_TOPIC_BODY, extractedText: material }, { stream: false }),
+    );
+    expect(res.status).toBe(200);
+    const quizRow = (ctx.client.tables["quizzes"] ?? []).find(
+      (q: { id?: string }) => q.id === QUIZ_C,
+    ) as { source_text?: string; sources?: Array<{ kind: string; url: string }> } | undefined;
+    // The web contribution SURVIVED the aggregate cap…
+    expect(quizRow?.source_text).toContain("=== WEB SOURCE [1/3]:");
+    // …and every persisted citation corresponds to a page the model read.
+    const webChips = (quizRow?.sources ?? []).filter((s) => s.kind === "web");
+    expect(webChips.length).toBeGreaterThan(0);
+    for (const chip of webChips) {
+      const idx = WEB_SOURCES.findIndex((s) => s.url === chip.url);
+      expect(quizRow?.source_text).toContain(`=== WEB SOURCE [${idx + 1}/3]:`);
+    }
+  });
 });

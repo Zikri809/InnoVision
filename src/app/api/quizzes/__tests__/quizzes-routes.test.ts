@@ -8,6 +8,32 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: () => fakeHolder.current,
 }));
 
+// Service-role storage seam for the DELETE sweep (audit-3 C-F1/G-F3). The
+// admin client is mocked so the owner-pinned cleanup path is exercised without
+// a live SUPABASE_SERVICE_ROLE_KEY; `tryCreateAdminClient` mirrors the real
+// degradation by returning null when the key is absent.
+const adminState = vi.hoisted(() => ({
+  removed: [] as Array<{ bucket: string; paths: string[] }>,
+  hasKey: true,
+}));
+
+vi.mock("@/lib/supabase/admin", () => {
+  const storage = {
+    from: (bucket: string) => ({
+      remove: async (paths: string[]) => {
+        adminState.removed.push({ bucket, paths });
+        return { data: paths.map((p) => ({ path: p })), error: null };
+      },
+      list: async () => ({ data: [], error: null }),
+    }),
+  };
+  const client = { storage };
+  return {
+    createAdminClient: () => client,
+    tryCreateAdminClient: () => (adminState.hasKey ? client : null),
+  };
+});
+
 async function importHandlers() {
   const createQuiz = await import("@/app/api/classes/[id]/quizzes/route");
   const quizRoute = await import("@/app/api/quizzes/[id]/route");
@@ -62,6 +88,8 @@ function currentClient(): FakeSupabase {
 beforeEach(() => {
   vi.resetModules();
   fakeHolder.current = undefined;
+  adminState.removed = [];
+  adminState.hasKey = true;
 });
 
 describe("I20 — AuthZ sweep: student blocked from every lecturer-only quiz route", () => {
@@ -820,5 +848,357 @@ describe("QT-1 — multi-select question authoring", () => {
       { params: Promise.resolve({ id: QUIZ_C, questionId: QUESTION_D }) },
     );
     expect(res.status).toBe(400);
+  });
+});
+
+describe("C-F5 — nullable retake/shuffle fields (audit-3)", () => {
+  it("a null-only PATCH is a typed 200, never a misleading 404", async () => {
+    const ctx = ownerContext();
+    ctx.client.tables["quizzes"][0] = {
+      ...ctx.client.tables["quizzes"][0],
+      mode: "assessment",
+      allow_retake: true,
+      max_attempts: 3,
+    };
+    const { quizRoute } = await importHandlers();
+
+    const res = await quizRoute.PATCH(req({ maxAttempts: null }), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+    expect(res.status).toBe(200);
+    // null on a `not null default` column resets to the default (1).
+    expect(ctx.client.tables["quizzes"][0].max_attempts).toBe(1);
+  });
+
+  it("an explicit null for allowRetake resets to false", async () => {
+    const ctx = ownerContext();
+    ctx.client.tables["quizzes"][0] = {
+      ...ctx.client.tables["quizzes"][0],
+      mode: "assessment",
+      allow_retake: true,
+    };
+    const { quizRoute } = await importHandlers();
+
+    const res = await quizRoute.PATCH(req({ allowRetake: null }), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+    expect(res.status).toBe(200);
+    expect(ctx.client.tables["quizzes"][0].allow_retake).toBe(false);
+  });
+
+  it("an empty body is still a typed 400 (no editable fields)", async () => {
+    ownerContext();
+    const { quizRoute } = await importHandlers();
+    const res = await quizRoute.PATCH(req({}), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("invalid_body");
+  });
+
+  it("maps the window-order DB constraint → 400", async () => {
+    ownerContext();
+    const { quizRoute } = await importHandlers();
+    currentClient().updateError = "quizzes_window_order_check";
+    const res = await quizRoute.PATCH(req({ opensAt: "2026-01-01T00:00:00.000Z" }), {
+      params: Promise.resolve({ id: QUIZ_C }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("invalid_body");
+  });
+});
+
+// ─── C-F2: the append_question cap now maps to a typed 422 ───────────────
+describe("C-F2 — questions route cap + error mapping", () => {
+  const VALID_Q = {
+    type: "mcq",
+    prompt: "What is 2+2?",
+    options: ["1", "2", "3", "4"],
+    correctIndex: 3,
+  };
+
+  /** Force the append_question RPC to return a seeded error. */
+  function withAppendError(message: string) {
+    const client = currentClient();
+    client.rpc = (async () => ({ data: null, error: { message } })) as typeof client.rpc;
+  }
+
+  it("maps quiz_question_limit_exceeded → 422 (typed cap, not a 503)", async () => {
+    ownerContext();
+    const { questions } = await importHandlers();
+    withAppendError("quiz_question_limit_exceeded");
+    const res = await questions.POST(req(VALID_Q), { params: Promise.resolve({ id: QUIZ_C }) });
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe("quiz_question_limit_exceeded");
+  });
+
+  it("maps not_owner / quiz_not_found → 404", async () => {
+    ownerContext();
+    const { questions } = await importHandlers();
+    withAppendError("not_owner");
+    expect((await questions.POST(req(VALID_Q), { params: Promise.resolve({ id: QUIZ_C }) })).status).toBe(404);
+    withAppendError("quiz_not_found");
+    expect((await questions.POST(req(VALID_Q), { params: Promise.resolve({ id: QUIZ_C }) })).status).toBe(404);
+  });
+
+  it("maps questions_locked_quiz_not_draft → 409", async () => {
+    ownerContext();
+    const { questions } = await importHandlers();
+    withAppendError("questions_locked_quiz_not_draft");
+    const res = await questions.POST(req(VALID_Q), { params: Promise.resolve({ id: QUIZ_C }) });
+    expect(res.status).toBe(409);
+  });
+
+  it("maps check-constraint drift → 400 and unknown → 503", async () => {
+    ownerContext();
+    const { questions } = await importHandlers();
+    withAppendError("violates check constraint");
+    expect((await questions.POST(req(VALID_Q), { params: Promise.resolve({ id: QUIZ_C }) })).status).toBe(400);
+    withAppendError("totally_unknown");
+    expect((await questions.POST(req(VALID_Q), { params: Promise.resolve({ id: QUIZ_C }) })).status).toBe(503);
+  });
+
+  it("non-uuid id → 404; non-draft → 409; cross-origin → 403; rate limit → 429; invalid body → 400", async () => {
+    const ctx = ownerContext();
+    const { questions } = await importHandlers();
+    expect((await questions.POST(req(VALID_Q), { params: Promise.resolve({ id: "nope" }) })).status).toBe(404);
+
+    ownerContext({ quizStatus: "live" });
+    expect((await questions.POST(req(VALID_Q), { params: Promise.resolve({ id: QUIZ_C }) })).status).toBe(409);
+
+    ownerContext();
+    const cross = new Request("http://localhost", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://evil.example" },
+      body: JSON.stringify(VALID_Q),
+    });
+    expect((await questions.POST(cross, { params: Promise.resolve({ id: QUIZ_C }) })).status).toBe(403);
+
+    ownerContext();
+    // Both helpers come from the same dynamic import — the earlier edit only
+    // destructured _seedRateLimit, leaving _resetRateLimiter undefined below.
+    const { _seedRateLimit, _resetRateLimiter } = await import("@/lib/classes/rate-limit");
+    _seedRateLimit(`quiz-author:${ctx.ownerId}`, 120);
+    expect((await questions.POST(req(VALID_Q), { params: Promise.resolve({ id: QUIZ_C }) })).status).toBe(429);
+
+    _resetRateLimiter();
+    ownerContext();
+    expect(
+      (await questions.POST(req({ ...VALID_Q, correctIndex: 9 }), { params: Promise.resolve({ id: QUIZ_C }) })).status,
+    ).toBe(400);
+  });
+});
+
+// ─── audit-3 C-F1 / P1-15: quiz DELETE storage sweep ─────────────────────
+describe("quiz DELETE — session guard + owner-pinned storage sweep", () => {
+  it("deletes a session-free quiz and sweeps owned image + quiz-source objects", async () => {
+    const ctx = ownerContext();
+    const owner = ctx.client.tables["quizzes"]![0].created_by as string;
+    const img = `${owner}/22222222-2222-4222-8222-222222222222.png`;
+    const src = `${owner}/${QUIZ_C}/33333333-3333-4333-8333-333333333333-notes.pdf`;
+    ctx.client.seedQuestion({
+      id: QUESTION_D,
+      quiz_id: QUIZ_C,
+      order_index: 0,
+      image_path: img,
+    });
+    ctx.client.tables["quizzes"]![0].source_file_url = src;
+    ctx.client.tables["quizzes"]![0].sources = [{ storage_path: src }];
+
+    const { quizRoute } = await importHandlers();
+    const res = await quizRoute.DELETE(req(), { params: Promise.resolve({ id: QUIZ_C }) });
+    expect(res.status).toBe(200);
+    const buckets = adminState.removed.map((r) => r.bucket);
+    expect(buckets).toContain("question-images");
+    expect(buckets).toContain("quiz-sources");
+    expect(adminState.removed.flatMap((r) => r.paths)).toContain(img);
+    expect(adminState.removed.flatMap((r) => r.paths)).toContain(src);
+    expect(ctx.client.tables["quizzes"]).toHaveLength(0);
+  });
+
+  it("refuses malformed image + quiz-source paths (skip + log, never cross-tenant)", async () => {
+    const ctx = ownerContext();
+    ctx.client.seedQuestion({
+      id: QUESTION_D,
+      quiz_id: QUIZ_C,
+      order_index: 0,
+      image_path: "../other-tenant/evil.png",
+    });
+    ctx.client.tables["quizzes"]![0].source_file_url = "not-a-valid-path";
+    ctx.client.tables["quizzes"]![0].sources = [{ storage_path: "/etc/passwd" }];
+
+    const { quizRoute } = await importHandlers();
+    const res = await quizRoute.DELETE(req(), { params: Promise.resolve({ id: QUIZ_C }) });
+    expect(res.status).toBe(200);
+    // Nothing reached the service-role remove().
+    expect(adminState.removed).toEqual([]);
+  });
+
+  it("degrades gracefully when the service-role key is unset (no 500)", async () => {
+    const ctx = ownerContext();
+    const owner = ctx.client.tables["quizzes"]![0].created_by as string;
+    ctx.client.seedQuestion({
+      id: QUESTION_D,
+      quiz_id: QUIZ_C,
+      order_index: 0,
+      image_path: `${owner}/44444444-4444-4444-8444-444444444444.png`,
+    });
+    adminState.hasKey = false;
+    const { quizRoute } = await importHandlers();
+    const res = await quizRoute.DELETE(req(), { params: Promise.resolve({ id: QUIZ_C }) });
+    expect(res.status).toBe(200);
+    expect(adminState.removed).toEqual([]);
+  });
+
+  it("blocks deletion when the quiz has student attempts → 409", async () => {
+    const ctx = ownerContext();
+    ctx.client.seedSession({ id: "s1", quiz_id: QUIZ_C, student_id: "stu" });
+    const { quizRoute } = await importHandlers();
+    const res = await quizRoute.DELETE(req(), { params: Promise.resolve({ id: QUIZ_C }) });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("quiz_has_sessions");
+  });
+
+  it("maps a session-count read error → 503", async () => {
+    const ctx = ownerContext();
+    ctx.client.countError = "count boom";
+    const { quizRoute } = await importHandlers();
+    const res = await quizRoute.DELETE(req(), { params: Promise.resolve({ id: QUIZ_C }) });
+    expect(res.status).toBe(503);
+  });
+
+  it("maps a delete write failure → 503", async () => {
+    const ctx = ownerContext();
+    ctx.client.updateError = "delete boom";
+    const { quizRoute } = await importHandlers();
+    const res = await quizRoute.DELETE(req(), { params: Promise.resolve({ id: QUIZ_C }) });
+    expect(res.status).toBe(503);
+  });
+
+  it("non-uuid → 404; cross-origin → 403; rate limit → 429", async () => {
+    const ctx = ownerContext();
+    const { quizRoute } = await importHandlers();
+    expect((await quizRoute.DELETE(req(), { params: Promise.resolve({ id: "nope" }) })).status).toBe(404);
+
+    const cross = new Request("http://localhost", {
+      method: "DELETE",
+      headers: { origin: "https://evil.example" },
+    });
+    expect((await quizRoute.DELETE(cross, { params: Promise.resolve({ id: QUIZ_C }) })).status).toBe(403);
+
+    const { _seedRateLimit } = await import("@/lib/classes/rate-limit");
+    _seedRateLimit(`quiz-mutate:${ctx.ownerId}`, 60);
+    expect((await quizRoute.DELETE(req(), { params: Promise.resolve({ id: QUIZ_C }) })).status).toBe(429);
+  });
+});
+
+// ─── question PATCH/DELETE error arms + image sweep ──────────────────────
+describe("question route — PATCH/DELETE error mapping + image sweep", () => {
+  const VALID_Q = {
+    type: "mcq",
+    prompt: "What is 2+2?",
+    options: ["1", "2", "3", "4"],
+    correctIndex: 3,
+  };
+  const params = { params: Promise.resolve({ id: QUIZ_C, questionId: QUESTION_D }) };
+
+  function seedQuestion(extra: Record<string, unknown> = {}) {
+    const ctx = ownerContext({
+      questions: [
+        { id: QUESTION_D, quiz_id: QUIZ_C, order_index: 0, type: "mcq", prompt: "Old", options: ["a", "b"], correct_index: 0, ...extra },
+      ],
+    });
+    return ctx;
+  }
+
+  it("PATCH non-uuid → 404; cross-origin → 403; rate limit → 429", async () => {
+    const ctx = seedQuestion();
+    const { questionRoute } = await importHandlers();
+    expect(
+      (await questionRoute.PATCH(req(VALID_Q), { params: Promise.resolve({ id: "nope", questionId: QUESTION_D }) })).status,
+    ).toBe(404);
+
+    const cross = new Request("http://localhost", {
+      method: "PATCH",
+      headers: { "content-type": "application/json", origin: "https://evil.example" },
+      body: JSON.stringify(VALID_Q),
+    });
+    expect((await questionRoute.PATCH(cross, params)).status).toBe(403);
+
+    const { _seedRateLimit } = await import("@/lib/classes/rate-limit");
+    _seedRateLimit(`quiz-author:${ctx.ownerId}`, 120);
+    expect((await questionRoute.PATCH(req(VALID_Q), params)).status).toBe(429);
+  });
+
+  it("PATCH lookup read error → 503; missing question → 404", async () => {
+    const ctx = seedQuestion();
+    const { questionRoute } = await importHandlers();
+    ctx.client.selectError = "lookup boom";
+    ctx.client.selectErrorTable = "questions";
+    expect((await questionRoute.PATCH(req(VALID_Q), params)).status).toBe(503);
+
+    ctx.client.selectError = null;
+    ctx.client.selectErrorTable = null;
+    expect(
+      (await questionRoute.PATCH(req(VALID_Q), { params: Promise.resolve({ id: QUIZ_C, questionId: crypto.randomUUID() }) })).status,
+    ).toBe(404);
+  });
+
+  it("PATCH maps update trigger/constraint/unknown errors", async () => {
+    const ctx = seedQuestion();
+    const { questionRoute } = await importHandlers();
+    ctx.client.updateError = "questions_locked_quiz_not_draft";
+    expect((await questionRoute.PATCH(req(VALID_Q), params)).status).toBe(409);
+    ctx.client.updateError = "violates check constraint";
+    expect((await questionRoute.PATCH(req(VALID_Q), params)).status).toBe(400);
+    ctx.client.updateError = "connection reset";
+    expect((await questionRoute.PATCH(req(VALID_Q), params)).status).toBe(503);
+  });
+
+  it("DELETE sweeps an owned image and removes the row", async () => {
+    const ctx = seedQuestion({ image_path: `${CLASS_B.replace(/b$/, "a")}/55555555-5555-4555-8555-555555555555.png` });
+    const owner = ctx.client.tables["quizzes"]![0].created_by as string;
+    const img = `${owner}/55555555-5555-4555-8555-555555555555.png`;
+    ctx.client.tables["questions"]![0].image_path = img;
+    const { questionRoute } = await importHandlers();
+    const res = await questionRoute.DELETE(req(), params);
+    expect(res.status).toBe(200);
+    expect(adminState.removed.flatMap((r) => r.paths)).toContain(img);
+  });
+
+  it("DELETE skips a malformed image path (skip + log)", async () => {
+    const ctx = seedQuestion();
+    ctx.client.tables["questions"]![0].image_path = "../evil.png";
+    const { questionRoute } = await importHandlers();
+    const res = await questionRoute.DELETE(req(), params);
+    expect(res.status).toBe(200);
+    expect(adminState.removed).toEqual([]);
+  });
+
+  it("DELETE maps trigger → 409, write failure → 503, missing row → 404, non-uuid → 404, cross-origin → 403, rate limit → 429", async () => {
+    const ctx = seedQuestion();
+    const { questionRoute } = await importHandlers();
+
+    ctx.client.updateError = "questions_locked_quiz_not_draft";
+    expect((await questionRoute.DELETE(req(), params)).status).toBe(409);
+
+    ctx.client.updateError = "delete boom";
+    expect((await questionRoute.DELETE(req(), params)).status).toBe(503);
+
+    ctx.client.updateError = null;
+    expect(
+      (await questionRoute.DELETE(req(), { params: Promise.resolve({ id: QUIZ_C, questionId: crypto.randomUUID() }) })).status,
+    ).toBe(404);
+
+    expect(
+      (await questionRoute.DELETE(req(), { params: Promise.resolve({ id: "nope", questionId: QUESTION_D }) })).status,
+    ).toBe(404);
+
+    const cross = new Request("http://localhost", { method: "DELETE", headers: { origin: "https://evil.example" } });
+    expect((await questionRoute.DELETE(cross, params)).status).toBe(403);
+
+    const { _seedRateLimit } = await import("@/lib/classes/rate-limit");
+    _seedRateLimit(`quiz-author:${ctx.ownerId}`, 120);
+    expect((await questionRoute.DELETE(req(), params)).status).toBe(429);
   });
 });

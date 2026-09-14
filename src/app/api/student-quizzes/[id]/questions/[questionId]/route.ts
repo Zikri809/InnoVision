@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { tryCreateAdminClient } from "@/lib/supabase/admin";
 import { requireStudentQuizOwner } from "@/lib/student-quizzes/guards";
 import { isUuid } from "@/lib/classes/roster";
 import { StudentQuestionInputSchema } from "@/lib/quizzes/validation";
 import { rateLimit } from "@/lib/classes/rate-limit";
+import { QUESTION_IMAGES_BUCKET, isOwnedQuestionImagePath } from "@/lib/media/validation";
+import { removeStorageObjects } from "@/lib/media/cleanup";
 import {
   checkSameOrigin,
   firstIssueMessage,
@@ -95,6 +98,10 @@ export async function PATCH(request: Request, { params }: Params) {
 
 /**
  * DELETE /api/student-quizzes/[id]/questions/[questionId] — remove one question.
+ *
+ * audit-3 G-F3: mirrors the lecturer twin (quizzes/[id]/questions/[questionId]
+ * /route.ts:173-177) by eagerly removing the question's image object instead of
+ * orphaning it until the (unscheduled) media-cleanup cron runs.
  */
 export async function DELETE(request: Request, { params }: Params) {
   const originError = checkSameOrigin(request);
@@ -111,6 +118,14 @@ export async function DELETE(request: Request, { params }: Params) {
     return rateLimited("Too many question updates. Try again later.");
   }
 
+  // Read the image reference BEFORE the delete (the row is gone after it).
+  const { data: existing } = await supabase
+    .from("student_quiz_questions")
+    .select("id, image_path")
+    .eq("id", questionId)
+    .eq("quiz_id", id)
+    .maybeSingle();
+
   const { data, error } = await supabase
     .from("student_quiz_questions")
     .delete()
@@ -124,6 +139,21 @@ export async function DELETE(request: Request, { params }: Params) {
   }
 
   if (!data || data.length === 0) return notFound();
+
+  const imagePath = (existing as { image_path: string | null } | null)?.image_path ?? null;
+  if (imagePath) {
+    if (isOwnedQuestionImagePath(imagePath, owner.userId)) {
+      // Best-effort: a missing service-role key degrades to a cron-swept
+      // orphan, never a 500 on an already-committed delete.
+      const admin = tryCreateAdminClient();
+      if (admin) await removeStorageObjects(admin, QUESTION_IMAGES_BUCKET, [imagePath]);
+    } else {
+      console.error("student question delete: refusing malformed image_path", {
+        quizId: id,
+        questionId,
+      });
+    }
+  }
 
   return NextResponse.json({ ok: true });
 }

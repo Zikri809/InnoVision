@@ -50,6 +50,55 @@ import type {
 const CLIENT_TIMEOUT_MS = 20 * 60_000;
 
 /**
+ * Per-file extraction outcome (audit-3 F-F5). The dialog previously rendered
+ * "{files.length} files ready" using the UPLOADED count, so a scanned/empty
+ * file that contributed nothing still counted as a source. Outcomes let the
+ * summary report only files that actually produced text, name the ones that
+ * were skipped and why, and re-run just the failed subset (F-F2).
+ */
+type FileOutcome = {
+  path: string;
+  name: string;
+  /** 1-based position in the uploaded list — keeps SOURCE headers stable. */
+  index: number;
+  /** Trimmed extracted text ("" when the file contributed nothing). */
+  text: string;
+  /**
+   * audit-3 F-F2: per-page text when the engine reports it (GLM). Lets a
+   * retry re-OCR only the failed pages and splice them back into position.
+   */
+  pageTexts?: string[];
+  /** Full page count of the file (the density denominator across retries). */
+  totalPages: number;
+  /** 1-based pages that produced nothing, as of the latest attempt. */
+  failedPages: number[];
+  /** audit-3 F-F2/F-F10: failed pages rejected by the OCR rate limit. */
+  rateLimitedPages: number;
+  /** Engine's own density/partial flag (feeds the low-density advisory). */
+  lowConfidence: boolean;
+  /** Why this file contributed no text at all (audit-3 F-F5). */
+  skippedReason?: "empty";
+};
+
+/** The text an outcome contributes: per-page parts when available, else the
+ * engine's combined text. */
+function outcomeText(o: FileOutcome): string {
+  if (o.pageTexts) return o.pageTexts.filter((t) => t.trim()).join("\n\n").trim();
+  return o.text.trim();
+}
+
+/** Render the combined corpus from the outcomes that produced text. */
+function combineOutcomes(outcomes: FileOutcome[], fileCount: number): string {
+  return outcomes
+    .map((o) => ({ o, text: outcomeText(o) }))
+    .filter(({ text }) => text.length > 0)
+    .map(({ o, text }) =>
+      fileCount > 1 ? `=== SOURCE [${o.index}/${fileCount}]: ${o.name} ===\n${text}` : text,
+    )
+    .join("\n\n");
+}
+
+/**
  * AI generation from uploaded/pasted material. Two modes share this dialog:
  *  - "lecturer" (default): posts to /api/ai/generate-quiz with the full
  *    control set and refreshes the server components on success.
@@ -141,6 +190,13 @@ export function GenerateFromFileDialog({
   const [isLowDensity, setIsLowDensity] = useState(false);
   // audit-2 M-17: "N of M pages failed" advisory state (all file types).
   const [partialPages, setPartialPages] = useState<{ failed: number; attempted: number } | null>(null);
+  // audit-3 F-F2: the rate-limited subset of the failures — names the cause
+  // and drives the retry affordance.
+  const [rateLimitedPages, setRateLimitedPages] = useState<number | null>(null);
+  // audit-3 F-F5: which uploaded files actually contributed text, and why the
+  // others were skipped. Drives an honest "{contributing} of {uploaded} files"
+  // summary instead of counting uploads as sources.
+  const [outcomes, setOutcomes] = useState<FileOutcome[]>([]);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -195,9 +251,54 @@ export function GenerateFromFileDialog({
     setFiles(newFiles);
     setExtractedText(null);
     setIsLowDensity(false);
+    setOutcomes([]);
+    setPartialPages(null);
+    setRateLimitedPages(null);
   }
 
-  async function handleExtractAll() {
+  /** Extract one uploaded file into a FileOutcome (never throws for a single
+   * file's low-confidence result — that is reported, not fatal). */
+  async function extractOne(
+    item: UploadedFileItem,
+    index: number,
+    signal: AbortSignal,
+    onProgress?: (p: PipelineProgress) => void,
+    retry?: { pages: number[]; previous: FileOutcome },
+  ): Promise<FileOutcome> {
+    const result = await runExtractionPipeline({
+      file: item.file,
+      engine,
+      config,
+      onProgress,
+      signal,
+      ...(retry ? { pagesToRetry: retry.pages } : {}),
+    });
+    const attempted = result.pagesAttempted ?? (result.pages || 1);
+    const text = result.text ?? "";
+    const totalPages = result.totalPages ?? Math.max(attempted, 1);
+    return {
+      path: item.path,
+      name: item.file.name,
+      index,
+      text,
+      ...(result.pageTexts ? { pageTexts: result.pageTexts } : {}),
+      totalPages,
+      failedPages: result.failedPages ?? [],
+      rateLimitedPages: result.rateLimitedPages?.length ?? 0,
+      lowConfidence: result.lowConfidence === true,
+      // A retry keeps the file's "contributed" status from its earlier
+      // attempt — only the failed pages were re-run, so an all-failed retry
+      // must not erase pages that succeeded before.
+      ...(text.trim() || retry?.previous.text.trim() ? {} : { skippedReason: "empty" as const }),
+    };
+  }
+
+  /**
+   * Extract files and fold the outcomes into the dialog's derived state.
+   * `onlyPaths` re-runs just the failed subset for the F-F2 retry affordance;
+   * omitted, it runs every uploaded file.
+   */
+  async function handleExtractAll(onlyPaths?: string[]) {
     if (files.length === 0 || busy) return;
     setBusy(true);
     setError(null);
@@ -207,61 +308,78 @@ export function GenerateFromFileDialog({
     const timer = setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
 
     try {
-      const texts: string[] = [];
-      let totalPages = 0;
-      let hasLowConfidence = false;
-      let hasOfficeFiles = false;
-      // audit-2 M-17: per-file partial-OCR accounting ("N of M pages
-      // failed"). GLM keeps going when a page 504s — the quiz used to be
-      // built from the surviving subset with a success-shaped dialog.
-      let totalAttemptedPages = 0;
-      let totalFailedPages = 0;
+      const priorOutcomes = outcomes;
+      const retarget = onlyPaths && onlyPaths.length > 0;
+      const priorByPath = new Map(priorOutcomes.map((o) => [o.path, o]));
+      const targets = files
+        .map((item, index) => ({ item, index }))
+        .filter(({ item }) => (retarget ? onlyPaths!.includes(item.path) : true));
 
-      for (let i = 0; i < files.length; i++) {
+      const produced: FileOutcome[] = [];
+      // Density heuristic keys on the whole batch, not just the retried
+      // subset (a retry of one failed PDF must not disable it).
+      const hasOfficeFiles = files.some((f) => /\.(pptx|docx)$/i.test(f.file.name));
+      for (const { item, index } of targets) {
         if (controller.signal.aborted) return;
-        const item = files[i];
-        const isOffice = /\.(pptx|docx)$/i.test(item.file.name);
-        if (isOffice) hasOfficeFiles = true;
 
-        setCurrentExtractingFile(`${item.file.name} (${i + 1}/${files.length})`);
-
-        const result = await runExtractionPipeline({
-          file: item.file,
-          engine,
-          config,
-          onProgress: (p) => setProgress(p),
-          signal: controller.signal,
-        });
-
-        // Denominator = ATTEMPTED pages (audit-2 M-17): the success count
-        // deflated the per-page density on partial runs and inflated the
-        // avg words/page. With no attempt data (single-page/legacy engines),
-        // fall back to the success count as before.
-        const attempted = result.pagesAttempted ?? (result.pages || 1);
-        totalPages += attempted;
-        totalAttemptedPages += attempted;
-        totalFailedPages += result.failedPages?.length ?? 0;
-        if (result.lowConfidence) {
-          hasLowConfidence = true;
-        }
-
-        if (result.text?.trim()) {
-          texts.push(
-            files.length > 1
-              ? `=== SOURCE [${i + 1}/${files.length}]: ${item.file.name} ===\n${result.text.trim()}`
-              : result.text.trim(),
-          );
+        setCurrentExtractingFile(`${item.file.name} (${index + 1}/${files.length})`);
+        const previous = priorByPath.get(item.path);
+        const retryPages =
+          retarget && previous && previous.failedPages.length > 0
+            ? previous.failedPages
+            : undefined;
+        const fresh = await extractOne(
+          item,
+          index,
+          controller.signal,
+          (p) => setProgress(p),
+          retryPages && previous ? { pages: retryPages, previous } : undefined,
+        );
+        // Splice retried pages back into the prior per-page corpus so the
+        // recovered text lands in its original position (F-F2).
+        if (retryPages && previous?.pageTexts) {
+          const merged = [...previous.pageTexts];
+          fresh.pageTexts?.forEach((t, i) => {
+            if (t.trim()) merged[i] = t;
+          });
+          produced.push({
+            ...fresh,
+            pageTexts: merged,
+            text: merged.filter((t) => t.trim()).join("\n\n").trim(),
+            // Recovered pages drop out of the failure set.
+            failedPages: fresh.failedPages.filter((p) => !retryPages.includes(p)),
+          });
+        } else {
+          produced.push(fresh);
         }
       }
 
-      const combinedText = texts.join("\n\n");
+      // Merge: a retry replaces only the re-run files; everything else keeps
+      // its prior outcome (F-F2 — the user retries the lost pages, not the
+      // whole batch).
+      const byPath = new Map(priorOutcomes.map((o) => [o.path, o]));
+      for (const outcome of produced) byPath.set(outcome.path, outcome);
+      const merged = retarget
+        ? files
+            .map((item) => byPath.get(item.path))
+            .filter((o): o is FileOutcome => o !== undefined)
+        : produced;
+      const finalOutcomes = merged.length > 0 ? merged : produced;
+      setOutcomes(finalOutcomes);
+
+      const combinedText = combineOutcomes(finalOutcomes, files.length);
       if (!combinedText.trim()) {
         throw new Error(t("emptyTextError"));
       }
 
+      const totalAttemptedPages = finalOutcomes.reduce((n, o) => n + o.totalPages, 0);
+      const totalFailedPages = finalOutcomes.reduce((n, o) => n + o.failedPages.length, 0);
+      const totalRateLimitedPages = finalOutcomes.reduce((n, o) => n + o.rateLimitedPages, 0);
+      const hasLowConfidence = finalOutcomes.some((o) => o.lowConfidence);
+
       const words = combinedText.trim().split(/\s+/).filter(Boolean).length;
-      const avgWordsPerPage = totalPages > 0 ? Math.round(words / totalPages) : 0;
-      const avgCharsPerPage = totalPages > 0 ? Math.round(combinedText.length / totalPages) : 0;
+      const avgWordsPerPage = totalAttemptedPages > 0 ? Math.round(words / totalAttemptedPages) : 0;
+      const avgCharsPerPage = totalAttemptedPages > 0 ? Math.round(combinedText.length / totalAttemptedPages) : 0;
 
       // Heuristic: Flag presentation/office decks where text density is suspiciously low (<12 words or <50 chars per page)
       const lowDensityDetected = hasOfficeFiles && (hasLowConfidence || avgWordsPerPage < 12 || avgCharsPerPage < 50);
@@ -270,11 +388,14 @@ export function GenerateFromFileDialog({
       // audit-2 M-17: surface partial-OCR loss for ALL file types (the old
       // low-density advisory only ever fired for .pptx/.docx) — a 10-page
       // scan with one 504'd page read as success and shipped an incomplete
-      // assessment.
+      // assessment. audit-3 F-F2: the rate-limited subset is broken out so
+      // the advisory can name the cause and offer a retry.
       if (totalFailedPages > 0 && totalAttemptedPages > 0) {
         setPartialPages({ failed: totalFailedPages, attempted: totalAttemptedPages });
+        setRateLimitedPages(totalRateLimitedPages > 0 ? totalRateLimitedPages : null);
       } else {
         setPartialPages(null);
+        setRateLimitedPages(null);
       }
 
       setExtractedText(combinedText);
@@ -285,6 +406,10 @@ export function GenerateFromFileDialog({
       const msg = err instanceof Error ? err.message : "";
       if (aborted) {
         setError(t("timeout"));
+      } else if (msg === "glm_rate_limited") {
+        setError(t("glmRateLimited"));
+      } else if (msg === "glm_busy") {
+        setError(t("glmBusy"));
       } else if (msg === "glm_error") {
         setError(t("glmError"));
       } else if (msg === "glm_timeout") {
@@ -306,6 +431,26 @@ export function GenerateFromFileDialog({
       setCurrentExtractingFile(null);
     }
   }
+
+  /** audit-3 F-F2: re-run only the files whose OCR pages failed (rate limit
+   * or otherwise), then fold the fresh outcomes back into the corpus. */
+  function handleRetryFailedFiles() {
+    const failedPaths = outcomes
+      .filter((o) => o.failedPages.length > 0 || o.skippedReason === "empty")
+      .map((o) => o.path);
+    if (failedPaths.length === 0) return;
+    void handleExtractAll(failedPaths);
+  }
+
+  /** Files that produced no text at all (audit-3 F-F5). */
+  const skippedFiles = outcomes.filter((o) => !outcomeText(o));
+  /** Files that actually contributed to the corpus. */
+  const contributingCount = outcomes.filter((o) => outcomeText(o)).length;
+  /** Storage paths of the contributing files — the only honest provenance. */
+  const contributingPaths = useMemo(
+    () => outcomes.filter((o) => outcomeText(o)).map((o) => o.path),
+    [outcomes],
+  );
 
   async function handleGenerate() {
     if (!extractedText || submitLock.current || busy) return;
@@ -341,7 +486,8 @@ export function GenerateFromFileDialog({
         difficulty,
         language,
         // Omit when empty — an explicit [] would trip the schema's min(1).
-        ...(files.length > 0 ? { sourcePaths: files.map((f) => f.path) } : {}),
+        // audit-3 F-F5: provenance is the CONTRIBUTING subset only.
+        ...(contributingPaths.length > 0 ? { sourcePaths: contributingPaths } : {}),
         // audit-1 P1-10: reused across retries; cleared on success below.
         generationId: generationIdRef.current,
       };
@@ -427,10 +573,13 @@ export function GenerateFromFileDialog({
           }
         : {}),
       // Omit when empty — an explicit [] would trip the schema's min(1) on
-      // the paste-only path.
-      ...(files.length > 0 ? { sourcePaths: files.map((f) => f.path) } : {}),
+      // the paste-only path. audit-3 F-F5/F-F11: only files that ACTUALLY
+      // contributed text are forwarded as provenance, so a scanned/empty file
+      // (or a stale upload from the other input mode) cannot mint a chip for
+      // text the model never saw.
+      ...(contributingPaths.length > 0 ? { sourcePaths: contributingPaths } : {}),
     }),
-    [webAugment, webFocusHint, quizId, extractedText, questionCount, generationMode, difficulty, formatDistribution, steeringPrompt, language, files],
+    [webAugment, webFocusHint, quizId, extractedText, questionCount, generationMode, difficulty, formatDistribution, steeringPrompt, language, contributingPaths],
   );
 
   /** Terminal outcomes from the in-dialog stream, reported at EVENT time:
@@ -533,6 +682,17 @@ export function GenerateFromFileDialog({
                       type="button"
                       onClick={() => {
                         setInputMode("text");
+                        // audit-3 F-F11: the file leg is not the source in
+                        // paste mode. Keeping the uploads made the step-2
+                        // provenance chips and the "{count} files ready"
+                        // summary reference text that was never used — clear
+                        // the stale file state so provenance cannot lie.
+                        setFiles([]);
+                        setOutcomes([]);
+                        setExtractedText(null);
+                        setPartialPages(null);
+                        setRateLimitedPages(null);
+                        setIsLowDensity(false);
                         setError(null);
                       }}
                       className="hit-slop inline-flex items-center gap-1.5 text-xs font-bold text-primary hover:underline hover:text-primary-deep transition-colors ml-1"
@@ -669,11 +829,20 @@ export function GenerateFromFileDialog({
                       <FileText className="size-4" />
                     </div>
                     <div className="min-w-0">
+                      {/* audit-3 F-F5: report files that CONTRIBUTED, not files
+                          that were uploaded. A scanned/empty upload contributes
+                          no text and must not be counted as a source. */}
                       <p className="text-xs font-bold text-foreground font-heading truncate">
-                        {t("extractedSummary", {
-                          count: files.length,
-                          chars: extractedText.length.toLocaleString(),
-                        })}
+                        {contributingCount === files.length
+                          ? t("extractedSummary", {
+                              count: contributingCount,
+                              chars: extractedText.length.toLocaleString(),
+                            })
+                          : t("extractedSummaryPartial", {
+                              contributing: contributingCount,
+                              total: files.length,
+                              chars: extractedText.length.toLocaleString(),
+                            })}
                       </p>
                       {files.length > 0 && (
                         <p className="text-2xs font-semibold text-muted-foreground truncate">
@@ -707,21 +876,61 @@ export function GenerateFromFileDialog({
               </div>
               )}
 
+              {/* audit-3 F-F5: files that contributed nothing are named
+                  explicitly — silence about a dropped upload is what let the
+                  old summary claim sources the model never saw. */}
+              {skippedFiles.length > 0 && (
+                <div className="flex items-start gap-3 rounded-2xl border-[3px] border-amber-500/30 bg-amber-500/10 p-3.5 shadow-[var(--shadow-clay-sm)]">
+                  <div className="rounded-xl bg-amber-500/20 p-2 text-amber-700 dark:text-amber-300 shrink-0 mt-0.5">
+                    <AlertTriangle className="size-4" />
+                  </div>
+                  <div className="min-w-0 space-y-1">
+                    <p className="text-xs font-bold font-heading text-amber-950 dark:text-amber-200">
+                      {t("skippedFilesTitle")}
+                    </p>
+                    <p className="text-2xs font-semibold text-amber-900/90 dark:text-amber-300/90 leading-relaxed">
+                      {t("skippedFilesDesc", {
+                        files: skippedFiles.map((o) => o.name).join(", "),
+                      })}
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* audit-2 M-17: partial-OCR warning — fires for EVERY file
                   type when any page of a multi-page extraction failed, not
-                  just office decks with low text density. */}
+                  just office decks with low text density.
+                  audit-3 F-F2: when the loss was caused by the OCR budget
+                  (429), name the cause and offer a retry for just the failed
+                  files instead of a generic "some pages failed". */}
               {partialPages && (
                 <div className="flex items-start gap-3 rounded-2xl border-[3px] border-amber-500/30 bg-amber-500/10 p-3.5 shadow-[var(--shadow-clay-sm)]">
                   <div className="rounded-xl bg-amber-500/20 p-2 text-amber-700 dark:text-amber-300 shrink-0 mt-0.5">
                     <AlertCircle className="size-4" />
                   </div>
-                  <div className="min-w-0 space-y-1">
+                  <div className="min-w-0 space-y-1.5 flex-1">
                     <p className="text-xs font-bold font-heading text-amber-950 dark:text-amber-200">
                       {t("partialPagesTitle")}
                     </p>
                     <p className="text-2xs font-semibold text-amber-900/90 dark:text-amber-300/90 leading-relaxed">
                       {t("partialPagesDesc", { failed: partialPages.failed, attempted: partialPages.attempted })}
                     </p>
+                    {rateLimitedPages !== null && (
+                      <p className="text-2xs font-semibold text-amber-900/90 dark:text-amber-300/90 leading-relaxed">
+                        {t("partialPagesRateLimitedDesc", { count: rateLimitedPages })}
+                      </p>
+                    )}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleRetryFailedFiles()}
+                      disabled={busy}
+                      className="h-8 gap-1.5 rounded-xl border-[2px] border-amber-500/50 bg-card px-3 text-2xs font-extrabold text-amber-900 hover:bg-amber-500/10 dark:text-amber-200"
+                    >
+                      <RefreshCw className="size-3.5" />
+                      {t("retryFailedPages")}
+                    </Button>
                   </div>
                 </div>
               )}
@@ -1075,7 +1284,7 @@ export function GenerateFromFileDialog({
               {inputMode === "file" ? (
                 <Button
                   type="button"
-                  onClick={handleExtractAll}
+                  onClick={() => void handleExtractAll()}
                   disabled={files.length === 0 || busy}
                   className="font-bold rounded-xl gap-2"
                 >

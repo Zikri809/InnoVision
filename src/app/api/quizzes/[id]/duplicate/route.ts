@@ -6,6 +6,7 @@ import { requireClassOwner, requireQuizOwner } from "@/lib/quizzes/guards";
 import { isUuid } from "@/lib/classes/roster";
 import { rateLimit } from "@/lib/classes/rate-limit";
 import { isOwnedQuestionImagePath, QUESTION_IMAGES_BUCKET } from "@/lib/media/validation";
+import { removeStorageObjects } from "@/lib/media/cleanup";
 import {
   checkSameOrigin,
   firstIssueMessage,
@@ -215,7 +216,7 @@ async function duplicateQuestionImagesInner(
       // Roll the copied object back immediately (swept-orphan avoidance),
       // then fail closed on the column. Awaited so a serverless freeze can
       // not orphan the just-copied object before removal dispatches.
-      await admin.storage.from(QUESTION_IMAGES_BUCKET).remove([newPath]).catch(() => {});
+      await removeStorageObjects(admin, QUESTION_IMAGES_BUCKET, [newPath]);
       await clearPath();
       failed++;
       continue;

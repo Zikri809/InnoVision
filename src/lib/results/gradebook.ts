@@ -113,6 +113,16 @@ export type BuildGradebookInput = {
    * contract).
    */
   sessionsByQuiz: Map<string, ExportSessionInput[]>;
+  /**
+   * audit-2 M-13 / audit-3 B-F5: the roster read's own truncation flag. The
+   * roster array is ALREADY capped by getClassRoster, so the model cannot
+   * infer truncation from its length (exactly-100 is indistinguishable from
+   * >100); callers pass the read's flag through. Omitted (pure-model callers)
+   * → inferred as `roster.length > ROSTER_LIMIT`, i.e. flagged only when rows
+   * were ACTUALLY dropped by an uncapped feed (the old `>=` off-by-one
+   * reported a full, untruncated 100-row roster as truncated).
+   */
+  rosterTruncated?: boolean;
 };
 
 export function buildGradebookModel(input: BuildGradebookInput): GradebookModel {
@@ -150,9 +160,18 @@ export function buildGradebookModel(input: BuildGradebookInput): GradebookModel 
     };
   });
 
-  const rows: GradebookRow[] = input.roster.map((r) => {
+  const rows: GradebookRow[] = [];
+  const rosterIds = new Set(input.roster.map((r) => r.student_id));
+
+  // Single row builder for BOTH roster rows and orphan rows so their cells,
+  // cumulative %, and integrity sums can never diverge (audit-3 B-F1).
+  const buildRow = (
+    studentId: string,
+    fullName: string | null,
+    matricNo: string | null,
+  ): GradebookRow => {
     const cells = columns.map((col) => {
-      const s = col.repByStudent.get(r.student_id);
+      const s = col.repByStudent.get(studentId);
       if (!s || s.score === null || col.questionCount === 0) return null;
       return {
         sessionId: s.id,
@@ -181,7 +200,7 @@ export function buildGradebookModel(input: BuildGradebookInput): GradebookModel 
     let fullscreenPauses = 0;
     let handPauses = 0;
     for (const col of columns) {
-      const s = col.repByStudent.get(r.student_id);
+      const s = col.repByStudent.get(studentId);
       if (!s) continue;
       faceFails += s.face_fail_count ?? s.face_fail_streak ?? 0;
       fullscreenPauses += s.fullscreen_pause_count ?? 0;
@@ -189,16 +208,36 @@ export function buildGradebookModel(input: BuildGradebookInput): GradebookModel 
     }
 
     return {
-      studentId: r.student_id,
-      fullName: r.full_name,
-      matricNo: r.matric_no,
+      studentId,
+      fullName,
+      matricNo,
       cells,
       cumulativePercent,
       faceFails,
       fullscreenPauses,
       handPauses,
     };
-  });
+  };
+
+  for (const r of input.roster) {
+    rows.push(buildRow(r.student_id, r.full_name, r.matric_no));
+  }
+
+  // audit-3 B-F1: orphan attempts (representative sessions whose student is
+  // no longer on the roster — removed/unenrolled, or pushed past the 100-row
+  // roster read cap) get appended rows with a null name, exactly like the
+  // per-quiz export's honesty rule (export.ts orphanSessions). The per-quiz
+  // class average already counted these students; without a row the Summary
+  // sheet silently dropped them while the average kept including them.
+  const orphanIds = new Set<string>();
+  for (const col of columns) {
+    for (const studentId of col.repByStudent.keys()) {
+      if (!rosterIds.has(studentId)) orphanIds.add(studentId);
+    }
+  }
+  for (const studentId of [...orphanIds].sort()) {
+    rows.push(buildRow(studentId, null, null));
+  }
 
   return {
     className: input.className,
@@ -211,6 +250,7 @@ export function buildGradebookModel(input: BuildGradebookInput): GradebookModel 
     })),
     rows,
     truncated,
-    rosterTruncated: input.roster.length >= ROSTER_LIMIT,
+    rosterTruncated:
+      input.rosterTruncated ?? input.roster.length > ROSTER_LIMIT,
   };
 }

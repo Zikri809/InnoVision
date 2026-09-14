@@ -30,6 +30,17 @@ export default defineConfig({
         // shared HTTP primitives, middleware redirect matrix.
         "src/lib/classes/guards.ts",
         "src/lib/classes/roster.ts",
+        // audit-1 §5.2 follow-up (2026-09): tested-but-untracked modules —
+        // each had a test file but no include entry, so deleting the test
+        // changed nothing. Floors live in the §5.2 block below.
+        "src/lib/classes/rate-limit.ts",
+        "src/lib/classes/join-code.ts",
+        "src/app/auth/callback/route.ts",
+        "src/lib/theme/theme.ts",
+        "src/lib/a11y/timer-milestones.ts",
+        "src/lib/bot/engine.ts",
+        "src/app/join/[code]/join-errors.ts",
+        "src/app/api/classes/**",
         "src/lib/auth/**",
         "src/lib/http.ts",
         "src/lib/supabase/middleware.ts",
@@ -66,8 +77,11 @@ export default defineConfig({
         // P3 quiz routes are tested by P3's test suite (above). audit-1 §5.2:
         // these were 0-gated ("tested-but-ungated" — deleting assertions stayed
         // green); they now carry floors AT their measured coverage in the §5.2
-        // block below. classes/join stays 0-key (no unit test exercises it).
-        "src/app/api/classes/join/route.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
+        // block below.
+        // (The old 0-key for classes/join lived here and matched NO include
+        // glob — dead by construction; H3-INFRA-F5 moved it into the §5.2
+        // block at its measured coverage, where classes-routes.test.ts:503,556
+        // actually exercises it.)
         // P5: pure session helpers + session routes carry the timer/grading
         // integrity logic (unit + route-test covered). Browser-only UI
         // components (play-client, question-card, option-card, progress-hud,
@@ -153,6 +167,21 @@ export default defineConfig({
         "src/lib/quizzes/guards.ts": { lines: 100 },
         "src/lib/http.ts": { lines: 95 },
         "src/lib/supabase/middleware.ts": { lines: 77 },
+        // H3-INFRA-F5/F6 (audit 2026-09): tested-but-untracked modules — each
+        // had a test file but was absent from coverage.include (so deleting the
+        // test changed nothing) or matched no include glob at all. Floors are
+        // AT the measured line coverage, matching the §5.2 precedent.
+        "src/app/api/classes/join/route.ts": { lines: 74 },
+        // rate-limit.ts now carries tests for every export (rateLimit,
+        // recordRateLimitHit, resetRateLimit, the LRU refresh and the shared
+        // bucket-cap enforcement), so its floor sits at the sibling lib bar.
+        "src/lib/classes/rate-limit.ts": { lines: 90 },
+        "src/lib/classes/join-code.ts": { lines: 100 },
+        "src/app/auth/callback/route.ts": { lines: 94 },
+        "src/lib/theme/theme.ts": { lines: 77 },
+        "src/lib/a11y/timer-milestones.ts": { lines: 100 },
+        "src/lib/bot/engine.ts": { lines: 98 },
+        "src/app/join/[code]/join-errors.ts": { lines: 100 },
         // Voice-activity advisory detector (pure, unit-tested).
         "src/lib/audio/vad.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/app/api/sessions/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },

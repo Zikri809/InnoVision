@@ -228,6 +228,54 @@ type PreparedSource =
   | { ok: true; text: string; sourcePathFinal: string | null; sourcePaths: string[]; parsed: boolean; webSources: WebSourceEntry[] | null; webAugmented?: boolean }
   | { ok: false; response: NextResponse };
 
+/** Guaranteed share of the aggregate budget reserved for the web corpus
+ * (audit-3 F-F6). The web corpus is the fresh-knowledge ADDITION, so it must
+ * survive the aggregate slice; the material is truncated FIRST when the two
+ * together exceed MAX_AGGREGATE_CHARS. 40k ≈ 10% of the 400k cap. */
+const WEB_CORPUS_MIN_SHARE = 40_000;
+
+/**
+ * Merge material + web corpus under MAX_AGGREGATE_CHARS while guaranteeing the
+ * web corpus a minimum share (audit-3 F-F6). The material is truncated FIRST,
+ * so a long upload/paste can no longer slice the web contribution away while
+ * its citations are still persisted and reported. If the web corpus must
+ * itself be cut (only possible when it exceeds the reserved share), the
+ * citations for pages whose `=== WEB SOURCE [i/N]` header did not survive are
+ * dropped, so provenance can never claim a page the model did not read.
+ * Headerless corpora (legacy/test shapes) keep their sources — the text is
+ * retained as a whole in that case.
+ */
+function mergeWithWebReserve(
+  materialText: string,
+  webText: string,
+  webSources: WebSourceEntry[],
+): { text: string; webSources: WebSourceEntry[] } {
+  const material = materialText.trim();
+  const web = webText.trim();
+  if (!web) return { text: material.slice(0, MAX_AGGREGATE_CHARS), webSources: [] };
+
+  const separator = 2;
+  // Guarantee the web corpus up to its reserved share; material takes what's
+  // left (truncated first). Web text longer than the reserve only survives if
+  // the material leaves room for it.
+  const webShare = Math.min(web.length, Math.max(WEB_CORPUS_MIN_SHARE, MAX_AGGREGATE_CHARS - material.length - separator));
+  const materialKeep = Math.min(material.length, Math.max(0, MAX_AGGREGATE_CHARS - webShare - separator));
+  const webKeep = Math.min(web.length, Math.max(0, MAX_AGGREGATE_CHARS - materialKeep - separator));
+  const webKept = web.slice(0, webKeep);
+  const text = `${material.slice(0, materialKeep)}\n\n${webKept}`;
+
+  // Full web corpus retained → every fetched page is cited (normal case).
+  if (webKeep >= web.length) return { text, webSources };
+
+  // Web corpus truncated: keep only citations whose envelope header survived.
+  const hasHeaders = /===\s*WEB\s+SOURCE\s*\[\d+\/\d+\]/.test(web);
+  if (!hasHeaders) return { text, webSources };
+  const survivors = webSources.filter((_, i) =>
+    webKept.includes(`=== WEB SOURCE [${i + 1}/${webSources.length}]:`),
+  );
+  return { text, webSources: survivors };
+}
+
 /** The web-search branch of source preparation (augmentation model): the
  * web corpus is APPENDED to the material text under its own fence (fresh
  * real-world knowledge the uploads may lack) and a failed/thin/unconfigured
@@ -302,15 +350,26 @@ async function prepareWebSource(
   if (augmented) {
     // Merge: material first (primary grounding), then the web corpus under
     // its own fence header so the model can tell the kinds apart.
-    const merged = `${opts.base!.text}\n\n${result.text}`;
-    const text = merged.length > MAX_AGGREGATE_CHARS ? merged.slice(0, MAX_AGGREGATE_CHARS) : merged;
+    //
+    // audit-3 F-F6: the old merge-then-slice put the web corpus LAST and then
+    // truncated the aggregate to MAX_AGGREGATE_CHARS — a long material corpus
+    // (pasted text up to the cap) sliced the entire web contribution away
+    // while the citations were still persisted and the payoff still reported
+    // "N web pages". Reserve a guaranteed minimum share for the web corpus
+    // (truncating the MATERIAL first when necessary) so persisted citations
+    // always correspond to text the model actually read.
+    const { text, webSources } = mergeWithWebReserve(
+      opts.base!.text,
+      result.text,
+      result.sources,
+    );
     return {
       ok: true,
       text,
       sourcePathFinal: opts.base!.sourcePathFinal,
       sourcePaths: opts.base!.sourcePaths,
       parsed: opts.base!.parsed,
-      webSources: result.sources,
+      webSources,
       webAugmented: true,
     };
   }
@@ -423,6 +482,15 @@ async function prepareSource(ctx: GenerationContext): Promise<PreparedSource> {
           pathsToProcess.length > 1
             ? `=== SOURCE [${i + 1}/${pathsToProcess.length}]: ${filename} ===\n${parse.text.trim()}`
             : parse.text.trim(),
+        );
+      } else {
+        // audit-3 F-F5: a file that yielded no text is NOT claimed as a source
+        // (contributedPaths above only ever receives contributors) — and it is
+        // no longer silent: log the drop so the API-only path leaves a trace.
+        // The shipped UI extracts client-side, where the dialog reports the
+        // skipped files to the user directly.
+        console.warn(
+          `[generate-quiz] source skipped (no extractable text): ${p}${parse.lowConfidence ? " (low confidence)" : ""}`,
         );
       }
     }
@@ -561,6 +629,10 @@ async function saveGeneration(
   // function carries p_web_sources AND p_source_paths (the full file list —
   // one provenance chip per uploaded file; the single p_source_file_url only
   // fed the primary path and under-counted multi-file builds).
+  // audit-3 F-F7: the AI-generated title is a VALIDATION GATE only (see
+  // AiQuizSchema's title contract) — it is never applied. The quiz already has
+  // a lecturer-chosen NOT NULL title, so the RPC's coalesce(p_title, title)
+  // is a no-op by construction; p_title carries that existing title.
   type SaveQuizQuestionsWebArgs = {
     p_quiz_id: string;
     p_title: string;

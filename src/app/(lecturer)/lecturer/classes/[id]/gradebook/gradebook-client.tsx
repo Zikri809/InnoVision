@@ -48,18 +48,22 @@ import { GradebookMobile } from "./gradebook-mobile";
 
 export function GradebookClient({
   model,
-  truncated,
   quizLimit,
+  sessionsTruncated,
   classId,
   archived,
 }: {
   model: GradebookModel;
-  truncated: boolean;
   quizLimit: number;
+  /** audit-3 B-F7: the session read hit its row cap — some attempts missing. */
+  sessionsTruncated: boolean;
   classId: string;
   archived: boolean;
 }) {
   const t = useTranslations("lecturer.gradebook");
+  // Mirrors ROSTER_LIMIT in @/lib/classes/roster — kept local so this client
+  // island never imports the server roster module (audit-3 B-F6).
+  const ROSTER_DISPLAY_LIMIT = 100;
   const [exporting, setExporting] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<GradebookStatusFilter>("all");
@@ -171,16 +175,31 @@ export function GradebookClient({
             {t("title")}
           </h1>
           <p className="mt-1 sm:mt-1.5 text-sm font-semibold text-muted-foreground">
-            {model.className} · {t("rosterCount", { count: model.rows.length })} ·{" "}
-            {t("quizCount", { count: model.quizzes.length })}
+            {model.className} ·{" "}
+            {model.rosterTruncated
+              ? t("rosterCountTruncated", { limit: ROSTER_DISPLAY_LIMIT })
+              : t("rosterCount", { count: model.rows.length })}{" "}
+            · {t("quizCount", { count: model.quizzes.length })}
           </p>
           <p className="mt-1 hidden text-xs text-muted-foreground sm:block">{t("subtitle")}</p>
         </div>
       </section>
 
-      {truncated && (
-        <p role="status" className="rounded-2xl border-[3px] border-amber-600/30 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-900">
+      {/* audit-3 B-F4/B-F6/B-F7: every silent-truncation path now has a
+          visible notice. Amber follows the AGENTS.md dark-mode pattern. */}
+      {model.truncated && (
+        <p role="status" className="rounded-2xl border-[3px] border-amber-600/40 bg-amber-100 px-4 py-3 text-sm font-bold text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300">
           {t("truncatedColumns", { limit: quizLimit })}
+        </p>
+      )}
+      {model.rosterTruncated && (
+        <p role="status" className="rounded-2xl border-[3px] border-amber-600/40 bg-amber-100 px-4 py-3 text-sm font-bold text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300">
+          {t("rosterTruncatedNotice", { limit: ROSTER_DISPLAY_LIMIT })}
+        </p>
+      )}
+      {sessionsTruncated && (
+        <p role="status" className="rounded-2xl border-[3px] border-amber-600/40 bg-amber-100 px-4 py-3 text-sm font-bold text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300">
+          {t("sessionsTruncated")}
         </p>
       )}
 

@@ -14,13 +14,35 @@ const PUBLIC_ROUTES = ["/", "/login", "/register", "/auth/callback", "/forgot-pa
 // changing their own password.
 const AUTH_BOUNCE_EXEMPT = ["/reset-password/confirm"];
 
+/**
+ * Static infrastructure the browser fetches ANONYMOUSLY (audit-3 H-F2 /
+ * R2-TOP-F2). These are NOT part of `PUBLIC_ROUTES` on purpose: `PUBLIC_ROUTES`
+ * feeds `shouldBounceAuthenticated`, which redirects a SIGNED-IN visitor to
+ * `/dashboard` — adding the manifest there would break it for authenticated
+ * users. The authoritative fix is the positive matcher allowlist in
+ * `src/proxy.ts`, so these paths never reach `updateSession()` at all. This
+ * list is defence-in-depth for the anonymous case (and documents the split so
+ * a future matcher regression cannot silently 307 the PWA manifest to /login).
+ */
+const STATIC_ASSET_ROUTES = ["/manifest.webmanifest", "/robots.txt", "/sitemap.xml", "/sw.js", "/.well-known"];
+
+function isStaticAssetRoute(pathname: string): boolean {
+  return STATIC_ASSET_ROUTES.some(
+    (route) => pathname === route || pathname.startsWith(`${route}/`),
+  );
+}
+
 function isPublicRoute(pathname: string): boolean {
+  if (isStaticAssetRoute(pathname)) return true;
   return PUBLIC_ROUTES.some(
     (route) => pathname === route || pathname.startsWith(`${route}/`),
   );
 }
 
 function shouldBounceAuthenticated(pathname: string): boolean {
+  // Never bounce static infrastructure: a signed-in user's manifest/service
+  // worker/robots fetch must return the file, not a 307 to /dashboard.
+  if (isStaticAssetRoute(pathname)) return false;
   if (!isPublicRoute(pathname)) return false;
   return !AUTH_BOUNCE_EXEMPT.some(
     (route) => pathname === route || pathname.startsWith(`${route}/`),
@@ -29,6 +51,14 @@ function shouldBounceAuthenticated(pathname: string): boolean {
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
+
+  // audit-3 A-F7: a redirect response is built fresh, so any auth cookies the
+  // refresh above wrote onto `supabaseResponse` were DROPPED — the browser
+  // kept its expired token, and the next request refreshed again (flicker,
+  // repeated GoTrue refreshes, and a lost refresh when the redirect target
+  // itself is a public route). Record every refreshed cookie here and replay
+  // it onto whichever response we return.
+  let refreshedCookies: { name: string; value: string; options?: Record<string, unknown> }[] = [];
 
   const supabase = createServerClient<Database>(
     env.NEXT_PUBLIC_SUPABASE_URL,
@@ -39,6 +69,16 @@ export async function updateSession(request: NextRequest) {
           return request.cookies.getAll();
         },
         setAll(cookiesToSet) {
+          // ACCUMULATE, don't overwrite: @supabase/ssr may invoke setAll more
+          // than once in a single getUser() (e.g. a chunked-cookie refresh
+          // followed by a clear). Overwriting would replay only the last batch
+          // onto a redirect and drop the earlier cookies (audit-3 adversarial
+          // review). Deduped by name, last write winning — matching the
+          // browser's own cookie semantics.
+          for (const c of cookiesToSet) {
+            refreshedCookies = refreshedCookies.filter((p) => p.name !== c.name);
+            refreshedCookies.push(c);
+          }
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value),
           );
@@ -54,6 +94,14 @@ export async function updateSession(request: NextRequest) {
     },
   );
 
+  /** Replay refreshed auth cookies onto a redirect so the refresh survives. */
+  const withRefreshedCookies = (response: NextResponse): NextResponse => {
+    for (const { name, value, options } of refreshedCookies) {
+      response.cookies.set(name, value, options);
+    }
+    return response;
+  };
+
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -64,7 +112,7 @@ export async function updateSession(request: NextRequest) {
   if (user && shouldBounceAuthenticated(pathname)) {
     const url = request.nextUrl.clone();
     url.pathname = "/dashboard";
-    return NextResponse.redirect(url);
+    return withRefreshedCookies(NextResponse.redirect(url));
   }
 
   // NOTE: `/api/*` is intentionally NOT handled here — the proxy matcher
@@ -76,8 +124,11 @@ export async function updateSession(request: NextRequest) {
   if (!user && !isPublicRoute(pathname)) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
-    url.searchParams.set("redirect", pathname);
-    return NextResponse.redirect(url);
+    // audit-3 A-F8: preserve the QUERY STRING too. The old form stored only
+    // `pathname`, so an expired session on a query-carrying URL (e.g. the
+    // student quiz list's `?class=…` link) lost its params after re-login.
+    url.searchParams.set("redirect", `${pathname}${request.nextUrl.search}`);
+    return withRefreshedCookies(NextResponse.redirect(url));
   }
 
   return supabaseResponse;

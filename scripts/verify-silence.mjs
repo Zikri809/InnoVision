@@ -14,8 +14,17 @@
 //   SV4  a REAL (fresh) verify suppresses flagging (300s term resets);
 //        a STALE backfilled check does not.
 //   SV5  answering freshness: answers older than 90s → never flagged.
-//   SV6  0045 stale-unavailable: a FRESH face_unavailable_at claim exempts;
-//        a STALE (>10 min) claim flows into the normal predicates.
+//   SV6  0047 outage-claim corroboration (audit-3 R2-FACE-F1): a FRESH claim
+//        is exempt ONLY while corroborated. SV6a = fresh claim with NO
+//        corroboration → FLAGGED — this is the audit-2 C-02 attack shape, and
+//        the 0046 revision shipped the predicate INVERTED, so the harness
+//        previously pinned "exempt" and thereby certified the vulnerability.
+//        SV6b = fresh claim WITH a fresh verify attempt (the sidecar-503
+//        shape: attempts flow, no face_checks row) → exempt.
+//        SV6c = a STALE (>10 min) claim flows into the normal predicates.
+//   SV8  audit-3 H3-RACE-F1: resume_grace_until (not paused_at) is the
+//        pause-resume guard — an active session WITH an unexpired grace is
+//        exempt, and the same session past the grace is flagged.
 //   SV7  0044 §8 advisory-touch throttle: a throttled (≤55s) direct-RPC
 //        advisory does NOT touch last_activity_at.
 //
@@ -263,19 +272,64 @@ async function main() {
       (await statusOf(sessionId)) === "active", `status=${await statusOf(sessionId)}`);
   }
 
-  // ── SV6: 0045 stale-unavailable freshness (P0-3 kill-switch expiry) ──
+  // ── SV6: 0047 outage-claim CORROBORATION (audit-3 R2-FACE-F1) ────
+  // The 0046 predicate implemented the corroboration terms as OR-disjuncts of
+  // the candidacy clause, which INVERTED the intent: a fresh claim with no
+  // corroboration short-circuited to "exempt". These pins assert the corrected
+  // semantics — a fresh claim suppresses the flag ONLY while corroborated.
   {
-    const freshClaim = await makeSilenceSession("sv6a", { startedMinsAgo: 7, answerCount: 2 });
-    await admin.from("quiz_sessions").update({ face_unavailable_at: minsAgo(3) }).eq("id", freshClaim.sessionId);
+    // SV6a — the audit-2 C-02 attack shape: a fresh claim and NOTHING else
+    // (verifies blocked, so no checks row and no attempt stamp) → FLAGGED.
+    const uncorroborated = await makeSilenceSession("sv6a", { startedMinsAgo: 7, answerCount: 2 });
+    await admin.from("quiz_sessions")
+      .update({ face_unavailable_at: minsAgo(3), face_verify_attempted_at: null })
+      .eq("id", uncorroborated.sessionId);
     await runCron();
-    record("SV6a FRESH face_unavailable claim (<10 min) → exempt",
-      (await statusOf(freshClaim.sessionId)) === "active", `status=${await statusOf(freshClaim.sessionId)}`);
+    record("SV6a FRESH claim with NO corroboration (blocked verifies) → FLAGGED",
+      (await statusOf(uncorroborated.sessionId)) === "flagged", `status=${await statusOf(uncorroborated.sessionId)}`);
 
-    const staleClaim = await makeSilenceSession("sv6b", { startedMinsAgo: 7, answerCount: 2 });
-    await admin.from("quiz_sessions").update({ face_unavailable_at: minsAgo(15) }).eq("id", staleClaim.sessionId);
+    // SV6b — the honest outage shape: the sidecar is down (503s, so NO
+    // face_checks row) but the verify route still stamped the attempt.
+    const corroborated = await makeSilenceSession("sv6b", { startedMinsAgo: 7, answerCount: 2 });
+    await admin.from("quiz_sessions")
+      .update({ face_unavailable_at: minsAgo(3), face_verify_attempted_at: minsAgo(1) })
+      .eq("id", corroborated.sessionId);
     await runCron();
-    record("SV6b STALE face_unavailable claim (>10 min) → flagged",
+    record("SV6b FRESH claim WITH a fresh verify attempt (sidecar 503) → exempt",
+      (await statusOf(corroborated.sessionId)) === "active", `status=${await statusOf(corroborated.sessionId)}`);
+
+    // SV6c — a stale claim flows into the normal predicates regardless.
+    const staleClaim = await makeSilenceSession("sv6c", { startedMinsAgo: 7, answerCount: 2 });
+    await admin.from("quiz_sessions")
+      .update({ face_unavailable_at: minsAgo(15), face_verify_attempted_at: minsAgo(15) })
+      .eq("id", staleClaim.sessionId);
+    await runCron();
+    record("SV6c STALE face_unavailable claim (>10 min) → flagged",
       (await statusOf(staleClaim.sessionId)) === "flagged", `status=${await statusOf(staleClaim.sessionId)}`);
+  }
+
+  // ── SV8: audit-3 H3-RACE-F1 — resume_grace_until is the guard ────
+  // The 0044/0045/0046 `paused_at` guard was a TAUTOLOGY (every writer of
+  // status='active' clears paused_at, and the cursor only admits 'active'),
+  // so it could never exclude a candidate. 0047 replaced it with an explicit
+  // grace stamp; these pins prove the stamp is load-bearing in both
+  // directions.
+  {
+    const graced = await makeSilenceSession("sv8a", { startedMinsAgo: 7, answerCount: 2 });
+    await admin.from("quiz_sessions")
+      .update({ paused_at: null, resume_grace_until: minsAgo(-1) })
+      .eq("id", graced.sessionId);
+    await runCron();
+    record("SV8a active session with an UNEXPIRED resume grace → NOT flagged",
+      (await statusOf(graced.sessionId)) === "active", `status=${await statusOf(graced.sessionId)}`);
+
+    const expired = await makeSilenceSession("sv8b", { startedMinsAgo: 7, answerCount: 2 });
+    await admin.from("quiz_sessions")
+      .update({ paused_at: null, resume_grace_until: minsAgo(2) })
+      .eq("id", expired.sessionId);
+    await runCron();
+    record("SV8b the same session past the grace → flagged",
+      (await statusOf(expired.sessionId)) === "flagged", `status=${await statusOf(expired.sessionId)}`);
   }
 
   // ── SV7: 0044 §8 — throttled advisory does NOT touch last_activity_at ──

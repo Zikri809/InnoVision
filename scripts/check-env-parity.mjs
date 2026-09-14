@@ -43,6 +43,10 @@ const ALLOWED_ABSENT = new Set([
   "TINYFISH_SEARCH_URL", // documented in the example as an optional override
   // Seeding guard (scripts/seed-*.mjs only)
   "ALLOW_PROD_SEED",
+  // Next.js build intrinsic (src/lib/classes/rate-limit.ts:36 checks it to
+  // exempt the production BUILD phase from the prod kill-switch warn; Next
+  // sets it itself and it must never be preset by an operator).
+  "NEXT_PHASE",
 ]);
 
 function collectEnvRefs(dir, refs) {
@@ -57,6 +61,13 @@ function collectEnvRefs(dir, refs) {
     if (!/\.(ts|tsx|mjs|js)$/.test(entry) || entry.endsWith(".test.ts") || entry.endsWith(".test.tsx")) continue;
     const text = readFileSync(full, "utf8");
     for (const m of text.matchAll(/\b(?:process\.)?env\.([A-Z_0-9]+)/g)) {
+      refs.set(m[1], join(full, "").replace(ROOT + "\\", "").replace(ROOT + "/", ""));
+    }
+    // audit-3 A-F4: also catch keys passed as STRING LITERALS to the envLimit
+    // helper (src/lib/auth/*), which the `env.KEY` pattern cannot see — the
+    // login failure threshold went undocumented and unnoticed for exactly this
+    // reason. Matches envLimit("KEY", …) / envInt("KEY", …).
+    for (const m of text.matchAll(/\b(?:envLimit|envInt|envNumber)\(\s*"([A-Z_0-9]+)"/g)) {
       refs.set(m[1], join(full, "").replace(ROOT + "\\", "").replace(ROOT + "/", ""));
     }
   }

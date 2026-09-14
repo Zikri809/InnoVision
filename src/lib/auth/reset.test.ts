@@ -73,6 +73,7 @@ beforeEach(() => {
   delete process.env.RESET_RATE_LIMIT;
   delete process.env.RESET_IP_RATE_LIMIT;
   delete process.env.RESET_CONFIRM_RATE_LIMIT;
+  delete process.env.RESET_EMAIL_DAILY_LIMIT;
 });
 
 function seedHeaders(table: Record<string, string>) {
@@ -132,14 +133,16 @@ describe("requestReset", () => {
 
   it("enforces the per-IP budget across rotating emails", async () => {
     seedHeaders({ "x-forwarded-for": "203.0.113.9" });
-    _seedRateLimit("reset-ip:203.0.113.9", 10);
+    // audit-3 R2-TOP-F5 raised the default IP budget to the classroom-NAT
+    // precedent (30/min) — seed AT the limit so this still forces a 429.
+    _seedRateLimit("reset-ip:203.0.113.9", 30);
     const res = await requestReset({ email: "rotate1@example.com" });
     expect(res.error).toMatch(/too many/i);
   });
 
   it("uses the unknown-IP key when x-forwarded-for is absent", async () => {
     seedHeaders({});
-    _seedRateLimit("reset-ip:unknown", 10);
+    _seedRateLimit("reset-ip:unknown", 30);
     const res = await requestReset({ email: "nohdr@example.com" });
     expect(res.error).toMatch(/too many/i);
   });
@@ -194,6 +197,24 @@ describe("requestReset", () => {
     await freshRequestReset({ email: "envtuned@example.com" });
     const res = await freshRequestReset({ email: "envtuned@example.com" });
     expect(res.error).toMatch(/too many/i);
+    vi.unstubAllEnvs();
+  });
+
+  // audit-3 R2-TOP-F3: the per-minute cap alone still allows ~7,200 emails/day.
+  // The daily ceiling must fire even when the per-minute budget has headroom.
+  it("enforces the per-email DAILY ceiling independently of the per-minute cap", async () => {
+    vi.stubEnv("RESET_RATE_LIMIT", "1000");
+    vi.stubEnv("RESET_EMAIL_DAILY_LIMIT", "2");
+    vi.resetModules();
+    const { requestReset: freshRequestReset } = await import("./reset");
+    seedHeaders({ "x-forwarded-for": "203.0.113.9" });
+
+    expect((await freshRequestReset({ email: "daily@example.com" })).error).toBeUndefined();
+    expect((await freshRequestReset({ email: "daily@example.com" })).error).toBeUndefined();
+    const third = await freshRequestReset({ email: "daily@example.com" });
+    expect(third.error).toMatch(/too many/i);
+    // Only the two accepted sends reached GoTrue.
+    expect(clientHolder.current!.calls.resetForEmail).toHaveLength(2);
     vi.unstubAllEnvs();
   });
 });

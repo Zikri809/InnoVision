@@ -91,6 +91,17 @@ for (const file of files) {
     namespaces[match[1]] = match[2] || match[3];
   }
 
+  // audit-3 H-F6: the server-side translator `tFor(locale)` was invisible to
+  // this scanner, so a missing key in a server action / route rendered the raw
+  // dotted key to the user (messages.ts:30 falls back to `key`). Unlike
+  // useTranslations/getTranslations, tFor keys are ABSOLUTE dotted paths from
+  // the catalog root — no namespace is prepended (ns = "").
+  //   const t = tFor(locale);  /  const t = tFor(await locale());
+  const tForRegex = /const\s+([a-zA-Z0-9_]+)\s*=\s*tFor\(/g;
+  while ((match = tForRegex.exec(content)) !== null) {
+    namespaces[match[1]] = "";
+  }
+
   for (const [tVar, ns] of Object.entries(namespaces)) {
     const callRegex = new RegExp(`\\b${tVar}\\(\\s*["']([^"']+)["']`, "g");
     let callMatch;

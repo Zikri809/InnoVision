@@ -6,6 +6,29 @@ on:
   pull_request:
 
 jobs:
+  # H3-INFRA-F1 recurrence guard: this is the ONLY job that can catch an
+  # unparseable ci.yml, because a YAML error prevents every job IN that file
+  # from being scheduled (GitHub silently falls back to a single anonymous
+  # run named `.github/workflows/ci.yml`). It has no dependencies and no
+  # checkout-heavy setup, so it reports in seconds.
+  workflow-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # js-yaml is a transitive dep of eslint; `npm ci` guarantees it is
+      # present and hoisted before the script imports it.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate workflow YAML (js-yaml)
+        run: node scripts/check-workflows.mjs
+
   test:
     runs-on: ubuntu-latest
     env:
@@ -24,6 +47,13 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # H3-INFRA-F1 recurrence guard (this YAML has been broken twice). Runs
+      # before the expensive steps so a syntax error fails in seconds. The
+      # dedicated `workflow-lint` job below is the load-bearing copy (a step
+      # inside ci.yml cannot run when ci.yml itself is unparseable).
+      - name: Validate workflow YAML
+        run: npm run lint:workflows
 
       - name: Start local Supabase
         run: npx supabase start
@@ -108,6 +138,12 @@ jobs:
       - name: "Matric number probes (0027: trigger/uniqueness/RLS/roster)"
         run: npm run verify:matric
 
+      - name: "Web-source probes (0040/0041: web sources + multi-file provenance)"
+        run: npm run verify:web-sources
+
+      - name: "Silence-cron probes (0042/0044/0045: flag_verify_silent_sessions predicates)"
+        run: npm run verify:silence
+
       - name: Build
         run: npm run build
 
@@ -117,12 +153,49 @@ jobs:
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
 
+      # H3-INFRA-F3: the 15 -> 25 timeout raise has never been exercised, and a
+      # step timeout is indistinguishable from a test failure in the summary.
+      # Record the start in its OWN step (a killed step's $GITHUB_ENV may not
+      # be flushed, so writing it inside the E2E run block is not reliable).
+      - name: Record E2E start
+        id: e2e_start
+        run: echo "E2E_START_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
+
       - name: E2E (E1a + E1 + E1b regression + mobile m1 allowlist)
+        id: e2e
         run: npx playwright test
         # Desktop suite + the mobile project's m1-*.spec.ts allowlist
         # (plan §6): the m1 journeys add ~4-7 min at workers:1 on top of the
         # desktop budget, hence 15 -> 25.
         timeout-minutes: 25
+        continue-on-error: false
+
+      - name: Report E2E step outcome
+        # Only when the E2E step itself failed. A timeout lands as `failure`
+        # (or `cancelled`); an earlier-step failure leaves it `skipped`, which
+        # is why this is not a bare `if: failure()`.
+        if: failure() && steps.e2e.outcome != 'skipped'
+        run: |
+          OUTCOME="${{ steps.e2e.outcome }}"
+          BUDGET=$(( 25 * 60 ))
+          if [ -n "${E2E_START_EPOCH:-}" ] && [ "${E2E_START_EPOCH}" != "0" ]; then
+            ELAPSED=$(( $(date +%s) - E2E_START_EPOCH ))
+          else
+            ELAPSED=0
+          fi
+          if [ "$ELAPSED" -ge "$BUDGET" ]; then
+            VERDICT="TIMEOUT — the step was killed at its 25-minute budget, NOT a Playwright test failure."
+          elif [ "$ELAPSED" -eq 0 ]; then
+            VERDICT="the step failed before/at the start marker could be read — treat as a real failure."
+          else
+            VERDICT="ran ${ELAPSED}s of the ${BUDGET}s budget — a real test/tooling failure, not a timeout."
+          fi
+          {
+            echo "### E2E step: \`e2e\` outcome=\`$OUTCOME\`"
+            echo ""
+            echo "$VERDICT"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "E2E step outcome=$OUTCOME elapsed=${ELAPSED}s — $VERDICT"
 
   integrity-e2e:
     # Opt-in hardening suite (e51): the main job's build bakes
@@ -145,6 +218,16 @@ jobs:
       # INTEGRITY_E2E in a local .env.local can no longer run e51 against a
       # hardening-OFF build).
       E51_HARDENING_E2E: "1"
+      # H3-INFRA-F2 review: the job's OWN pre-build (below) runs `next build`
+      # outside playwright.config.ts's webServer env, so without these the
+      # BUILD_ID it seeds belongs to a bundle with the fake seams OFF — and the
+      # :3002 server (which polls .next/BUILD_ID) would serve that seam-less
+      # build until the main webServer rebuilds. Mirror the webServer's
+      # build-time env exactly. NEXT_PUBLIC_INTEGRITY_HARDENING_OFF is
+      # deliberately ABSENT (hardening must stay baked IN for e51).
+      NEXT_PUBLIC_E2E_FAKE_SEAM: "1"
+      FACE_MOCK_ENABLED: "1"
+      INSIGHTFACE_BASE_URL: "http://localhost:8000"
     steps:
       - uses: actions/checkout@v4
 
@@ -181,7 +264,7 @@ jobs:
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
 
-      - name: Build (hardening-ON: INTEGRITY_E2E omits the kill switch)
+      - name: "Build (hardening-ON: INTEGRITY_E2E omits the kill switch)"
         run: npm run build
         # Playwright starts ALL FOUR webServers on every run regardless of
         # --project filtering; the :3002 server polls .next/BUILD_ID with a

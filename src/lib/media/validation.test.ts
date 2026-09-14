@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  checkMultipartLength,
   contentTypeFor,
   extFor,
+  isOwnedQuizSourcePath,
   isWellFormedQuestionImagePath,
+  isWellFormedQuizSourcePath,
   isValidAvatarPath,
   sniffImageType,
 } from "./validation";
@@ -11,15 +12,10 @@ import {
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 const UID = "11111111-2222-3333-4444-555555555555";
 const IMG_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+const QUIZ_ID = "cccccccc-dddd-eeee-ffff-000000000000";
 
 function buf(bytes: number[]): Buffer {
   return Buffer.from(bytes);
-}
-
-function requestWithLength(value: string | null): Request {
-  const headers = new Headers();
-  if (value !== null) headers.set("content-length", value);
-  return new Request("https://app.test/api/x", { method: "POST", headers });
 }
 
 describe("sniffImageType", () => {
@@ -67,35 +63,10 @@ describe("extFor / contentTypeFor", () => {
   });
 });
 
-describe("checkMultipartLength", () => {
-  it("accepts a declared length within cap", () => {
-    expect(checkMultipartLength(requestWithLength("1024"), 5 * 1024 * 1024)).toBeNull();
-  });
-
-  it("accepts exactly cap + slack (multipart framing)", () => {
-    const atCap = 5 * 1024 * 1024 + 64 * 1024;
-    expect(checkMultipartLength(requestWithLength(String(atCap)), 5 * 1024 * 1024)).toBeNull();
-  });
-
-  it("rejects over-cap declared length with 413", () => {
-    const res = checkMultipartLength(
-      requestWithLength(String(6 * 1024 * 1024)),
-      5 * 1024 * 1024,
-    );
-    expect(res).not.toBeNull();
-    expect(res?.status).toBe(413);
-  });
-
-  it("rejects a MISSING content-length header (chunked) with 413", () => {
-    const res = checkMultipartLength(requestWithLength(null), 5 * 1024 * 1024);
-    expect(res).not.toBeNull();
-    expect(res?.status).toBe(413);
-  });
-
-  it("rejects an unparseable content-length with 413", () => {
-    const res = checkMultipartLength(requestWithLength("abc"), 5 * 1024 * 1024);
-    expect(res).not.toBeNull();
-    expect(res?.status).toBe(413);
+describe("checkMultipartLength removed (audit-3 G-F7)", () => {
+  it("is no longer exported (dead pre-H-04 header-only gate)", async () => {
+    const mod = await import("./validation");
+    expect("checkMultipartLength" in mod).toBe(false);
   });
 });
 
@@ -127,8 +98,34 @@ describe("isWellFormedQuestionImagePath (owner-agnostic sign-route guard)", () =
   });
 });
 
-describe("isValidAvatarPath", () => {
-  it("accepts uid/avatar.<img-ext>", () => {
+describe("isWellFormedQuizSourcePath / isOwnedQuizSourcePath (audit-3 C-F1)", () => {
+  const good = `${UID}/${QUIZ_ID}/${IMG_ID}-notes.pdf`;
+
+  it("accepts the uid/quizId/<uuid>-<filename> contract", () => {
+    expect(isWellFormedQuizSourcePath(good)).toBe(true);
+    expect(isWellFormedQuizSourcePath(`${UID}/${QUIZ_ID}/${IMG_ID}-a_b.c.pdf`)).toBe(true);
+  });
+
+  it("rejects traversal, extra/empty segments, and bad folder shapes", () => {
+    expect(isWellFormedQuizSourcePath(`${UID}/${QUIZ_ID}/../${IMG_ID}-x.pdf`)).toBe(false);
+    expect(isWellFormedQuizSourcePath(`${UID}/${QUIZ_ID}/sub/${IMG_ID}-x.pdf`)).toBe(false);
+    expect(isWellFormedQuizSourcePath(`${UID}//${IMG_ID}-x.pdf`)).toBe(false);
+    expect(isWellFormedQuizSourcePath(`${UID}/${IMG_ID}-x.pdf`)).toBe(false);
+    expect(isWellFormedQuizSourcePath(`${IMG_ID}-x.pdf`)).toBe(false);
+    expect(isWellFormedQuizSourcePath(`notauuid/${QUIZ_ID}/${IMG_ID}-x.pdf`)).toBe(false);
+    // File name must START with a UUID followed by `-<rest>`.
+    expect(isWellFormedQuizSourcePath(`${UID}/${QUIZ_ID}/x.pdf`)).toBe(false);
+    expect(isWellFormedQuizSourcePath(`${UID}/${QUIZ_ID}/${IMG_ID}.pdf`)).toBe(false);
+  });
+
+  it("pins the owner prefix (cross-tenant poison fails closed)", () => {
+    expect(isOwnedQuizSourcePath(good, UID)).toBe(true);
+    const other = "99999999-8888-7777-6666-555555555555";
+    expect(isOwnedQuizSourcePath(`${other}/${QUIZ_ID}/${IMG_ID}-x.pdf`, UID)).toBe(false);
+  });
+});
+
+describe("isValidAvatarPath", () => {  it("accepts uid/avatar.<img-ext>", () => {
     expect(isValidAvatarPath(`${UID}/avatar.png`, UID)).toBe(true);
     expect(isValidAvatarPath(`${UID}/avatar.jpg`, UID)).toBe(true);
     expect(isValidAvatarPath(`${UID}/avatar.jpeg`, UID)).toBe(true);

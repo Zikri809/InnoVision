@@ -84,4 +84,13 @@ next-env.d.ts
 # transient agent-work scratch (transcripts, probes, repro dirs) — skills stay tracked
 /.agents/*
 !/.agents/skills/
+# ...but the skills tree re-includes EVERYTHING under it (the negation above
+# overrides the `/.agents/*` rule), so compiled Python bytecode from the
+# ui-ux-pro-max skill's scripts stayed trackable. audit-3 R3-HYG-F1: exclude
+# __pycache__ AFTER the negation so it applies inside skills too.
+__pycache__/
+*.py[cod]
 .eslintcache
+
+# audit-3 R3-DEP-F6: prod-destructive confirmation audit trail.
+/.prod-audit.log

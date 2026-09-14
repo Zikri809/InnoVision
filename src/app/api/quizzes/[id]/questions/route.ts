@@ -13,6 +13,7 @@ import {
   notFound,
   rateLimited,
   readCappedJson,
+  unprocessable,
 } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
@@ -80,6 +81,16 @@ export async function POST(request: Request, { params }: Params) {
       return notFound();
     }
     if (msg.includes("questions_locked_quiz_not_draft")) return notDraft();
+    // audit-3 C-F2: the 30-question cap raised by append_question
+    // (quiz_question_limit_exceeded, 0045:1514-1522) was unmapped here and
+    // fell through to the generic 503, unlike the sibling import route which
+    // maps it to a typed 422. Mirror that mapping.
+    if (msg.includes("quiz_question_limit_exceeded")) {
+      return unprocessable(
+        "This quiz already has the maximum limit of 30 questions.",
+        "quiz_question_limit_exceeded",
+      );
+    }
     if (
       msg.includes("duplicate_options") ||
       msg.includes("empty_option") ||

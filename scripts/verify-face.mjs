@@ -286,6 +286,16 @@ async function main() {
     return { quiz, sessionId: start.data.session.id };
   }
 
+  /** Timed assessment — the deadline arithmetic only exists when a limit is set. */
+  async function makeLiveTimedAssessment(title, timeLimitSec, studentClient = clientS1) {
+    const quiz = await makeQuiz({ title, mode: "assessment", time_limit_sec: timeLimitSec });
+    await addQuestions(quiz.id);
+    await publish(quiz.id);
+    const start = await studentClient.rpc("start_quiz_session", { p_quiz_id: quiz.id });
+    assertNoError("start timed session", { error: start.error });
+    return { quiz, sessionId: start.data.session.id };
+  }
+
   async function currentNonce(studentClient, sessionId) {
     const { data } = await studentClient
       .from("quiz_sessions")
@@ -1152,6 +1162,67 @@ async function main() {
     record("0044 recover: long pause credited at most 120s (was full duration)",
       rec.data?.sessionStatus === "active" && creditedSec > 0 && creditedSec <= 125,
       `credited=${creditedSec.toFixed(1)}s ${JSON.stringify(rec.data)}`);
+  }
+
+  // ── 0048 D-F6: RPC deadline arithmetic (remainingMs) ────────────
+  // The client countdown is a pure mirror of the SQL deadline
+  // (lib/sessions/timer.ts remainingMs()); the RPCs that SHIFT started_at
+  // (self_recover_session, unlock_session) must return the post-credit
+  // remainingMs so the client can re-sync instead of freezing through the
+  // pause. CI previously asserted only the credited-seconds cap.
+  {
+    const LIMIT = 300;
+    const { sessionId: sT } = await makeLiveTimedAssessment("Deadline Math", LIMIT, clientS3);
+    await clientS3.rpc("pause_session", { p_session_id: sT });
+    // Backdate the pause 3600s so the uncapped RPC would credit an hour; the
+    // 120s cap must hold AND the returned remainingMs must reflect it.
+    await admin.from("quiz_sessions").update({
+      paused_at: new Date(Date.now() - 3600 * 1000).toISOString(),
+    }).eq("id", sT);
+    const recT = await clientS3.rpc("self_recover_session", { p_session_id: sT });
+    // Assert against the DB deadline itself (stronger than a magic constant):
+    // remainingMs must equal (started_at + limit − now) within a small margin.
+    const rowT = (await admin.from("quiz_sessions")
+      .select("started_at").eq("id", sT).single()).data;
+    const expectedRem = Date.parse(rowT.started_at) + LIMIT * 1000 - Date.now();
+    const rem = recT.data?.remainingMs;
+    record("0048 recover: remainingMs matches the post-credit DB deadline",
+      typeof rem === "number" && Math.abs(rem - expectedRem) <= 5_000,
+      `remainingMs=${rem} expected≈${expectedRem} credited=${recT.data?.creditedSeconds}`);
+    record("0048 recover: 120s credit cap holds (remaining > limit)",
+      recT.data?.creditedSeconds > 0 && recT.data.creditedSeconds <= 120 &&
+        typeof rem === "number" && rem > LIMIT * 1000,
+      `credited=${recT.data?.creditedSeconds}s remainingMs=${rem}`);
+
+    // Already-active early return must ALSO carry the deadline (D-F2): a
+    // second recovery call on an active session used to return no remainingMs,
+    // leaving a second tab frozen at its pre-pause reading.
+    const recT2 = await clientS3.rpc("self_recover_session", { p_session_id: sT });
+    const rem2 = recT2.data?.remainingMs;
+    record("0048 recover: already-active early return carries remainingMs (D-F2)",
+      recT2.data?.sessionStatus === "active" && typeof rem2 === "number" &&
+        Math.abs(rem2 - rem) <= 5_000,
+      `remainingMs=${rem2} (first=${rem})`);
+
+    // unlock_session: the same 120s cap and the same remainingMs contract —
+    // on a FRESH session so the deadline arithmetic is unambiguous.
+    const { sessionId: sU } = await makeLiveTimedAssessment("Deadline Math Unlock", LIMIT, clientS3);
+    await clientS3.rpc("pause_session", { p_session_id: sU });
+    await admin.from("quiz_sessions").update({
+      paused_at: new Date(Date.now() - 3600 * 1000).toISOString(),
+    }).eq("id", sU);
+    const startedBeforeU = (await admin.from("quiz_sessions")
+      .select("started_at").eq("id", sU).single()).data.started_at;
+    const unlockT = await clientA.rpc("unlock_session", { p_session_id: sU });
+    const startedAfterU = (await admin.from("quiz_sessions")
+      .select("started_at").eq("id", sU).single()).data.started_at;
+    const creditedU = (new Date(startedAfterU) - new Date(startedBeforeU)) / 1000;
+    const expectedRemU = Date.parse(startedAfterU) + LIMIT * 1000 - Date.now();
+    const remU = unlockT.data?.remainingMs;
+    record("0048 unlock: credit capped at 120s AND remainingMs matches the DB deadline",
+      unlockT.data?.sessionStatus === "active" && creditedU > 0 && creditedU <= 125 &&
+        typeof remU === "number" && Math.abs(remU - expectedRemU) <= 5_000,
+      `credited=${creditedU.toFixed(1)}s remainingMs=${remU} expected≈${expectedRemU}`);
   }
 
   // ── 0044: face_fail_count lifetime counter ──────────────────────

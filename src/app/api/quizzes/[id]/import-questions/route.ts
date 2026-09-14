@@ -10,6 +10,7 @@ import {
   firstIssueMessage,
   internalError,
   invalidBody,
+  jsonError,
   notDraft,
   notFound,
   rateLimited,
@@ -46,7 +47,16 @@ const ImportSchema = z.object({
     .array(QuestionInputSchema)
     .min(1, "Import must include at least one question.")
     .max(QUIZ_QUESTION_CAP, "A single import cannot exceed 30 questions."),
+  // audit-3 H3-RACE-F3: per-RUN idempotency key (mirrors the student path's
+  // generationId). The client keeps one UUID across retries of the SAME
+  // import; a post-commit retry (lost response / reload / second tab) is then
+  // a no-op instead of a duplicate append.
+  generationId: z.string().uuid("generationId must be a valid UUID.").optional(),
 });
+
+// audit-3 H3-RACE-F3: in-process in-flight guard (generate-quiz precedent).
+// A scripted double-POST must not fire two append RPCs for the same quiz.
+const inFlight = new Set<string>();
 
 /**
  * POST /api/quizzes/[id]/import-questions — bulk-append parsed questions to
@@ -130,50 +140,67 @@ export async function POST(request: Request, { params }: Params) {
     explanation: q.explanation ?? null,
   }));
 
-  const { error: rpcError } = await supabase.rpc("save_quiz_questions", {
-    p_quiz_id: id,
-    p_title: null,
-    p_source_file_url: null,
-    p_source_text: null,
-    p_questions: rows,
-    p_mode: "append",
-  } as never);
-
-  if (rpcError) {
-    const msg = rpcError.message ?? "";
-    console.error("Import save_quiz_questions error:", rpcError);
-    // Structure mirrors generate-quiz's mapping with import-appropriate
-    // copy. The invalid_* / not_authenticated arms are unreachable when
-    // this route is correct (hardcoded 'append', NULL provenance args,
-    // Zod-validated rows); the check-constraint arm maps to 400 exactly
-    // like the sibling questions route (drift insurance, not a 503).
-    if (msg.includes("not_owner") || msg.includes("not_quiz_owner") || msg.includes("quiz_not_found")) {
-      return notFound();
-    }
-    if (msg.includes("quiz_not_draft") || msg.includes("questions_locked_quiz_not_draft")) {
-      return notDraft();
-    }
-    if (msg.includes("quiz_question_limit_exceeded")) {
-      return unprocessable(
-        "Importing these questions exceeds the maximum limit of 30 questions per quiz.",
-        "quiz_question_limit_exceeded",
-      );
-    }
-    if (
-      msg.includes("violates check constraint") ||
-      msg.includes("duplicate_options") ||
-      msg.includes("empty_option") ||
-      msg.includes("option_too_long") ||
-      msg.includes("explanation_too_long") ||
-      msg.includes("invalid_question_fields") ||
-      msg.includes("invalid_correct_indices")
-    ) {
-      return invalidBody(
-        "The imported questions failed validation. Check options are distinct and within limits.",
-      );
-    }
-    return internalError("Could not import the questions right now.");
+  // audit-3 H3-RACE-F3: guard against a concurrent import for the SAME quiz
+  // (a second tab / scripted double-submit). The advisory lock in the RPC
+  // serializes writers but both appends would still succeed.
+  if (inFlight.has(id)) {
+    return jsonError(
+      "already_running",
+      "An import for this quiz is already in progress.",
+      429,
+    );
   }
+  inFlight.add(id);
+  try {
+    const { error: rpcError } = await supabase.rpc("save_quiz_questions", {
+      p_quiz_id: id,
+      p_title: null,
+      p_source_file_url: null,
+      p_source_text: null,
+      p_questions: rows,
+      p_mode: "append",
+      // Idempotency tag: a retry of the same run returns without appending.
+      p_generation_id: parsed.data.generationId ?? null,
+    } as never);
 
-  return NextResponse.json({ added: rows.length }, { status: 200 });
+    if (rpcError) {
+      const msg = rpcError.message ?? "";
+      console.error("Import save_quiz_questions error:", rpcError);
+      // Structure mirrors generate-quiz's mapping with import-appropriate
+      // copy. The invalid_* / not_authenticated arms are unreachable when
+      // this route is correct (hardcoded 'append', NULL provenance args,
+      // Zod-validated rows); the check-constraint arm maps to 400 exactly
+      // like the sibling questions route (drift insurance, not a 503).
+      if (msg.includes("not_owner") || msg.includes("not_quiz_owner") || msg.includes("quiz_not_found")) {
+        return notFound();
+      }
+      if (msg.includes("quiz_not_draft") || msg.includes("questions_locked_quiz_not_draft")) {
+        return notDraft();
+      }
+      if (msg.includes("quiz_question_limit_exceeded")) {
+        return unprocessable(
+          "Importing these questions exceeds the maximum limit of 30 questions per quiz.",
+          "quiz_question_limit_exceeded",
+        );
+      }
+      if (
+        msg.includes("violates check constraint") ||
+        msg.includes("duplicate_options") ||
+        msg.includes("empty_option") ||
+        msg.includes("option_too_long") ||
+        msg.includes("explanation_too_long") ||
+        msg.includes("invalid_question_fields") ||
+        msg.includes("invalid_correct_indices")
+      ) {
+        return invalidBody(
+          "The imported questions failed validation. Check options are distinct and within limits.",
+        );
+      }
+      return internalError("Could not import the questions right now.");
+    }
+
+    return NextResponse.json({ added: rows.length }, { status: 200 });
+  } finally {
+    inFlight.delete(id);
+  }
 }

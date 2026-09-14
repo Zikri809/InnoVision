@@ -14,13 +14,23 @@ import {
  *
  *  1. Mid-session close (submit-only grace, client journey):
  *     student starts a PRACTICE quiz, lecturer closes it mid-session, then:
- *       - the next answer POST → 409 quiz_not_live → dead screen (RPC gate,
- *         0012:199-208; the client renders toast.quizUnavailable),
- *       - SUBMIT still succeeds (submit_session is status-free — deliberate),
+ *       - the next answer POST → 409 quiz_not_live (RPC gate, 0012:199-208),
+ *       - the client SUBMITS the earned evidence instead of dead-ending
+ *         (audit-3 D-F1: submit_session is deliberately status-free for
+ *         active/paused, so the stranded assessment is rescued — the
+ *         EndScreen renders the partial score),
  *       - the results page of the completed session STILL renders (practice
  *         is policy-revealed) via the closed+revealed metadata fallback,
  *       - a play-page RELOAD of the now-unstartable quiz card is moot — the
  *         session URL itself stays reachable.
+ *
+ *     NOTE: this test previously pinned the OPPOSITE posture ("the dead phase
+ *     has no submit control by design" + an API-driven submit). That posture
+ *     is exactly what audit-3 D-F1 confirmed as the High-severity strand: a
+ *     closed quiz left the session active, unsubmitted and unscoreable, with
+ *     the one-active index blocking any retake. The client now submits, so
+ *     the API-driven submit in the old step 2 is replaced by an idempotent
+ *     re-submit assertion.
  *
  *  2. Reveal-first-then-close journey (QC-2):
  *     lecturer closes an ASSESSMENT quiz whose student already submitted;
@@ -44,7 +54,7 @@ const QUIZ_TITLE = `E36 Grace Quiz ${stamp}`;
 
 test.describe.configure({ mode: "serial" });
 
-test("mid-session close: answer dead-screens, submit grace succeeds, results reachable", async ({
+test("mid-session close: client auto-submits, submit grace succeeds, results reachable", async ({
   browser,
 }) => {
   test.skip(!INVITE, "LECTURER_INVITE_CODE not set");
@@ -124,23 +134,31 @@ test("mid-session close: answer dead-screens, submit grace succeeds, results rea
       .toBe("closed");
   }
 
-  // ── 1. Next answer → 409 quiz_not_live → dead screen.
+  // ── 1. Next answer → 409 quiz_not_live → the client SUBMITS (D-F1).
+  // submit_session is deliberately status-free for active/paused sessions, so
+  // the in-flight student's earned evidence must not be stranded. The client
+  // enters timeUp and hands off to submitNow() — the EndScreen with the
+  // partial score is the persistent user-visible consequence.
   await student.getByRole("button", { name: /A2/i }).click();
+  await expect(student.getByText(/Practice complete/i)).toBeVisible({
+    timeout: 15_000,
+  });
   await expect(
-    student.getByText("This quiz is no longer available.", { exact: true }),
+    student.locator(":visible", { hasText: /^1\s*\/\s*2$/ }).first(),
   ).toBeVisible({ timeout: 10_000 });
 
-  // ── 2. Submit grace: submit_session has NO status gate — the in-flight
-  // student can still submit after close. The dead phase has no submit
-  // control by design (grace applies to students hit mid-question, not to
-  // post-dead UI), so the submit is driven via the API from the student's
-  // authenticated context.
+  // ── 2. Submit-grace contract double-check via the API: the client's
+  // close-driven submit already completed the session (submit_session is
+  // status-free by design), so a re-submit is idempotent → 409
+  // already_submitted carrying the stored score.
   const submitRes = await student.request.post(`/api/sessions/${sessionId}/submit`, {
     data: {},
   });
-  expect(submitRes.status()).toBe(200);
+  expect(submitRes.status()).toBe(409);
   const submitBody = await submitRes.json();
+  expect(submitBody.error).toBe("already_submitted");
   expect(submitBody.session.status).toBe("completed");
+  expect(submitBody.score).toBe(1);
 
   // ── 3. Completed session URL stays reachable post-close (QC-2 fallback:
   // student_quiz_view misses → student_closed_revealed_quiz_view supplies

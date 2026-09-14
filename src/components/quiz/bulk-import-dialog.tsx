@@ -93,6 +93,11 @@ export function BulkImportDialog({
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const submitLock = useRef(false);
+  // audit-3 H3-RACE-F3: per-RUN idempotency key. `submitLock` is per-tab and
+  // released in `finally`, so it does not survive a reload — a lost response
+  // plus a retry would append a duplicate block. The key is minted once per
+  // parsed-batch commit and reused on retry; the server dedupes on it.
+  const generationIdRef = useRef<string | null>(null);
 
   const remaining = Math.max(0, QUIZ_QUESTION_CAP - questionCount);
   const overCap = rawText.trim() !== "" && remaining === 0;
@@ -108,6 +113,7 @@ export function BulkImportDialog({
   function reset() {
     setRawText("");
     setError(null);
+    generationIdRef.current = null;
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
@@ -123,6 +129,8 @@ export function BulkImportDialog({
     }
     try {
       const text = await file.text();
+      // New batch content → new run identity (see the textarea onChange).
+      generationIdRef.current = null;
       setRawText(text);
       setError(null);
     } catch {
@@ -135,6 +143,16 @@ export function BulkImportDialog({
     submitLock.current = true;
     setCommitting(true);
     setError(null);
+
+    // One key per parsed batch: reused verbatim across retries of the same
+    // commit (audit-3 H3-RACE-F3), cleared by reset() for a NEW batch.
+    if (!generationIdRef.current) {
+      generationIdRef.current =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    }
+    const generationId = generationIdRef.current;
 
     try {
       const res = await fetch(`/api/quizzes/${quizId}/import-questions`, {
@@ -151,6 +169,7 @@ export function BulkImportDialog({
             // single-answer rows keep the exact historical payload shape).
             correctIndices: row.correctIndices,
           })),
+          generationId,
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -212,7 +231,13 @@ export function BulkImportDialog({
             <Textarea
               id="bulk-import-text"
               value={rawText}
-              onChange={(e) => setRawText(e.target.value)}
+              onChange={(e) => {
+                // Editing the batch mints a NEW run identity: a retry of the
+                // EDITED rows must not be deduped against the previous run's
+                // tag (audit-3 H3-RACE-F3). A plain retry (no edit) reuses it.
+                generationIdRef.current = null;
+                setRawText(e.target.value);
+              }}
               placeholder={t("pastePlaceholder")}
               rows={6}
               maxLength={400000}

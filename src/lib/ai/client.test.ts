@@ -137,6 +137,23 @@ describe("chatCompletions", () => {
     if (!res.ok) expect(res.error).toBe("cancelled");
   });
 
+  // audit-3 F-F9: an already-aborted signal must bail BEFORE the request is
+  // issued — the abort listener only fires for a FUTURE abort, so a client
+  // that disconnected during prompt assembly still bought a paid call.
+  it("bails before issuing the request when the signal is already aborted", async () => {
+    const create = vi.fn(async () => ({ choices: [{ message: { content: "x" } }] }));
+    const client = makeClient(create);
+    const res = await chatCompletions({
+      client,
+      model: "m",
+      messages: [{ role: "user", content: "hi" }],
+      signal: AbortSignal.abort(),
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toBe("cancelled");
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it("passes temperature and jsonMode through to the provider", async () => {
     let captured: { temperature?: number; response_format?: unknown } | undefined;
     const client = makeClient(async (opts) => {

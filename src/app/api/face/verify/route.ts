@@ -155,15 +155,20 @@ export async function POST(request: Request) {
     .maybeSingle();
   const faceExempt = sessionRow.data?.face_exempt === true;
 
-  // audit-2 C-02: corroborate that a verify ATTEMPT reached the server for
-  // this session (any outcome — even a sidecar 503). The silence cron's
-  // outage-claim exemption (0046) now requires recent corroboration: a
-  // tampered client that blocks verify POSTs while re-arming
-  // report_face_unavailable every few minutes produces NO attempts and is no
-  // longer exempt forever. Fire-and-forget, owner-scoped (the row above
-  // proves the caller owns the session); an admin write because RLS exposes
-  // no update policy and a failure must never fail the verify.
-  if (sessionRow.data) {
+  // audit-3 E-F2-ORDER: corroborate that a verify ATTEMPT reached a VERDICT
+  // for this session. The silence cron's outage-claim exemption (0047) trusts
+  // this stamp, so it must NOT be written before any real work: the audit-2
+  // form stamped it here, which meant a parse-failing verify (garbage frame →
+  // 400 with no face_checks row and no nonce rotation) sustained the
+  // outage-claim exemption forever while the pipeline produced nothing. The
+  // stamp is therefore taken by `touchVerifyAttempt()` AFTER the sidecar
+  // frames have been processed — an honest outage (sidecar 503) still stamps,
+  // a client that never gets a verdict does not.
+  const touchVerifyAttempt = () => {
+    if (!sessionRow.data) return;
+    // Fire-and-forget, owner-scoped (the row above proves the caller owns the
+    // session); an admin write because RLS exposes no update policy and a
+    // failure must never fail the verify.
     void Promise.resolve(
       createAdminClient()
         .from("quiz_sessions")
@@ -174,7 +179,7 @@ export async function POST(request: Request) {
         if (r.error) console.error("face_verify_attempted_at touch error:", r.error);
       })
       .catch(() => {});
-  }
+  };
 
   // Cutover / integrity guard: the student must have a stored baseline
   // BEFORE any sidecar work. `present=false` covers pre-migration enrollees
@@ -220,8 +225,21 @@ export async function POST(request: Request) {
   // pipeline `unavailable` passthrough, never a partial verdict).
   const firstError = results.find((r): r is { error: string } => "error" in r);
   if (firstError) {
+    // audit-3 E-F2-ORDER: corroborate the outage claim ONLY for outage-shaped
+    // failures. An `invalid_frame` is the sidecar rejecting the frame bytes —
+    // the pipeline maps it to a FAIL signal (400 → paused), not an outage, and
+    // it is exactly the shape a tampered client loops to keep the claim fresh
+    // without ever producing a verdict. Stamping it would re-open the audit-2
+    // C-02 bypass the 0047 polarity fix closes. `insightface_unavailable`
+    // (sidecar down/timeout) and `insightface_error` (sidecar 5xx) ARE honest
+    // outages and must stamp, or a real outage would be flagged.
+    if (firstError.error !== "invalid_frame") touchVerifyAttempt();
     return mapFaceError(firstError) ?? internalError("Something went wrong.");
   }
+
+  // Sidecar work reached a verdict for every frame — this IS the attempt the
+  // outage-claim corroboration is about.
+  touchVerifyAttempt();
 
   let similarities = (results as Array<{ similarity: number }>).map((r) =>
     Math.min(1, Math.max(0, r.similarity)),
@@ -249,6 +267,33 @@ export async function POST(request: Request) {
     similarities = similarities.map(() => 0);
   }
 
+  // audit-3 E-F1/E-F3: the per-frame pose/spoof trail is computed HERE and
+  // written by record_face_check in the SAME statement as the verdict, so the
+  // audit record is complete the moment the check exists. The former
+  // post-hoc `attach_frame_poses` RPC matched on a CLIENT-SUPPLIED nonce
+  // against a column that never existed (42703 on every verify → the trail was
+  // silently always NULL), and was granted to `authenticated`, so any student
+  // could backfill forged poses for their own checks. Folding it into the
+  // verdict removes both the drift and the forgery surface.
+  //
+  // The route still cannot gate liveness server-side (no spoof model — a
+  // static photo with plausible yaw passes), but the yaw/pitch/roll trail
+  // lives in face_checks.frame_poses for lecturer audit: a photo-replay shows
+  // near-constant pose across every check of the exam, which a live student
+  // does not produce. The raw P(real) rides along so a lecturer can see
+  // borderline/spoofed frames even when the gate passed them (record-only
+  // mode) or failed them (enforced mode).
+  const frameFaces = (results as Array<{ faces: insightface.InsightFaceExtractResult["faces"] }>).map(
+    (r) => r.faces,
+  );
+  const poses = frameFaces.map((faces, i) => {
+    const primary = selectPrimaryFace(faces);
+    const spoofScore = spoofVerdicts[i]?.score ?? null;
+    return primary
+      ? { yaw: primary.yaw, pitch: primary.pitch, roll: primary.roll, spoof: spoofScore }
+      : { spoof: spoofScore };
+  });
+
   // The subject is ROUTE-derived (always the authenticated uid) — the RPC's
   // `p_subject = auth.uid()` check stays as defense in depth against direct
   // RPC callers, but a browser client can never claim another identity here.
@@ -260,6 +305,7 @@ export async function POST(request: Request) {
     p_nonce: parsed.data.nonce,
     p_frames: frames,
     p_proof: proof,
+    p_poses: poses,
   });
 
   if (error) {
@@ -287,9 +333,6 @@ export async function POST(request: Request) {
     // must never fail the verify. The pure gates (≥2 frames, ≥15% area, one
     // span displaced, det floor) live in second-face.ts; the RPC's own owner/
     // assessment/status gates + 55s throttle bound the write.
-    const frameFaces = (results as Array<{ faces: insightface.InsightFaceExtractResult["faces"] }>).map(
-      (r) => r.faces,
-    );
     if (shouldReportSecondFace(frameFaces)) {
       void Promise.resolve(
         supabase.rpc("report_session_advisory", {
@@ -302,34 +345,6 @@ export async function POST(request: Request) {
         })
         .catch(() => {});
     }
-    // audit-2 C-01 (minimum viable): bind the sidecar's per-frame pose to
-    // the recorded check. The route still cannot gate liveness server-side
-    // (no spoof model — a static photo with plausible yaw passes), but the
-    // yaw/pitch/roll trail now lives in face_checks.frame_poses for lecturer
-    // audit: a photo-replay shows near-constant pose across every check of
-    // the exam, which a live student does not produce. Fire-and-forget; a
-    // failure must never fail the verify.
-    const poses = frameFaces.map((faces, i) => {
-      const primary = selectPrimaryFace(faces);
-      // audit-2 C-01: the raw P(real) rides along with the pose so a
-      // lecturer can see borderline/spoofed frames even when the gate
-      // passed them (record-only mode) or failed them (enforced mode).
-      const spoofScore = spoofVerdicts[i]?.score ?? null;
-      return primary
-        ? { yaw: primary.yaw, pitch: primary.pitch, roll: primary.roll, spoof: spoofScore }
-        : { spoof: spoofScore };
-    });
-    void Promise.resolve(
-      supabase.rpc("attach_frame_poses", {
-        p_session_id: parsed.data.sessionId,
-        p_nonce: parsed.data.nonce,
-        p_poses: poses,
-      }),
-    )
-      .then((r) => {
-        if (r.error) console.error("attach_frame_poses error:", r.error);
-      })
-      .catch(() => {});
     const result: FaceCheckResult = {
       matched: payload.matched,
       distance: typeof payload.distance === "number" ? payload.distance : null,

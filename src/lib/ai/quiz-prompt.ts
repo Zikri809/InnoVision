@@ -265,23 +265,93 @@ function stripFence(text: string): string {
 }
 
 /**
+ * Extract the OUTERMOST balanced `{...}` objects from arbitrary text, parsed
+ * (audit-3 F-F8). String-aware, so braces inside JSON strings don't unbalance
+ * the scan; an unbalanced `{` in prose is skipped rather than aborting the
+ * search. Only top-level spans are returned — nested objects are consumed with
+ * their parent, so a `{title, questions:[…]}` wrapper is never silently
+ * decomposed into its individual questions.
+ */
+function balancedJsonObjects(text: string): unknown[] {
+  const out: unknown[] = [];
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] !== "{") {
+      i++;
+      continue;
+    }
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    let end = -1;
+    for (let j = i; j < text.length; j++) {
+      const ch = text[j];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') inString = true;
+      else if (ch === "{") depth++;
+      else if (ch === "}") {
+        depth--;
+        if (depth === 0) {
+          end = j;
+          break;
+        }
+      }
+    }
+    if (end === -1) {
+      // Unbalanced `{` (prose fragment / abandoned draft): keep searching.
+      i++;
+      continue;
+    }
+    const candidate = text.slice(i, end + 1);
+    try {
+      out.push(JSON.parse(candidate));
+    } catch {
+      // Balanced but not JSON (prose braces) — skip past it.
+    }
+    i = end + 1;
+  }
+  return out;
+}
+
+/**
+ * Parse model text into JSON values, tolerating a full-wrap ```json fence and,
+ * when that fails, prose-wrapped JSON ("Here is the quiz:\n```json{...}").
+ * Returns candidates in document order; the caller validates each against its
+ * schema so a stray parseable object in the prose cannot masquerade as output.
+ * audit-3 F-F8: the strict parse used to 422 after two full-priced calls on
+ * output that `salvageJsonFromReasoning` already knew how to recover.
+ */
+function jsonCandidates(text: string): unknown[] {
+  const cleaned = stripFence(text);
+  try {
+    return [JSON.parse(cleaned)];
+  } catch {
+    return balancedJsonObjects(cleaned);
+  }
+}
+
+/**
  * Parse raw model text into a validated AiQuiz. Tolerates ```json fences that
- * real LLMs often emit, then validates against the strict schema.
+ * real LLMs often emit, then validates against the strict schema. When the
+ * strict parse fails, embedded JSON is salvaged from surrounding prose (F-F8).
  */
 export function parseQuizJson(text: string): ParsedQuiz {
-  const cleaned = stripFence(text);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch {
+  const candidates = jsonCandidates(text);
+  if (candidates.length === 0) {
     return { ok: false, issues: ["Model output was not valid JSON."] };
   }
-
-  const result = AiQuizSchema.safeParse(parsed);
-  if (!result.success) {
-    return { ok: false, issues: result.error.issues.map((i) => i.message) };
+  let firstIssues: string[] | null = null;
+  for (const candidate of candidates) {
+    const result = AiQuizSchema.safeParse(candidate);
+    if (result.success) return { ok: true, quiz: result.data };
+    firstIssues ??= result.error.issues.map((i) => i.message);
   }
-  return { ok: true, quiz: result.data };
+  return { ok: false, issues: firstIssues ?? ["Model output was not valid JSON."] };
 }
 
 /**
@@ -329,45 +399,42 @@ export function auditSelfContained(quiz: AiQuiz): string[] {
  * always return the full quiz shape even for a single-question request).
  */
 export function parseQuestionJson(text: string): ParsedQuestion {
-  const cleaned = stripFence(text);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch {
+  const candidates = jsonCandidates(text);
+  if (candidates.length === 0) {
     return { ok: false, issues: ["Model output was not valid JSON."] };
   }
 
-  // Bare question object?
-  const direct = AiQuestionSchema.safeParse(parsed);
-  if (direct.success) return { ok: true, question: direct.data };
+  let firstIssues: string[] | null = null;
+  for (const parsed of candidates) {
+    // Bare question object?
+    const direct = AiQuestionSchema.safeParse(parsed);
+    if (direct.success) return { ok: true, question: direct.data };
 
-  // Wrapper { title, questions: [...] }? Only accept EXACTLY one question —
-  // silently dropping extra (possibly attacker-influenced) questions is a
-  // correctness risk (LOW #14 from the audit).
-  if (typeof parsed === "object" && parsed !== null && "questions" in parsed) {
-    const list = (parsed as { questions: unknown }).questions;
-    if (Array.isArray(list)) {
-      if (list.length === 1) {
-        const first = AiQuestionSchema.safeParse(list[0]);
-        if (first.success) return { ok: true, question: first.data };
-        // The wrapper path was taken but the single question failed — report
-        // ITS issues, not the bare-object errors (which are misleading here).
-        return { ok: false, issues: first.error.issues.map((i) => i.message) };
-      } else {
-        return {
-          ok: false,
-          issues: ["Expected exactly one question in the response wrapper."],
-        };
+    // Wrapper { title, questions: [...] }? Only accept EXACTLY one question —
+    // silently dropping extra (possibly attacker-influenced) questions is a
+    // correctness risk (LOW #14 from the audit).
+    if (typeof parsed === "object" && parsed !== null && "questions" in parsed) {
+      const list = (parsed as { questions: unknown }).questions;
+      if (Array.isArray(list)) {
+        if (list.length === 1) {
+          const first = AiQuestionSchema.safeParse(list[0]);
+          if (first.success) return { ok: true, question: first.data };
+          // The wrapper path was taken but the single question failed — report
+          // ITS issues, not the bare-object errors (which are misleading here).
+          return { ok: false, issues: first.error.issues.map((i) => i.message) };
+        } else {
+          return {
+            ok: false,
+            issues: ["Expected exactly one question in the response wrapper."],
+          };
+        }
       }
     }
+
+    firstIssues ??= direct.error.issues.map((i) => i.message);
   }
 
-  return {
-    ok: false,
-    issues: direct.success
-      ? []
-      : direct.error.issues.map((i) => i.message),
-  };
+  return { ok: false, issues: firstIssues ?? ["Model output was not valid JSON."] };
 }
 
 export type GenerateQuizResult =
@@ -515,6 +582,13 @@ export type RegenerateResult =
 /**
  * Regenerate a single question with one validation retry. The caller only
  * writes on success, so a failure leaves the original untouched (I17).
+ *
+ * audit-3 F-F1: `signal` is the caller's abort source (request.signal plus the
+ * route's own cancellation detection). It is checked before EACH attempt and
+ * between attempts, so a dialog closed mid-regeneration maps to `cancelled`
+ * (409 at the route) instead of running the full round trip and silently
+ * overwriting the question row. The signal is also threaded into the `chat`
+ * callback by the route so the in-flight fetch is genuinely aborted.
  */
 export async function regenerateQuestion(opts: {
   chat: (messages: ChatMessage[], timeoutMs?: number) => Promise<ChatResult>;
@@ -523,10 +597,13 @@ export async function regenerateQuestion(opts: {
   instruction?: string;
   language?: "en" | "ms" | "auto";
   deadlineMs?: number;
+  signal?: AbortSignal;
 }): Promise<RegenerateResult> {
-  const { chat, question, siblings, instruction, language = "auto", deadlineMs = Date.now() + 900_000 } = opts;
+  const { chat, question, siblings, instruction, language = "auto", deadlineMs = Date.now() + 900_000, signal } = opts;
 
   const attempt = async (extra?: string): Promise<RegenerateResult> => {
+    // Cancelled before we spend anything (audit-3 F-F1).
+    if (signal?.aborted) return { ok: false, error: "cancelled" };
     const remaining = remainingBudgetMs(deadlineMs);
     const messages: ChatMessage[] = [
       { role: "system", content: buildRegenerateSystemPrompt(language, question.type) },

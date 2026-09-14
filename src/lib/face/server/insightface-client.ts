@@ -67,6 +67,30 @@ const INSIGHTFACE_TIMEOUT_MS = 5000;
 
 /** Marker frame size in bytes is meaningless (it's ASCII); sent as-is. */
 
+/**
+ * audit-3 E-F6: the mock seam is a TEST-ONLY shortcut that mints a perfect
+ * self-match (det 0.99, spoof real 0.99) from a marker string, i.e. it
+ * bypasses every biometric check. It is opt-in via two independent env flags
+ * and is never set by a real deployment — but the audit found NO production
+ * signal if a harness-promoted artifact or an env leak ever sets both. The
+ * existing prod warning covers only FACE_SPOOF_ENFORCE, so a silent mock would
+ * be indistinguishable from a working proctoring stack. Warn once per process
+ * (mirrors src/lib/integrity/hardening-gate.ts's memoized prod warn).
+ */
+let mockSeamWarned = false;
+
+function warnIfMockSeamInProduction(): void {
+  if (mockSeamWarned) return;
+  mockSeamWarned = true;
+  if (process.env.NODE_ENV !== "production") return;
+  console.warn(
+    "[insightface] MOCK MODE IS ACTIVE in a production build " +
+      "(NEXT_PUBLIC_E2E_FAKE_SEAM=1 AND FACE_MOCK_ENABLED=1): face verification " +
+      "returns canned verdicts and verifies NOTHING. This is test-harness " +
+      "configuration — remove both variables and rebuild for real deployments (audit-3 E-F6).",
+  );
+}
+
 function isMockMode(): boolean {
   // Since 5f6b1da the E2E suite runs the PRODUCTION build (`npm run build &&
   // npm run start`), where NODE_ENV is "production" and the old gate was
@@ -74,10 +98,11 @@ function isMockMode(): boolean {
   // client. The harness opt-in (playwright.config.ts webServer env →
   // seam-gate.ts) now carries the E2E-only privilege; production deployments
   // never set it, so the default-off posture is unchanged.
-  return (
+  const enabled =
     process.env.NEXT_PUBLIC_E2E_FAKE_SEAM === "1" &&
-    process.env.FACE_MOCK_ENABLED === "1"
-  );
+    process.env.FACE_MOCK_ENABLED === "1";
+  if (enabled) warnIfMockSeamInProduction();
+  return enabled;
 }
 
 /** E2E frame markers produced by the fake tracker (`e2e/fake-face-tracker.ts`). */

@@ -5,6 +5,7 @@ import { EnrollSchema } from "@/lib/face/schemas";
 import { MAX_FRAME_BASE64_CHARS } from "@/lib/face/constants";
 import { mapFaceError } from "@/lib/face/rpc-mapping";
 import { selectPrimaryFace } from "@/lib/face/embedding";
+import { spoofGateDecision, type SpoofFrameVerdict } from "@/lib/face/spoof";
 import * as insightface from "@/lib/face/server/insightface-client";
 import {
   checkSameOrigin,
@@ -40,7 +41,10 @@ const ENROLL_RATE = { limit: 5, windowMs: 60 * 1000 };
  *  3. Per frame: sidecar `/extract` (ONE call yields pose + embedding) →
  *     pick the primary face (largest bbox, det_score ≥ floor) → validate
  *     pose (front |yaw| ≤ 30°, sides 10° ≤ |yaw| ≤ 75°). Reject → 400
- *     pose_invalid. NO face → 400 pose_invalid.
+ *     pose_invalid. NO face → 400 pose_invalid. The frame-level spoof
+ *     verdicts are collected and judged with the same majority policy as the
+ *     verify route — a majority-spoofed capture → 400 spoof_detected (audit-3
+ *     E-F7: a poisoned baseline would otherwise be planted unchecked).
  *  4. RPC `enroll_face(p_samples jsonb)` — the RPC validates the samples,
  *     runs the INTERNAL duplicate check (max cosine vs other students'
  *     samples ≥ 0.45 → 'pending_review' else 'enrolled'), stores the 3
@@ -55,6 +59,7 @@ const ENROLL_RATE = { limit: 5, windowMs: 60 * 1000 };
  *  - `invalid_samples` → 400
  *  - `insightface_unavailable` → 503
  *  - `pose_invalid` → 400
+ *  - `spoof_detected` → 400 (majority-spoofed capture; audit-3 E-F7)
  *  - success → 200 `{ ok: true, status: 'enrolled'|'pending_review' }`
  */
 export async function POST(request: Request) {
@@ -134,12 +139,19 @@ export async function POST(request: Request) {
 
   const samples: { angle: string; embedding: number[] }[] = [];
   const yaws: string[] = [];
+  // audit-3 E-F7: the sidecar's spoof verdict was previously discarded at
+  // enroll, so a replay/photo could plant a poisoned BASELINE and verify-time
+  // enforcement was the only line left. Collect it here and apply the same
+  // majority policy the verify route uses (lib/face/spoof.ts) — a spoofed
+  // capture must not become a stored identity.
+  const enrollSpoofVerdicts: SpoofFrameVerdict[] = [];
   for (let i = 0; i < extracts.length; i++) {
     const ex = extracts[i];
     const angleName = angles[i].name;
     if ("error" in ex) {
       return mapFaceError(ex) ?? internalError("Something went wrong.");
     }
+    enrollSpoofVerdicts.push(ex.spoof ?? null);
     const primary = selectPrimaryFace(ex.faces);
     if (!primary) {
       console.error(`[enroll-timing] ${angleName}: NO FACE DETECTED after ${timings.extractBatchMs}ms batch`);
@@ -183,6 +195,41 @@ export async function POST(request: Request) {
   console.info(
     `[enroll-timing] extract x3 ${timings.extractBatchMs}ms — ${yaws.join(" ")} (server needs |front|≤30, sides within 10–75)`,
   );
+
+  // audit-3 E-F7: reject a spoofed enrollment using the SAME majority policy
+  // AND the SAME enforcement switch as the verify route. Without this the
+  // enrollment path had no server-side liveness at all (blink liveness is
+  // client-side only, and a scripted POST bypasses it), so a replay could
+  // plant the baseline that every later verify is compared against — identity
+  // substitution at the root.
+  //
+  // Gating on FACE_SPOOF_ENFORCE (adversarial review): verify treats the flag
+  // as "record-only vs enforce" because a sidecar built before the weights
+  // were baked returns no verdicts. Enforcing unconditionally here would make
+  // that posture inconsistent — verify would record while enroll hard-failed —
+  // and a single false-positive verdict (screen glare, dim lab lighting) would
+  // permanently block a student's enrollment with no env remedy.
+  const enrollSpoof = spoofGateDecision(enrollSpoofVerdicts);
+  if (enrollSpoof.forcedFail) {
+    const spoofEnforced = process.env.FACE_SPOOF_ENFORCE === "1";
+    console.error(
+      spoofEnforced
+        ? "enroll: spoof gate rejected the capture"
+        : "enroll: spoof verdicts detected but NOT enforced (FACE_SPOOF_ENFORCE != 1)",
+      { ...enrollSpoof, scores: enrollSpoofVerdicts.map((v) => v?.score ?? null) },
+    );
+    if (spoofEnforced) {
+      return jsonError(
+        "spoof_detected",
+        process.env.NODE_ENV !== "production"
+          ? `The capture looks like a photo or screen replay (P(real) scores: ${enrollSpoofVerdicts
+              .map((v) => (v ? v.score.toFixed(2) : "n/a"))
+              .join(", ")}). Use a live camera.`
+          : undefined,
+        400,
+      );
+    }
+  }
 
   // 2. Atomic enroll: validate → internal duplicate check → delete-then-
   //    insert samples → GUC-guarded status write, all inside ONE

@@ -63,14 +63,30 @@ describe("buildGradebookModel — column policy", () => {
     expect(model.truncated).toBe(true);
   });
 
-  it("flags rosterTruncated when roster hits the read cap", () => {
-    const roster = Array.from({ length: 100 }, (_, i) => ({
+  it("flags rosterTruncated only when rows were actually dropped (B-F5)", () => {
+    // Exactly ROSTER_LIMIT students is a FULL, untruncated roster — the old
+    // `>=` off-by-one reported it as truncated. The flag is true only when
+    // an uncapped feed actually exceeded the cap, or the caller passes the
+    // roster read's own flag through.
+    const full = Array.from({ length: 100 }, (_, i) => ({
       student_id: `s${i}`,
       full_name: `S ${i}`,
       matric_no: null,
     }));
-    const model = buildGradebookModel(baseInput({ roster }));
-    expect(model.rosterTruncated).toBe(true);
+    expect(buildGradebookModel(baseInput({ roster: full })).rosterTruncated).toBe(false);
+
+    const over = Array.from({ length: 101 }, (_, i) => ({
+      student_id: `s${i}`,
+      full_name: `S ${i}`,
+      matric_no: null,
+    }));
+    expect(buildGradebookModel(baseInput({ roster: over })).rosterTruncated).toBe(true);
+
+    // The real callers feed an ALREADY-capped roster, so they pass the read's
+    // flag explicitly (getClassRoster's truncated result).
+    expect(
+      buildGradebookModel(baseInput({ roster: full, rosterTruncated: true })).rosterTruncated,
+    ).toBe(true);
   });
 });
 
@@ -151,7 +167,7 @@ describe("buildGradebookModel — cells and representative sessions", () => {
     expect(model.rows[0].cells[0]).toBeNull();
   });
 
-  it("orphan sessions (student not in roster) do not crash and are simply absent", () => {
+  it("appends orphan sessions as null-name rows and keeps the average consistent (B-F1)", () => {
     const model = buildGradebookModel(
       baseInput({
         sessionsByQuiz: new Map([
@@ -159,8 +175,58 @@ describe("buildGradebookModel — cells and representative sessions", () => {
         ]),
       }),
     );
-    expect(model.rows).toHaveLength(1);
+    // Roster row (no attempt) + appended orphan row.
+    expect(model.rows).toHaveLength(2);
     expect(model.rows[0].cells[0]).toBeNull();
+    expect(model.rows[1]).toMatchObject({ studentId: "ghost", fullName: null, matricNo: null });
+    expect(model.rows[1].cells[0]).toMatchObject({ score: 5, percent: 50 });
+    // The average already included the orphan — the displayed rows now do too.
+    expect(model.quizzes[0].averagePercent).toBe(50);
+  });
+
+  it("orphan rows carry integrity counters (B-F1)", () => {
+    const model = buildGradebookModel(
+      baseInput({
+        sessionsByQuiz: new Map([
+          [
+            "qz-1",
+            [
+              session({
+                id: "s1",
+                student_id: "ghost",
+                score: 5,
+                face_fail_count: 2,
+                fullscreen_pause_count: 1,
+                hand_pause_count: 3,
+              }),
+            ],
+          ],
+        ]),
+      }),
+    );
+    expect(model.rows[1]).toMatchObject({
+      studentId: "ghost",
+      faceFails: 2,
+      fullscreenPauses: 1,
+      handPauses: 3,
+    });
+  });
+
+  it("orphan rows are deterministic (sorted by student id) and deduped across quizzes", () => {
+    const model = buildGradebookModel(
+      baseInput({
+        quizzes: [quiz({ id: "qz-1" }), quiz({ id: "qz-2", created_at: "2026-08-02T00:00:00Z" })],
+        questionCounts: [
+          { quiz_id: "qz-1", count: 10 },
+          { quiz_id: "qz-2", count: 10 },
+        ],
+        sessionsByQuiz: new Map([
+          ["qz-1", [session({ id: "s2", student_id: "ghost-b", score: 5 })]],
+          ["qz-2", [session({ id: "s3", student_id: "ghost-a", score: 5 })]],
+        ]),
+      }),
+    );
+    expect(model.rows.map((r) => r.studentId)).toEqual(["stu-1", "ghost-a", "ghost-b"]);
   });
 });
 

@@ -138,7 +138,8 @@ guard (requireUser/requireLecturer/requireQuizOwner/…)   ← auth + ownership
 ```
 
 Shared helpers live in `src/lib/http.ts` (response builders,
-`checkSameOrigin`, `checkBodyLimit`, `firstIssueMessage`) and
+`checkSameOrigin`, the streaming-capped body readers `readCappedJson` /
+`readCappedText` / `readCappedFormData`, `firstIssueMessage`) and
 `src/lib/classes/guards.ts` (`requireUser`, `requireLecturer`,
 `requireClassOwner`, …). Ownership helpers: `requireQuizOwner` joins
 quiz → class → lecturer so a non-owner gets the same 404 as a missing row

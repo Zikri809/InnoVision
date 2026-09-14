@@ -475,11 +475,23 @@ export function PlayClient({
   // ── Incident ring-buffer recorder (uploads ONLY on incidents) ──────
   // Skipped under the E2E fake seam — headless runs must not exercise a real
   // getUserMedia/MediaRecorder path the fake tracker doesn't cover.
+  //
+  // R2-INC-F2: `enabled` carries a PHASE term (mirroring useIntegrityAdvisories
+  // above). Without it the recorder stayed armed after session death — a
+  // session in `dead`/`submitted` can never produce another incident, so the
+  // capture machinery must be torn down; the hook's own `!enabled` cleanup
+  // runs on the flip (this is the client-side half of the fix; the hook owns
+  // the actual recorder/stream teardown).
   const isFakeFace =
     isFakeFaceSeamEnabled() && getFakeFaceTracker() != null;
   useIncidentRecorder({
     sessionId,
-    enabled: quiz.mode === "assessment" && Boolean(face) && !isFakeFace,
+    enabled:
+      quiz.mode === "assessment" &&
+      Boolean(face) &&
+      !isFakeFace &&
+      phase !== "submitted" &&
+      phase !== "dead",
     status: faceStatus,
     phase,
     // The clip's stored reason is the PAUSE CAUSE, not the bare status — the
@@ -506,9 +518,20 @@ export function PlayClient({
   // Monotonic countdown — UX only, never trusted (the RPC is authoritative).
   // Pauses while the session is paused or flagged so the student doesn't lose
   // quiz time while waiting for lecturer review or completing blink recovery.
+  //
+  // R2-SESS-F2 — `dead` is TERMINAL (deliberate, do not "fix" by removing it
+  // from this list): the countdown must not resurrect dead → timeUp → submit.
+  // Before D-F1(a) `dead` was an ACCIDENTAL rescuer: the quiz_not_live answer
+  // path dead-ended and only the still-ticking countdown (timed quizzes)
+  // eventually submitted. That path now submits directly (see the
+  // quiz_not_live branch in answer()), so every remaining `dead` entry is a
+  // session a submit cannot help — reset by a lecturer (404), completed in
+  // another tab, or a verify that surfaced the end (outcome surfaceEnd). Any
+  // strand caused by a quiz closing under a non-answering tab is covered
+  // server-side by quiz_autoclose's seal (0048 §5), NOT by a client timer.
   useEffect(() => {
     if (remainingMs === null) return;
-    if (phase === "submitted" || phase === "timeUp") return;
+    if (phase === "submitted" || phase === "timeUp" || phase === "dead") return;
     if (faceStatus === "flagged" || faceStatus === "paused") return;
     if (remainingMs <= 0) {
       void handleTimeUp();
@@ -554,7 +577,10 @@ export function PlayClient({
   }
 
   async function handleTimeUp() {
-    if (phase === "submitted" || phase === "timeUp") return;
+    // R2-SESS-F2: `dead` is terminal — a timer that fires while the session
+    // is gone/completed must not re-enter timeUp and submit. See the
+    // countdown comment above for the full decision.
+    if (phase === "submitted" || phase === "timeUp" || phase === "dead") return;
     setSubmissionReason("time_up");
     setPhaseAndRef("timeUp");
     setError(null);
@@ -721,15 +747,35 @@ export function PlayClient({
             setPhaseAndRef("dead");
             return;
           }
-          // Unknown/gone → dead (terminal).
+          // Unknown/gone (the status GET failed, or returned no `status`).
+          //
+          // audit-3 adversarial review: this is a TRANSIENT-FAILURE path, not a
+          // terminal verdict — the GET can fail on a network blip even though
+          // the session is alive and still holding unsent answers. Since `dead`
+          // is now terminal for both the countdown and handleTimeUp
+          // (R2-SESS-F2), routing here would strand an active session with NO
+          // submit control. Route to `timeUp` instead, which renders the
+          // Retry-submit affordance; `dead` stays reserved for the explicit
+          // terminal signals (the 404 reset above, and `completed`).
           setError(t("toast.sessionInactive"));
-          setPhaseAndRef("dead");
+          setPhaseAndRef("timeUp");
           return;
         }
 
+        // D-F1 (High): the quiz was closed (or the student removed) mid-session.
+        // Do NOT dead-end — `submit_session` is deliberately permissive for
+        // active/paused sessions, so the earned evidence must still be
+        // submitted. answer() still holds submitLock until its finally, so the
+        // submit is handed off on a macrotask (the SAME reason the
+        // quiz_window_closed branch below defers). A failed submit lands in
+        // timeUp with the Retry-submit control — never a silent dead screen.
         if (res.status === 409 && body.error === "quiz_not_live") {
+          const alreadyTimeUp = phaseRef.current === "timeUp";
           setError(t("toast.quizUnavailable"));
-          setPhaseAndRef("dead");
+          setPhaseAndRef("timeUp");
+          if (!alreadyTimeUp) {
+            setTimeout(() => void submitNow(), 0);
+          }
           return;
         }
 

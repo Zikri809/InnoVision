@@ -52,9 +52,20 @@ export function useNotifications({
 
   const [items, setItems] = useState<NotificationItem[]>(initialItems);
   const [unreadCount, setUnreadCount] = useState(initialUnreadCount);
-  const [healthy, setHealthy] = useState<ChannelHealth>("subscribed");
+  // audit-3 H-F3: start UNHEALTHY, not "subscribed". Realtime is only a
+  // latency accelerator — on remote deploys the WS never upgrades, so polling
+  // is the only delivery path. Assuming health before the channel has actually
+  // confirmed would poll at the slow cadence (or, combined with a hidden-tab
+  // mount, never at all) and a lecturer could miss `session_flagged`.
+  const [healthy, setHealthy] = useState<ChannelHealth>("unhealthy");
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(initialItems.length >= PAGE_SIZE);
+  // Visibility is STATE (not just a ref) so the poll effect below re-evaluates
+  // when the tab becomes visible. The ref stays for the synchronous readers
+  // (ensureSubscribed) that must not wait for a render.
+  const [visible, setVisible] = useState(
+    typeof document === "undefined" ? true : !document.hidden,
+  );
 
   const itemsRef = useRef(items);
   // Sync after commit (react-compiler forbids ref writes during render).
@@ -62,9 +73,7 @@ export function useNotifications({
     itemsRef.current = items;
   }, [items]);
   const channelRef = useRef<RealtimeChannel | null>(null);
-  const visibleRef = useRef(
-    typeof document === "undefined" ? true : !document.hidden,
-  );
+  const visibleRef = useRef(visible);
 
   const handleInsert = useCallback((row: RawNotificationRow) => {
     const item = mapRawRow(row);
@@ -237,12 +246,15 @@ export function useNotifications({
         (msg) => handleInsert((msg as unknown as { new: RawNotificationRow }).new),
       )
       .subscribe((status) => {
+        // Functional updates: the callback can fire long after this closure
+        // was created, so it must transition from the CURRENT health, never a
+        // value captured at subscribe time (audit-3 H-F3).
         if (status === "SUBSCRIBED") {
-          setHealthy(nextHealth("unhealthy", "subscribed"));
+          setHealthy((current) => nextHealth(current, "subscribed"));
         } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          setHealthy(nextHealth("subscribed", "channel_error"));
+          setHealthy((current) => nextHealth(current, "channel_error"));
         } else if (status === "CLOSED") {
-          setHealthy(nextHealth("subscribed", "channel_closed"));
+          setHealthy((current) => nextHealth(current, "channel_closed"));
         }
       });
     channelRef.current = channel;
@@ -254,12 +266,23 @@ export function useNotifications({
     ensureSubscribed();
 
     const onVisibility = () => {
-      visibleRef.current = !document.hidden;
-      if (document.hidden) {
-        teardown();
-      } else {
+      const nextVisible = !document.hidden;
+      visibleRef.current = nextVisible;
+      // audit-3 H-F3: this state flip is what re-runs the poll effect below.
+      // The old handler was one-shot: it refreshed + resubscribed, but the
+      // poll effect (deps [healthy, refresh]) never re-ran, so a hook that
+      // MOUNTED while hidden never scheduled the loop at all — and a tab
+      // resume could not start it either.
+      setVisible(nextVisible);
+      if (nextVisible) {
+        // Returning from a hidden gap: the channel was torn down, so the
+        // previous health is stale. Downgrade to the fast cadence until
+        // SUBSCRIBED re-confirms (realtime has no replay; polling heals).
+        setHealthy((current) => nextHealth(current, "resumed"));
         void refresh();
         ensureSubscribed();
+      } else {
+        teardown();
       }
     };
     const onFocus = () => {
@@ -284,11 +307,16 @@ export function useNotifications({
     };
   }, [supabase, userId, ensureSubscribed, teardown, refresh]);
 
-  // Poll cadence follows channel health. Self-rescheduling timeout so the
-  // cadence (incl. the E2E test seam) is re-read every tick, not frozen at
-  // effect creation.
+  // Poll cadence follows channel health AND visibility. Self-rescheduling
+  // timeout so the cadence (incl. the E2E test seam) is re-read every tick,
+  // not frozen at effect creation.
+  //
+  // audit-3 H-F3: the effect must be scheduled whenever the tab is visible —
+  // including on the FIRST visibilitychange after a hidden mount. Keying the
+  // early return on `visible` state (not the ref) is what makes the resume
+  // re-run the effect and start the loop.
   useEffect(() => {
-    if (!visibleRef.current) return;
+    if (!visible) return;
     let timer: ReturnType<typeof setTimeout>;
     const loop = () => {
       timer = setTimeout(() => {
@@ -298,7 +326,7 @@ export function useNotifications({
     };
     loop();
     return () => clearTimeout(timer);
-  }, [healthy, refresh]);
+  }, [healthy, refresh, visible]);
 
   return {
     items,

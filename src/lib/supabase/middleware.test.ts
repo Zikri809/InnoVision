@@ -2,11 +2,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 const mockGetUser = vi.fn();
+// Captures the cookie adapter updateSession hands to createServerClient, so a
+// test can drive setAll() the way @supabase/ssr does on a token refresh.
+const ssrOptionsHolder: {
+  current: { cookies?: { setAll?: (c: { name: string; value: string; options?: Record<string, unknown> }[]) => void } } | null;
+} = { current: null };
 
 vi.mock("@supabase/ssr", () => ({
-  createServerClient: vi.fn(() => ({
-    auth: { getUser: mockGetUser },
-  })),
+  createServerClient: vi.fn((_url: string, _key: string, opts: unknown) => {
+    ssrOptionsHolder.current = opts as typeof ssrOptionsHolder.current;
+    return { auth: { getUser: mockGetUser } };
+  }),
 }));
 
 import { updateSession } from "@/lib/supabase/middleware";
@@ -17,6 +23,7 @@ function nextReq(pathWithQuery: string): NextRequest {
 
 beforeEach(() => {
   mockGetUser.mockReset();
+  ssrOptionsHolder.current = null;
 });
 
 describe("updateSession — middleware redirect matrix", () => {
@@ -30,13 +37,65 @@ describe("updateSession — middleware redirect matrix", () => {
     expect(location.searchParams.get("redirect")).toBe("/lecturer/classes");
   });
 
-  it("preserves the query string in the redirect param path only", async () => {
+  it("preserves the query string in the redirect param (audit-3 A-F8)", async () => {
     mockGetUser.mockResolvedValue({ data: { user: null } });
 
-    // pathname (not search) is captured — mirrors the implementation.
+    // The query string is part of the preserved destination: the old form
+    // stored only the pathname, so an expired session on a query-carrying URL
+    // (e.g. the student quiz list's ?class=… link) lost its params.
     const res = await updateSession(nextReq("/student/quizzes?tab=shared"));
     const location = new URL(res.headers.get("location")!);
-    expect(location.searchParams.get("redirect")).toBe("/student/quizzes");
+    expect(location.searchParams.get("redirect")).toBe("/student/quizzes?tab=shared");
+  });
+
+  it("replays refreshed auth cookies onto the login redirect (audit-3 A-F7)", async () => {
+    // A redirect is a FRESH NextResponse, so cookies written by the refresh
+    // were previously dropped and the browser kept its expired token.
+    mockGetUser.mockImplementation(async () => {
+      ssrOptionsHolder.current?.cookies?.setAll?.([
+        { name: "sb-innovision-auth-token", value: "refreshed", options: { path: "/" } },
+      ]);
+      return { data: { user: null } };
+    });
+
+    const res = await updateSession(nextReq("/lecturer/classes"));
+    expect(res.status).toBe(307);
+    expect(res.cookies.get("sb-innovision-auth-token")?.value).toBe("refreshed");
+  });
+
+  it("accumulates multi-batch setAll calls, last write per name winning", async () => {
+    // @supabase/ssr can invoke setAll more than once in one getUser() (e.g. a
+    // chunked-cookie refresh then a clear). Overwriting would replay only the
+    // last batch and silently drop the earlier cookies.
+    mockGetUser.mockImplementation(async () => {
+      const setAll = ssrOptionsHolder.current?.cookies?.setAll;
+      setAll?.([{ name: "cookie-a", value: "a1", options: { path: "/" } }]);
+      setAll?.([
+        { name: "cookie-b", value: "b1", options: { path: "/" } },
+        { name: "cookie-a", value: "a2", options: { path: "/" } },
+      ]);
+      return { data: { user: null } };
+    });
+
+    const res = await updateSession(nextReq("/lecturer/classes"));
+    expect(res.status).toBe(307);
+    // Both batches survive; the duplicate name resolves to the LATER value.
+    expect(res.cookies.get("cookie-a")?.value).toBe("a2");
+    expect(res.cookies.get("cookie-b")?.value).toBe("b1");
+  });
+
+  it("replays refreshed cookies onto the authenticated /dashboard bounce too", async () => {
+    mockGetUser.mockImplementation(async () => {
+      ssrOptionsHolder.current?.cookies?.setAll?.([
+        { name: "sb-innovision-auth-token", value: "bounced", options: { path: "/" } },
+      ]);
+      return { data: { user: { id: "u1" } } };
+    });
+
+    const res = await updateSession(nextReq("/login"));
+    expect(res.status).toBe(307);
+    expect(new URL(res.headers.get("location")!).pathname).toBe("/dashboard");
+    expect(res.cookies.get("sb-innovision-auth-token")?.value).toBe("bounced");
   });
 
   it("lets anonymous users through public routes unchanged", async () => {

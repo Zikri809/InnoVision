@@ -87,11 +87,14 @@ type QuizRow = {
 export function ClassDetailClient({
   cls,
   roster,
+  rosterTruncated,
   quizzes,
   ownedClasses,
 }: {
   cls: ClassInfo;
   roster: RosterEntry[];
+  /** audit-2 M-13: the roster read hit its 100-row cap (students dropped). */
+  rosterTruncated: boolean;
   quizzes: QuizRow[];
   /** AP-2: owned, unarchived classes — duplicate destination options. */
   ownedClasses: Array<{ id: string; title: string }>;
@@ -103,6 +106,14 @@ export function ClassDetailClient({
   // QR join dialog copy lives in the shared `join` namespace (the /join page
   // and student confirm island use the same keys).
   const tJoin = useTranslations("join");
+
+  // Mirrors ROSTER_LIMIT in @/lib/classes/roster (the read cap the server
+  // reports via `rosterTruncated`). Kept local so this client island never
+  // imports the server roster module.
+  const ROSTER_DISPLAY_LIMIT = 100;
+  const rosterCountLabel = rosterTruncated
+    ? t("rosterCountTruncated", { limit: ROSTER_DISPLAY_LIMIT })
+    : t("rosterCount", { count: roster.length });
 
   const [title, setTitle] = useState("");
   const [mode, setMode] = useState<"practice" | "assessment">("practice");
@@ -791,7 +802,7 @@ export function ClassDetailClient({
                 )}
               </div>
               <p className="mt-1 sm:mt-1.5 text-xs sm:text-sm font-semibold text-muted-foreground">
-                {t("rosterCount", { count: roster.length })} · {t("quizCount", { count: quizzes.length })}
+                {rosterCountLabel} · {t("quizCount", { count: quizzes.length })}
               </p>
 
               {/* Mobile compact join code pill */}
@@ -945,6 +956,7 @@ export function ClassDetailClient({
                   )}
                 >
                   {roster.length}
+                  {rosterTruncated && "+"}
                 </span>
               </button>
             </div>
@@ -1154,6 +1166,7 @@ export function ClassDetailClient({
                   )}
                 >
                   {roster.length}
+                  {rosterTruncated && "+"}
                 </span>
               </button>
             </div>
@@ -1165,6 +1178,7 @@ export function ClassDetailClient({
               </CardTitle>
               <span className="rounded-full bg-primary/15 px-2.5 py-0.5 text-xs font-extrabold text-primary leading-none">
                 {roster.length}
+                {rosterTruncated && "+"}
               </span>
             </div>
 
@@ -1181,6 +1195,18 @@ export function ClassDetailClient({
           </div>
         </CardHeader>
         <CardContent className="px-4 sm:px-6 pt-0 sm:pt-4 pb-2 sm:pb-4">
+          {/* audit-2 M-13 / audit-3 B-F6: the roster read is capped at 100
+              rows. Without this note a 250-enrolled class reads "100 students"
+              with students 101-250 invisible. Clay amber pattern per
+              AGENTS.md (dark-mode variants mandatory). */}
+          {rosterTruncated && (
+            <p
+              role="status"
+              className="mb-3 rounded-2xl border-[3px] border-amber-600/40 bg-amber-100 px-4 py-3 text-sm font-bold text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300"
+            >
+              {t("rosterTruncatedNotice", { limit: ROSTER_DISPLAY_LIMIT })}
+            </p>
+          )}
           {roster.length === 0 ? (
             <div className="grid place-items-center rounded-2xl border-[3px] border-dashed border-border bg-card/60 px-6 py-10 text-center">
               <p className="font-heading text-base font-semibold">{t("noStudents")}</p>

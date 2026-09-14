@@ -19,6 +19,55 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+/**
+ * audit-3 R3-DEP-F6 — the prod-destructive confirmation gate.
+ *
+ * The expected token used to be the project-ref LITERAL hardcoded below, which
+ * is committed in this same file: anyone who can read the repo can answer the
+ * interactive prompt (or script it). The expected token is now read from the
+ * out-of-band env var `PROD_CONFIRM_TOKEN`; the literal survives only as a
+ * clearly-marked, loudly-warned fallback for the current single deployment so
+ * existing operators are not locked out.
+ *
+ * Every confirmed (or bypassed) destructive run also writes a timestamped
+ * audit line to stdout and to PROD_AUDIT_LOG (default `.prod-audit.log` at the
+ * repo root, gitignored) — `ALLOW_PROD_SEED=1` used to skip the gate with no
+ * record at all.
+ */
+const FALLBACK_CONFIRM_TOKEN = "yjzezkvfbeknknzaqymw";
+const AUDIT_LOG_PATH =
+  process.env.PROD_AUDIT_LOG || path.resolve(__dirname, "../../.prod-audit.log");
+
+function expectedConfirmToken() {
+  const outOfBand = (process.env.PROD_CONFIRM_TOKEN ?? "").trim();
+  if (outOfBand) return outOfBand;
+  console.warn(
+    "⚠️  PROD_CONFIRM_TOKEN is not set — falling back to the project-ref " +
+      "literal committed in scripts/lib/remote-env.mjs. That value is readable " +
+      "by anyone with repo access, so the interactive gate is NOT a real secret. " +
+      "Export PROD_CONFIRM_TOKEN (out-of-band) before running destructive prod " +
+      "operations.",
+  );
+  return FALLBACK_CONFIRM_TOKEN;
+}
+
+/** Timestamped audit trail for every destructive prod decision. */
+function auditProd(action, label, target) {
+  const line =
+    `${new Date().toISOString()} action=${action} label=${JSON.stringify(label)} ` +
+    `target=${target ?? "?"} pid=${process.pid} cwd=${process.cwd()}`;
+  console.log(`[prod-audit] ${line}`);
+  try {
+    fs.appendFileSync(AUDIT_LOG_PATH, `${line}\n`);
+  } catch (err) {
+    // A logging failure must not silently cancel the operation — surface it.
+    console.warn(
+      `[prod-audit] WARNING: could not write ${AUDIT_LOG_PATH} (${err.message}); ` +
+        "the stdout line above is the only record of this run.",
+    );
+  }
+}
+
 export function loadEnvFile(name) {
   const p = path.resolve(__dirname, "../../", name);
   if (!fs.existsSync(p)) return {};
@@ -63,22 +112,43 @@ export function resolveEnv(argv) {
     );
     process.exit(1);
   }
+  if (!remote && !isLocalUrl) {
+    // audit-3 R3-DEP-F6: forcing a prod target without --remote is itself a
+    // destructive-relevant decision — record it instead of skipping silently.
+    console.warn(
+      `⚠️  ALLOW_PROD_SEED=1 — running against the NON-LOCAL URL ${URL} without --remote.`,
+    );
+    auditProd("allow-prod-seed", "resolveEnv: non-local target without --remote", URL);
+  }
   return { URL, SERVICE, isRemote: remote };
 }
 
 /** Confirm before running a destructive operation against the hosted project. */
 export async function confirmRemote(label) {
-  if (process.env.ALLOW_PROD_SEED === "1") return true;
+  const target = loadEnvFile(".env.production.local").NEXT_PUBLIC_SUPABASE_URL ?? "?";
+  if (process.env.ALLOW_PROD_SEED === "1") {
+    // audit-3 R3-DEP-F6: this path used to return true with no confirmation
+    // and no record. It still skips the prompt (that is its purpose), but the
+    // skip is now announced and audited.
+    console.warn(
+      "⚠️  ALLOW_PROD_SEED=1 — interactive confirmation SKIPPED for a destructive " +
+        "hosted-project operation.",
+    );
+    auditProd("bypassed", label, target);
+    return true;
+  }
   const readline = await import("node:readline/promises");
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const answer = await rl.question(
-    `\n⚠️  About to ${label} on the HOSTED project (${loadEnvFile(".env.production.local").NEXT_PUBLIC_SUPABASE_URL ?? "?"}).\nType the project ref to confirm, or anything else to abort: `,
+    `\n⚠️  About to ${label} on the HOSTED project (${target}).\nType the project ref to confirm, or anything else to abort: `,
   );
   rl.close();
-  if (answer.trim() === "yjzezkvfbeknknzaqymw") {
+  if (answer.trim() === expectedConfirmToken()) {
+    auditProd("confirmed", label, target);
     console.log("Confirmed.\n");
     return true;
   }
+  auditProd("aborted", label, target);
   console.log("Aborted.\n");
   process.exit(1);
 }

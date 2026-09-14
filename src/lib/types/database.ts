@@ -199,6 +199,7 @@ export type Database = {
           frame_poses: Json | null
           id: string
           matched: boolean
+          nonce: string | null
           session_id: string
           suspected_replay: boolean
           too_frequent: boolean
@@ -211,6 +212,7 @@ export type Database = {
           frame_poses?: Json | null
           id?: string
           matched: boolean
+          nonce?: string | null
           session_id: string
           suspected_replay?: boolean
           too_frequent?: boolean
@@ -223,6 +225,7 @@ export type Database = {
           frame_poses?: Json | null
           id?: string
           matched?: boolean
+          nonce?: string | null
           session_id?: string
           suspected_replay?: boolean
           too_frequent?: boolean
@@ -419,6 +422,7 @@ export type Database = {
           correct_indices: number[] | null
           created_at: string
           explanation: string | null
+          generation_id: string | null
           id: string
           image_path: string | null
           options: string[]
@@ -432,6 +436,7 @@ export type Database = {
           correct_indices?: number[] | null
           created_at?: string
           explanation?: string | null
+          generation_id?: string | null
           id?: string
           image_path?: string | null
           options: string[]
@@ -445,6 +450,7 @@ export type Database = {
           correct_indices?: number[] | null
           created_at?: string
           explanation?: string | null
+          generation_id?: string | null
           id?: string
           image_path?: string | null
           options?: string[]
@@ -494,6 +500,7 @@ export type Database = {
           mode: Database["public"]["Enums"]["quiz_mode"]
           paused_at: string | null
           quiz_id: string
+          resume_grace_until: string | null
           score: number | null
           started_at: string
           status: Database["public"]["Enums"]["session_status"]
@@ -517,6 +524,7 @@ export type Database = {
           mode: Database["public"]["Enums"]["quiz_mode"]
           paused_at?: string | null
           quiz_id: string
+          resume_grace_until?: string | null
           score?: number | null
           started_at?: string
           status?: Database["public"]["Enums"]["session_status"]
@@ -540,6 +548,7 @@ export type Database = {
           mode?: Database["public"]["Enums"]["quiz_mode"]
           paused_at?: string | null
           quiz_id?: string
+          resume_grace_until?: string | null
           score?: number | null
           started_at?: string
           status?: Database["public"]["Enums"]["session_status"]
@@ -1455,10 +1464,6 @@ export type Database = {
           isSetofReturn: false
         }
       }
-      attach_frame_poses: {
-        Args: { p_nonce: string; p_poses: Json; p_session_id: string }
-        Returns: undefined
-      }
       backfill_notification_state: { Args: never; Returns: Json }
       can_student_view_quiz: { Args: { p_quiz_id: string }; Returns: boolean }
       clone_quiz: {
@@ -1466,6 +1471,7 @@ export type Database = {
         Returns: string
       }
       compare_face_baseline: { Args: { p_embedding: string }; Returns: Json }
+      cron_health: { Args: never; Returns: Json }
       enroll_face: { Args: { p_samples: Json }; Returns: Json }
       exempt_face_session: {
         Args: { p_reason: string; p_session_id: string }
@@ -1505,6 +1511,7 @@ export type Database = {
         Args: {
           p_frames: string[]
           p_nonce: string
+          p_poses?: Json
           p_proof?: string
           p_session_id: string
           p_similarities: number[]
@@ -1540,9 +1547,11 @@ export type Database = {
       safe_audit_uuid: { Args: { p_value: string }; Returns: string }
       save_quiz_questions: {
         Args: {
+          p_generation_id?: string
           p_mode?: string
           p_questions: Json
           p_quiz_id: string
+          p_replace_ids?: string[]
           p_source_file_url: string
           p_source_text: string
           p_title: string
@@ -1568,6 +1577,7 @@ export type Database = {
           p_mode?: string
           p_questions: Json
           p_quiz_id: string
+          p_replace_ids?: string[]
         }
         Returns: {
           correct_index: number

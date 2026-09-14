@@ -22,6 +22,23 @@ export interface QuizUpdateColumns {
   shuffle_questions?: boolean;
 }
 
+/**
+ * Defaults for the `not null default` retake/shuffle columns (0032:46-47,
+ * 0034:28). audit-3 C-F5: these fields are declared nullable in
+ * UpdateQuizSchema, but the columns are NOT NULL with a DEFAULT, so an
+ * explicit `null` cannot be stored. The old code silently DROPPED it (a
+ * `{maxAttempts: null}`-only PATCH produced an empty update → PostgREST
+ * `SELECT … WHERE false` → 404 not_found, which is a lie: nothing was
+ * missing). A null now means "reset this field to its column default", which
+ * is the semantically correct reading for a NOT NULL DEFAULT column and is
+ * consistent with the window/timeLimit nulls meaning "clear the bound".
+ */
+export const QUIZ_FIELD_DEFAULTS = {
+  allow_retake: false,
+  max_attempts: 1,
+  shuffle_questions: false,
+} as const;
+
 /** The window fields a PATCH may carry while bypassing the draft-only lock. */
 export const WINDOW_PATCH_KEYS = ["opensAt", "closesAt"] as const;
 
@@ -71,14 +88,14 @@ export function buildQuizUpdates(
   if (input.timeLimitSec !== undefined) updates.time_limit_sec = input.timeLimitSec;
   if (input.opensAt !== undefined) updates.opens_at = input.opensAt;
   if (input.closesAt !== undefined) updates.closes_at = input.closesAt;
-  if (input.allowRetake !== undefined && input.allowRetake !== null) {
-    updates.allow_retake = input.allowRetake;
+  if (input.allowRetake !== undefined) {
+    updates.allow_retake = input.allowRetake ?? QUIZ_FIELD_DEFAULTS.allow_retake;
   }
-  if (input.maxAttempts !== undefined && input.maxAttempts !== null) {
-    updates.max_attempts = input.maxAttempts;
+  if (input.maxAttempts !== undefined) {
+    updates.max_attempts = input.maxAttempts ?? QUIZ_FIELD_DEFAULTS.max_attempts;
   }
-  if (input.shuffleQuestions !== undefined && input.shuffleQuestions !== null) {
-    updates.shuffle_questions = input.shuffleQuestions;
+  if (input.shuffleQuestions !== undefined) {
+    updates.shuffle_questions = input.shuffleQuestions ?? QUIZ_FIELD_DEFAULTS.shuffle_questions;
   }
 
   const effectiveMode = input.mode ?? currentMode;

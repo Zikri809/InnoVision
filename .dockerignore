@@ -1,0 +1,71 @@
+# Docker build-context exclusions (audit-3 R3-DEP-F1).
+#
+# The glm-ocr service builds with `context: .` (the repo ROOT) because its
+# Dockerfile lives under docker/glm-ocr/. Without this file every build
+# transmitted the ENTIRE working tree to the daemon — including `.env.local`
+# and `.env.production.local`, which holds the hosted Supabase SERVICE-ROLE
+# key. That is context transmission (the Dockerfile has no COPY), but it still
+# ships secrets and multi-GB build output over the socket on every build,
+# which is expensive on a remote/WSL2 `DOCKER_HOST` and a needless exposure on
+# a shared build daemon. The sibling insightface service avoids the problem by
+# using `context: ./docker/insightface`; this file gives glm-ocr the same
+# protection without restructuring the build.
+#
+# Keep this list in sync with the repo's actual generated/secret paths.
+
+# Secrets — never send to the daemon.
+.env
+.env.*
+!.env.local.example
+
+# Dependencies / build output
+node_modules
+.next
+out
+build
+dist
+*.tsbuildinfo
+next-env.d.ts
+
+# Test + coverage artifacts
+coverage
+playwright-report
+test-results
+snapshots
+bench-glm-ocr.jsonl
+
+# Local Supabase / tooling data
+supabase/.temp
+supabase/.branches
+compreface-data
+
+# VCS + agent scratch
+.git
+.gitignore
+.github
+.agents
+.vscode
+.idea
+.tmp
+.tmp_*
+
+# Docs / design scratch (not needed by any Dockerfile today)
+docs
+design-system
+redesign-previews
+Sample Code
+graphify-out
+skills-lock.json
+GEMINI.md
+PROJECT.md
+AGENTS.md
+
+# Python bytecode (the insightface build context is its own dir, but keep the
+# root context clean if a future Dockerfile builds from here).
+__pycache__
+*.pyc
+
+# Misc editor/OS noise
+*.log
+.DS_Store
+Thumbs.db

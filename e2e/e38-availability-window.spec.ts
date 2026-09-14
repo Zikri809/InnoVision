@@ -114,7 +114,7 @@ test("window journey: not-open → opened → window-closed → autoclose hides 
   await expect(dialog).toBeVisible();
   await setDateTime(
     lecturer,
-    dialog.getByLabel("Opens at (UTC)", { exact: true }),
+    dialog.getByLabel("Opens at (Malaysia time)", { exact: true }),
     new Date(Date.now() - 60_000),
   );
   await dialog.getByRole("button", { name: "Save changes" }).click();

@@ -12,6 +12,15 @@ import { env } from "@/lib/env";
  *
  * NEVER import this into a client component or expose it via a route that
  * a non-privileged user can reach.
+ *
+ * audit-3 A-F5: the key is REQUIRED for the app's privileged features (face
+ * verify, incident clips, media cleanup, notifications), but the pre-checks
+ * that merely improve an error message must not depend on it — an unset key
+ * used to turn the advisory duplicate-matric lookup into a hard crash that
+ * blocked student signup entirely (and wedged SSO students on the matric gate),
+ * contradicting the documented "optional, fails closed per feature" posture.
+ * Privileged writes keep using `createAdminClient()` and still fail loudly;
+ * advisory lookups use `tryCreateAdminClient()` and degrade.
  */
 let adminClient: SupabaseClient<Database> | null = null;
 
@@ -32,4 +41,22 @@ export function createAdminClient(): SupabaseClient<Database> {
   });
 
   return adminClient;
+}
+
+/**
+ * Null-returning variant for ADVISORY calls (audit-3 A-F5). Returns null when
+ * SUPABASE_SERVICE_ROLE_KEY is unset instead of throwing, so a friendly-error
+ * pre-check cannot become an outage. Callers MUST have a correct fallback: the
+ * DB constraint is the authority, so skipping the pre-check degrades the error
+ * message, never the invariant.
+ */
+export function tryCreateAdminClient(): SupabaseClient<Database> | null {
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    console.warn(
+      "[admin] SUPABASE_SERVICE_ROLE_KEY is unset: skipping an advisory service-role " +
+        "lookup. Privileged features (face verify, incident clips, media) will fail.",
+    );
+    return null;
+  }
+  return createAdminClient();
 }

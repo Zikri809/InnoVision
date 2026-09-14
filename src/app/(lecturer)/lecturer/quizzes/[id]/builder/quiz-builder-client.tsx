@@ -126,6 +126,15 @@ const emptyDraft: QuestionDraft = {
   explanation: "",
 };
 
+/**
+ * audit-3 C-F2: the 30-question cap is enforced by the append_question RPC
+ * (0045:1514-1522) and the import route, but the builder had no client-side
+ * awareness — the 31st add round-tripped and surfaced a generic 503 before
+ * the route mapping was fixed. Mirror the DB cap so the control disables and
+ * the limit is visible before the request.
+ */
+const QUIZ_QUESTION_CAP = 30;
+
 export function QuizBuilderClient({
   quiz,
   questions,
@@ -160,7 +169,12 @@ export function QuizBuilderClient({
   const t = useTranslations("lecturer.builder");
   const tCommon = useTranslations("common");
   const tMedia = useTranslations("media");
+  // audit-3 C-F2: reuse the existing quizEditor cap string for the add-form
+  // limit notice (one source of truth for the 30-question cap copy).
+  const tEditor = useTranslations("quizEditor");
   const isDraft = quiz.status === "draft";
+  // audit-3 C-F2: client-side cap awareness (mirrors the DB/RPC 30 cap).
+  const atCap = questions.length >= QUIZ_QUESTION_CAP;
 
   // Title editing state
   const [editingTitle, setEditingTitle] = useState(false);
@@ -407,6 +421,11 @@ export function QuizBuilderClient({
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     if (saving) return;
+    // audit-3 C-F2: never round-trip a 31st add — the RPC would reject it.
+    if (atCap) {
+      setError(tEditor("questionCapReached", { count: QUIZ_QUESTION_CAP }));
+      return;
+    }
     setSaving(true);
     setError(null);
 
@@ -592,27 +611,33 @@ export function QuizBuilderClient({
     }
   }
 
-  /** QC-2 prevention CTA: reveal (idempotent), then close (CAS) — both safe
-   * in either order, so a partial sequence never strands results. */
+  /** QC-2 prevention CTA. audit-3 H3-ATOM-F5: CLOSE first, then reveal.
+   * Closing blocks new starts and hard-stops answering, so the follow-up
+   * reveal can never expose correctness to an in-flight student, and a failed
+   * close aborts before the irreversible reveal (the old reveal-then-close
+   * order could strand a revealed+live quiz). Both calls stay idempotent, so
+   * a partial sequence is retryable from the same dialog. */
   async function handleRevealThenClose() {
     if (closing) return;
     setCloseCooled(true);
     setClosing(true);
     setCloseError(null);
     try {
+      const closeRes = await fetch(`/api/quizzes/${quiz.id}/close`, {
+        method: "POST",
+      });
+      if (!closeRes.ok) {
+        const body = await closeRes.json().catch(() => ({}));
+        setCloseError(body.message ?? body.error ?? tCommon("errorGeneric"));
+        return;
+      }
       const revealRes = await fetch(`/api/quizzes/${quiz.id}/reveal`, {
         method: "POST",
       });
       if (!revealRes.ok) {
         const body = await revealRes.json().catch(() => ({}));
-        setCloseError(body.message ?? body.error ?? tCommon("errorGeneric"));
-        return;
-      }
-      const res = await fetch(`/api/quizzes/${quiz.id}/close`, {
-        method: "POST",
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
+        // The quiz is closed but results are still hidden — a recoverable
+        // state the dashboard's own Reveal button handles.
         setCloseError(body.message ?? body.error ?? tCommon("errorGeneric"));
         return;
       }
@@ -913,9 +938,14 @@ export function QuizBuilderClient({
         </div>
 
         <div className="flex items-center gap-3 pt-2">
-          <Button type="submit" disabled={saving || !draft.prompt.trim()}>
+          <Button type="submit" disabled={saving || !draft.prompt.trim() || atCap}>
             {saving ? tCommon("loading") : t("addQuestionSubmitBtn")}
           </Button>
+          {atCap && (
+            <p className="text-xs font-bold text-muted-foreground" role="status">
+              {tEditor("questionCapReached", { count: QUIZ_QUESTION_CAP })}
+            </p>
+          )}
           {inSheet && (
             <Button
               type="button"
@@ -1199,6 +1229,7 @@ export function QuizBuilderClient({
           {isDraft && questions.length > 0 && (
             <Button
               onClick={() => setMobileAddOpen(true)}
+              disabled={atCap}
               className="h-10 flex-1 rounded-xl px-3 text-xs font-extrabold gap-1.5 shadow-[var(--shadow-clay-sm)]"
             >
               <Plus className="size-4 shrink-0" />
@@ -1239,6 +1270,7 @@ export function QuizBuilderClient({
               {isDraft && questions.length === 0 && (
                 <DropdownMenuItem
                   onClick={() => setMobileAddOpen(true)}
+                  disabled={atCap}
                   className="flex items-center gap-2 cursor-pointer font-bold"
                 >
                   <Plus className="size-4 text-muted-foreground" />
@@ -1248,6 +1280,7 @@ export function QuizBuilderClient({
               {isDraft && (
                 <DropdownMenuItem
                   onClick={() => setImportOpen(true)}
+                  disabled={atCap}
                   className="flex items-center gap-2 cursor-pointer font-bold"
                 >
                   <ListPlus className="size-4 text-muted-foreground" />
@@ -1435,6 +1468,7 @@ export function QuizBuilderClient({
                 variant="outline"
                 size="sm"
                 onClick={() => setMobileAddOpen(true)}
+                disabled={atCap}
                 className="md:hidden h-9 rounded-xl border-2 border-primary/40 bg-primary/10 text-primary hover:bg-primary/20 hover:text-primary font-extrabold shadow-[var(--shadow-sm)] gap-1 px-3 text-xs"
               >
                 <Plus className="size-3.5" />

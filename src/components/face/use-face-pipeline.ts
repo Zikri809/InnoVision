@@ -92,12 +92,14 @@ export type FacePipelineProps = {
   /** D13 — a lecturer reset the session mid-flight (verify → 404 no longer owned). */
   onReset?: () => void;
   /**
-   * 0045 §5 (audit-1 §2.13): a successful self-recovery returns the server's
-   * own remaining exam time (its credited-seconds arithmetic). PlayClient
-   * adopts it so the countdown reflects the capped credit instead of
-   * freezing through the whole pause — the drift that surfaced as a
-   * mid-answer `time_expired` 403. Fired only on a server-confirmed
-   * recovery, only for timed quizzes (number, not null).
+   * 0045 §5 (audit-1 §2.13) + 0048 D-F2: the server's own remaining exam time
+   * after the session moved — a self-recovery (credited-seconds arithmetic) or
+   * a lecturer unlock / cross-tab recovery observed by the flagged poll and
+   * the stale-nonce GET. PlayClient adopts it so the countdown reflects the
+   * capped credit instead of freezing through the whole pause — the drift
+   * that surfaced as a mid-answer `time_expired` 403. Fired only on a
+   * server-confirmed active session, only for timed quizzes (number, not
+   * null).
    */
   onRecoveredRemaining?: (remainingMs: number) => void;
 };
@@ -293,6 +295,14 @@ export function useFacePipeline(props: FacePipelineProps) {
         if (disposedRef.current || isTerminalRef.current) return;
         if (body.status === "active") {
           nonceRef.current = body.verify_nonce ?? nonceRef.current;
+          // D-F2: the lecturer unlocked the session (or another tab already
+          // recovered it). The GET envelope carries the server's own
+          // remainingMs for an active timed session; adopt it so the
+          // countdown re-syncs instead of resuming from the frozen pre-pause
+          // reading (mirrors the self-recover adoption in runRecovery).
+          if (typeof body.remainingMs === "number" && body.remainingMs >= 0) {
+            onRecoveredRemainingRef.current?.(body.remainingMs);
+          }
           if (body.face_exempt === true) {
             setStatusBoth("exempt");
             return;
@@ -334,12 +344,14 @@ export function useFacePipeline(props: FacePipelineProps) {
           onPhaseChangeRef.current("submitted");
           return;
         }
-        // Unknown/gone (non-404, no status): fail-closed terminal rather than
-        // re-arming a poll for a session that no longer exists.
-        if (body.status === undefined && !res.ok) {
-          onResetRef.current?.();
-          return;
-        }
+        // Non-404, no status: this is NOT proof the session is gone. The GET
+        // route deliberately returns 503 for a TRANSIENT DB fault and 429 from
+        // its limiter, both with no `status` field — treating those as terminal
+        // threw a student on a live flagged session to the dead screen on a
+        // single 8-second poll tick (and, now that `dead` is terminal for the
+        // countdown and handleTimeUp, with no way back or to submit). Only the
+        // explicit 404 above is definitive; anything else re-arms the poll
+        // (adversarial review).
       } catch {
         // network — keep polling
       }
@@ -381,6 +393,53 @@ export function useFacePipeline(props: FacePipelineProps) {
   // silence-flagged — the client keeps the claim fresh while it lives.
   const lastUnavailableReportAtRef = useRef(0);
   const UNAVAILABLE_REARM_MS = 6 * 60 * 1000;
+  // audit-3 E-F5: bounded self-heal retry out of `unavailable`.
+  const unavailableRetryAttemptsRef = useRef(0);
+  const UNAVAILABLE_RETRY_MAX_ATTEMPTS = 5;
+  const UNAVAILABLE_RETRY_BASE_MS = 30 * 1000;
+  function clearUnavailableRetry() {
+    if (unavailableRetryTimerRef.current) {
+      clearTimeout(unavailableRetryTimerRef.current);
+      unavailableRetryTimerRef.current = null;
+    }
+  }
+  /**
+   * Probe the verify path once while `unavailable`, with linear backoff.
+   * `force` bypasses runVerify's shouldScheduleFaceCheck gate (which requires
+   * `ready`) but keeps every other guard, and the outcome machinery moves the
+   * status off `unavailable` on success — which clears this timer via the
+   * effect above. A genuine outage exhausts the budget and leaves the
+   * degraded banner + the 6-min claim re-arm doing their job.
+   */
+  function scheduleUnavailableRetry() {
+    if (unavailableRetryAttemptsRef.current >= UNAVAILABLE_RETRY_MAX_ATTEMPTS) return;
+    if (unavailableRetryTimerRef.current) return;
+    const attempt = unavailableRetryAttemptsRef.current;
+    unavailableRetryTimerRef.current = setTimeout(() => {
+      unavailableRetryTimerRef.current = null;
+      if (
+        disposedRef.current ||
+        isTerminalRef.current ||
+        statusRef.current !== "unavailable"
+      ) {
+        return;
+      }
+      // audit-3 adversarial review: a hidden tab must not run a capture. The
+      // normal cadence path checks hiddenRef, and without the same check the
+      // probe would capture nothing, post the no-face sentinel as a FAIL vote,
+      // and could flag an honest student whose tab was merely backgrounded when
+      // the sidecar recovered. Defer WITHOUT consuming an attempt — the retry
+      // budget is for real failures, not for a backgrounded tab.
+      if (hiddenRef.current) {
+        scheduleUnavailableRetry();
+        return;
+      }
+      unavailableRetryAttemptsRef.current = attempt + 1;
+      void runVerify("periodic", 0, true).finally(() => {
+        if (statusRef.current === "unavailable") scheduleUnavailableRetry();
+      });
+    }, UNAVAILABLE_RETRY_BASE_MS * (attempt + 1));
+  }
   function reportUnavailable() {
     const now = Date.now();
     if (now - lastUnavailableReportAtRef.current < UNAVAILABLE_REARM_MS) return;
@@ -401,7 +460,18 @@ export function useFacePipeline(props: FacePipelineProps) {
   // window, < the cron's 10-min staleness bound) for as long as the outage
   // lasts; any status change clears it. The 6-min guard inside
   // reportUnavailable keeps an immediate report + the first tick idempotent.
+  //
+  // audit-3 E-F5: `unavailable` used to be ONE-WAY for the whole page-load —
+  // nothing left it automatically (every re-entry path requires
+  // statusRef==='ready'), so a single sidecar 5xx/restart ended proctoring
+  // for the rest of the attempt and the silence cron then flagged an honest
+  // student. The same timer now also RETRIES the verify with a bounded,
+  // backed-off schedule: a transient outage self-heals back to `ready`, and a
+  // genuine one stops after UNAVAILABLE_RETRY_MAX_ATTEMPTS so the client
+  // cannot hot-loop the sidecar. A reload already re-seeds `ready`
+  // (play/[sessionId]/page.tsx), so this only closes the in-page gap.
   const unavailableRearmTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const unavailableRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (status === "unavailable" && !disposedRef.current && !isTerminalRef.current) {
       if (unavailableRearmTimerRef.current) return;
@@ -410,15 +480,23 @@ export function useFacePipeline(props: FacePipelineProps) {
           reportUnavailable();
         }
       }, UNAVAILABLE_REARM_MS);
-    } else if (unavailableRearmTimerRef.current) {
-      clearInterval(unavailableRearmTimerRef.current);
-      unavailableRearmTimerRef.current = null;
+      scheduleUnavailableRetry();
+    } else {
+      if (unavailableRearmTimerRef.current) {
+        clearInterval(unavailableRearmTimerRef.current);
+        unavailableRearmTimerRef.current = null;
+      }
+      clearUnavailableRetry();
+      // Any status change resets the retry budget: a fresh outage later in
+      // the same attempt gets its own bounded retries.
+      unavailableRetryAttemptsRef.current = 0;
     }
     return () => {
       if (unavailableRearmTimerRef.current) {
         clearInterval(unavailableRearmTimerRef.current);
         unavailableRearmTimerRef.current = null;
       }
+      clearUnavailableRetry();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
@@ -557,6 +635,12 @@ export function useFacePipeline(props: FacePipelineProps) {
         if (typeof getBody.verify_nonce === "string") {
           nonceRef.current = getBody.verify_nonce;
         }
+        // D-F2: the nonce rotated because the session moved (a recovery or a
+        // lecturer unlock). The same GET carries the server's remainingMs —
+        // adopt it so the countdown re-syncs on this self-heal path too.
+        if (typeof getBody.remainingMs === "number" && getBody.remainingMs >= 0) {
+          onRecoveredRemainingRef.current?.(getBody.remainingMs);
+        }
       } catch {
         // fall through to surface state
       }
@@ -651,6 +735,10 @@ export function useFacePipeline(props: FacePipelineProps) {
   async function runVerify(
     trigger: "start" | "question" | "periodic",
     lightingRetries = 0,
+    // audit-3 E-F5: the bounded `unavailable` self-heal probe must be able to
+    // re-enter the verify path while the status is NOT `ready` (the cadence
+    // gate below exists to stop the NORMAL cadence, not a recovery probe).
+    force = false,
   ) {
     if (isTerminalRef.current) return;
     if (verifyLock.current) {
@@ -664,7 +752,7 @@ export function useFacePipeline(props: FacePipelineProps) {
 
     const s = statusRef.current;
     const phaseNow = questionVisibleRef.current ? "question" : "feedback";
-    if (!shouldScheduleFaceCheck(s, phaseNow) && trigger !== "start") return;
+    if (!force && !shouldScheduleFaceCheck(s, phaseNow) && trigger !== "start") return;
     if (faceExemptRef.current) {
       setStatusBoth("exempt");
       return;
@@ -677,7 +765,13 @@ export function useFacePipeline(props: FacePipelineProps) {
     // Client-side pacing: if the last POST was moments ago, fold this trigger
     // into a single deferred re-run after the remaining gap (one timer,
     // latest-wins) instead of burning rate budget on back-to-back POSTs.
-    if (trigger !== "start") {
+    //
+    // `force` (the bounded `unavailable` self-heal probe) SKIPS this deferral:
+    // the deferred re-run only fires while statusRef is 'ready', which is
+    // false in the exact state that calls a forced probe — so deferring would
+    // silently drop the probe while the caller had already consumed an attempt
+    // from its budget (adversarial review).
+    if (trigger !== "start" && !force) {
       // Async verify path — never called during render.
       // eslint-disable-next-line react-hooks/purity
       const sincePost = Date.now() - lastVerifyPostAtRef.current;
@@ -1049,6 +1143,7 @@ export function useFacePipeline(props: FacePipelineProps) {
       if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
       if (minGapTimerRef.current) clearTimeout(minGapTimerRef.current);
       if (lightingRetryTimerRef.current) clearTimeout(lightingRetryTimerRef.current);
+      clearUnavailableRetry();
       pendingVerifyRef.current = null;
     }
   }, [isTerminal]);

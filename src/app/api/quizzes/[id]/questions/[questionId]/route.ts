@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { QUESTION_IMAGES_BUCKET, isOwnedQuestionImagePath } from "@/lib/media/validation";
+import { removeStorageObjects } from "@/lib/media/cleanup";
 import { requireQuizOwner } from "@/lib/quizzes/guards";
 import { isUuid } from "@/lib/classes/roster";
 import { rateLimit } from "@/lib/classes/rate-limit";
@@ -171,10 +172,7 @@ export async function DELETE(request: Request, { params }: Params) {
     // fail closed (skip + log; 0046's CHECK/trigger backstop now makes the
     // poison unreachable for NEW writes anyway).
     if (isOwnedQuestionImagePath(imagePath, owner.userId)) {
-      void createAdminClient()
-        .storage.from(QUESTION_IMAGES_BUCKET)
-        .remove([imagePath])
-        .catch(() => {});
+      void removeStorageObjects(createAdminClient(), QUESTION_IMAGES_BUCKET, [imagePath]);
     } else {
       console.error("question delete: refusing malformed image_path", { quizId: id, questionId });
     }

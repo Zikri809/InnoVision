@@ -69,8 +69,8 @@ export async function POST(request: Request, { params }: Params) {
 
   // Body cap: selectedIndices is Zod-capped at 5 elements, but a huge JSON
   // body would be parsed BEFORE Zod sees it (sibling-route convention).
-  // audit-1 P1-5: streaming-capped read replaces the header-only
-  // checkBodyLimit (chunked bodies bypassed it) + unbounded json() pair.
+  // audit-1 P1-5: the streaming-capped read aborts mid-stream, so chunked
+  // bodies cannot bypass the cap the way a header-only check allowed.
   const body = await readCappedJson(request);
   if (!body.ok) return body.response;
 

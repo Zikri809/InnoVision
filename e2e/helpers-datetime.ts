@@ -1,4 +1,5 @@
 import type { Page, Locator } from "@playwright/test";
+import { windowIsoToLocalInput } from "../src/lib/format/window";
 
 /**
  * Set a DateTimePicker (clay calendar popover) to a specific Date.
@@ -8,12 +9,14 @@ import type { Page, Locator } from "@playwright/test";
  * Day buttons carry `data-day="<YYYY-MM-DD>"` (react-day-picker v10), which
  * is stable regardless of locale formatting or "Today, …" label prefixes.
  *
- * TIME CONTRACT: the availability-window surface is a datetime-local input
- * that `lib/format/window.windowLocalInputToIso` parses as UTC wall-clock
- * ("the lecturer schedules in UTC quiz time"; the edit-dialog labels say
- * "(UTC)"). The original e38 helper filled getUTC* components accordingly;
- * keep that here — filling local components would shift every window by the
- * machine's UTC offset (UTC+8 here) and silently flip window journeys.
+ * TIME CONTRACT (audit-3 C-F3): the availability-window surface is a
+ * datetime-local input whose value `lib/format/window.windowLocalInputToIso`
+ * interprets as a wall-clock in DISPLAY_TIME_ZONE (Asia/Kuala_Lumpur), the
+ * same zone every display surface renders. The helper therefore converts the
+ * target INSTANT into that zone's wall-clock before filling the picker —
+ * filling UTC components would shift every window by the machine's offset
+ * and silently flip window journeys. `windowIsoToLocalInput` is imported
+ * directly so the helper cannot drift from production conversion.
  */
 export async function setDateTime(
   page: Page,
@@ -22,15 +25,19 @@ export async function setDateTime(
 ): Promise<void> {
   await trigger.click();
 
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const iso = `${target.getUTCFullYear()}-${pad(target.getUTCMonth() + 1)}-${pad(target.getUTCDate())}`;
-  const year = target.getUTCFullYear();
-  const monthIdx = target.getUTCMonth();
+  // "YYYY-MM-DDTHH:mm" in DISPLAY_TIME_ZONE (Asia/Kuala_Lumpur).
+  const local = windowIsoToLocalInput(target.toISOString());
+  if (!local) throw new Error("setDateTime: invalid target date");
+  const [datePart, timePart] = local.split("T");
+  const [yearStr, monthStr, dayStr] = datePart.split("-");
+  const [hh, mm] = timePart.split(":");
+  const year = Number(yearStr);
+  const monthIdx = Number(monthStr) - 1;
 
   // Navigate until the target month is displayed. React-day-picker's prev/next
   // buttons are labeled "Go to the Previous/Next Month".
   for (let i = 0; i < 24; i++) {
-    const dayBtn = page.locator(`[data-day="${iso}"]`);
+    const dayBtn = page.locator(`[data-day="${datePart}"]`);
     if (await dayBtn.count()) {
       // data-day renders for outside (adjacent-month) cells too; only click
       // when it belongs to the displayed month grid we navigated to.
@@ -52,11 +59,9 @@ export async function setDateTime(
   }
 
   // Time inputs are labeled "<trigger label> — hours/minutes". Escape the
-  // label: it can contain regex metacharacters ("Opens at (UTC)").
+  // label: it can contain regex metacharacters (e.g. "Opens at (Malaysia time)").
   const label = (await trigger.getAttribute("aria-label")) ?? "";
   const esc = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const hh = String(target.getUTCHours()).padStart(2, "0");
-  const mm = String(target.getUTCMinutes()).padStart(2, "0");
   const hoursInput = page.getByRole("textbox", { name: new RegExp(`^${esc} — hours$`) });
   await hoursInput.fill(hh);
   await hoursInput.blur();

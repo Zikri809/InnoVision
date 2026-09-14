@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getClassRoster } from "@/lib/classes/roster";
 import { assembleResultsRows } from "@/lib/results/derive";
-import { RESULTS_SESSION_LIMIT, RESULTS_AUDIT_LIMIT } from "@/lib/results/constants";
+import { RESULTS_SESSION_LIMIT, RESULTS_AUDIT_LIMIT, RESULTS_CLIP_LIMIT } from "@/lib/results/constants";
 import { buildExportModel } from "@/lib/results/export";
 import { buildQuestionInsights } from "@/lib/results/insights";
 import { ResultsDashboardClient } from "./results-dashboard-client";
@@ -204,12 +204,21 @@ export default async function LecturerQuizResultsPage({
           supabase
             .from("session_advisories")
             .select("session_id, adv_type, first_seen_at, last_seen_at, occurrences")
-            .in("session_id", sessionIds),
+            .in("session_id", sessionIds)
+            // audit-3 R2-INC-F4: this read had no cap while every sibling read
+            // did (PostgREST's max_rows was the only ceiling, and a truncated
+            // result was indistinguishable from a complete one).
+            .order("last_seen_at", { ascending: false })
+            .limit(RESULTS_AUDIT_LIMIT),
           supabase
             .from("incident_clips")
             .select("id, session_id, storage_path, reason, duration_ms, recorded_from, recorded_to")
             .in("session_id", sessionIds)
-            .order("recorded_from", { ascending: false }),
+            .order("recorded_from", { ascending: false })
+            // audit-3 R2-INC-F4: capped like every sibling read. Each row also
+            // costs a signed-URL mint below, so an uncapped read turned every
+            // page load into an unbounded burst of 1-hour bearer URLs.
+            .limit(RESULTS_CLIP_LIMIT),
         ]);
 
   if (faceChecksError) {

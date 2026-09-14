@@ -8,6 +8,8 @@ import { GradebookClient } from "./gradebook-client";
 export const dynamic = "force-dynamic";
 
 const QUESTION_COUNT_LIMIT = 5_000;
+// audit-3 B-F7: session read cap (mirrors the export route's SESSIONS_LIMIT).
+const SESSIONS_LIMIT = 20_000;
 
 /**
  * RA-1 — cross-quiz class gradebook (RSC).
@@ -53,18 +55,20 @@ export default async function GradebookPage({
   }
   if (!cls) notFound();
 
-  const [{ roster, error: rosterError }, { data: quizzes, error: quizzesError }] =
-    await Promise.all([
-      getClassRoster(supabase, id),
-      supabase
-        .from("quizzes")
-        .select("id, title, status, results_revealed_at, created_at")
-        .eq("class_id", id)
-        .in("status", ["live", "closed"])
-        .eq("mode", "assessment")
-        .order("created_at", { ascending: true })
-        .limit(GRADEBOOK_QUIZ_LIMIT + 1),
-    ]);
+  const [
+    { roster, truncated: rosterTruncated, error: rosterError },
+    { data: quizzes, error: quizzesError },
+  ] = await Promise.all([
+    getClassRoster(supabase, id),
+    supabase
+      .from("quizzes")
+      .select("id, title, status, results_revealed_at, created_at")
+      .eq("class_id", id)
+      .in("status", ["live", "closed"])
+      .eq("mode", "assessment")
+      .order("created_at", { ascending: true })
+      .limit(GRADEBOOK_QUIZ_LIMIT + 1),
+  ]);
 
   if (rosterError || quizzesError) {
     console.error("Gradebook fetch error:", rosterError ?? quizzesError);
@@ -72,8 +76,6 @@ export default async function GradebookPage({
   }
 
   const quizList = quizzes ?? [];
-  // Over-cap flag from the same filtered source list (not raw class quizzes).
-  const truncated = quizList.length > GRADEBOOK_QUIZ_LIMIT;
   const columnQuizzes = quizList.slice(0, GRADEBOOK_QUIZ_LIMIT);
   const quizIds = columnQuizzes.map((q) => q.id);
 
@@ -100,21 +102,32 @@ export default async function GradebookPage({
 
   // Sessions for all column quizzes in ONE read, ordered to satisfy
   // selectRepresentativeSessions' contract (started_at DESC, id DESC).
-  const { data: sessionRows, error: sessionsError } = quizIds.length
+  // audit-3 B-F7: bounded read — `count: "exact"` gives the true matching
+  // total so the page can tell the user when older attempts were dropped
+  // (including when the deployed PostgREST `max_rows` clamps our limit).
+  const { data: sessionRows, count: sessionCount, error: sessionsError } = quizIds.length
     ? await supabase
         .from("lecturer_session_view")
         .select(
           "id, quiz_id, student_id, status, score, started_at, submitted_at, last_activity_at, face_fail_streak, focus_pause_count, fullscreen_pause_count, hand_pause_count, face_fail_count, attempt",
+          { count: "exact" },
         )
         .in("quiz_id", quizIds)
         .order("started_at", { ascending: false })
         .order("id", { ascending: false })
-        .limit(20_000)
-    : { data: [], error: null };
+        .limit(SESSIONS_LIMIT)
+    : { data: [], count: 0, error: null };
   if (sessionsError) {
     console.error("Gradebook sessions fetch error:", sessionsError);
     return <LoadErrorPanel />;
   }
+
+  // Prefer the exact count; the `>= limit` form is only a fallback for a null
+  // count (with a real count it false-positives at exactly the cap).
+  const sessionsTruncated =
+    typeof sessionCount === "number"
+      ? sessionCount > (sessionRows?.length ?? 0)
+      : (sessionRows?.length ?? 0) >= SESSIONS_LIMIT;
 
   const sessionsByQuiz = new Map<string, import("@/lib/results/export").ExportSessionInput[]>();
   for (const s of sessionRows ?? []) {
@@ -143,7 +156,9 @@ export default async function GradebookPage({
   const model = buildGradebookModel({
     className: cls.title,
     roster,
-    quizzes: columnQuizzes.map((q) => ({
+    // Feed the FULL fetched list (≤ LIMIT+1) so the model derives the
+    // over-cap flag itself (single source of truth).
+    quizzes: quizList.map((q) => ({
       id: q.id,
       title: q.title,
       status: q.status,
@@ -155,13 +170,15 @@ export default async function GradebookPage({
       count: countByQuiz.get(q.id) ?? 0,
     })),
     sessionsByQuiz,
+    // audit-2 M-13 / audit-3 B-F5: pass the roster read's flag through.
+    rosterTruncated,
   });
 
   return (
     <GradebookClient
       model={model}
-      truncated={truncated}
       quizLimit={GRADEBOOK_QUIZ_LIMIT}
+      sessionsTruncated={sessionsTruncated}
       classId={cls.id}
       archived={cls.archived_at !== null}
     />

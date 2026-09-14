@@ -26,6 +26,20 @@ describe("poll state machine (U2)", () => {
     expect(nextHealth("unhealthy", "subscribed")).toBe("subscribed");
   });
 
+  // audit-3 H-F3: a resume from a hidden gap tears the channel down, so a
+  // previously-"subscribed" health is stale and must fast-poll until SUBSCRIBED
+  // re-confirms. An already-unhealthy resume stays unhealthy (idempotent).
+  it("resume downgrades a stale healthy state to the fast cadence", () => {
+    expect(nextHealth("subscribed", "resumed")).toBe("unhealthy");
+    expect(nextHealth("unhealthy", "resumed")).toBe("unhealthy");
+  });
+
+  it("resume → SUBSCRIBED restores the healthy cadence", () => {
+    expect(nextHealth(nextHealth("subscribed", "resumed"), "subscribed")).toBe(
+      "subscribed",
+    );
+  });
+
   it("effectivePollMs falls back to cadence when no window seam (node env)", () => {
     // In the vitest node environment there is no `window`, so the test-seam
     // override path is inert and the plain cadence applies.

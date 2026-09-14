@@ -512,7 +512,10 @@ phone can micro-shake the camera into spurious re-verify). None under
    references ARE caught.
 9. Security/privacy: camera boots only after consent; keyless assessment
    acks; shuffle presented↔canonical translation; no answer key pre-reveal;
-   `Permissions-Policy: microphone=()` untouched.
+   `Permissions-Policy: microphone=(self)` (audit-3 R3-INT-F1: the old
+   `microphone=()` was an EMPTY allowlist that blocked same-origin too, so the
+   integrity suite's own mic capture — voice/headset advisories and the
+   incident-clip audio track — was dead in every deployment).
 
 ## 6. Delivery phases (each shippable, e2e-green)
 

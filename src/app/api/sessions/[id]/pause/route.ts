@@ -19,8 +19,20 @@ type Params = { params: Promise<{ id: string }> };
 // Per-user rate limit on pauses (coalesced per episode — 20/min is generous).
 const PAUSE_RATE = { limit: 20, windowMs: 60 * 1000 };
 
+// D-F5: the Zod enum MUST mirror the pause_session RPC enum verbatim
+// (0046:665 accepts 'focus_lost' | 'hard_blur' | 'fullscreen_exit' |
+// 'hand_loss'). It used to omit 'hard_blur', so the route rejected a value
+// the RPC accepts — a contract skew that would 400 the day a sender used it.
+//
+// TRAP (documented, 0046:692-694): the RPC's counting is
+// `focus_lost` → focus_pause_count; `fullscreen_exit` → fullscreen_pause_count;
+// EVERY OTHER reason (hand_loss AND hard_blur) → hand_pause_count, with a
+// 3-strike auto-flag. So adding a reason here without a matching RPC branch
+// silently makes it a hand-pause strike. Add a branch in the RPC first.
 const PauseSchema = z.object({
-  reason: z.enum(["hand_loss", "focus_lost", "fullscreen_exit"]).default("hand_loss"),
+  reason: z
+    .enum(["hand_loss", "focus_lost", "fullscreen_exit", "hard_blur"])
+    .default("hand_loss"),
 });
 
 /**
@@ -79,7 +91,9 @@ export async function POST(request: Request, { params }: Params) {
     }
     const parsed = PauseSchema.safeParse(body);
     if (!parsed.success) {
-      return invalidBody("reason must be 'hand_loss', 'focus_lost' or 'fullscreen_exit'.");
+      return invalidBody(
+        "reason must be 'hand_loss', 'focus_lost', 'fullscreen_exit' or 'hard_blur'.",
+      );
     }
     reason = parsed.data.reason;
   }

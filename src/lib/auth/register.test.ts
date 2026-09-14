@@ -102,6 +102,10 @@ vi.mock("@/lib/supabase/admin", () => ({
     if (!adminHolder.current) throw new Error("admin client not configured");
     return adminHolder.current;
   },
+  // audit-3 A-F5: the advisory pre-checks use the null-returning accessor, so
+  // the mock must expose it too. Returning null when no admin client is
+  // configured exercises exactly the degradation path the fix introduced.
+  tryCreateAdminClient: () => adminHolder.current ?? null,
 }));
 vi.mock("next/headers", () => ({
   cookies: async () => ({ set: () => undefined, get: () => undefined }),
@@ -113,6 +117,37 @@ beforeEach(() => {
   rlsHolder.current = undefined;
   adminHolder.current = undefined;
   _resetRateLimiter();
+});
+
+describe("register — full_name bound (audit-3 A-F6)", () => {
+  it("rejects a name over 120 chars BEFORE any auth work", async () => {
+    // The bound must equal the profiles_full_name_len CHECK (0050): a longer
+    // name used to pass validation and then hit 23514 in the service-role
+    // upsert, surfacing as promotionFailed/consentFailed after the account
+    // already existed.
+    rlsHolder.current = makeRlsClient();
+    adminHolder.current = makeAdminClient();
+    const res = await register({
+      email: "a@b.com",
+      password: "hunter22",
+      matricNo: "231456",
+      fullName: "x".repeat(121),
+    });
+    expect(res.error).toMatch(/120 characters/i);
+    expect(rlsHolder.current!.signUpCalls).toHaveLength(0);
+  });
+
+  it("accepts exactly 120 chars", async () => {
+    rlsHolder.current = makeRlsClient();
+    adminHolder.current = makeAdminClient();
+    const res = await register({
+      email: "a@b.com",
+      password: "hunter22",
+      matricNo: "231456",
+      fullName: "x".repeat(120),
+    });
+    expect(res.session).toBe(true);
+  });
 });
 
 describe("register — matric validation", () => {

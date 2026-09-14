@@ -106,9 +106,25 @@ export class StudentFakeSupabase extends FakeSupabase {
       return { data: null, error: { message: "question_cap_reached" } };
     }
 
+    // audit-3 H3-ATOM-F1: a replace scoped to `p_replace_ids` deletes ONLY
+    // those rows (a manual question appended during the LLM call survives); a
+    // null/absent list keeps the historical full-replace semantics.
+    const replaceIds = Array.isArray(args?.p_replace_ids)
+      ? (args.p_replace_ids as unknown[]).filter((v): v is string => typeof v === "string")
+      : null;
+    const surviving =
+      mode === "replace" && replaceIds !== null
+        ? questions.filter((q) => q.quiz_id !== quizId || !replaceIds.includes(String(q.id)))
+        : questions.filter((q) => q.quiz_id !== quizId);
+
     // Atomicity: validate everything BEFORE mutating anything.
     const staged: Row[] = [];
-    let order = mode === "replace" ? 0 : mine.reduce((m, q) => Math.max(m, (q.order_index as number) ?? -1), -1) + 1;
+    let order =
+      mode === "replace" && replaceIds === null
+        ? 0
+        : surviving
+            .filter((q) => q.quiz_id === quizId)
+            .reduce((m, q) => Math.max(m, (q.order_index as number) ?? -1), -1) + 1;
     for (const r of rows as Row[]) {
       staged.push({
         id: randomUuid(),
@@ -124,7 +140,7 @@ export class StudentFakeSupabase extends FakeSupabase {
     }
 
     if (mode === "replace") {
-      this.tables["student_quiz_questions"] = questions.filter((q) => q.quiz_id !== quizId);
+      this.tables["student_quiz_questions"] = surviving;
     }
     this.tables["student_quiz_questions"].push(...staged);
 

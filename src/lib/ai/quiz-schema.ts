@@ -155,7 +155,20 @@ export const AiQuestionSchema = z
     }
   });
 
-/** The raw schema the AI is asked to produce (also validates model output). */
+/**
+ * The raw schema the AI is asked to produce (also validates model output).
+ *
+ * audit-3 F-F7 — TITLE CONTRACT: `title` is validated here (1–200 chars, the
+ * same bound as the quizzes DB CHECK) but is deliberately NOT written back to
+ * the quiz row. A quiz is always created with a lecturer-chosen title
+ * (`quizzes.title` is NOT NULL, 0004:37), so there is no "absent title" case
+ * the generated value could honestly fill — the pre-existing title always
+ * wins, and the RPC's `coalesce(p_title, title)` (0040/0041) is a no-op by
+ * construction. The generated title remains load-bearing as a FAILURE gate:
+ * a missing/over-long title fails AiQuizSchema and triggers the retry/422
+ * path (pinned by ai-routes.test.ts:86-87). Callers must not "fix" this by
+ * applying the AI title — that would silently rename lecturer quizzes.
+ */
 export const AiQuizSchema = z
   .object({
     title: z

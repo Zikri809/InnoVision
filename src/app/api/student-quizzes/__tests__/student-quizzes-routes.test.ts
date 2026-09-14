@@ -12,6 +12,38 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: () => fakeHolder.current,
 }));
 
+// Service-role storage seam for the DELETE sweep (audit-3 G-F3). Mirrors the
+// real `tryCreateAdminClient` degradation: null when the key is unset.
+const adminState = vi.hoisted(() => ({
+  removed: [] as Array<{ bucket: string; paths: string[] }>,
+  listed: [] as Array<{ bucket: string; prefix: string }>,
+  hasKey: true,
+  prefixObjects: [] as string[],
+}));
+
+vi.mock("@/lib/supabase/admin", () => {
+  const storage = {
+    from: (bucket: string) => ({
+      remove: async (paths: string[]) => {
+        adminState.removed.push({ bucket, paths });
+        return { data: paths.map((p) => ({ path: p })), error: null };
+      },
+      list: async (prefix: string) => {
+        adminState.listed.push({ bucket, prefix });
+        return {
+          data: adminState.prefixObjects.map((name) => ({ name })),
+          error: null,
+        };
+      },
+    }),
+  };
+  const client = { storage };
+  return {
+    createAdminClient: () => client,
+    tryCreateAdminClient: () => (adminState.hasKey ? client : null),
+  };
+});
+
 async function importAll() {
   const list = await import("@/app/api/student-quizzes/route");
   const quizRoute = await import("@/app/api/student-quizzes/[id]/route");
@@ -45,6 +77,10 @@ beforeEach(() => {
   vi.resetModules();
   _resetRateLimiter();
   fakeHolder.current = undefined;
+  adminState.removed = [];
+  adminState.listed = [];
+  adminState.hasKey = true;
+  adminState.prefixObjects = [];
 });
 
 describe("authoring routes — creator authz", () => {
@@ -476,5 +512,171 @@ describe("QT-1 — student domain rejects multi_select (v1 scope)", () => {
       { params: Promise.resolve({ id: ctx.quizId, questionId: ctx.q1 }) },
     );
     expect(res.status).toBe(400);
+  });
+});
+
+describe("H3-ATOM-F1 — scoped replace preserves concurrently-added rows", () => {
+  it("a replace scoped to p_replace_ids keeps a manual question added mid-LLM", async () => {
+    const ctx = makeStudentQuizContext();
+    const client = ctx.client;
+    fakeHolder.current = client;
+    const quizId = ctx.quizId;
+
+    // The snapshot taken BEFORE the LLM call: only the seeded q1 row id.
+    const snapshotId = client.tables["student_quiz_questions"]![0].id as string;
+    // A manual question appended DURING the call (not in the snapshot).
+    client.seedStudentQuestion({
+      id: "00000000-0000-4000-8000-0000000000a2",
+      quiz_id: quizId,
+      order_index: 2,
+      type: "mcq",
+      prompt: "Manual mid-call",
+      options: ["a", "b"],
+      correct_index: 0,
+      generation_id: null,
+    });
+
+    const { error } = await client.rpc("save_student_quiz_questions", {
+      p_quiz_id: quizId,
+      p_questions: [
+        { type: "mcq", prompt: "Generated", options: ["a", "b"], correct_index: 0 },
+      ],
+      p_mode: "replace",
+      p_replace_ids: [snapshotId],
+    } as never);
+    expect(error).toBeNull();
+
+    const rows = client.tables["student_quiz_questions"]!.filter((q) => q.quiz_id === quizId);
+    const prompts = rows.map((r) => r.prompt);
+    // The scoped row is gone; the manual row survived; the generated row landed.
+    expect(prompts).not.toContain("What is 2+2?");
+    expect(prompts).toContain("Manual mid-call");
+    expect(prompts).toContain("Generated");
+    // Generated row appended AFTER the surviving maximum.
+    const survivingMax = Math.max(
+      ...rows.filter((r) => r.prompt === "Manual mid-call").map((r) => Number(r.order_index)),
+    );
+    expect(Number(rows.find((r) => r.prompt === "Generated")?.order_index)).toBeGreaterThan(survivingMax);
+  });
+
+  it("a null p_replace_ids keeps the historical full-replace semantics", async () => {
+    const ctx = makeStudentQuizContext();
+    const client = ctx.client;
+    fakeHolder.current = client;
+    const quizId = ctx.quizId;
+
+    const { error } = await client.rpc("save_student_quiz_questions", {
+      p_quiz_id: quizId,
+      p_questions: [
+        { type: "mcq", prompt: "New", options: ["a", "b"], correct_index: 0 },
+      ],
+      p_mode: "replace",
+    } as never);
+    expect(error).toBeNull();
+    const rows = client.tables["student_quiz_questions"]!.filter((q) => q.quiz_id === quizId);
+    expect(rows.map((r) => r.prompt)).toEqual(["New"]);
+  });
+});
+
+// ─── audit-3 G-F3 / H3-AUTHZ-F1: student quiz DELETE ─────────────────────
+describe("DELETE /api/student-quizzes/[id] — limiter + eager storage cleanup", () => {
+  it("deletes the quiz and sweeps owned question images + the quiz-sources prefix", async () => {
+    const ctx = makeStudentQuizContext();
+    fakeHolder.current = ctx.client;
+    const img = `${ctx.ownerId}/66666666-6666-4666-8666-666666666666.png`;
+    ctx.client.tables["student_quiz_questions"]![0].image_path = img;
+    // Two objects under the server-constructed `<uid>/<quizId>/` prefix: one
+    // valid, one malformed (must be skipped by the per-object validator).
+    adminState.prefixObjects = [
+      "77777777-7777-4777-8777-777777777777-notes.pdf",
+      "..",
+    ];
+
+    const { quizRoute } = await importAll();
+    const res = await quizRoute.DELETE(req(), {
+      params: Promise.resolve({ id: ctx.quizId }),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).ok).toBe(true);
+    // The row is gone.
+    expect(
+      (ctx.client.tables["student_quizzes"] ?? []).find((q) => q.id === ctx.quizId),
+    ).toBeUndefined();
+
+    const removed = adminState.removed.flatMap((r) => r.paths);
+    expect(removed).toContain(img);
+    expect(removed).toContain(`${ctx.ownerId}/${ctx.quizId}/77777777-7777-4777-8777-777777777777-notes.pdf`);
+    // The malformed object name never reached remove().
+    expect(removed.some((p) => p.endsWith("/.."))).toBe(false);
+    expect(adminState.listed).toContainEqual({
+      bucket: "quiz-sources",
+      prefix: `${ctx.ownerId}/${ctx.quizId}`,
+    });
+  });
+
+  it("skips a malformed question image_path (owner-pinned, skip + log)", async () => {
+    const ctx = makeStudentQuizContext();
+    fakeHolder.current = ctx.client;
+    ctx.client.tables["student_quiz_questions"]![0].image_path = "../other/evil.png";
+
+    const { quizRoute } = await importAll();
+    const res = await quizRoute.DELETE(req(), {
+      params: Promise.resolve({ id: ctx.quizId }),
+    });
+    expect(res.status).toBe(200);
+    expect(adminState.removed.flatMap((r) => r.paths)).not.toContain("../other/evil.png");
+  });
+
+  it("degrades gracefully when the service-role key is unset (no 500 on a committed delete)", async () => {
+    const ctx = makeStudentQuizContext();
+    fakeHolder.current = ctx.client;
+    ctx.client.tables["student_quiz_questions"]![0].image_path = `${ctx.ownerId}/88888888-8888-4888-8888-888888888888.png`;
+    adminState.hasKey = false;
+
+    const { quizRoute } = await importAll();
+    const res = await quizRoute.DELETE(req(), {
+      params: Promise.resolve({ id: ctx.quizId }),
+    });
+    expect(res.status).toBe(200);
+    expect(adminState.removed).toEqual([]);
+    expect(adminState.listed).toEqual([]);
+  });
+
+  it("DELETE rate limit (60/h) → 429 on the 61st call", async () => {
+    const ctx = makeStudentQuizContext();
+    fakeHolder.current = ctx.client;
+    const { quizRoute } = await importAll();
+    // Dynamic import AFTER resetModules so the seeding lands on the SAME
+    // rate-limit instance the route module captured.
+    const { _seedRateLimit } = await import("@/lib/classes/rate-limit");
+    _seedRateLimit(`sq-delete:${ctx.ownerId}`, 60);
+    const res = await quizRoute.DELETE(req(), {
+      params: Promise.resolve({ id: ctx.quizId }),
+    });
+    expect(res.status).toBe(429);
+  });
+
+  it("maps a delete write failure → 503; malformed id → 404; cross-origin → 403", async () => {
+    const ctx = makeStudentQuizContext();
+    fakeHolder.current = ctx.client;
+    const { quizRoute } = await importAll();
+
+    ctx.client.updateError = "connection reset";
+    expect(
+      (await quizRoute.DELETE(req(), { params: Promise.resolve({ id: ctx.quizId }) })).status,
+    ).toBe(503);
+
+    ctx.client.updateError = null;
+    expect(
+      (await quizRoute.DELETE(req(), { params: Promise.resolve({ id: "nope" }) })).status,
+    ).toBe(404);
+
+    const cross = new Request("http://localhost", {
+      method: "DELETE",
+      headers: { origin: "https://evil.example" },
+    });
+    expect(
+      (await quizRoute.DELETE(cross, { params: Promise.resolve({ id: ctx.quizId }) })).status,
+    ).toBe(403);
   });
 });

@@ -17,8 +17,10 @@ Contract (docs/PLAN_INSIGHTFACE_MIGRATION.md, v3):
 Privacy: frames are decoded in memory and NEVER written to disk.
 
 Security: optional shared-secret header (`x-sidecar-token`, compared with
-`FACE_SIDECAR_TOKEN`) — the loopback publish is the primary control, the
-token guards bind drift (compose edits, `network_mode: host`). Request body
+`FACE_SIDECAR_TOKEN` in constant time via `hmac.compare_digest`) — the
+loopback publish is the primary control, the token guards bind drift (compose
+edits, `network_mode: host`). This is defense-in-depth, not a live oracle:
+over loopback the attacker already owns the host. Request body
 is capped (FACE_MAX_BODY_MB, default 2 MB) — well above the ~150KB frames
 the Next.js routes send, far below memory-exhaustion abuse.
 
@@ -38,6 +40,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import hmac
 import logging
 import os
 
@@ -104,7 +107,13 @@ def health() -> dict:
 
 
 def _check_token(x_sidecar_token: str | None) -> None:
-    if TOKEN and x_sidecar_token != TOKEN:
+    # audit-3 R3-DEP-F5: constant-time compare. `!=` short-circuits on the
+    # first differing byte, which is a (near-theoretical, over-loopback)
+    # timing oracle on the shared secret. hmac.compare_digest removes it.
+    # Honest framing: the loopback publish is the primary control and an empty
+    # TOKEN disables the check by design (local dev default) — this is
+    # hygiene/defense-in-depth against bind drift, not a live vulnerability.
+    if TOKEN and not hmac.compare_digest(x_sidecar_token or "", TOKEN):
         raise HTTPException(status_code=401, detail="unauthorized")
 
 

@@ -55,6 +55,48 @@ afterAll(() => {
   vi.unstubAllEnvs();
 });
 
+describe("audit-3 R3-DEP-F2 — VLLM_API_KEY forwarding", () => {
+  it("sends Authorization: Bearer on the probe and the chat call when the key is set", async () => {
+    vi.stubEnv("VLLM_API_KEY", "test-vllm-secret");
+    lecturerContext();
+    const seen: { probe?: string | null; chat?: string | null } = {};
+    defaultAiServer.use(
+      http.get(`${GLM_BASE}/v1/models`, ({ request }) => {
+        seen.probe = request.headers.get("authorization");
+        return HttpResponse.json({ data: [{ id: "glm-ocr" }] });
+      }),
+      http.post(`${GLM_BASE}/v1/chat/completions`, ({ request }) => {
+        seen.chat = request.headers.get("authorization");
+        return HttpResponse.json({ choices: [{ message: { content: "page text" } }] });
+      }),
+    );
+    const route = await importRoute();
+    const res = await route.POST(post({ image: PNG_DATAURL }));
+    expect(res.status).toBe(200);
+    expect(seen.probe).toBe("Bearer test-vllm-secret");
+    expect(seen.chat).toBe("Bearer test-vllm-secret");
+  });
+
+  it("sends NO Authorization header when the key is unset (keyless loopback default)", async () => {
+    vi.stubEnv("VLLM_API_KEY", "");
+    lecturerContext();
+    let probeAuth: string | null = "unset";
+    defaultAiServer.use(
+      http.get(`${GLM_BASE}/v1/models`, ({ request }) => {
+        probeAuth = request.headers.get("authorization");
+        return HttpResponse.json({ data: [{ id: "glm-ocr" }] });
+      }),
+      http.post(`${GLM_BASE}/v1/chat/completions`, () =>
+        HttpResponse.json({ choices: [{ message: { content: "page text" } }] }),
+      ),
+    );
+    const route = await importRoute();
+    const res = await route.POST(post({ image: PNG_DATAURL }));
+    expect(res.status).toBe(200);
+    expect(probeAuth).toBeNull();
+  });
+});
+
 describe("GET /api/extract/ocr — availability probe", () => {
   it("reports available:true when the model is listed upstream", async () => {
     lecturerContext();
@@ -137,6 +179,25 @@ describe("POST /api/extract/ocr — page transcription", () => {
     expect((await res.json()).error).toBe("glm_error");
   });
 
+  // audit-3 F-F10: an upstream 429 is a capacity/rate signal, not a page-read
+  // failure. It must surface as its own code so the dialog says "rate limited,
+  // retry" instead of provoking retries into the same spent window.
+  it("upstream 429 → 429 glm_rate_limited (distinct from glm_error)", async () => {
+    lecturerContext();
+    defaultAiServer.use(
+      http.get(`${GLM_BASE}/v1/models`, () =>
+        HttpResponse.json({ data: [{ id: "glm-ocr" }] }),
+      ),
+      http.post(`${GLM_BASE}/v1/chat/completions`, () =>
+        HttpResponse.json({ error: "too many" }, { status: 429 }),
+      ),
+    );
+    const route = await importRoute();
+    const res = await route.POST(post({ image: PNG_DATAURL }));
+    expect(res.status).toBe(429);
+    expect((await res.json()).error).toBe("glm_rate_limited");
+  });
+
   it("malformed image field → 400 glm_error", async () => {
     lecturerContext();
     const route = await importRoute();
@@ -154,5 +215,39 @@ describe("POST /api/extract/ocr — page transcription", () => {
       body: "{nope",
     });
     expect((await route.POST(bad)).status).toBe(400);
+  });
+
+  // audit-3 F-F4: the limiter alone admitted a second batch of 20 at t≈60s
+  // while the first batch (90s each) was still running → up to 40 concurrent
+  // GPU holds. The in-flight guard caps concurrent pages per user.
+  it("caps concurrent page inferences per user (F-F4 in-flight guard)", async () => {
+    lecturerContext();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    defaultAiServer.use(
+      http.get(`${GLM_BASE}/v1/models`, () =>
+        HttpResponse.json({ data: [{ id: "glm-ocr" }] }),
+      ),
+      http.post(`${GLM_BASE}/v1/chat/completions`, async () => {
+        await gate;
+        return HttpResponse.json({ choices: [{ message: { content: "page text" } }] });
+      }),
+    );
+    const route = await importRoute();
+    // Two pages are admitted (the ceiling); the third is rejected as busy.
+    const p1 = route.POST(post({ image: PNG_DATAURL }));
+    const p2 = route.POST(post({ image: PNG_DATAURL }));
+    const third = await route.POST(post({ image: PNG_DATAURL }));
+    expect(third.status).toBe(429);
+    expect((await third.json()).error).toBe("glm_busy");
+    release();
+    const [r1, r2] = await Promise.all([p1, p2]);
+    expect(r1.status).toBe(200);
+    expect(r2.status).toBe(200);
+    // The slots are released — a later request succeeds.
+    const after = await route.POST(post({ image: PNG_DATAURL }));
+    expect(after.status).toBe(200);
   });
 });

@@ -43,12 +43,23 @@
 //          session_id); budget exhaustion; practice untouched.
 //   D53  — stale-paused sealing: passed window → stale session sealed
 //          completed (evidence preserved), spawn window-stopped; windowless
-//          quiz keeps normal already_attempted blocking.
+//          quiz keeps normal already_attempted blocking. (0048 D-F3: the
+//          seal writes NO submitted_at and never touches flagged.)
 //   D54  — retake-aware auto-reveal: fresh completed student with budget
 //          remaining keeps the quiz unrevealed; final submit reveals.
 //   D55  — quiz_completed_all digest counts DISTINCT students: one student's
 //          two attempts don't fire it; the second distinct student does
 //          (exactly once — dedupe key holds).
+//   D56  — (0048 D-F1b) quiz_autoclose seals in-flight assessment sessions of
+//          closed quizzes: completed + scored, submitted_at NULL, no
+//          session_submitted mail, one-active slot freed.
+//   D57  — (0048 D-F3) flagged is NEVER sealed: the autoclose sweep and the
+//          stale-window restart both leave the lecturer hold standing.
+//   D58  — (0048 R2-SESS-F3) self_recover_session / unlock_session /
+//          exempt_face_session refuse a CLOSED quiz → quiz_not_live.
+//   D59  — (0048 R2-RLS-F1) direct PostgREST reads of session_answers
+//          .is_correct and quiz_sessions.score are denied at the privilege
+//          layer while the safe columns + reveal-gated views still work.
 //
 // NOTE: D41 (quiz-delete guard) is deliberately NOT here — a Node Supabase
 // client cannot invoke Next.js route handlers, and at the DB layer the FK is
@@ -850,11 +861,15 @@ async function main() {
     record("D53 stale active session from a PASSED window → sealed, spawn window-stopped",
       s1b.data?.error === "quiz_window_closed",
       JSON.stringify(s1b.data));
-    const rows = await clientS1.from("quiz_sessions").select("id, attempt, status, submitted_at")
+    // D-F3 (0048): the seal no longer writes submitted_at — a sealed session
+    // never submitted, and stamping it made the gradebook misrepresent it.
+    // The assign_seal_score trigger still materializes the score. `score` is
+    // column-revoked from authenticated (0048 §7), so read it via admin.
+    const rows = await admin.from("quiz_sessions").select("id, attempt, status, submitted_at, score")
       .eq("quiz_id", quiz.id).eq("student_id", studentS1.id).order("attempt");
-    record("D53 sealed attempt-1 marked completed (never deleted — evidence preserved)",
+    record("D53 sealed attempt-1 marked completed, submitted_at NULL (D-F3: sealed ≠ submitted)",
       (rows.data ?? []).length === 1 && rows.data[0].status === "completed" &&
-        rows.data[0].submitted_at != null,
+        rows.data[0].submitted_at == null && rows.data[0].score != null,
       JSON.stringify(rows.data ?? []));
 
     // No-budget case behaves identically (sealing is unconditional).
@@ -951,6 +966,175 @@ async function main() {
       (digestFinal.data ?? []).length === 1 &&
         digestFinal.data[0].dedupe_key === `quiz_completed_all:${quiz.id}`,
       JSON.stringify(digestFinal.data ?? []));
+  }
+
+  // ── D56 (0048 D-F1b): quiz_autoclose seals in-flight assessments ──
+  // A quiz closed mid-session used to leave every active session stranded:
+  // answers 409 quiz_not_live, submit deliberately permissive but nothing
+  // ever asked for it, and the one-active index blocked a retake. The
+  // autoclose sweep now seals (completed + scored, NOT submitted).
+  {
+    const quiz = await makeQuiz({ title: "D56 Autoclose Seal", mode: "assessment" });
+    const qs = await addQuestions(quiz.id, QUESTION_TEMPLATE);
+    await publish(quiz.id);
+
+    const s1 = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
+    assertNoError("D56 start", s1);
+    const sId = s1.data.session.id;
+    await clientS1.rpc("answer_question", {
+      p_session_id: sId, p_question_id: qs[0].id, p_selected_index: 0,
+    });
+
+    // Window passes → autoclose flips live→closed AND seals the session.
+    await clientA.from("quizzes")
+      .update({ closes_at: new Date(Date.now() - 60_000).toISOString() })
+      .eq("id", quiz.id);
+    const ac = await admin.rpc("quiz_autoclose");
+    assertNoError("D56 quiz_autoclose", { error: ac.error });
+
+    const row = (await admin.from("quiz_sessions")
+      .select("status, score, submitted_at").eq("id", sId).single()).data;
+    record("D56 autoclose seals in-flight assessment (completed + scored, NOT submitted)",
+      row?.status === "completed" && row?.score === 1 && row?.submitted_at == null,
+      JSON.stringify(row));
+
+    // Seal ≠ submit: no session_submitted digest row for the sealed session.
+    const subNotif = await clientA.from("notifications").select("id")
+      .eq("dedupe_key", `session_submitted:${sId}`);
+    record("D56 sealed session fires NO session_submitted notification (0045 §9 GUC)",
+      (subNotif.data ?? []).length === 0, JSON.stringify(subNotif.data ?? []));
+
+    // The one-active slot is freed: the index only covers active/paused/flagged.
+    const active = await admin.from("quiz_sessions").select("id")
+      .eq("quiz_id", quiz.id).eq("status", "active");
+    record("D56 no active row remains (one-active slot freed by the seal)",
+      (active.data ?? []).length === 0, JSON.stringify(active.data ?? []));
+  }
+
+  // ── D57 (0048 D-F3): flagged is NEVER sealed — the hold survives ──
+  {
+    // Arm A: the autoclose sweep must leave a flagged session alone.
+    const quiz = await makeQuiz({ title: "D57 Flagged Hold", mode: "assessment" });
+    await addQuestions(quiz.id, QUESTION_TEMPLATE);
+    await publish(quiz.id);
+
+    const s3 = await clientS3.rpc("start_quiz_session", { p_quiz_id: quiz.id });
+    assertNoError("D57 start", s3);
+    const sId = s3.data.session.id;
+    // Flag it (service-role write fires the same notify trigger as the RPCs).
+    await admin.from("quiz_sessions").update({ status: "flagged" }).eq("id", sId);
+
+    // Window passes → autoclose. The flag must survive.
+    await clientA.from("quizzes")
+      .update({ closes_at: new Date(Date.now() - 60_000).toISOString() })
+      .eq("id", quiz.id);
+    await admin.rpc("quiz_autoclose");
+    const row = (await admin.from("quiz_sessions")
+      .select("status, submitted_at").eq("id", sId).single()).data;
+    record("D57 autoclose does NOT seal a flagged session (lecturer hold survives)",
+      row?.status === "flagged" && row?.submitted_at == null, JSON.stringify(row));
+
+    // Arm B: start_quiz_session's stale-window seal must not touch flagged
+    // either. It needs the quiz still LIVE (a closed quiz short-circuits at
+    // the status gate with quiz_not_live before reaching the seal), so use a
+    // second quiz whose window passed but which was never autoclosed.
+    const quiz2 = await makeQuiz({ title: "D57 Flagged Stale Restart", mode: "assessment" });
+    await addQuestions(quiz2.id, QUESTION_TEMPLATE);
+    await publish(quiz2.id);
+    const s3b = await clientS3.rpc("start_quiz_session", { p_quiz_id: quiz2.id });
+    assertNoError("D57 arm B start", s3b);
+    const sId2 = s3b.data.session.id;
+    await admin.from("quiz_sessions").update({ status: "flagged" }).eq("id", sId2);
+    await clientA.from("quizzes")
+      .update({ closes_at: new Date(Date.now() - 60_000).toISOString() })
+      .eq("id", quiz2.id);
+
+    const blocked = await clientS3.rpc("start_quiz_session", { p_quiz_id: quiz2.id });
+    const rowAfter = (await admin.from("quiz_sessions")
+      .select("status, submitted_at").eq("id", sId2).single()).data;
+    record("D57 stale-window restart does NOT seal flagged (still already_attempted)",
+      blocked.data?.error === "already_attempted" &&
+        rowAfter?.status === "flagged" && rowAfter?.submitted_at == null,
+      `${JSON.stringify(blocked.data)} row=${JSON.stringify(rowAfter)}`);
+  }
+
+  // ── D58 (0048 R2-SESS-F3): resurrect paths refuse a closed quiz ──
+  {
+    const quiz = await makeQuiz({ title: "D58 Liveness Gate", mode: "assessment" });
+    await addQuestions(quiz.id, QUESTION_TEMPLATE);
+    await publish(quiz.id);
+
+    const s1 = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
+    assertNoError("D58 start", s1);
+    const sId = s1.data.session.id;
+    await clientS1.rpc("pause_session", { p_session_id: sId });
+    // Close the quiz out from under the paused session.
+    await admin.from("quizzes").update({ status: "closed" }).eq("id", quiz.id);
+
+    const rec = await clientS1.rpc("self_recover_session", { p_session_id: sId });
+    record("D58 self_recover on a CLOSED quiz → quiz_not_live (no resurrection)",
+      rec.data?.error === "quiz_not_live", JSON.stringify(rec.data));
+
+    const unl = await clientA.rpc("unlock_session", { p_session_id: sId });
+    record("D58 unlock on a CLOSED quiz → quiz_not_live (no resurrection)",
+      unl.data?.error === "quiz_not_live", JSON.stringify(unl.data));
+
+    const exm = await clientA.rpc("exempt_face_session", {
+      p_session_id: sId, p_reason: "D58 probe",
+    });
+    record("D58 exempt on a CLOSED quiz → quiz_not_live (no resurrection)",
+      exm.data?.error === "quiz_not_live", JSON.stringify(exm.data));
+
+    const row = (await admin.from("quiz_sessions")
+      .select("status").eq("id", sId).single()).data;
+    record("D58 session stays paused after all three refusals",
+      row?.status === "paused", JSON.stringify(row));
+  }
+
+  // ── D59 (0048 R2-RLS-F1): base-table column privileges ───────────
+  // The 0012 column-level REVOKE was a no-op while the table-level SELECT
+  // grant stood; 0048 §7 revokes the table grant and re-grants the explicit
+  // safe column list. A direct PostgREST read of the sensitive columns must
+  // now fail at the privilege layer, while the views keep working.
+  {
+    const quiz = await makeQuiz({ title: "D59 Column Priv", mode: "assessment" });
+    const qs = await addQuestions(quiz.id, QUESTION_TEMPLATE);
+    await publish(quiz.id);
+    const s1 = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
+    assertNoError("D59 start", s1);
+    const sId = s1.data.session.id;
+    await clientS1.rpc("answer_question", {
+      p_session_id: sId, p_question_id: qs[0].id, p_selected_index: 0,
+    });
+
+    const badAns = await clientS1.from("session_answers").select("is_correct").eq("session_id", sId);
+    record("D59 direct is_correct read off session_answers is DENIED (R2-RLS-F1)",
+      Boolean(badAns.error) && (badAns.data ?? []).length === 0,
+      badAns.error?.message ?? JSON.stringify(badAns.data));
+
+    const goodAns = await clientS1.from("session_answers")
+      .select("id, selected_index, selected_indices, answered_at").eq("session_id", sId);
+    record("D59 safe columns on session_answers remain readable",
+      !goodAns.error && (goodAns.data ?? []).length === 1,
+      goodAns.error?.message ?? JSON.stringify(goodAns.data));
+
+    const badSess = await clientS1.from("quiz_sessions").select("score").eq("id", sId);
+    record("D59 direct score read off quiz_sessions is DENIED (R2-RLS-F1)",
+      Boolean(badSess.error) && (badSess.data ?? []).length === 0,
+      badSess.error?.message ?? JSON.stringify(badSess.data));
+
+    const goodSess = await clientS1.from("quiz_sessions")
+      .select("id, status, mode, verify_nonce, last_activity_at").eq("id", sId);
+    record("D59 safe columns on quiz_sessions remain readable",
+      !goodSess.error && (goodSess.data ?? []).length === 1,
+      goodSess.error?.message ?? JSON.stringify(goodSess.data));
+
+    // The authorized view paths still expose what they should (reveal-gated).
+    const viewAns = await clientS1.from("student_answers_view")
+      .select("selected_index, is_correct").eq("session_id", sId);
+    record("D59 student_answers_view still readable (reveal gate unaffected)",
+      !viewAns.error && (viewAns.data ?? []).length === 1,
+      viewAns.error?.message ?? JSON.stringify(viewAns.data));
   }
 
   // ── QT1: multi-select grading, storage, secrecy (0036/0037) ─────

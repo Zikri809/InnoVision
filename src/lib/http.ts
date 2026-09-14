@@ -51,28 +51,11 @@ export function payloadTooLarge(message: string): NextResponse {
 }
 
 /**
- * Default pre-parse JSON body cap for authoring routes. Mirrors the guard the
- * student-quiz surface ships inline (`BODY_LIMIT_BYTES`); Zod string caps only
- * apply AFTER `request.json()` has materialized the whole body, so oversized
- * payloads are rejected at the header instead.
+ * Default pre-parse JSON body cap for authoring routes. Zod string caps only
+ * apply AFTER the body has materialized, so oversized payloads are rejected
+ * by the streaming readers below at this cap.
  */
 export const JSON_BODY_LIMIT_BYTES = 64 * 1024;
-
-/**
- * Reject requests whose declared `content-length` exceeds `maxBytes` BEFORE
- * the body is buffered. Chunked encodings without the header fall through —
- * the Zod schema caps remain the real backstop for those.
- */
-export function checkBodyLimit(
-  request: Request,
-  maxBytes: number = JSON_BODY_LIMIT_BYTES,
-): NextResponse | null {
-  const lenHeader = request.headers.get("content-length");
-  if (lenHeader && Number(lenHeader) > maxBytes) {
-    return payloadTooLarge("Request body too large.");
-  }
-  return null;
-}
 
 type CappedRead =
   | { ok: true; bytes: Uint8Array }
@@ -81,7 +64,7 @@ type CappedRead =
 /**
  * Consume `request.body` chunk-by-chunk under a HARD byte cap (audit-1 P1-5).
  *
- * `checkBodyLimit` trusts the `content-length` header; a chunked transfer
+ * A header-only check trusts the `content-length` header; a chunked transfer
  * (no header) or a lying one bypasses it and the body materializes in full
  * before any Zod cap runs. This reader aborts the moment accumulated bytes
  * exceed `maxBytes`, so the cap holds regardless of what the headers claim.
@@ -130,10 +113,10 @@ async function readCappedBytes(
 }
 
 /**
- * Streaming-capped JSON body reader — the drop-in replacement for the
- * `checkBodyLimit(request)` + `await request.json()` pair on the heaviest
- * endpoints (verify/enroll/start/join/advisory/answer). Returns a typed
- * result instead of throwing so routes stay linear:
+ * Streaming-capped JSON body reader — the drop-in replacement for the old
+ * header-only cap + `await request.json()` pair on the heaviest endpoints
+ * (verify/enroll/start/join/advisory/answer). Returns a typed result instead
+ * of throwing so routes stay linear:
  *   `{ ok: true, data }`               — parsed JSON, within the cap
  *   `{ ok: false, response }`          — 413 over cap (header OR stream),
  *                                        400 for missing/malformed JSON

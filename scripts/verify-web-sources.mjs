@@ -3,10 +3,13 @@
 // still resolves, grants are revoked from anon, invalid web URLs are skipped,
 // and replace/append sources assembly matches the route contract.
 //
-// Run: node scripts/verify-web-sources.mjs   (requires local supabase running)
+// Run: node scripts/verify-web-sources.mjs   (requires local supabase running;
+// refuses a non-local target via assertLocalTarget — override only with
+// ALLOW_PROD_SEED=1).
 
 import { config as loadEnv } from "dotenv";
 import { existsSync } from "node:fs";
+import { assertLocalTarget } from "./lib/target-guard.mjs";
 
 if (existsSync(".env.local")) loadEnv({ path: ".env.local", override: false });
 
@@ -17,6 +20,10 @@ if (!URL || !ANON || !SERVICE) {
   console.error("Set Supabase env vars (local supabase must be running).");
   process.exit(2);
 }
+
+// Service-role harness that MUTATES the target (createUser + profile/class/
+// quiz inserts + RPC calls) — same guard as every sibling verify-* script.
+assertLocalTarget(URL, "verify-web-sources.mjs");
 
 const { createClient } = await import("@supabase/supabase-js");
 const admin = createClient(URL, SERVICE);

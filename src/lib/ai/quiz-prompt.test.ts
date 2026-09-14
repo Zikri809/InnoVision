@@ -263,6 +263,31 @@ describe("U-A10 — parseQuizJson strips fences", () => {
     expect(parsed.ok).toBe(false);
     if (!parsed.ok) expect(parsed.issues.length).toBeGreaterThan(0);
   });
+
+  // audit-3 F-F8: prose-wrapped JSON used to fail BOTH attempts (the fence
+  // stripper only handled a full-wrap fence), burning two full-priced calls
+  // before a 422. Salvage the embedded object instead.
+  it("salvages JSON wrapped in prose with a fenced block", () => {
+    const parsed = parseQuizJson(`Here is the quiz:\n\`\`\`json\n${validQuizJson}\n\`\`\`\nHope that helps!`);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.quiz.title).toBe("Motion");
+  });
+
+  it("salvages a bare JSON object embedded in prose (no fence)", () => {
+    const parsed = parseQuizJson(`Sure! ${validQuizJson} Let me know if you need changes.`);
+    expect(parsed.ok).toBe(true);
+  });
+
+  it("ignores a stray parseable object that is not a valid quiz", () => {
+    const parsed = parseQuizJson(`{"unrelated":true} then ${validQuizJson}`);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.quiz.questions).toHaveLength(3);
+  });
+
+  it("still fails when no valid quiz object exists anywhere", () => {
+    const parsed = parseQuizJson(`{"unrelated":true} and {"other":1}`);
+    expect(parsed.ok).toBe(false);
+  });
 });
 
 describe("parseQuestionJson — wrapper handling", () => {
@@ -361,6 +386,21 @@ describe("regenerateQuestion", () => {
     });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toBe("invalid_ai_output");
+  });
+
+  // audit-3 F-F1: an aborted caller signal must not spend a round trip — the
+  // `cancelled` branch used to be unreachable because no signal was threaded.
+  it("returns cancelled without calling the model when the signal is already aborted", async () => {
+    const chat = vi.fn(okChat(JSON.stringify({ type: "mcq", prompt: "x", options: ["a", "b"], correct_index: 0 })));
+    const res = await regenerateQuestion({
+      chat,
+      question: sampleQuestion,
+      siblings: [],
+      signal: AbortSignal.abort(),
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toBe("cancelled");
+    expect(chat).not.toHaveBeenCalled();
   });
 });
 

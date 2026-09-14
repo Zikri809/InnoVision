@@ -66,7 +66,7 @@ never assumed.
   `{ questions: [...] }`. Route preamble in house order:
   `isUuid → requireQuizOwner → notDraft() → checkSameOrigin →
   rateLimit('quiz-import:<uid>', 120/h — quiz-author parity) →
-  checkBodyLimit(request, 512 KB — 30×2000-char prompts approach the 64 KB
+  readCappedJson(request, 512 KB — 30×2000-char prompts approach the 64 KB
   default; same override generate-quiz uses) →
   Zod z.object({ questions: z.array(QuestionInputSchema).min(1).max(30) }) →
   map each Zod row to DB shape {type, prompt, options, correct_index,
@@ -86,9 +86,9 @@ never assumed.
   - The RPC's cap check behind its advisory lock is the authoritative backstop.
   - Route sets `export const dynamic = "force-dynamic"`;
     `params: Promise<{ id: string }>` awaited.
-  - Accepted house posture: the 512 KB gate is content-length-conditional
-    (`checkBodyLimit` falls through on headerless/chunked requests — same as
-    every sibling route); Zod's 30-row cap + per-field limits bound what
+  - Accepted house posture: the 512 KB gate is a STREAMING cap
+    (`readCappedJson` aborts mid-read, so headerless/chunked requests cannot
+    bypass it); Zod's 30-row cap + per-field limits bound what
     persists, and the budget is rate-limited to 120/h.
   - Error mapping (mirror generate-quiz/route.ts:338–384): `not_owner`/
     `not_quiz_owner`/`quiz_not_found` → 404 notFound(); `quiz_not_draft` →
@@ -183,7 +183,7 @@ blocks sharing.
 - Route `POST /api/quizzes/[id]/duplicate`: house preamble
   `isUuid → requireQuizOwner(src) → checkSameOrigin →
   rateLimit('quiz-duplicate:<uid>', 30/h — publish/close parity) →
-  checkBodyLimit → Zod z.object({ destClassId: uuid }) →
+  readCappedJson → Zod z.object({ destClassId: uuid }) →
   requireClassOwner(destClassId) (failure = the SAME bare notFound() as src,
   ordered after the src guard so a non-src-owner learns nothing about dest
   classes) → owner.archivedAt → 409 class_archived → clone_quiz RPC →
@@ -415,8 +415,9 @@ route tests, E2E save-and-reinsert journey.
 **Deviations from the plan text (all deliberate)**
 1. Check-constraint RPC errors map to 400 (questions-route parity), not the
    plan's original 503 — plan amended to ratify.
-2. The 512 KB gate is content-length-conditional (house `checkBodyLimit`
-   posture shared by every sibling route); Zod bounds + 120/h rate limit
+2. The 512 KB gate is a streaming cap (`readCappedJson`, house posture shared
+   by every sibling route) — it aborts mid-read, so a headerless/chunked
+   request cannot bypass it; Zod bounds + 120/h rate limit
    bound what persists — plan amended to ratify.
 3. The duplicate dialog defaults AWAY from an archived source class (first
    owned unarchived class) — the server would 409 anyway; the source class

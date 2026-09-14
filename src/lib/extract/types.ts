@@ -22,6 +22,23 @@ export type ExtractionResult = {
    */
   pagesAttempted?: number;
   failedPages?: number[];
+  /**
+   * audit-3 F-F2/F-F10: the subset of `failedPages` rejected because the
+   * per-user OCR budget was spent (HTTP 429), NOT because the page could not
+   * be read. The dialog names the cause ("rate limited — retry") instead of
+   * reporting a generic read failure, and offers a retry for the lost pages.
+   */
+  rateLimitedPages?: number[];
+  /**
+   * audit-3 F-F2: per-page text, index-aligned to page number (index i is
+   * page i+1; "" for a page that produced nothing). Lets a retry re-OCR ONLY
+   * the failed pages and splice them back into position, instead of re-running
+   * the whole deck and re-tripping the very budget that caused the loss.
+   */
+  pageTexts?: string[];
+  /** Pages actually attempted on this call (a retry attempts only the
+   * requested subset, so `pages`/`pagesAttempted` describe just that call). */
+  totalPages?: number;
 };
 
 /** Config passed from the builder page (server component reads env).
@@ -33,7 +50,9 @@ export type OcrConfig = {
 
 /** Text density: a page is "scanned" (needs OCR) below this many chars. */
 export const MIN_CHARS_PER_PAGE = 40;
-/** Max pages rasterized + recognized per Tesseract/GLM OCR run (includes GLM-OCR up to 200 pages). */
+/** Max pages rasterized + recognized per Tesseract/GLM OCR run (includes GLM-OCR up to 200 pages).
+ * audit-3 F-F3: this cap bounds CPU/page count only — MEMORY is bounded by the
+ * streaming rasterizer (one page in flight), not by this number. */
 export const MAX_OCR_PAGES = 200;
 /** Client-side file size cap (single file). */
 export const MAX_FILE_BYTES = 25_000_000;
@@ -76,6 +95,15 @@ export function isAllowedExtension(filename: string): boolean {
  * Falls back to a timestamped name when nothing safe remains.
  */
 export function sanitizeStorageFilename(filename: string): string {
+  // audit-3 INJ-F3 (hygiene): a dot-only name (".pdf") is an EXTENSION, not a
+  // filename. `isAllowedExtension` accepts it (`split(".").pop()`), but the
+  // stripping below deletes the leading dot and leaves a bare stem, so the
+  // stored object loses its extension and `detectNativeType` throws
+  // `unsupported_file_type` — a 422 whose "run OCR in the browser" advice
+  // cannot work. Preserve the validated extension under a safe generated stem.
+  if (/^\.[A-Za-z0-9]+$/.test(filename) && isAllowedExtension(filename)) {
+    return `file-${Date.now()}.${filename.slice(1).toLowerCase()}`;
+  }
   let base = filename.replace(/[\u0000-\u001f\u007f\\/]/g, "").trim();
   while (base.includes("..")) {
     base = base.replace(/\.\./g, "");

@@ -128,11 +128,11 @@ class FakeQueryBuilder {
   then(
     resolve: (value: { count?: number; data?: Row[]; error: { message: string } | null }) => void,
   ): void {
-    const { rows, error } = this._execute();
+    const { rows, error, total } = this._execute();
     // Match PostgREST's real shape: count queries return { count, data, error },
-    // plain queries return { data, error }.
+    // plain queries return { data, error }. `count` is the PRE-limit total.
     if (error) resolve({ count: undefined, data: undefined, error });
-    else if (this.countExact) resolve({ count: rows.length, data: rows, error: null });
+    else if (this.countExact) resolve({ count: total ?? rows.length, data: rows, error: null });
     else resolve({ data: rows, error: null });
   }
 
@@ -147,12 +147,22 @@ class FakeQueryBuilder {
     });
   }
 
-  private _filtered(rows: Row[]): Row[] {
-    return this._project(this._filterRaw(rows));
+  /**
+   * `skipLimit` exists so a count query can be taken BEFORE `.limit()` is
+   * applied — PostgREST's `count: "exact"` reports the total matching rows in
+   * Content-Range regardless of the range window, which is exactly how the
+   * gradebook's truncation flags detect a dropped tail (and how they detect a
+   * server-side `max_rows` clamp). Counting after the slice made every count
+   * equal the returned length, so the fake could not represent truncation at
+   * all and the flags' tests passed only via their fallback term
+   * (adversarial review).
+   */
+  private _filtered(rows: Row[], skipLimit = false): Row[] {
+    return this._project(this._filterRaw(rows, skipLimit));
   }
 
   /** Filter/sort/limit WITHOUT projection — keeps original row references. */
-  private _filterRaw(rows: Row[]): Row[] {
+  private _filterRaw(rows: Row[], skipLimit = false): Row[] {
     let out = rows;
     for (const f of this.filters) {
       // Support PostgREST embedded filters (`classes.lecturer_id = x`) used by
@@ -196,11 +206,11 @@ class FakeQueryBuilder {
         return asc ? av - bv : bv - av;
       });
     }
-    if (this.limitN !== undefined) out = out.slice(0, this.limitN);
+    if (!skipLimit && this.limitN !== undefined) out = out.slice(0, this.limitN);
     return out;
   }
 
-  private _execute(): { rows: Row[]; error: { message: string } | null } {
+  private _execute(): { rows: Row[]; error: { message: string } | null; total?: number } {
     // Test-only error seam: when set, every WRITE operation (insert/update/
     // delete) on this table returns the seeded error so the route's
     // error-mapping branches can be exercised (e.g. trigger errors on
@@ -224,7 +234,15 @@ class FakeQueryBuilder {
     const tableRows = (this.client.tables[this.table] ??= []);
 
     if (!this.op) {
-      return { rows: this._filtered(tableRows), error: null };
+      // Pre-limit total: what Content-Range would report for `count: "exact"`.
+      const total = this._filtered(tableRows, true).length;
+      let rows = this._filtered(tableRows);
+      // PostgREST's server-side `max_rows` (supabase/config.toml: 1000
+      // locally) silently caps ANY range request. Modeling it lets a test
+      // prove the truncation flags catch a clamp the app never asked for.
+      const cap = this.client.maxRows;
+      if (typeof cap === "number" && rows.length > cap) rows = rows.slice(0, cap);
+      return { rows, error: null, total };
     }
 
     if (this.op.kind === "insert") {
@@ -253,6 +271,36 @@ class FakeQueryBuilder {
 function randomUuid(): string {
   return crypto.randomUUID();
 }
+
+/**
+ * Known production RPCs whose SQL semantics are deliberately NOT modeled in
+ * this fake — their route tests drive them through the `rpcResult` seam and
+ * the authoritative behavior is pinned by the live-DB verify-*.mjs harnesses.
+ *
+ * This list is the ONLY fallthrough `rpc()` allows: an unknown name (e.g. a
+ * renamed or deleted RPC) throws instead of returning the default result, so
+ * a route test can no longer go green against a missing RPC (H3-INFRA-F4 —
+ * the E-F1 class of drift).
+ */
+const SEAM_ONLY_RPCS = new Set([
+  // NOTE: attach_frame_poses was DROPPED in migration 0047 (its work is folded
+  // into record_face_check), so no production code calls it. Leaving the name
+  // here would silently allow a route test to go green against a REMOVED RPC —
+  // the exact drift this set exists to catch — so it is deliberately absent.
+  "get_verify_proof_secret",
+  "join_class",
+  "mark_notifications_read",
+  "mark_notifications_read_before",
+  "reorder_questions",
+  "student_results",
+  // Modeled by StudentFakeSupabase, seam-only against the BASE fake.
+  "answer_student_question",
+  "append_student_question",
+  "reorder_student_questions",
+  "resolve_shared_student_quiz",
+  "save_student_quiz_questions",
+  "student_quiz_share_action",
+]);
 
 export class FakeSupabase {
   tables: TableMap = {};
@@ -284,6 +332,14 @@ export class FakeSupabase {
    * be exercised (SELECTs otherwise pass through).
    */
   countError: string | null = null;
+
+  /**
+   * Simulated PostgREST `max_rows` (audit-3 B-F7). When set, every SELECT is
+   * silently clamped to this many rows — the deployed default is 1000 — so a
+   * test can prove a truncation flag fires for a clamp the app did not ask
+   * for. `null`/undefined disables the clamp.
+   */
+  maxRows: number | null = null;
   /**
    * Test-only: when set, plain SELECT queries (no write op, no count) on
    * `selectErrorTable` return this error — used to exercise read-failure
@@ -325,7 +381,12 @@ export class FakeSupabase {
   //    report_face_unavailable / revoke_face_consent): route-mapping stubs —
   //    must stay in lockstep with migrations 0009_face.sql + 0039_insightface.sql; the authoritative
   //    RPC-semantics checks are scripts/verify-face.mjs.
-  //  - reorder_questions / others: return the pre-seeded rpcResult.
+  //  - SEAM_ONLY_RPCS: known production RPCs whose SQL semantics are NOT
+  //    modeled here (authoritative checks live in the verify-*.mjs harnesses);
+  //    their route tests drive them purely through the `rpcResult` seam.
+  // Anything else THROWS (H3-INFRA-F4): a renamed/removed RPC must fail loudly
+  // instead of silently returning `{data:null,error:null}` and letting a route
+  // test go green against an RPC that no longer exists.
   async rpc(name: string, args?: Record<string, unknown>) {
     if (name === "start_quiz_session") {
       return this._startQuizSession(args);
@@ -530,7 +591,25 @@ export class FakeSupabase {
       return { data: rows, error: null };
     }
 
-    return this.rpcResult;
+    if (SEAM_ONLY_RPCS.has(name)) {
+      // Known-but-unmodeled: the route test seeds `rpcResult` for the branch
+      // under test; an unseeded call yields the neutral shape (matching the
+      // historical fallthrough for these names only).
+      if (this.rpcResult.data !== null || this.rpcResult.error !== null) {
+        return this.rpcResult;
+      }
+      return { data: null, error: null };
+    }
+
+    // Fail loudly rather than returning a success shape for an RPC this fake
+    // does not know (H3-INFRA-F4). A renamed/removed RPC used to fall through
+    // to `rpcResult` and let the route's error branch pass the test.
+    throw new Error(
+      `FakeSupabase.rpc("${name}") is not modeled. Add a stub branch in ` +
+        `rpc() (or register the name in SEAM_ONLY_RPCS if its semantics are ` +
+        `covered by a verify-*.mjs harness) — otherwise this test would pass ` +
+        `against a missing/renamed RPC.`,
+    );
   }
 
   /**

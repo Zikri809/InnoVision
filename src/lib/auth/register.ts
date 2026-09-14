@@ -1,7 +1,7 @@
 "use server";
 
 import { createServerActionClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createAdminClient, tryCreateAdminClient } from "@/lib/supabase/admin";
 import { isValidInviteCode } from "@/lib/auth/invite-code";
 import { normalizeMatric } from "@/lib/auth/matric";
 import { sanitizeRedirect } from "@/lib/auth/redirect";
@@ -28,6 +28,13 @@ export interface RegisterResult {
 // Limits are env-tunable ONLY upward for the local E2E harness, which
 // registers dozens of accounts from 127.0.0.1 inside one window (the default
 // production posture stays 10/min).
+/**
+ * Display-name bound. MUST equal the `profiles_full_name_len` CHECK in
+ * migration 0050 — the app validates and the DB enforces; a mismatch means a
+ * valid-looking input fails at the write (audit-3 A-F6).
+ */
+const MAX_FULL_NAME_LENGTH = 120;
+
 const envLimit = (name: string, fallback: number): number => {
   const parsed = Number(process.env[name] ?? "");
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -94,8 +101,14 @@ export async function register({
   if (typeof password !== "string" || password.length < 6) {
     return { session: false, error: t("authErrors.passwordShort") };
   }
+  // audit-3 A-F6: the bound is 120, matching the profiles_full_name_len CHECK
+  // (0050). The two must agree: the app used to allow 200, so a 121-200-char
+  // name passed validation and was written by the service-role upserts below
+  // (promotion / consent-repair) straight into a 23514 — turning a benign
+  // input into `promotionFailed` / `consentFailed` AFTER the auth account
+  // already existed. Rejecting here keeps the failure friendly and early.
   const trimmedName = fullName?.trim() ?? "";
-  if (trimmedName.length > 200) {
+  if (trimmedName.length > MAX_FULL_NAME_LENGTH) {
     return { session: false, error: t("authErrors.nameTooLong") };
   }
 
@@ -167,14 +180,21 @@ export async function register({
   // (documented in PLAN_MATRIC_EXCEL_EXPORT §5). The unique index remains
   // authoritative for races.
   if (normalizedMatric) {
-    const adminProbe = createAdminClient();
-    const { data: clash } = await adminProbe
-      .from("profiles")
-      .select("id")
-      .ilike("matric_no", normalizedMatric)
-      .limit(1);
-    if (clash && clash.length > 0) {
-      return { session: false, error: t("authErrors.matricTaken") };
+    // audit-3 A-F5: ADVISORY only — the unique index is authoritative. Use the
+    // null-returning accessor so an unset SUPABASE_SERVICE_ROLE_KEY degrades
+    // this friendly message instead of throwing. The throw used to sit outside
+    // any try block, so a key documented as optional ("fail closed per
+    // feature", lib/env.ts) made student registration impossible outright.
+    const adminProbe = tryCreateAdminClient();
+    if (adminProbe) {
+      const { data: clash } = await adminProbe
+        .from("profiles")
+        .select("id")
+        .ilike("matric_no", normalizedMatric)
+        .limit(1);
+      if (clash && clash.length > 0) {
+        return { session: false, error: t("authErrors.matricTaken") };
+      }
     }
   }
 
@@ -256,7 +276,9 @@ export async function register({
           {
             id: userId,
             role: "lecturer",
-            full_name: fullName || null,
+            // Defensive clamp: the service-role upsert bypasses the trigger's
+            // clamp, so it must not be able to violate the CHECK (0050).
+            full_name: fullName ? fullName.slice(0, MAX_FULL_NAME_LENGTH) : null,
             locale: userLocale,
             consent_given_at: consentAt,
           },
@@ -276,16 +298,28 @@ export async function register({
       // audit-2 M-19: a privilege grant must be attributable. This used to
       // only console.error on failure — every promotion was invisible to
       // audit_events, so a leaked invite code left no trail at all.
-      const { error: auditError } = await admin
-        .from("audit_events")
-        .insert({
-          actor_id: userId,
-          subject_id: userId,
-          action: "lecturer_promoted_via_invite",
-          metadata: { email: trimmedEmail },
-        });
+      //
+      // audit-3 H3-ATOM-F3: the grant is already committed by this point, so
+      // a failed audit insert cannot be rolled back — the honest fix is to
+      // retry once and, if it still fails, log something an operator can act
+      // on (the gap is otherwise invisible: the promotion succeeds silently).
+      const auditRow = {
+        actor_id: userId,
+        subject_id: userId,
+        action: "lecturer_promoted_via_invite",
+        metadata: { email: trimmedEmail },
+      };
+      let auditError = (await admin.from("audit_events").insert(auditRow)).error;
       if (auditError) {
-        console.error("Failed to audit lecturer promotion:", auditError);
+        auditError = (await admin.from("audit_events").insert(auditRow)).error;
+      }
+      if (auditError) {
+        console.error(
+          "[register] CRITICAL: lecturer promotion committed with NO audit trail for user " +
+            `${userId} (${trimmedEmail}). The role grant is live but unattributable — ` +
+            "record it manually in audit_events.",
+          auditError,
+        );
       }
 
       // Keep auth.users metadata in sync (belt-and-suspenders). A failure
@@ -304,13 +338,26 @@ export async function register({
 
       // Verify promotion actually took effect; if not, surface a clear error
       // rather than leaving the user stuck with a student profile.
-      const { data: profile } = await admin
+      //
+      // audit-3 H3-ATOM-F3: the re-read's `error` used to be IGNORED, so a
+      // transient read fault produced `profile === null` → the guard below
+      // reported promotionFailed for a promotion that had in fact committed
+      // (and the retry then hit "already registered" → generic signupFailed).
+      // A failed read is NOT evidence the role is wrong: log it and let the
+      // caller proceed, since the upsert above already reported success.
+      const { data: profile, error: verifyError } = await admin
         .from("profiles")
         .select("role")
         .eq("id", userId)
         .maybeSingle();
 
-      if (profile?.role !== "lecturer") {
+      if (verifyError) {
+        console.error(
+          "[register] could not verify lecturer promotion (transient read fault) for " +
+            `${userId}; the upsert reported success, so treating the promotion as applied.`,
+          verifyError,
+        );
+      } else if (profile?.role !== "lecturer") {
         console.error("Lecturer promotion not reflected in profile for", userId);
         return {
           session: false,
@@ -358,14 +405,24 @@ export async function register({
     } else {
       // RPC race (or failure): create/repair via service role (bypasses RLS
       // and passes the trigger, since auth.role() is 'service_role').
-      const admin = createAdminClient();
+      // audit-3 A-F5: this is a PRIVILEGED write, so it still requires the
+      // key — but an unset key must produce a typed, actionable error instead
+      // of an uncaught throw that surfaces as a generic signup failure.
+      const admin = tryCreateAdminClient();
+      if (!admin) {
+        console.error(
+          "Registration: consent RPC did not persist and SUPABASE_SERVICE_ROLE_KEY is unset — cannot repair the profile row.",
+        );
+        return { session: false, error: t("authErrors.consentFailed") };
+      }
       const { error: adminError } = await admin
         .from("profiles")
         .upsert(
           {
             id: userId,
             role: "student",
-            full_name: fullName || null,
+            // Defensive clamp — see the lecturer upsert above.
+            full_name: fullName ? fullName.slice(0, MAX_FULL_NAME_LENGTH) : null,
             locale: userLocale,
             matric_no: normalizedMatric,
             consent_given_at: consentAt,

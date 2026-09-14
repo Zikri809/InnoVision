@@ -151,6 +151,24 @@ export async function POST(request: Request, { params }: Params) {
     );
   }
 
+  // audit-3 H3-ATOM-F1: snapshot the ids that exist BEFORE the LLM call. The
+  // save's replace branch deletes ONLY these (plus, for the legacy path, no
+  // rows at all when the list is null), so a manual question appended while
+  // the 30-900 s generation runs is never destroyed. Previously the mode was
+  // latched from `existing` and the RPC's replace branch deleted every row.
+  let existingIds: string[] = [];
+  if (existing > 0) {
+    const { data: idRows, error: idsError } = await supabase
+      .from("student_quiz_questions")
+      .select("id")
+      .eq("quiz_id", id);
+    if (idsError) {
+      inFlight.delete(id);
+      return internalError("Could not check existing quiz questions.");
+    }
+    existingIds = (idRows ?? []).map((r) => r.id);
+  }
+
   const ctx: GenerationContext = {
     supabase,
     admin,
@@ -160,6 +178,7 @@ export async function POST(request: Request, { params }: Params) {
     day,
     usedToday: usageRow?.count ?? 0,
     existing,
+    existingIds,
     remaining,
     deadlineMs: Date.now() + GENERATION_BUDGET_MS,
   };
@@ -185,6 +204,8 @@ type GenerationContext = {
   day: string;
   usedToday: number;
   existing: number;
+  /** Ids present BEFORE the LLM call (audit-3 H3-ATOM-F1 replace scope). */
+  existingIds: string[];
   remaining: number;
   deadlineMs: number;
 };
@@ -347,7 +368,7 @@ async function saveGeneration(
   result: Extract<GenerateQuizResult, { ok: true }>,
   opts: { signal?: AbortSignal } = {},
 ): Promise<SaveOutcome> {
-  const { supabase, admin, quizId, userId, day, usedToday, remaining } = ctx;
+  const { supabase, admin, quizId, userId, day, usedToday, remaining, existingIds } = ctx;
   const rowsAll = aiQuizToRows(result.quiz);
   // Models may over-deliver vs the requested count; clamp so an over-generous
   // batch can never push past the 50-cap (the bulk RPC would otherwise reject
@@ -362,6 +383,10 @@ async function saveGeneration(
       ),
     };
   }
+  // audit-3 H3-ATOM-F1: replace vs append is decided by the SNAPSHOT taken
+  // before the LLM call (ctx.existingIds), and the replace branch is scoped
+  // to exactly those ids — a manual question appended during the generation
+  // survives. An empty snapshot means "seed a new quiz" (replace).
   const mode = ctx.existing > 0 ? "append" : "replace";
 
   // Cancel checkpoint: a cancelled generation must NOT persist rows the
@@ -379,6 +404,10 @@ async function saveGeneration(
       // audit-1 P1-10: an append retry after a post-commit abort is deduped
       // by this tag (the RPC returns the saved rows instead of re-appending).
       p_generation_id: ctx.body.generationId ?? null,
+      // audit-3 H3-ATOM-F1: scope the replace delete to the rows that existed
+      // BEFORE the LLM call — a manual question appended meanwhile survives.
+      // Null on append (unused by that branch).
+      p_replace_ids: mode === "replace" ? existingIds : null,
     } as unknown as never,
   );
 

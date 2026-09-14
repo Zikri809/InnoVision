@@ -1,16 +1,22 @@
 /**
- * Browser-only OpenAI-compatible chat helper for LOCAL GLM-OCR (Docker/vLLM).
+ * [OI]-compatible chat helper for LOCAL GLM-OCR (Docker/vLLM).
  *
- * This module MUST NOT be imported from server code. It performs a plain fetch
- * from the lecturer's browser to `{GLM_BASE_URL}/v1/chat/completions` — the
- * local GLM-OCR endpoint (vLLM in Docker, loopback-bound) — and carries no API
- * key.
+ * Since the GLM-OCR container became loopback-bound and is reached through
+ * `POST /api/extract/ocr` (server-side proxy), this helper runs in the ROUTE,
+ * not the browser — the header comment here used to claim browser-only and
+ * "carries no API key", which stopped being true when the proxy landed.
  *
- * SSRF guard (S8): server routes must NEVER derive `baseURL` from a request
- * body. The server only ever talks to env-configured providers through
- * `lib/ai/client.ts`. This helper is browser-only, so the "baseURL" it talks
- * to is the lecturer's own machine, by design.
+ * SSRF guard (S8): the caller must NEVER derive `baseUrl` from a request body.
+ * The route sources it from `GLM_BASE_URL` only; `lib/ai/client.ts` owns every
+ * other provider.
+ *
+ * audit-3 R3-DEP-F2: `apiKey` sends `Authorization: Bearer …` so the compose
+ * side can enable vLLM's `--api-key`. It is optional because a loopback-bound
+ * container without a key is the existing posture; when the compose service
+ * sets `VLLM_API_KEY`, the same value must be present here or every OCR call
+ * 401s. Never log or echo the key.
  */
+
 
 /** A single multimodal content part (OpenAI vision-chat shape). */
 export type HttpChatContentPart =
@@ -25,7 +31,7 @@ export type HttpChatMessage = {
 
 export type HttpChatResult =
   | { ok: true; text: string }
-  | { ok: false; error: "timeout" | "http_error" | "ai_error"; message?: string };
+  | { ok: false; error: "timeout" | "rate_limited" | "http_error" | "ai_error"; message?: string };
 
 /**
  * POST an OpenAI-compatible chat request and return the assistant's text.
@@ -38,21 +44,36 @@ export async function httpChatCompletions(opts: {
   messages: HttpChatMessage[];
   maxTokens?: number;
   timeoutMs?: number;
+  /** audit-3 R3-DEP-F2: vLLM `--api-key` value, when the container sets one. */
+  apiKey?: string;
 }): Promise<HttpChatResult> {
-  const { baseUrl, model, messages, maxTokens = 2000, timeoutMs = 60_000 } = opts;
+  const { baseUrl, model, messages, maxTokens = 2000, timeoutMs = 60_000, apiKey } = opts;
   const endpoint = `${baseUrl.replace(/\/$/, "")}/v1/chat/completions`;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (apiKey) headers.authorization = `Bearer ${apiKey}`;
+
   try {
     const res = await fetch(endpoint, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers,
       body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature: 0 }),
       signal: controller.signal,
     });
     if (!res.ok) {
+      // audit-3 F-F10: an upstream 429 (vLLM concurrency/queue rejection) is a
+      // RETRYABLE capacity signal, not a page-read failure — keep it distinct
+      // so the OCR route can surface `glm_rate_limited` instead of `glm_error`.
+      if (res.status === 429) {
+        return {
+          ok: false,
+          error: "rate_limited",
+          message: "GLM-OCR is at capacity (HTTP 429).",
+        };
+      }
       return {
         ok: false,
         error: "http_error",
@@ -87,12 +108,17 @@ export async function probeGlmModel(opts: {
   baseUrl: string;
   model: string;
   timeoutMs?: number;
+  /** audit-3 R3-DEP-F2: required when the container runs with `--api-key`. */
+  apiKey?: string;
 }): Promise<boolean> {
-  const { baseUrl, model, timeoutMs = 2000 } = opts;
+  const { baseUrl, model, timeoutMs = 2000, apiKey } = opts;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const headers: Record<string, string> = {};
+  if (apiKey) headers.authorization = `Bearer ${apiKey}`;
   try {
     const res = await fetch(`${baseUrl.replace(/\/$/, "")}/v1/models`, {
+      headers,
       signal: controller.signal,
     });
     if (!res.ok) return false;

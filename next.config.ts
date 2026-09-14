@@ -17,7 +17,25 @@ const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
  */
 const CSP_REPORT_ONLY = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob:",
+  // audit-3 R3-INT-F2: `cdn.jsdelivr.net` is REQUIRED here by the DEFAULT OCR
+  // engine. `src/lib/extract/tesseract.ts` calls `Tesseract.createWorker()`
+  // without workerPath/corePath, so tesseract.js v7 falls back to its CDN
+  // defaults: the worker is `importScripts`-ed from jsdelivr and the WASM core
+  // is dynamically imported from it. Both are governed by `script-src` (a blob
+  // worker is allowed by worker-src, but the script it loads is not), so
+  // enforcing the previous policy would have blocked OCR for every page in
+  // every deployment. The traineddata FETCH is unaffected — `connect-src`
+  // below already ends in a blanket `https:`.
+  //
+  // This is the deliberate trade-off between the two available remedies:
+  // allowing the origin the code ALREADY loads (no security change from
+  // today's no-CSP behaviour, and it unblocks enforcement) versus vendoring
+  // the worker/core/traineddata under /public like the MediaPipe assets, which
+  // would let this origin be removed. Vendoring is the stronger fix and the
+  // documented follow-up; it was not taken here because it adds ~18 MB of WASM
+  // variants plus a vendor script and a CI hash step. If you vendor them, DROP
+  // this origin and re-point tesseract.ts at the local paths.
+  "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob: https://cdn.jsdelivr.net",
   "worker-src 'self' blob:",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
@@ -42,13 +60,69 @@ const SECURITY_HEADERS = [
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   {
     key: "Permissions-Policy",
-    value: "camera=(self), microphone=(), geolocation=(), payment=()",
+    // audit-3 R3-INT-F1: `microphone=()` is an EMPTY allowlist — it blocks
+    // same-origin too, so the integrity suite's own `getUserMedia({audio:true})`
+    // (src/components/face/use-integrity-advisories.ts) always failed with
+    // NotAllowedError, killing the voice_activity + headset_active advisories
+    // and the incident-clip audio track in every deployment. The only mic
+    // consumers are same-origin, so `(self)` is the correct allowlist.
+    value: "camera=(self), microphone=(self), geolocation=(), payment=()",
   },
   // Only meaningful over HTTPS; harmless on localhost.
   {
     key: "Strict-Transport-Security",
     value: "max-age=63072000; includeSubDomains",
   },
+];
+
+/**
+ * Hostnames allowed to differ from the request Host for server actions and
+ * dev-only /_next/* + HMR fetches.
+ *
+ * audit-3 H-F8 / R2-TOP-F1: these used to be the hardcoded tunnel host
+ * `innovision.zikr-i.uk`, so a staging or second-institution deploy silently
+ * aborted every server action (the login form appears to just reset) with no
+ * env remedy. They are now DERIVED from deployment env:
+ *   - `TRUSTED_ORIGINS`      — comma-separated, scheme-included origins (the
+ *                              same var `checkSameOrigin` in src/lib/http.ts
+ *                              reads, so actions and route handlers agree).
+ *   - `NEXT_PUBLIC_SITE_URL` / `SITE_URL` — the deployment's public origin.
+ *   - `ALLOWED_ORIGINS`      — extra comma-separated hostnames (wildcards OK,
+ *                              e.g. `*.example.edu`).
+ * The tunnel host stays as the DEFAULT so the current deployment keeps
+ * working with zero config. Set the env vars above for any other deployment.
+ */
+const DEFAULT_ALLOWED_HOSTS = ["innovision.zikr-i.uk"];
+
+function hostnamesFrom(...values: (string | undefined)[]): string[] {
+  const hosts: string[] = [];
+  for (const value of values) {
+    for (const entry of (value ?? "").split(",")) {
+      const trimmed = entry.trim();
+      if (!trimmed) continue;
+      try {
+        // Entries are scheme-included origins; bare hostnames (incl. the
+        // `*.example.edu` wildcard form Next accepts) pass through as-is.
+        const url = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
+        hosts.push(url.host.toLowerCase());
+      } catch {
+        // Malformed entry — skip rather than break the build.
+      }
+    }
+  }
+  return hosts;
+}
+
+const ALLOWED_HOSTS = [
+  ...new Set([
+    ...DEFAULT_ALLOWED_HOSTS,
+    ...hostnamesFrom(
+      process.env.ALLOWED_ORIGINS,
+      process.env.TRUSTED_ORIGINS,
+      process.env.NEXT_PUBLIC_SITE_URL,
+      process.env.SITE_URL,
+    ),
+  ]),
 ];
 
 const nextConfig: NextConfig = {
@@ -78,10 +152,12 @@ const nextConfig: NextConfig = {
   // tunnel they differ, and a mismatched action is silently aborted (the login
   // form appears to just reset). Allowlist the tunnel host for actions; dev
   // also needs allowedDevOrigins so /_next/* assets + HMR socket aren't 403'd.
-  allowedDevOrigins: ["innovision.zikr-i.uk"],
+  // audit-3 H-F8: derived from env (see ALLOWED_HOSTS above) — the tunnel host
+  // is only the default, never the sole hardcoded deployment.
+  allowedDevOrigins: ALLOWED_HOSTS,
   experimental: {
     serverActions: {
-      allowedOrigins: ["innovision.zikr-i.uk"],
+      allowedOrigins: ALLOWED_HOSTS,
     },
     // The same-origin /sb proxy carries browser uploads (quiz source PDFs —
     // 25 MB per file, 50 MB total per the client-side caps). Next's dev proxy

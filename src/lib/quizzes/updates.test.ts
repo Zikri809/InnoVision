@@ -89,4 +89,21 @@ describe("buildQuizUpdates (U-M7..U-M13)", () => {
     expect(hasRetakeFields({ title: "x" })).toBe(false);
     expect(hasRetakeFields({})).toBe(false);
   });
+
+  // ── audit-3 C-F5: nullable fields reset to the column default ──────
+  it("U-M18 an explicit null resets allowRetake/maxAttempts to their column defaults", () => {
+    const res = buildQuizUpdates({ allowRetake: null, maxAttempts: null }, "assessment");
+    expect(res).toEqual({ allow_retake: false, max_attempts: 1 });
+  });
+
+  it("U-M19 a null-only PATCH still produces a non-empty update (no misleading 404)", () => {
+    const res = buildQuizUpdates({ maxAttempts: null }, "assessment");
+    expect(Object.keys(res).length).toBeGreaterThan(0);
+    expect(res).toEqual({ max_attempts: 1 });
+  });
+
+  it("U-M20 an explicit null resets shuffleQuestions to false", () => {
+    const res = buildQuizUpdates({ shuffleQuestions: null }, "assessment");
+    expect(res).toEqual({ shuffle_questions: false });
+  });
 });

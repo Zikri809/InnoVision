@@ -16,7 +16,15 @@ const envLimit = (name: string, fallback: number): number => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
 
-const CAPTURE_RATE = { limit: envLimit("MATRIC_CAPTURE_RATE_LIMIT", 5), windowMs: 60_000 };
+// audit-3 R2-TOP-F5: the budget was 5/min, sized as if each student had a
+// distinct egress IP. Classroom NAT shares ONE egress IP, so the first lecture
+// onboarding a whole lab would 429 honest students after five captures — the
+// same failure login.ts:19-22 already documents ("classroom NAT shares one
+// egress IP — the SSO limiter's 60/min precedent"). Match the login-IP
+// precedent (30/min): the per-IP cap exists to blunt the existence oracle in
+// the service-role pre-check, and the partial unique index stays authoritative
+// for correctness, so a looser cap costs no security.
+const CAPTURE_RATE = { limit: envLimit("MATRIC_CAPTURE_RATE_LIMIT", 30), windowMs: 60_000 };
 
 export interface MatricCaptureResult {
   error?: string;
@@ -43,7 +51,7 @@ async function locale(): Promise<SupportedLocale> {
  * is the race-safe duplicate net; its violation maps to the SAME friendly
  * "already registered" copy the signup flow uses. The service-role pre-check
  * carries the same residual existence oracle register.ts accepts (blunted by
- * the 5/min cap; the unique index stays authoritative).
+ * the 30/min NAT-tolerant cap; the unique index stays authoritative).
  */
 export async function captureOwnMatric({
   matricNo,
@@ -91,16 +99,23 @@ export async function captureOwnMatric({
 
   // Duplicate pre-check via the service-role client (register.ts precedent):
   // friendly message instead of an opaque 500 on the unique index.
-  const { createAdminClient } = await import("@/lib/supabase/admin");
-  const admin = createAdminClient();
-  const { data: taken } = await admin
-    .from("profiles")
-    .select("id")
-    .ilike("matric_no", matric.value)
-    .neq("id", user.id)
-    .limit(1);
-  if ((taken ?? []).length > 0) {
-    return { error: t("authErrors.matricTaken") };
+  // audit-3 A-F5: ADVISORY only — the unique index remains authoritative, and
+  // the null-returning accessor keeps an unset SUPABASE_SERVICE_ROLE_KEY from
+  // throwing. The throw used to wedge SSO students permanently: the capture
+  // page always errored, and (student)/layout.tsx redirects every
+  // matric-less student back to it.
+  const { tryCreateAdminClient } = await import("@/lib/supabase/admin");
+  const admin = tryCreateAdminClient();
+  if (admin) {
+    const { data: taken } = await admin
+      .from("profiles")
+      .select("id")
+      .ilike("matric_no", matric.value)
+      .neq("id", user.id)
+      .limit(1);
+    if ((taken ?? []).length > 0) {
+      return { error: t("authErrors.matricTaken") };
+    }
   }
 
   // audit-2 M-12: set-once is enforced AT THE WRITE — the UPDATE carries

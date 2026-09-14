@@ -136,6 +136,11 @@ export async function chatCompletions(opts: {
   signal?: AbortSignal;
 }): Promise<ChatResult> {
   const { client: ai, model, messages, maxTokens = AI_MAX_OUTPUT_TOKENS, jsonMode = true, temperature = 0.7 } = opts;
+  // audit-3 F-F9: an already-aborted outer signal must bail BEFORE issuing the
+  // request — the listener below only fires on a FUTURE abort, so a client
+  // that disconnected while the prompt was being assembled still bought a
+  // full-priced LLM round trip.
+  if (opts.signal?.aborted) return { ok: false, error: "cancelled" };
   const controller = new AbortController();
   const perCallTimeout = opts.timeoutMs
     ? Math.min(AI_ROUND_TRIP_TIMEOUT_MS, opts.timeoutMs)
@@ -259,6 +264,10 @@ export async function chatStream(opts: {
     temperature = 0.7,
   } = opts;
   const idleMs = opts.idleTimeoutMs ?? Number(process.env.AI_STREAM_IDLE_TIMEOUT_MS ?? 90_000);
+
+  // audit-3 F-F9: same entry check as the legacy path — an outer signal that
+  // is already aborted must not open a stream (and a paid call) at all.
+  if (opts.signal?.aborted) return { ok: false, error: "cancelled" };
 
   const controller = new AbortController();
   // Held in an object because TS narrowing can't see the timer callbacks'

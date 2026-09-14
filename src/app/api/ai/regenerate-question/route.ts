@@ -107,14 +107,29 @@ export async function POST(request: Request, context?: { params?: Promise<{ id?:
   }
   inFlight.add(questionId);
 
+  // audit-3 F-F1: cancellation source for this request. The client closes the
+  // dialog → fetch abort → request.signal fires; the route's own controller
+  // mirrors it (and gives the handler a single signal to thread into the AI
+  // call and to check before the DB write). Without this the `cancelled`
+  // branch below was dead code: the full LLM round trip ran to completion and
+  // then overwrote the question row.
+  const controller = new AbortController();
+  const onClientAbort = () => controller.abort();
+  request.signal.addEventListener("abort", onClientAbort);
+  // `addEventListener` does NOT fire for a signal that is already aborted, so
+  // mirror the current state explicitly.
+  if (request.signal.aborted) controller.abort();
+
   try {
     return await handleRegenerate({
       supabase,
       questionId,
       questionRow,
       instruction,
+      signal: controller.signal,
     });
   } finally {
+    request.signal.removeEventListener("abort", onClientAbort);
     inFlight.delete(questionId);
   }
 }
@@ -134,8 +149,9 @@ async function handleRegenerate(ctx: {
     explanation: string | null;
   };
   instruction?: string;
+  signal: AbortSignal;
 }): Promise<NextResponse> {
-  const { supabase, questionId, questionRow, instruction } = ctx;
+  const { supabase, questionId, questionRow, instruction, signal } = ctx;
 
   // Load siblings for coherence (excluding the target).
   const { data: siblingRows, error: sibErr } = await supabase
@@ -172,15 +188,18 @@ async function handleRegenerate(ctx: {
   const siblings = (siblingRows ?? []).map(toAi);
 
   // 6. AI call. Explicit deadline (same budget as generate-quiz) so the route
-  // never silently inherits a changed default inside regenerateQuestion.
+  // never silently inherits a changed default inside regenerateQuestion. The
+  // request signal rides into the fetch so closing the dialog stops the spend
+  // (audit-3 F-F1).
   const ai = createAiClient();
   const result = await regenerateQuestion({
     chat: (messages, timeoutMs) =>
-      chatCompletions({ client: ai, model: AI_MODEL, messages, timeoutMs }),
+      chatCompletions({ client: ai, model: AI_MODEL, messages, timeoutMs, signal }),
     question: target,
     siblings,
     instruction,
     deadlineMs: Date.now() + GENERATION_BUDGET_MS,
+    signal,
   });
 
   if (!result.ok) {
@@ -215,6 +234,14 @@ async function handleRegenerate(ctx: {
   );
   if (!normalized) {
     return unprocessable("The regenerated question lost its correct answer. Try again.", "invalid_ai_output");
+  }
+
+  // audit-3 F-F1: cancel checkpoint BEFORE the DB write. Even when the abort
+  // raced past the AI call (the model answered as the client disconnected),
+  // the question row must not be silently overwritten — the user never saw
+  // the result. Mirrors generate-quiz's saveGeneration checkpoint.
+  if (signal.aborted) {
+    return jsonError("cancelled", "Generation cancelled.", 409);
   }
 
   // 7. Quiz-scoped UPDATE (WHERE id AND quiz_id); trigger error → 409.

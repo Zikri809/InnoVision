@@ -15,6 +15,17 @@
 #     recommended production runtime for GLM-OCR (the Ollama [OI]-compat
 #     vision endpoint is known to 502). The lecturer's browser talks to it over
 #     loopback only (127.0.0.1:11434) — see docs/GLM_OCR_SETUP.md.
+#     VLLM_API_KEY is the mirror of FACE_SIDECAR_TOKEN: set it (project-root
+#     `.env` or shell env) to require a bearer token on the /v1 endpoints;
+#     empty = auth disabled (local dev default). The Next.js proxy
+#     (src/lib/ai/http-compat.ts, called by /api/extract/ocr) sends the
+#     matching `Authorization: Bearer` header from ITS OWN VLLM_API_KEY, so
+#     both sides must be set to the SAME value — see the comment on
+#     the environment block below.
+#
+# Both long-running services carry a json-file log rotation (max-size/max-file)
+# and a memory/CPU ceiling so a runaway container cannot fill the host disk or
+# starve the Supabase stack (audit-3 R3-DEP-F2).
 #
 # Rollback note: on this dev host the CompreFace stack (containers, volumes,
 # images) was fully disposed on 2026-09-05 — see docs/INSIGHTFACE_SETUP.md
@@ -22,6 +33,12 @@
 # compreface volumes containing biometric data — do NOT `docker compose down
 # -v` casually there; disposal is a documented security step.
 name: innovision
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
 
 services:
   # GLM-OCR via vLLM — [OI]-compatible `/v1/chat/completions` + `/v1/models`.
@@ -38,9 +55,38 @@ services:
       dockerfile: docker/glm-ocr/Dockerfile
     image: innovision-glm-ocr:local
     restart: unless-stopped
+    environment:
+      # audit-3 R3-DEP-F2: mirror of FACE_SIDECAR_TOKEN — the token guards bind
+      # drift (compose edits, `network_mode: host`), where the loopback publish
+      # no longer applies. vLLM reads VLLM_API_KEY natively and only installs
+      # the bearer middleware when the value is NON-EMPTY (api_server.py:
+      # `[key for key in (args.api_key or [envs.VLLM_API_KEY]) if key]`), so
+      # `${VLLM_API_KEY:-}` keeps local dev unauthenticated while letting a
+      # production deploy opt in by exporting the var.
+      #
+      # With the key set, `/v1/models` + `/v1/chat/completions` require
+      # `Authorization: Bearer <key>`. The Next.js proxy client
+      # (src/lib/ai/http-compat.ts, reached via /api/extract/ocr) sends it from
+      # the app's own VLLM_API_KEY, so set BOTH to the same value: this
+      # compose-side var (read from the project-root `.env`) and the app's
+      # (read from .env.local by the Next process). Prefer enabling the key in
+      # any deployment whose Docker socket is shared / remote.
+      VLLM_API_KEY: "${VLLM_API_KEY:-}"
+      # Keep HF telemetry off inside the container.
+      HF_HUB_DISABLE_TELEMETRY: "1"
     command:
       - --model
       - zai-org/GLM-OCR
+      # audit-3 R3-DEP-F3: pin the weights to a revision. Every InsightFace
+      # artifact is sha256-pinned (docker/insightface/Dockerfile ARG ..._SHA256);
+      # this was the only un-pinned model artifact, so a default-branch change
+      # or re-tag would silently swap the OCR engine's weights on a cold start.
+      # The default below is the zai-org/GLM-OCR `main` commit observed
+      # 2026-09-13 (HF API `sha`, repo last modified 2026-09-11). Override
+      # GLM_OCR_REVISION to move the pin deliberately; a non-existent revision
+      # fails loudly at model load instead of serving different weights.
+      - --revision
+      - "${GLM_OCR_REVISION:-2e85a62840ccac27daa451df36c736c4636b8628}"
       - --served-model-name
       - glm-ocr
       - --port
@@ -54,6 +100,11 @@ services:
       - --enforce-eager
     ports:
       - "127.0.0.1:11434:11434" # loopback-only: [OI]-compatible API
+    # audit-3 R3-DEP-F2: unbounded container memory/CPU + default json-file
+    # logs let one bad request or a chatty restart loop take down the host.
+    mem_limit: 16g
+    cpus: "8.0"
+    logging: *default-logging
     deploy:
       resources:
         reservations:
@@ -62,7 +113,10 @@ services:
               count: all
               capabilities: [gpu]
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:11434/v1/models"]
+      # /health is unauthenticated even when VLLM_API_KEY is set, so the probe
+      # keeps working with auth on (/v1/models would 401 and mark the container
+      # unhealthy). vLLM exposes /health unconditionally.
+      test: ["CMD", "curl", "-fsS", "http://localhost:11434/health"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -86,6 +140,12 @@ services:
       WEB_CONCURRENCY: "1"
     ports:
       - "127.0.0.1:8000:8000" # loopback-only: /extract + /health
+    # audit-3 R3-DEP-F2: sibling parity with glm-ocr — bound memory/CPU and
+    # rotate the json-file log. One model instance ≈ 500 MB, so 2g is ~4x
+    # headroom; OMP_NUM_THREADS=2 in the image keeps CPU use honest.
+    mem_limit: 2g
+    cpus: "2.0"
+    logging: *default-logging
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
       interval: 30s

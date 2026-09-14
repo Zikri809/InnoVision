@@ -34,6 +34,23 @@ describe("sanitizeStorageFilename", () => {
     const out = sanitizeStorageFilename("..");
     expect(out).toMatch(/^file-\d+$/);
   });
+
+  it("preserves a valid extension for dot-only names (audit-3 INJ-F3)", () => {
+    // `.pdf` passes isAllowedExtension but the stripping rules delete the
+    // leading dot, leaving `<uuid>-pdf` — an extensionless stem that
+    // detectNativeType rejects. Keep the extension so the API-only path
+    // degrades sanely instead of throwing unsupported_file_type.
+    const out = sanitizeStorageFilename(".pdf");
+    expect(out).toMatch(/^file-\d+\.pdf$/);
+    expect(out.split(".").pop()).toBe("pdf");
+    expect(isAllowedExtension(out)).toBe(true);
+  });
+
+  it("does not fabricate an allowed extension for a dot-only disallowed name", () => {
+    // `.exe` fails isAllowedExtension (the upload gate rejects it), so the
+    // INJ-F3 preservation rule must not apply — no `.exe` extension is minted.
+    expect(sanitizeStorageFilename(".exe")).toBe("exe");
+  });
 });
 
 describe("base64ByteLength", () => {

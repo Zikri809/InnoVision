@@ -49,6 +49,12 @@ export type PipelineOptions = {
   file?: File;
   data?: ArrayBuffer;
   filename?: string;
+  /**
+   * audit-3 F-F2: re-OCR ONLY these 1-based pages (a retry after a rate-limit
+   * loss). Currently honoured by the GLM engine, which reports per-page text;
+   * the caller splices the result back into the prior per-page corpus.
+   */
+  pagesToRetry?: number[];
 };
 
 /** Throw an AbortError if the caller has cancelled the extraction. */
@@ -156,8 +162,11 @@ async function runOcr(
   if (!file) throw new Error("no_input");
 
   if (engine === "glm") {
-    const glm = await glmExtract(file, (page, total) =>
-      opts.onProgress?.({ stage: "ocr", page, total, engine: "glm" }),
+    const glm = await glmExtract(
+      file,
+      (page, total) => opts.onProgress?.({ stage: "ocr", page, total, engine: "glm" }),
+      // audit-3 F-F2: a retry re-runs only the failed pages (honoured by GLM).
+      { pagesToRetry: opts.pagesToRetry },
     );
     return glm;
   }

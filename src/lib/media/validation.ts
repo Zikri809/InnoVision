@@ -3,15 +3,16 @@
  *
  * House rule: the client is never trusted. Every byte that reaches storage
  * passes through here first:
- *  - declared content-length gate BEFORE formData() buffers the multipart body
- *    (chunked / headerless requests are rejected outright — formData() would
- *    materialize them fully);
  *  - magic-byte sniffing decides the ACTUAL type/ext/content-type (the
  *    client-declared MIME is advisory only — a mislabeled payload would be
- *    stored and served under the wrong type);
+ *    stored and served under the wrong type). The byte cap itself is enforced
+ *    by `readCappedFormData` in `media/server.ts` (streaming, header-agnostic);
+ *    the pre-H-04 header-only `checkMultipartLength` gate was dead code and
+ *    has been removed;
  *  - stored-path format validators run immediately before every signed-URL
- *    mint, so a tampered DB column can never steer the signer outside the
- *    owner's folder (traversal/`..` cannot match the anchored regex).
+ *    mint or service-role storage operation, so a tampered DB column can never
+ *    steer the signer/remover outside the owner's folder (traversal/`..`
+ *    cannot match the anchored regexes).
  */
 
 export const MAX_QUESTION_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -22,6 +23,7 @@ export const MULTIPART_FRAMING_SLACK_BYTES = 64 * 1024;
 
 export const QUESTION_IMAGES_BUCKET = "question-images";
 export const AVATARS_BUCKET = "avatars";
+export const QUIZ_SOURCES_BUCKET = "quiz-sources";
 
 export type SniffedImageType = "png" | "jpeg" | "webp";
 
@@ -71,40 +73,6 @@ export function extFor(type: SniffedImageType): string {
 
 export function contentTypeFor(type: SniffedImageType): string {
   return CONTENT_TYPE_BY_TYPE[type];
-}
-
-/**
- * Pre-parse gate for multipart routes: the declared content-length must be
- * PRESENT, parseable, and within cap. A chunked request without the header
- * yields NaN → rejected (formData() would otherwise buffer it fully — App
- * Router imposes no default body cap).
- *
- * Returns null when acceptable, or a typed 413 response.
- */
-export function checkMultipartLength(
-  request: Request,
-  maxFileBytes: number,
-): Response | null {
-  const raw = request.headers.get("content-length");
-  const declared = raw == null || raw === "" ? Number.NaN : Number(raw);
-  if (!Number.isFinite(declared)) {
-    return payloadTooLargeResponse(
-      "A content-length header is required for uploads.",
-    );
-  }
-  if (declared > maxFileBytes + MULTIPART_FRAMING_SLACK_BYTES) {
-    return payloadTooLargeResponse(
-      `Upload exceeds the ${Math.floor(maxFileBytes / (1024 * 1024))} MB limit.`,
-    );
-  }
-  return null;
-}
-
-function payloadTooLargeResponse(message: string): Response {
-  return Response.json(
-    { error: "payload_too_large", message },
-    { status: 413, headers: { "content-type": "application/json" } },
-  );
 }
 
 // ─── Stored-path validators (defense in depth before signing) ────────────
@@ -157,4 +125,41 @@ export function isOwnedQuestionImagePath(path: string, ownerUid: string): boolea
   return (
     path.startsWith(`${ownerUid}/`) && isWellFormedQuestionImagePath(path)
   );
+}
+
+/**
+ * audit-3 C-F1: `quiz-sources` object path contract. Uploads are constructed
+ * client-side (UploadDropzone) as
+ * `<ownerUid>/<quizId>/<client-uuidv4>-<sanitized-filename>` — exactly three
+ * segments, both folders UUIDs, the file name a UUID followed by `-<rest>`.
+ * Anchored, so traversal, extra segments, and empty segments cannot match.
+ *
+ * The quiz DELETE sweep feeds DB columns (`source_file_url`, `sources[].storage_path`)
+ * to a service-role `remove()`; those columns are caller-writable at the DB
+ * layer, so an unvalidated path would let a lecturer destroy another tenant's
+ * object. There was no `quiz-sources` validator before this one — the C-03
+ * owner-pin gate had only ever been applied to the question-images bucket.
+ */
+const QUIZ_SOURCE_FILE_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-[^/]+$/i;
+
+export function isWellFormedQuizSourcePath(path: string): boolean {
+  const parts = path.split("/");
+  if (parts.length !== 3) return false;
+  const [owner, quizId, file] = parts;
+  return (
+    ANY_UID_RE.test(owner) &&
+    UUID_RE.test(quizId) &&
+    QUIZ_SOURCE_FILE_RE.test(file)
+  );
+}
+
+/**
+ * OWNER-PINNED gate for privileged `quiz-sources` operations fed from a DB
+ * column (the quiz DELETE sweep). Mirrors isOwnedQuestionImagePath: the
+ * first segment must be the acting owner's uid AND the whole path must match
+ * the well-formed contract. Callers skip + log on false, never throw.
+ */
+export function isOwnedQuizSourcePath(path: string, ownerUid: string): boolean {
+  return path.startsWith(`${ownerUid}/`) && isWellFormedQuizSourcePath(path);
 }

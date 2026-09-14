@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { QUESTION_IMAGES_BUCKET, isOwnedQuestionImagePath } from "@/lib/media/validation";
+import { tryCreateAdminClient } from "@/lib/supabase/admin";
+import {
+  QUESTION_IMAGES_BUCKET,
+  QUIZ_SOURCES_BUCKET,
+  isOwnedQuestionImagePath,
+  isOwnedQuizSourcePath,
+} from "@/lib/media/validation";
+import { removeStorageObjects } from "@/lib/media/cleanup";
 import { requireQuizOwner } from "@/lib/quizzes/guards";
 import { isUuid } from "@/lib/classes/roster";
 import { rateLimit } from "@/lib/classes/rate-limit";
@@ -89,6 +95,16 @@ export async function PATCH(request: Request, { params }: Params) {
   if (owner.quiz.status !== "draft" && !liveManageableOnly) return notDraft();
 
   const updates = buildQuizUpdates(patch, owner.quiz.mode);
+
+  // audit-3 C-F5: buildQuizUpdates always emits at least one column for any
+  // accepted field (nullable retake/shuffle nulls reset to the column
+  // default, see updates.ts), so an empty update — which PostgREST turns
+  // into `SELECT … WHERE false` and this route then reports as a misleading
+  // 404 — is unreachable. Keep the guard as an assertion against future
+  // builder drift.
+  if (Object.keys(updates).length === 0) {
+    return invalidBody("No editable fields provided.");
+  }
 
   const { data: quiz, error } = await supabase
     .from("quizzes")
@@ -189,9 +205,7 @@ export async function DELETE(request: Request, { params }: Params) {
   for (const row of questionRows ?? []) {
     // audit-2 C-03: every path here feeds a service-role remove() — each one
     // is gated to the quiz owner's OWN folder with the well-formed shape
-    // check (a poisoned column would otherwise delete cross-tenant bytes;
-    // quiz-sources paths are validated by the 0040-era owner-prefix writes,
-    // but the question column is the direct vector — gate both defensively).
+    // check (a poisoned column would otherwise delete cross-tenant bytes).
     if (row.image_path && isOwnedQuestionImagePath(row.image_path, owner.userId)) {
       push(QUESTION_IMAGES_BUCKET, row.image_path);
     } else if (row.image_path) {
@@ -203,7 +217,20 @@ export async function DELETE(request: Request, { params }: Params) {
     .select("source_file_url, sources")
     .eq("id", id)
     .maybeSingle();
-  if (quizRow?.source_file_url) push("quiz-sources", quizRow.source_file_url);
+  // audit-3 C-F1: `source_file_url`/`sources[].storage_path` are
+  // caller-writable at the DB layer (0004 UPDATE policy + the draft-only
+  // freeze trigger; save_quiz_questions persists p_source_file_url verbatim
+  // and accepts any non-empty string), so BOTH must pass the owner-pinned
+  // quiz-sources contract before reaching the service-role remove(). Before
+  // this fix the C-03 owner-pin gate covered only question-images.
+  const pushQuizSource = (path: string) => {
+    if (isOwnedQuizSourcePath(path, owner.userId)) {
+      push(QUIZ_SOURCES_BUCKET, path);
+    } else {
+      console.error("quiz delete: refusing malformed quiz-sources path", { quizId: id });
+    }
+  };
+  if (quizRow?.source_file_url) pushQuizSource(quizRow.source_file_url);
   if (Array.isArray(quizRow?.sources)) {
     for (const entry of quizRow.sources) {
       if (
@@ -211,7 +238,7 @@ export async function DELETE(request: Request, { params }: Params) {
         typeof entry === "object" &&
         typeof (entry as { storage_path?: unknown }).storage_path === "string"
       ) {
-        push("quiz-sources", (entry as { storage_path: string }).storage_path);
+        pushQuizSource((entry as { storage_path: string }).storage_path);
       }
     }
   }
@@ -223,11 +250,18 @@ export async function DELETE(request: Request, { params }: Params) {
   }
 
   if (paths.size > 0) {
-    const admin = createAdminClient();
-    for (const [bucket, bucketPaths] of paths) {
-      // storage.remove takes a path list; ≤31 paths per quiz (30 questions
-      // + sources) — a single call per bucket, bounded by construction.
-      void admin.storage.from(bucket).remove(bucketPaths).catch(() => {});
+    // Best-effort: the quiz row is already deleted, so a missing service-role
+    // key must degrade to a logged orphan (cron-reclaimable), never a 500 on
+    // an operation that in fact succeeded.
+    const admin = tryCreateAdminClient();
+    if (admin) {
+      for (const [bucket, bucketPaths] of paths) {
+        // storage.remove takes a path list; ≤31 paths per quiz (30 questions
+        // + sources) — a single call per bucket, bounded by construction.
+        // Non-fatal (the quiz row is already gone) but never silent: an
+        // orphaned object is otherwise unrecoverable with no signal.
+        await removeStorageObjects(admin, bucket, bucketPaths);
+      }
     }
   }
 

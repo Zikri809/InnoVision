@@ -10,6 +10,7 @@ import {
   isOwnedQuestionImagePath,
 } from "@/lib/media/validation";
 import { checkSameOrigin, internalError, invalidOrigin, notFound, rateLimited } from "@/lib/http";
+import { removeStorageObjects } from "@/lib/media/cleanup";
 
 export const dynamic = "force-dynamic";
 
@@ -69,7 +70,7 @@ export async function POST(request: Request, { params }: Params) {
     .eq("id", questionId)
     .eq("quiz_id", id);
   if (updateError) {
-    await admin.storage.from(QUESTION_IMAGES_BUCKET).remove([path]).catch(() => {});
+    await removeStorageObjects(admin, QUESTION_IMAGES_BUCKET, [path]);
     console.error("practice question image update error:", updateError);
     return internalError("Could not attach the image right now.");
   }
@@ -81,7 +82,7 @@ export async function POST(request: Request, { params }: Params) {
     // path must fail closed here (skip + log) instead of deleting cross-
     // tenant bytes.
     if (isOwnedQuestionImagePath(oldPath, owner.userId)) {
-      void admin.storage.from(QUESTION_IMAGES_BUCKET).remove([oldPath]).catch(() => {});
+      void removeStorageObjects(admin, QUESTION_IMAGES_BUCKET, [oldPath]);
     } else {
       console.error("practice question image replace: refusing malformed old image_path", {
         quizId: id,
@@ -136,7 +137,7 @@ export async function DELETE(request: Request, { params }: Params) {
     // audit-2 C-03: owner-pinned shape gate before the service-role remove
     // (poisoned-column vector). Fail closed: skip + log.
     if (isOwnedQuestionImagePath(oldPath, owner.userId)) {
-      void admin.storage.from(QUESTION_IMAGES_BUCKET).remove([oldPath]).catch(() => {});
+      void removeStorageObjects(admin, QUESTION_IMAGES_BUCKET, [oldPath]);
     } else {
       console.error("practice question image delete: refusing malformed image_path", {
         quizId: id,

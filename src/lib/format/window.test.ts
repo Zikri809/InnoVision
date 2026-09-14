@@ -8,12 +8,14 @@ import {
 } from "./window";
 
 describe("windowLocalInputToIso", () => {
-  it("parses a datetime-local value as a UTC instant", () => {
-    expect(windowLocalInputToIso("2026-09-01T14:30")).toBe("2026-09-01T14:30:00.000Z");
+  it("parses a datetime-local value as a wall-clock in DISPLAY_TIME_ZONE (KL, UTC+8)", () => {
+    // audit-3 C-F3: the input and the display surfaces share ONE zone, so
+    // "14:30" typed by a lecturer means 14:30 KL = 06:30Z.
+    expect(windowLocalInputToIso("2026-09-01T14:30")).toBe("2026-09-01T06:30:00.000Z");
   });
 
   it("parses seconds precision", () => {
-    expect(windowLocalInputToIso("2026-09-01T14:30:45")).toBe("2026-09-01T14:30:45.000Z");
+    expect(windowLocalInputToIso("2026-09-01T14:30:45")).toBe("2026-09-01T06:30:45.000Z");
   });
 
   it("empty / whitespace → null (unbounded endpoint)", () => {
@@ -28,13 +30,23 @@ describe("windowLocalInputToIso", () => {
     expect(windowLocalInputToIso("2026-13-99T99:99")).toBeNull();
     expect(windowLocalInputToIso("2026-09-01")).toBeNull();
   });
+
+  it("rejects calendar overflow instead of rolling it over", () => {
+    expect(windowLocalInputToIso("2026-02-30T10:00")).toBeNull();
+    expect(windowLocalInputToIso("2026-04-31T10:00")).toBeNull();
+  });
 });
 
 describe("windowIsoToLocalInput", () => {
   it("round-trips with the parse side", () => {
-    const iso = "2026-09-01T14:30:00.000Z";
+    const iso = "2026-09-01T06:30:00.000Z";
     expect(windowIsoToLocalInput(iso)).toBe("2026-09-01T14:30");
     expect(windowLocalInputToIso(windowIsoToLocalInput(iso))).toBe(iso);
+  });
+
+  it("renders the instant in DISPLAY_TIME_ZONE, not UTC", () => {
+    // 02:00Z = 10:00 KL — the same wall-clock formatWindow shows.
+    expect(windowIsoToLocalInput("2026-09-01T02:00:00.000Z")).toBe("2026-09-01T10:00");
   });
 
   it("null/unparseable → empty input", () => {

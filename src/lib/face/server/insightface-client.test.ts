@@ -1,11 +1,15 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import {
   extractFace,
   health,
   uidMockEmbedding,
+  isMockModeEnabled,
+  isMockMatchFrame,
+  isMockMismatchFrame,
   MOCK_MATCH_MARKER,
+  MOCK_MISMATCH_MARKER,
 } from "./insightface-client";
 import { EMBEDDING_DIMS } from "@/lib/face/embedding";
 
@@ -172,5 +176,119 @@ describe("insightface-client — real boundary (audit-1 §5.4)", () => {
       delete process.env.NEXT_PUBLIC_E2E_FAKE_SEAM;
       delete process.env.FACE_MOCK_ENABLED;
     }
+  });
+});
+
+// ─── audit-3 E-F6: mock-mode surface + memoized production warning ────────
+//
+// The warning is memoized at MODULE level, so each warn assertion re-imports a
+// fresh instance (vi.resetModules + dynamic import — the hardening-gate.test.ts
+// precedent). The env is read at CALL time, so the mock-mode behavior tests
+// can drive the statically-imported instance directly.
+describe("audit-3 E-F6 — mock mode + production warning", () => {
+  const SEAM = "NEXT_PUBLIC_E2E_FAKE_SEAM";
+  const MOCK = "FACE_MOCK_ENABLED";
+
+  async function withMockFlags(run: () => Promise<void>): Promise<void> {
+    const prevSeam = process.env[SEAM];
+    const prevMock = process.env[MOCK];
+    process.env[SEAM] = "1";
+    process.env[MOCK] = "1";
+    try {
+      await run();
+    } finally {
+      if (prevSeam === undefined) delete process.env[SEAM];
+      else process.env[SEAM] = prevSeam;
+      if (prevMock === undefined) delete process.env[MOCK];
+      else process.env[MOCK] = prevMock;
+    }
+  }
+
+  it("mock mode + marker predicates require BOTH flags", () => {
+    expect(isMockModeEnabled()).toBe(false);
+    process.env[SEAM] = "1";
+    try {
+      // Only one of the two flags set → still OFF (strict opt-in).
+      delete process.env[MOCK];
+      expect(isMockModeEnabled()).toBe(false);
+    } finally {
+      delete process.env[SEAM];
+    }
+  });
+
+  it("marker predicates and canned extraction only fire with both flags", async () => {
+    await withMockFlags(async () => {
+      expect(isMockModeEnabled()).toBe(true);
+      expect(isMockMatchFrame(MOCK_MATCH_MARKER)).toBe(true);
+      expect(isMockMatchFrame(MOCK_MISMATCH_MARKER)).toBe(false);
+      expect(isMockMismatchFrame(MOCK_MISMATCH_MARKER)).toBe(true);
+      expect(isMockMismatchFrame(MOCK_MATCH_MARKER)).toBe(false);
+
+      // MATCH marker → one canned centered face with a real spoof verdict.
+      const match = await extractFace(MOCK_MATCH_MARKER, "uid-mock");
+      if ("error" in match) throw new Error("expected a canned match result");
+      expect(match.faces).toHaveLength(1);
+      expect(match.faces[0].yaw).toBe(0);
+      expect(match.spoof).toEqual({ real: true, score: 0.99 });
+
+      // MISMATCH marker → the no-face sentinel (a 0-vote, never an error).
+      expect(await extractFace(MOCK_MISMATCH_MARKER, "uid-mock")).toEqual({ faces: [] });
+      // A REAL frame while the flag is on → deterministic no-face, never a 503.
+      expect(await extractFace("a-real-webcam-frame", "uid-mock")).toEqual({ faces: [] });
+      // Health short-circuits to true in mock mode (no sidecar round trip).
+      expect(await health()).toBe(true);
+    });
+  });
+
+  describe("warnIfMockSeamInProduction", () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    let prevNode: string | undefined;
+
+    beforeEach(() => {
+      warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      prevNode = process.env.NODE_ENV;
+    });
+
+    afterEach(() => {
+      warn.mockRestore();
+      (process.env as { NODE_ENV?: string }).NODE_ENV = prevNode;
+      delete process.env[SEAM];
+      delete process.env[MOCK];
+    });
+
+    async function freshClient() {
+      vi.resetModules();
+      return await import("./insightface-client");
+    }
+
+    it("warns ONCE when NODE_ENV=production and both seam flags are set", async () => {
+      const mod = await freshClient();
+      (process.env as { NODE_ENV?: string }).NODE_ENV = "production";
+      process.env[SEAM] = "1";
+      process.env[MOCK] = "1";
+      expect(mod.isMockModeEnabled()).toBe(true);
+      // Memoization: a second call must not warn again.
+      expect(mod.isMockModeEnabled()).toBe(true);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain("[insightface]");
+    });
+
+    it("does NOT warn in a development build", async () => {
+      const mod = await freshClient();
+      (process.env as { NODE_ENV?: string }).NODE_ENV = "development";
+      process.env[SEAM] = "1";
+      process.env[MOCK] = "1";
+      expect(mod.isMockModeEnabled()).toBe(true);
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it("does NOT warn when the flags are absent (mock mode off)", async () => {
+      const mod = await freshClient();
+      (process.env as { NODE_ENV?: string }).NODE_ENV = "production";
+      delete process.env[SEAM];
+      delete process.env[MOCK];
+      expect(mod.isMockModeEnabled()).toBe(false);
+      expect(warn).not.toHaveBeenCalled();
+    });
   });
 });

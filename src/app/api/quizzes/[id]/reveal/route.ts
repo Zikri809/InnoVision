@@ -31,6 +31,15 @@ const REVEAL_RATE = { limit: 10, windowMs: 60 * 1000 };
  *  - Idempotent: a second reveal is a 0-row no-op → 200 `{ already: true }`.
  *  - The DB trigger `quiz_reveal_once` is the backstop: any UPDATE that
  *    changes a non-null `results_revealed_at` raises `reveal_once_only`.
+ *
+ * audit-3 H3-ATOM-F5: reveal is now BOUND TO THE END OF THE ASSESSMENT. A
+ * live quiz with in-flight sessions (active/paused/flagged) refuses with a
+ * typed 409 — revealing mid-assessment exposed `is_correct` for every
+ * already-answered question, irreversibly (quiz_reveal_once). The count is
+ * advisory (a session started in the sub-second window after it has no
+ * answers yet, so nothing leaks for it); the authoritative backstop is the
+ * status term added to `is_student_reveal_allowed` in 0049, which keeps
+ * correctness hidden on any `live` quiz even if one is revealed anyway.
  */
 export async function POST(_request: Request, { params }: Params) {
   const supabase = await createClient();
@@ -62,9 +71,53 @@ export async function POST(_request: Request, { params }: Params) {
     );
   }
 
+  // H3-ATOM-F5: reveal is bound to the end of the assessment. On a LIVE quiz
+  // it refuses ONLY when an in-flight session has already ANSWERED something —
+  // that is exactly the population that would immediately read `is_correct`
+  // (the irreversible leak). An in-flight session with no answers yet leaks
+  // nothing, so the legitimate "reveal early so the EndScreen shows the score"
+  // journey (e7-unlock) keeps working; the authoritative per-caller deferral
+  // lives in `is_student_reveal_allowed` (0049), which also covers a reveal
+  // that arrives via direct PostgREST or the submit_session auto-flip.
+  if (owner.quiz.status === "live") {
+    const { data: liveSessions, error: liveError } = await supabase
+      .from("quiz_sessions")
+      .select("id")
+      .eq("quiz_id", id)
+      .in("status", ["active", "paused", "flagged"]);
+    if (liveError) {
+      console.error("reveal quiz in-flight read error:", liveError);
+      return internalError("Could not reveal the results right now.");
+    }
+    const liveIds = (liveSessions ?? []).map((s) => s.id);
+    if (liveIds.length > 0) {
+      const { count, error: answerError } = await supabase
+        .from("session_answers")
+        .select("id", { count: "exact", head: true })
+        .in("session_id", liveIds);
+      if (answerError) {
+        console.error("reveal quiz in-flight answer-count error:", answerError);
+        return internalError("Could not reveal the results right now.");
+      }
+      if ((count ?? 0) > 0) {
+        return NextResponse.json(
+          {
+            error: "quiz_in_progress",
+            message:
+              "Students have already answered questions and are still taking this quiz. Close the quiz before revealing results.",
+          },
+          { status: 409, headers: { "content-type": "application/json" } },
+        );
+      }
+    }
+  }
+
   // Guarded one-way-safe UPDATE (mirrors the auto-reveal flip in
   // submit_session). No status term: the `.is(null)` guard carries one-way
-  // idempotency; `quiz_reveal_once` remains the trigger backstop.
+  // idempotency; `quiz_reveal_once` remains the trigger backstop. The
+  // correctness gate itself is `is_student_reveal_allowed` (0049 defers it for
+  // a caller who is still answering), so a reveal that lands on a live quiz
+  // still exposes nothing to an in-flight student.
   const { data, error } = await supabase
     .from("quizzes")
     .update({ results_revealed_at: new Date().toISOString() })

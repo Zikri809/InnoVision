@@ -34,7 +34,8 @@ const OWN_COLS = `${ENVELOPE_COLS}, verify_nonce`;
  * Envelope: `{ id, status, quiz_id, mode, started_at, submitted_at, score,
  * face_exempt, face_fail_streak, face_unavailable_at, last_activity_at }` +
  * `verify_nonce` for the own student ONLY (the lecturer SELECT never fetches
- * the nonce).
+ * the nonce) + `remainingMs` for the own student's ACTIVE timed session
+ * (D-F2 — the countdown re-sync seed).
  */
 export async function GET(_request: Request, { params }: Params) {
   const supabase = await createClient();
@@ -119,28 +120,49 @@ export async function GET(_request: Request, { params }: Params) {
  * state is derived from quiz metadata via RLS — no dedicated read needed here.
  * QC-2: a closed+revealed quiz falls out of the live-only view; the closed-
  * revealed view is the fallback so recovered results still reach the student.
+ *
+ * D-F2: for an ACTIVE timed session the envelope also carries `remainingMs`
+ * (the same ungraced deadline arithmetic as lib/sessions/timer.ts). The
+ * flagged poll observes status='active' here after a lecturer unlock, so the
+ * client can re-sync its countdown instead of resuming from the frozen
+ * pre-pause reading.
  */
 async function studentEnvelope(
   supabase: Awaited<ReturnType<typeof createClient>>,
   s: Record<string, unknown>,
 ) {
   const row = envelope(s);
-  if (row.mode === "assessment" && row.score != null && typeof row.quiz_id === "string") {
-    const { data: quiz } = await supabase
-      .from("student_quiz_view")
-      .select("id, results_revealed_at")
-      .eq("id", row.quiz_id)
-      .maybeSingle()
-      .then(async (r) =>
-        r.data
-          ? r
-          : supabase
-              .from("student_closed_revealed_quiz_view")
-              .select("id, results_revealed_at")
-              .eq("id", row.quiz_id as string)
-              .maybeSingle(),
-      );
-    if (!quiz?.results_revealed_at) row.score = null;
+  if (typeof row.quiz_id !== "string") return row;
+  // Quiz metadata is needed for the reveal gate (score non-null) and/or the
+  // active-session deadline (D-F2). One read serves both.
+  const needsQuizMeta =
+    (row.mode === "assessment" && row.score != null) || row.status === "active";
+  if (!needsQuizMeta) return row;
+  const { data: quiz } = await supabase
+    .from("student_quiz_view")
+    .select("id, results_revealed_at, time_limit_sec")
+    .eq("id", row.quiz_id)
+    .maybeSingle()
+    .then(async (r) =>
+      r.data
+        ? r
+        : supabase
+            .from("student_closed_revealed_quiz_view")
+            .select("id, results_revealed_at, time_limit_sec")
+            .eq("id", row.quiz_id as string)
+            .maybeSingle(),
+    );
+  if (row.mode === "assessment" && row.score != null && !quiz?.results_revealed_at) {
+    row.score = null;
+  }
+  if (
+    row.status === "active" &&
+    quiz?.time_limit_sec != null &&
+    typeof row.started_at === "string"
+  ) {
+    const deadline = Date.parse(row.started_at) + quiz.time_limit_sec * 1000;
+    // Server-computed seed (the client never reads its own clock for this).
+    (row as Record<string, unknown>).remainingMs = Math.max(0, deadline - Date.now());
   }
   return row;
 }

@@ -326,27 +326,33 @@ export function ResultsDashboardClient({
     }
   }
 
-  /** QC-2 prevention CTA: reveal (idempotent), then close (CAS) — both
-   * safe in either order, so a partial sequence never strands results. */
+  /** QC-2 prevention CTA. audit-3 H3-ATOM-F5: CLOSE first, then reveal.
+   * Closing blocks new starts and hard-stops answering, so the follow-up
+   * reveal can never expose correctness to an in-flight student, and a failed
+   * close aborts before the irreversible reveal (the old reveal-then-close
+   * order could strand a revealed+live quiz). Both calls stay idempotent, so
+   * a partial sequence is retryable from the same dialog. */
   async function handleRevealThenClose() {
     if (closing || revealing) return;
     setCloseCooled(true);
     setClosing(true);
     setCloseError(null);
     try {
+      const closeRes = await fetch(`/api/quizzes/${quizId}/close`, {
+        method: "POST",
+      });
+      if (!closeRes.ok) {
+        const body = await closeRes.json().catch(() => ({}));
+        setCloseError(body.message ?? body.error ?? tCommon("errorGeneric"));
+        return;
+      }
       const revealRes = await fetch(`/api/quizzes/${quizId}/reveal`, {
         method: "POST",
       });
       if (!revealRes.ok) {
         const body = await revealRes.json().catch(() => ({}));
-        setCloseError(body.message ?? body.error ?? tCommon("errorGeneric"));
-        return;
-      }
-      const res = await fetch(`/api/quizzes/${quizId}/close`, {
-        method: "POST",
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
+        // The quiz is closed but results are still hidden — a recoverable
+        // state the Reveal button on this dashboard handles.
         setCloseError(body.message ?? body.error ?? tCommon("errorGeneric"));
         return;
       }

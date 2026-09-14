@@ -123,10 +123,14 @@ export default defineConfig({
         // Same class of flake for the reset path: e34 fires several
         // resetPasswordForEmail calls (incl. per-IP budget) within one window
         // and retries in CI. Raised for the harness only — production
-        // defaults stay 5/min per email and 10/min per IP.
+        // defaults stay 5/min per email and 30/min per IP (audit-3 R2-TOP-F5
+        // raised the IP budget to the classroom-NAT-tolerant login precedent),
+        // with a 10/day per-email ceiling (audit-3 R2-TOP-F3) that the harness
+        // also lifts.
         RESET_RATE_LIMIT: "1000",
         RESET_IP_RATE_LIMIT: "1000",
         RESET_CONFIRM_RATE_LIMIT: "1000",
+        RESET_EMAIL_DAILY_LIMIT: "1000",
         // Kill-switch for the ~60 hardcoded per-route budgets (VERIFY_RATE,
         // START_RATE, the non-tunable `invite:global` 100/min signup bucket,
         // ...) which the suite's 6-worker burst overflows mid-run — the

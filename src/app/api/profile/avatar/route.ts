@@ -9,6 +9,7 @@ import {
   isValidAvatarPath,
 } from "@/lib/media/validation";
 import { checkSameOrigin, internalError, notFound, rateLimited } from "@/lib/http";
+import { removeStorageObjects } from "@/lib/media/cleanup";
 
 export const dynamic = "force-dynamic";
 
@@ -73,7 +74,7 @@ export async function POST(request: Request) {
     .eq("id", userId);
   if (updateError) {
     if (!previous) {
-      await admin.storage.from(AVATARS_BUCKET).remove([path]).catch(() => {});
+      await removeStorageObjects(admin, AVATARS_BUCKET, [path]);
     }
     console.error("avatar update error:", updateError);
     return internalError("Could not save the avatar right now.");
@@ -82,7 +83,7 @@ export async function POST(request: Request) {
   if (previous && previous !== path) {
     // Defense in depth on the stored column before touching storage.
     if (isValidAvatarPath(previous, userId)) {
-      void admin.storage.from(AVATARS_BUCKET).remove([previous]).catch(() => {});
+      void removeStorageObjects(admin, AVATARS_BUCKET, [previous]);
     }
   }
 
@@ -119,7 +120,7 @@ export async function DELETE(request: Request) {
     // Defense in depth: never hand a stored column to storage.remove unchecked.
     const admin = createAdminClient();
     if (isValidAvatarPath(previous, userId)) {
-      void admin.storage.from(AVATARS_BUCKET).remove([previous]).catch(() => {});
+      void removeStorageObjects(admin, AVATARS_BUCKET, [previous]);
     }
   }
 

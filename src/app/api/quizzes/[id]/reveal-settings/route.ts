@@ -37,11 +37,16 @@ export async function PATCH(request: Request, { params }: Params) {
   const owner = await requireQuizOwner(supabase, id);
   if (!owner.ok) return owner.response;
 
-  const rate = owner.userId ? rateLimit(`reveal-settings:${owner.userId}`, SETTINGS_RATE) : false;
-  if (!rate) return rateLimited("Too many requests. Try again in a minute.");
-
+  // CSRF BEFORE the rate limiter (audit-3 C-F4): this was the only route in
+  // the app whose ordering was inverted, so a cross-origin probe burned the
+  // owner's settings budget (the reveal/close/duplicate siblings all check
+  // origin first).
   const originError = checkSameOrigin(request);
   if (originError) return originError;
+
+  if (!rateLimit(`reveal-settings:${owner.userId}`, SETTINGS_RATE)) {
+    return rateLimited("Too many requests. Try again in a minute.");
+  }
 
   const body = await readCappedJson(request);
   if (!body.ok) return body.response;
