@@ -77,6 +77,11 @@ jobs:
           echo "GLM_BASE_URL=http://localhost:11434" >> .env.local
           echo "OCR_GLM_MODEL=glm-ocr" >> .env.local
           echo "OCR_VISION_MODEL=gpt-4o-mini" >> .env.local
+          # GLM-OCR provider selector: the FREE local leg. CI has no Z.ai key
+          # and must never select the metered leg (a unit/route test that
+          # reaches the remote path would bill a real account). Fail-closed in
+          # the app, explicit here so the build env is self-consistent.
+          echo "GLM_PROVIDER=local" >> .env.local
 
       - name: Reset DB (apply migrations)
         run: npx supabase db reset
@@ -92,6 +97,74 @@ jobs:
 
       - name: Env parity (audit-1 §5.5)
         run: node scripts/check-env-parity.mjs
+
+      # Gate S5 recurrence guard: the four kill switches must NEVER reach a CI
+      # build. Two of them (NEXT_PUBLIC_E2E_FAKE_SEAM, NEXT_PUBLIC_INTEGRITY_
+      # HARDENING_OFF) are inlined at BUILD time, so a leaked value here bakes
+      # fake tracker seams into the artifact this job builds and runs. The
+      # other two disarm the rate limiter / the real face engine at RUNTIME.
+      # `src/lib/prod-guards.ts` catches this at app boot in production, but
+      # that is too late for CI: the artifact would already be built. Assert on
+      # the BUILD env here, before the expensive steps.
+      #
+      # WHICH ENVIRONMENT THIS COVERS — read carefully before "fixing" it:
+      # this step reads the JOB env only: the `env:` block at the top of this
+      # job plus anything exported into the shell by an earlier `run:` step
+      # (e.g. `$GITHUB_ENV`). That is the env `npm run build` below inherits,
+      # so it is the right thing to assert on.
+      #
+      # It deliberately does NOT cover the Playwright webServer env. That env
+      # is a SEPARATE, child-process-only environment assembled in
+      # playwright.config.ts, and it LEGITIMATELY arms two of the four switches
+      # for the E2E step: `NEXT_PUBLIC_E2E_FAKE_SEAM: "1"` and
+      # `NEXT_PUBLIC_INTEGRITY_HARDENING_OFF: "1"` (plus E2E_RATE_LIMIT_DISABLED
+      # and FACE_MOCK_ENABLED). That is by design — the suite drives fake
+      # tracker seams and needs the clipboard/fullscreen hardening inert. Those
+      # values never reach this step's env, so the "OK" line below describes
+      # the JOB/BUILD env, NOT the environment the E2E webServer runs in.
+      # Consequence: this step is a guard on the artifact CI ships, and must
+      # not be extended to police the harness's own deliberate configuration.
+      #
+      # The `integrity-e2e` job has no such step: its job-level env carries
+      # NEXT_PUBLIC_E2E_FAKE_SEAM=1 and FACE_MOCK_ENABLED=1 on purpose (to bake
+      # the fake seams in for e51 while omitting the hardening kill switch), so
+      # this four-switch check would fail on that job's correct configuration.
+      #
+      # Comparison is NORMALIZED (trim + lowercase) so casing/whitespace
+      # variants (`False`, `"0 "`) are handled deliberately rather than by
+      # accident. Anything that is not absent/0/false is treated as ARMED and
+      # fails the step — fail-closed.
+      #
+      # Deliberately INLINE (no script file): this is a short env assertion and
+      # a new script would need its own tests/parity wiring.
+      #
+      # Do not add any of these four to a job's top-level `env:`.
+      - name: Assert kill switches are absent from the build env
+        run: |
+          fail=0
+          for key in E2E_RATE_LIMIT_DISABLED NEXT_PUBLIC_E2E_FAKE_SEAM FACE_MOCK_ENABLED NEXT_PUBLIC_INTEGRITY_HARDENING_OFF; do
+            raw="${!key:-}"
+            # Normalize before comparing: trim surrounding whitespace, then
+            # lowercase. Without this, "False" and "0 " were rejected only as a
+            # side effect of the glob not matching — safe (fail-closed) but
+            # surprising, and the intent was never stated. The RAW value is kept
+            # for the error message, so the operator sees exactly what leaked.
+            value="${raw#"${raw%%[![:space:]]*}"}"
+            value="${value%"${value##*[![:space:]]}"}"
+            value="${value,,}"
+            case "$value" in
+              ""|"0"|"false") ;;
+              *)
+                echo "::error::kill switch $key=$raw is set in the CI build env — it must be absent or 0 (gate S5)."
+                fail=1
+                ;;
+            esac
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "Refusing to build: a kill switch above would bake fake seams into the artifact."
+            exit 1
+          fi
+          echo "OK — in the JOB/BUILD env (not the Playwright webServer env, which arms two of them on purpose) E2E_RATE_LIMIT_DISABLED / NEXT_PUBLIC_E2E_FAKE_SEAM / FACE_MOCK_ENABLED / NEXT_PUBLIC_INTEGRITY_HARDENING_OFF are all absent or 0."
 
       - name: Lint
         run: npm run lint
@@ -205,6 +278,14 @@ jobs:
     # This job runs ONLY e51 against a build with the hardening baked IN
     # (INTEGRITY_E2E=1 makes the webServer env omit the kill switch). E51's
     # full two-role journeys cost a second `next build` + ~5 min of specs.
+    #
+    # NO kill-switch assertion step here (unlike the `test` job): this job's
+    # job-level env DELIBERATELY carries NEXT_PUBLIC_E2E_FAKE_SEAM=1 and
+    # FACE_MOCK_ENABLED=1 (see the H3-INFRA-F2 note below), so the four-switch
+    # check would fail on its own correct configuration. It also deliberately
+    # OMITS NEXT_PUBLIC_INTEGRITY_HARDENING_OFF so the hardening is baked IN —
+    # the opposite of the `test` job. The gate S5 enforcement lives in the
+    # `test` job, which is the artifact CI ships.
     runs-on: ubuntu-latest
     env:
       # Same CI-only invite code as the `test` job (see its comment there).
@@ -257,6 +338,11 @@ jobs:
           echo "GLM_BASE_URL=http://localhost:11434" >> .env.local
           echo "OCR_GLM_MODEL=glm-ocr" >> .env.local
           echo "OCR_VISION_MODEL=gpt-4o-mini" >> .env.local
+          # GLM-OCR provider selector: the FREE local leg. CI has no Z.ai key
+          # and must never select the metered leg (a unit/route test that
+          # reaches the remote path would bill a real account). Fail-closed in
+          # the app, explicit here so the build env is self-consistent.
+          echo "GLM_PROVIDER=local" >> .env.local
 
       - name: Reset DB (apply migrations)
         run: npx supabase db reset

@@ -77,6 +77,21 @@ next-env.d.ts
 # GLM-OCR benchmark raw timings (regenerate with `npm run glm:bench`)
 /bench-glm-ocr.jsonl
 
+# GLM spend governor's durable ledger (WS-CORE src/lib/ai/glm-spend.ts): per-user
+# daily OCR token/spend accounting. Written at RUNTIME by the app, resolved
+# against the process cwd (default `.glm-spend-ledger.json`; override with
+# GLM_SPEND_LEDGER_PATH). Deliberately NOT root-anchored so a ledger written
+# into a subdirectory (a custom path, or a container bind-mount that lands
+# under a work dir) is still ignored — there is no legitimate tracked file with
+# this name.
+#
+# The GLOB is load-bearing, not cosmetic: the ledger is written tmp-then-rename
+# (`${path}.tmp`, glm-spend.ts:258), so a crash or kill between writeFileSync and
+# renameSync leaves `.glm-spend-ledger.json.tmp` on disk — the exact-name rule
+# alone did NOT match it (`git check-ignore` exit 1), and a `git add -A` would
+# then commit the day's per-user accounting.
+.glm-spend-ledger.json*
+
 # scratch: dev logs, probe scripts, throwaway screenshots
 /.tmp/
 /.tmp_*
@@ -92,5 +107,6 @@ __pycache__/
 *.py[cod]
 .eslintcache
 
-# audit-3 R3-DEP-F6: prod-destructive confirmation audit trail.
-/.prod-audit.log
+# audit-3 R3-DEP-F6: prod-destructive confirmation audit trail. Glob so the
+# rotated/partial siblings (`*.1`, `.tmp`) are covered too.
+/.prod-audit.log*

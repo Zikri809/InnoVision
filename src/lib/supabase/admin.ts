@@ -1,3 +1,5 @@
+import "server-only";
+
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/types/database";
 import { env } from "@/lib/env";
@@ -12,6 +14,17 @@ import { env } from "@/lib/env";
  *
  * NEVER import this into a client component or expose it via a route that
  * a non-privileged user can reach.
+ *
+ * **Gate S6: `import "server-only"`.** The header above already SAID
+ * "SERVER-ONLY", but that was prose only — unlike its siblings
+ * (`src/lib/ai/client.ts`, `src/lib/ai/tinyfish.ts`,
+ * `src/lib/face/server/insightface-client.ts`) the module carried no runtime
+ * guard, so a stray client-component import would have bundled the
+ * service-role key instead of failing the build. `server-only` resolves to a
+ * throwing module outside the RSC/server layer (Next aliases it per layer —
+ * `WEBPACK_LAYERS.GROUP.serverOnly` allows it), making the claim enforceable.
+ * `src/test/setup.ts` mocks the package globally, so unit tests that import
+ * this module (route tests mock it anyway) are unaffected.
  *
  * audit-3 A-F5: the key is REQUIRED for the app's privileged features (face
  * verify, incident clips, media cleanup, notifications), but the pre-checks

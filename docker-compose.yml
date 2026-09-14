@@ -32,6 +32,26 @@
 # §Cutover. Fresh hosts that ran the old stack elsewhere may still hold
 # compreface volumes containing biometric data — do NOT `docker compose down
 # -v` casually there; disposal is a documented security step.
+#
+# ── VPS deployment services (plan §B3 / gate O1) ────────────────────────────
+# Two more services exist for the vCPU VPS target (`docs/DEPLOY_VPS.md`):
+#   - app   — the Next.js image built from the repo-root Dockerfile. Publishes
+#             127.0.0.1:3000 ONLY (loopback; the proxy terminates TLS and
+#             forwards over the compose network). The GLM-OCR vLLM container is
+#             NOT started there (profile-gated below); GLM runs remotely on the
+#             Z.ai API and Supabase is hosted.
+#   - caddy — TLS + reverse proxy in front of `app`. 80/443 are the ONLY ports
+#             exposed to the internet on the VPS.
+#
+# Profile rule (compose spec): a service WITHOUT `profiles:` always starts on a
+# bare `docker compose up`; a service WITH one starts only when that profile is
+# requested. `glm-ocr` therefore carries `profiles: ["gpu"]` — a bare
+# `compose up` on a GPU-less VPS must never try to CREATE it (its nvidia device
+# reservation fails at create time, and the CPU fallback wants 16g/8cpu at
+# ~30 s/page, which is not a real fallback on a classroom VPS). Laptop/dev
+# keeps working via the explicit path: `docker compose --profile gpu up -d`
+# (or the existing `npm run glm:start`, which names the service directly and
+# pulls its profile in automatically).
 name: innovision
 
 x-logging: &default-logging
@@ -50,6 +70,15 @@ services:
   # Transformers predates the `glm_ocr` architecture, so we layer a
   # Transformers-from-source install on top (per the official GLM-OCR docs).
   glm-ocr:
+    # PROFILE-GATED (plan §B3.1): this is the ONLY service with `profiles:`.
+    # A bare `docker compose up` therefore skips it entirely, which is what the
+    # vCPU VPS needs — there is no GPU, GLM runs remotely on Z.ai, and an
+    # attempted create would fail on the nvidia device reservation (or, worse,
+    # fall back to CPU and hold 16g/8cpu for a ~30 s/page engine). Opt in
+    # explicitly on a GPU host: `docker compose --profile gpu up -d glm-ocr`
+    # (`npm run glm:start` names the service directly, which pulls the profile
+    # in automatically).
+    profiles: ["gpu"]
     build:
       context: .
       dockerfile: docker/glm-ocr/Dockerfile
@@ -152,3 +181,213 @@ services:
       timeout: 10s
       retries: 5
       start_period: 90s
+
+  # ── app — the Next.js server (plan §B3.1 / gate O1) ────────────────────────
+  # Built from the repo-root Dockerfile (multi-stage: deps → `next build` →
+  # `output: "standalone"` runner as `USER node`).
+  #
+  # ⚠️ THE BUILD-TIME ENV FAMILY IS NOT IN `environment:` BELOW. NEXT_PUBLIC_*
+  # values, the ALLOWED_HOSTS family and the `/sb` rewrite gate all bake at
+  # `next build` and are declared as Dockerfile `ARG`s. Setting them at runtime
+  # would change NOTHING about the shipped bundle — the standalone server
+  # (`node server.js`) serves the frozen routes manifest and the already-inlined
+  # client bundle. To flip the Supabase target or the public origin: set the var
+  # and REBUILD the image. Only genuinely runtime-read vars belong in
+  # `env_file:`.
+  #
+  # NOTE ON THE RUNTIME BINARY: this image runs `node server.js` from
+  # `.next/standalone` (`output: "standalone"`), NOT `next start`. The two are
+  # not interchangeable — `next start` refuses a standalone build with
+  # "next start does not work with output: standalone". The frozen-manifest
+  # behaviour above is identical either way, so the BUILD-vs-RUNTIME split is
+  # unchanged; only the binary name was wrong.
+  #
+  # The ARG values come from compose interpolation, i.e. the SHELL env or the
+  # project-root `.env` file (compose's own file, NOT `.env.local` — there is no
+  # env_file mechanism for build args). The VPS therefore exports the build-time
+  # family alongside `SITE_HOST`/`ACME_EMAIL` in the project-root `.env`, and
+  # `docker compose build app` reproduces the hosted image. A var left unset
+  # falls back to the Dockerfile default (the LOCAL posture): the safe failure
+  # for a dev build, a silent misconfiguration on the VPS.
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: "${NEXT_PUBLIC_SUPABASE_URL:-http://127.0.0.1:58021}"
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: "${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}"
+        NEXT_PUBLIC_SITE_URL: "${NEXT_PUBLIC_SITE_URL:-}"
+        SITE_URL: "${SITE_URL:-}"
+        TRUSTED_ORIGINS: "${TRUSTED_ORIGINS:-}"
+        # ALLOWED_HOSTS is the operator-facing name; ALLOWED_ORIGINS is the
+        # original one next.config.ts reads. BOTH are passed because
+        # next.config.ts folds the pair into the same allowlist — before that
+        # alias existed, following the runbook's `ALLOWED_HOSTS=` line had NO
+        # effect (the origin worked only because NEXT_PUBLIC_SITE_URL/SITE_URL
+        # were set in the same block).
+        ALLOWED_HOSTS: "${ALLOWED_HOSTS:-}"
+        ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-}"
+        # Harness kill switches: pinned to 0 for every image built by this
+        # compose file. They are inlined into the client bundle, so a
+        # harness-built image promoted to the VPS carries them forever.
+        NEXT_PUBLIC_E2E_FAKE_SEAM: "0"
+        NEXT_PUBLIC_INTEGRITY_HARDENING_OFF: "0"
+    image: innovision-app:local
+    restart: unless-stopped
+    # RUNTIME env (read per request / at process start). ⚠️ ON THE VPS THIS FILE
+    # MUST BE FRESH, NEVER A COPY OF THE LAPTOP'S .env.local — that copy carries
+    # `localhost:*` defaults for the sidecars and Supabase, and the scripts'
+    # remote overlay does not apply to the runtime (plan §B1.8 "named trap").
+    # It holds the server-only secrets (SUPABASE_SERVICE_ROLE_KEY, ZAI_API_KEY,
+    # FACE_SIDECAR_TOKEN) that must never be build args, plus the RUNTIME-flippable
+    # origin vars (TRUSTED_ORIGINS) and the sidecar token that must MATCH the one
+    # the insightface service reads from the project-root `.env`.
+    env_file:
+      - .env.local
+    environment:
+      # Compose-network hostname, overriding whatever the env file says: the
+      # app's default (`http://localhost:8000`) would resolve to the app's OWN
+      # container, where nothing listens. `insightface-service` is the service
+      # name on this network.
+      INSIGHTFACE_BASE_URL: "http://insightface-service:8000"
+      NODE_ENV: "production"
+      # ── THE PROD ENV GATE IS A CONTROL ONLY BECAUSE OF THIS LINE (S1/S5) ───
+      # `src/lib/prod-guards.ts` (run from `src/instrumentation.ts`) refuses to
+      # start the server when a harness kill switch is armed or a gated token is
+      # empty — but ONLY when `NODE_ENV=production` AND `PROD_ENV_STRICT === "1"`.
+      # Without this line the gate logs one `[prod-guards] N production env
+      # violation(s) …` warn and boots anyway, which is exactly the "wish, not a
+      # control" that gate S1 exists to remove. RUNTIME env, not a build arg: it
+      # is read from `process.env` at startup, never inlined.
+      #
+      # The Playwright harness deliberately does NOT set this (it runs a
+      # production build with the kill switches ON to serve the fake seams), so
+      # this pinning is what separates the VPS from the harness. Do NOT relax it
+      # to make a boot failure go away — fix the environment it names instead.
+      PROD_ENV_STRICT: "1"
+      # ── The spend ledger MUST outlive the container (gate G8) ──────────────
+      # `src/lib/ai/glm-spend.ts` keeps the per-user daily Z.ai token cap in a
+      # JSON file. With no volume, that file lands in the container's writable
+      # layer: it is NOT lost on a restart (`restart: unless-stopped` reuses the
+      # container) but it IS lost on every `up --build`, `down`/`up`, or image
+      # bump — i.e. on every redeploy, which is exactly when a spend cap matters
+      # least and an abuser would benefit most. A crash-loop or a routine deploy
+      # would hand every user a fresh `GLM_DAILY_TOKEN_CAP`. The named volume
+      # below puts the file on host-backed storage that survives recreation.
+      #
+      # Path is under /var/lib (the FHS location for variable state) rather than
+      # the /app workdir so the mounted volume does not shadow any traced file.
+      #
+      # RESIDUAL, documented not fixed: the ledger is PER-HOST. Two app replicas
+      # sharing one Z.ai key still double-spend (each enforces the cap against
+      # its own file). That is why the deployment target is SINGLE-INSTANCE; a
+      # shared store (Postgres/Redis) is the upgrade path if this is ever scaled.
+      GLM_SPEND_LEDGER_PATH: "/var/lib/innovision/glm-spend-ledger.json"
+      # GLM_PROVIDER is NOT forced here on purpose: it is set by the env file
+      # (`remote` on the VPS per plan §B2.1, `local` on a dev box). Hardcoding
+      # it would silently override a developer's choice, and the app's own
+      # resolver is already fail-closed (an unknown value selects `local`).
+    volumes:
+      # Durable home for the spend ledger — see GLM_SPEND_LEDGER_PATH above.
+      # Host-backed, survives `compose up --build` / `down`/`up` / image bumps;
+      # only `down -v` removes it (do not).
+      - glm-ledger:/var/lib/innovision
+    ports:
+      # LOOPBACK ONLY. The proxy (caddy, below) terminates TLS and forwards
+      # over the compose network; publishing 3000 on 0.0.0.0 would expose the
+      # app directly, bypassing TLS and the proxy's header handling. This is
+      # also the real access control on a Docker host: `ufw deny 3000` is
+      # silently ineffective against published ports (Docker writes its own
+      # iptables rules), so the loopback bind is the control, not the firewall.
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      insightface-service:
+        # The face sidecar must be SERVING before the app takes traffic: the
+        # healthcheck above is what `service_healthy` waits on. Without it the
+        # first exam-integrity calls hit a cold model load and time out (the
+        # routes allow 5s per call).
+        condition: service_healthy
+    # ⚠️ UNVALIDATED AT CLASSROOM SCALE — these are PLACEHOLDERS, not measured
+    # numbers. The plan refuses to pretend otherwise (gate O1: "mem/cpus
+    # UNVALIDATED — load-test at classroom scale before pinning"). The sidecar
+    # limits above were derived from a measured model footprint; the app's are
+    # not, because the load profile (N students polling notifications + N/4
+    # integrity frames + a lecturer OCR run) has never been measured on a vCPU
+    # host. Start here, run the classroom-scale load test, then pin. A too-low
+    # cpus quota shows up as SSE/streamed-AI latency and healthcheck timeouts,
+    # not as an obvious crash.
+    mem_limit: 2g
+    cpus: "2.0"
+    logging: *default-logging
+    # NOTE: the app image carries its OWN HEALTHCHECK (Dockerfile) asserting
+    # liveness + DB reachability from /api/health — and deliberately NOT
+    # `cron.ok`, so a paused free-tier Supabase project cannot drive a restart
+    # loop that zeroes the in-memory rate-limit/spend Maps. Not repeated here
+    # so there is one source of truth; the image's instruction applies.
+
+  # ── caddy — TLS termination + reverse proxy (plan §B3.3) ───────────────────
+  # Caddy issues and renews Let's Encrypt / ZeroSSL certificates automatically
+  # and does HTTP→HTTPS on its own. Requirements, all of which are operational
+  # and all of which fail loudly in the Caddy logs if missed:
+  #   1. DNS A/AAAA for {$SITE_HOST} must point at this host;
+  #   2. ports 80 AND 443 must be reachable from the internet (ACME uses 80 for
+  #      the HTTP-01 challenge, and the HTTP→HTTPS redirect needs it too);
+  #   3. /data must be a PERSISTENT volume — see the volumes note below.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      # HTTP/3 (QUIC) rides UDP 443. Optional: Caddy serves HTTP/2 over TCP 443
+      # without it. Published anyway because a dropped UDP packet is
+      # indistinguishable from a filtered port, and the failure mode (clients
+      # silently staying on h2) is invisible without this line.
+      - "443:443/udp"
+    environment:
+      # The public hostname Caddy serves and requests a certificate for. No
+      # default in the Caddyfile beyond a placeholder — an unset/typo'd value
+      # yields a cert for the wrong name, which browsers reject, so set it
+      # explicitly in the project-root `.env` (compose reads that file, NOT
+      # .env.local).
+      SITE_HOST: "${SITE_HOST:-innovision.zikr-i.uk}"
+      # ACME account email (expiry notices). Optional: leave unset/empty and the
+      # Caddyfile's quoted `{$ACME_EMAIL:}` placeholder yields a valid config
+      # with NO contact address (no expiry-reminder mail, certs still issue).
+      # ⚠️ Do NOT "simplify" this to a bare `email {$ACME_EMAIL}` in the
+      # Caddyfile — an empty expansion there is a bare `email` token and Caddy
+      # refuses to adapt, crash-looping the container (see the Caddyfile note).
+      ACME_EMAIL: "${ACME_EMAIL:-}"
+    volumes:
+      # The Caddyfile is config, mounted READ-ONLY — the container never needs
+      # to write it.
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # ⚠️ WITHOUT THESE TWO VOLUMES EVERY RECREATE RE-ISSUES CERTIFICATES.
+      # Caddy keeps its ACME account key, issued certs and OCSP staples under
+      # /data; in an anonymous container layer they vanish on `compose up`
+      # after any config edit or image bump, and each recreate burns a fresh
+      # issuance against Let's Encrypt's rate limits (50 certs/registered
+      # domain/week, 5 duplicate certs/week) — a handful of redeploys locks the
+      # domain out for a week with no workaround but waiting. Named volumes
+      # also survive `compose down` (only `down -v` removes them — do not).
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+    logging: *default-logging
+
+volumes:
+  # Declared here (not as anonymous layers) so certificates and the ACME
+  # account survive container recreation — see the caddy service note above.
+  # Both are small (a few hundred KB) and MUST NOT be removed casually:
+  # `docker compose down -v` deletes them and the next start re-issues every
+  # certificate from scratch.
+  caddy-data:
+  caddy-config:
+  # The GLM spend ledger (gate G8). Small (a JSON file, pruned to 7 day
+  # buckets) but load-bearing: without it every redeploy resets
+  # `GLM_DAILY_TOKEN_CAP` for every user, because the ledger would live in the
+  # container's writable layer. Declared here so it survives `up --build`,
+  # `down`/`up` and image bumps. Per-host, so single-instance only — see the
+  # GLM_SPEND_LEDGER_PATH comment in the app service.
+  glm-ledger:

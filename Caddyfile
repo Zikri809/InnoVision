@@ -1,0 +1,201 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Caddyfile — TLS termination + reverse proxy for InnoVision (plan §B3.3).
+#
+# Caddy issues and renews Let's Encrypt / ZeroSSL certificates automatically on
+# first start and redirects HTTP→HTTPS on its own; there is no certbot, no
+# renewal cron, and no certificate path to configure here.
+#
+# ── BEFORE THE FIRST START (all three are operational, not config) ───────────
+#   1. DNS: an A (and/or AAAA) record for {$SITE_HOST} must already resolve to
+#      this host. ACME validates over the PUBLIC name — a missing record makes
+#      issuance fail, and each failed attempt counts against the rate limits.
+#   2. Ports 80 AND 443 reachable from the internet. Port 80 is not optional
+#      for HTTPS: it carries the HTTP-01 challenge and the redirect.
+#   3. `caddy-data:/data` must be a PERSISTENT volume (see docker-compose.yml).
+#      Without it every recreate re-issues certificates and a few redeploys
+#      exhaust Let's Encrypt's duplicate-certificate limit for a week.
+#
+# ── HOP COUNT — SET TRUSTED_PROXY_COUNT TO MATCH THIS FILE ───────────────────
+# `src/lib/request-ip.ts` resolves the client IP by counting trusted hops from
+# the RIGHT of X-Forwarded-For, so the app's `TRUSTED_PROXY_COUNT` must equal
+# the number of proxies that append to that header in front of it:
+#
+#   Caddy ONLY (this file, direct to the internet)          → TRUSTED_PROXY_COUNT=1
+#   Cloudflare tunnel (or another proxy) IN FRONT of Caddy  → TRUSTED_PROXY_COUNT=2
+#   NO proxy at all (app reached directly on :3000)         → TRUSTED_PROXY_COUNT=0  ← MANDATORY
+#
+# The `=0` case is mandatory, not merely conservative: when X-Forwarded-For is
+# ABSENT, request-ip.ts falls back to `x-real-ip` UNCONDITIONALLY — and that is
+# exactly the header cloudflared strips. A direct-access deployment with the
+# default (1) therefore accepts a client-forged `X-Forwarded-For` and mints a
+# fresh rate-limit bucket per request, defeating every per-IP budget with only
+# a once-per-process warning. Behind Caddy the header is always present, so the
+# default of 1 is correct for this file's posture.
+#
+# ⚠️ THE NUMBERS ABOVE ARE MEASURED, BUT ONLY FOR A TWO-CADDY CHAIN. The old
+# comment claimed the tunnel row was 2 without ever measuring it, and the
+# measurement contradicts the old claim about how the header is built. Measured
+# here with Caddy 2.11.4 (two Caddy containers in series, a backend echoing its
+# headers, `trusted_proxies` configured as below):
+#     direct → Caddy → backend, forged `X-Forwarded-For: 1.2.3.4`
+#       backend saw {"xff":"1.2.3.4, 172.22.0.1"}   (forged value KEPT as prefix,
+#                                                    Caddy APPENDED its peer)
+#     edge → Caddy → backend, forged `X-Forwarded-For: 1.2.3.4`
+#       backend saw {"xff":"172.22.0.1, 172.22.0.4"} (forgery DISCARDED, TWO entries)
+#     edge → Caddy → backend, no forged header
+#       backend saw {"xff":"172.22.0.1, 172.22.0.4"} (same TWO entries)
+# Feeding those into `clientIpFromHeaders`: `trusted=1` picks the last entry
+# (Caddy's own peer, i.e. the tunnel — correct for Caddy-only), and `trusted=2`
+# picks the entry the tunnel wrote (the real client — correct for tunnel+Caddy).
+#
+# WITHOUT `trusted_proxies` (the pre-fix file) the same two-hop chain produced a
+# SINGLE entry — the tunnel's address REPLACED the inbound XFF — and `trusted=2`
+# then hit `parts[length-2] === undefined`, fell through to `x-real-ip` (which
+# Caddy does not set: measured `xri: null`), and returned "unknown". Every client
+# collapsed into ONE shared bucket. The `trusted_proxies` line below is what
+# makes the tunnel row's `=2` true; it is not decoration.
+#
+# STILL NOT PROVABLE FROM HERE: the rows above model "another Caddy". A real
+# cloudflared/nginx edge may write XFF differently (some send a single entry,
+# some send two, some also set X-Real-IP). PROVE IT ON THE LIVE TUNNEL with a
+# forged header before trusting the count:
+#     curl -s -H "X-Forwarded-For: 1.2.3.4" https://$SITE_HOST/api/health
+# and read what the backend logged. A wrong count silently funnels every
+# student into one rate-limit bucket, which is the failure `request-ip.ts`
+# warns about — so do not copy a number you have not reproduced.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Global options. `email` is the ACME account contact — expiry notices go
+# there.
+#
+# WHY THE QUOTES AND THE `:` — this line crash-looped the container (defect
+# proven by the ops critic). A bare `email {$ACME_EMAIL}` with ACME_EMAIL unset
+# OR set-but-empty expands to a lone `email` token and Caddy refuses to adapt:
+#     Error: adapting config using caddyfile: parsing caddyfile tokens for
+#     'email': wrong argument count or unexpected line ending after 'email'
+# The old comment claimed Caddy "accepts" an empty value. It does not, and since
+# docs/DEPLOY_VPS.md calls ACME_EMAIL "optional but recommended", the DEFAULT
+# path was a caddy crash-loop that presents as an unrelated TLS/site failure.
+#
+# The fix is the `{$VAR:default}` form (empty default) PLUS the surrounding
+# QUOTES, which keep the expanded value a single token so an empty expansion is
+# a valid empty argument rather than a missing one. VERIFIED for all three
+# states with `caddy validate` + `caddy adapt`:
+#   unset      → Valid configuration; adapts with NO tls.email (no contact)
+#   set-empty  → Valid configuration; adapts with NO tls.email
+#   set-real   → Valid configuration; adapts with tls.email = the value
+# An empty ACME contact is a real, supported posture (no expiry-reminder mail);
+# it is not the same as a broken one. Set ACME_EMAIL in the project-root `.env`
+# to receive expiry notices.
+{
+	email "{$ACME_EMAIL:}"
+}
+
+# The public site. `{$SITE_HOST}` comes from the environment (compose passes
+# `SITE_HOST`, defaulting to the tunnel host) so the same file serves staging
+# and a second institution with no edit. A bare hostname here (no scheme, no
+# port) is what tells Caddy to obtain a certificate for it automatically.
+#
+# ⚠️ `SITE_HOST` has NO placeholder default, unlike `ACME_EMAIL` above, and it
+# must not get one: an empty expansion leaves `{` as the first token of this
+# block, which Caddy reads as a global-options block in the wrong place and
+# refuses ("server block without any key is global configuration, and if used,
+# it must be first"). That is why compose supplies the default
+# (`${SITE_HOST:-innovision.zikr-i.uk}`) and why this file is only valid when
+# SITE_HOST is non-empty. A wrong-but-present value is a cert for the wrong
+# name (browsers reject it, loudly); an ABSENT one is a parse failure. Keep the
+# compose default, or export SITE_HOST, but never leave it empty.
+{$SITE_HOST} {
+	# The single upstream. `app` is the compose service name — this file is
+	# mounted into the caddy container, so it resolves over the compose network
+	# rather than the host loopback. Keep this in step with the app service's
+	# `127.0.0.1:3000:3000` publish: the loopback publish is for host-side
+	# debugging (and for a tunnel that bypasses Caddy); the proxy itself talks
+	# to the service name.
+	#
+	# `trusted_proxies` — EXPLICIT, not a default. Caddy's behaviour for an
+	# inbound X-Forwarded-For depends on whether the immediate peer is trusted:
+	# an untrusted peer's header is REPLACED, a trusted peer's is APPENDED to.
+	# Leaving that to an implicit default means the header the app sees (and so
+	# the hop count `TRUSTED_PROXY_COUNT` must match) can change with a Caddy
+	# version bump. `private_ranges` covers the compose network and RFC1918
+	# space, so the immediate peer is deterministic for both a plain Caddy-only
+	# deployment and a tunnel/other proxy sitting on a private address. If your
+	# tunnel reaches Caddy from a PUBLIC address, replace this with that exact
+	# CIDR — otherwise its header is replaced rather than appended and the hop
+	# count changes.
+	#
+	# `header_up -X-Real-IP` — strip the inbound X-Real-IP. MEASURED: Caddy
+	# does NOT set X-Real-IP (a backend behind it saw `xri: null`), and it does
+	# NOT strip one the client sent — a forged `X-Real-IP: 6.6.6.6` arrived
+	# untouched. `request-ip.ts` falls back to `x-real-ip` whenever XFF does not
+	# yield a usable entry, so that pass-through is a forged-IP vector on a
+	# header Caddy has no reason to forward. Removing it means the fallback
+	# degrades to "unknown" (one shared bucket) instead of a client-chosen key.
+	reverse_proxy app:3000 {
+		trusted_proxies private_ranges
+		header_up -X-Real-IP
+	}
+
+	# Header handling — deliberately minimal, because Caddy's defaults are
+	# already the correct ones here:
+	#   - `Host` is passed through UNCHANGED by default. Do NOT rewrite it to
+	#     the upstream name: Next's server-action CSRF check compares the
+	#     browser Origin against Host/X-Forwarded-Host, and a rewritten Host
+	#     makes every action silently abort (the login form appears to just
+	#     reset). The app's allowlist (ALLOWED_HOSTS at BUILD, TRUSTED_ORIGINS
+	#     at RUNTIME) is what makes the differing origin acceptable.
+	#   - `X-Forwarded-Proto` / `X-Forwarded-Host` are set by Caddy. This is what
+	#     makes the hop count 1.
+	#   - `X-Forwarded-For`: MEASURED (Caddy 2.11.4) — the inbound value is
+	#     APPENDED TO when the immediate peer is trusted (the `trusted_proxies`
+	#     setting above, which covers the compose network and RFC1918 space) and
+	#     REPLACED when it is not. Either way the LAST entry is Caddy-written,
+	#     which is what `TRUSTED_PROXY_COUNT=1` relies on. The old comment said
+	#     "appended by default" unconditionally; the replace case is real, and
+	#     the hop-count header above records the measured entry counts.
+	#
+	# WebSocket upgrades (Supabase Realtime when it is proxied through here,
+	# and any SSE/streamed AI response) are handled transparently by Caddy —
+	# no `Upgrade`/`Connection` header juggling needed.
+
+	# Body size: the app accepts 25 MB quiz source PDFs (50 MB per batch) and
+	# OCR uploads. Caddy has no default request-body cap, but be explicit so a
+	# future proxy-level limit cannot silently 413 the exam-critical upload
+	# path. 60 MB sits above the app's own 55 MiB dev-proxy ceiling and the
+	# 50 MB batch cap.
+	request_body {
+		max_size 60MB
+	}
+
+	# Health/logging posture:
+	#   - `log` writes structured access logs to stdout (captured by the
+	#     json-file driver configured in compose, which rotates at 10m/3 files).
+	#   - The app's own /api/health is NOT used as a Caddy health probe. Caddy
+	#     has no upstream health check in the core distribution, and one is not
+	#     wanted: the Docker HEALTHCHECK in the app image is the single source
+	#     of truth, and it deliberately asserts liveness only (never Supabase
+	#     cron state, which would turn free-tier project pausing into a restart
+	#     loop).
+	log {
+		output stdout
+		format console
+	}
+
+	# Do not cache HTML. The app is session-heavy and serves personalized
+	# pages; a caching proxy in front of it is a correctness risk, and Caddy
+	# does not cache by default — this is a note, not a directive.
+
+	# Response headers that the proxy should own:
+	#   - HSTS is ALREADY sent by the app (next.config.ts, 2 years +
+	#     includeSubDomains, no preload). Do NOT add a second one here; two
+	#     HSTS headers are concatenated by some clients and the app's value is
+	#     the one the security audit reviewed. Add `preload` only after
+	#     HTTPS-everywhere is proven for every subdomain.
+	#   - `-Server` removes Caddy's version banner. The app's own headers
+	#     (X-Frame-Options, nosniff, Referrer-Policy, Permissions-Policy, the
+	#     Report-Only CSP) come from next.config.ts and pass through untouched.
+	header {
+		-Server
+	}
+}

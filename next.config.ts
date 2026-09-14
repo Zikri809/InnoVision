@@ -87,8 +87,17 @@ const SECURITY_HEADERS = [
  *                              same var `checkSameOrigin` in src/lib/http.ts
  *                              reads, so actions and route handlers agree).
  *   - `NEXT_PUBLIC_SITE_URL` / `SITE_URL` — the deployment's public origin.
+ *   - `ALLOWED_HOSTS`        — the name the VPS operator docs use
+ *                              (docs/DEPLOY_VPS.md, .env.local.example) and the
+ *                              name the app Dockerfile/compose expose as a build
+ *                              arg. It is an ALIAS for `ALLOWED_ORIGINS`; both
+ *                              are read below. Before this alias existed the
+ *                              documented arg was a silent no-op — an operator
+ *                              following the runbook set ALLOWED_HOSTS, nothing
+ *                              read it, and the origin only worked because the
+ *                              same block also set NEXT_PUBLIC_SITE_URL/SITE_URL.
  *   - `ALLOWED_ORIGINS`      — extra comma-separated hostnames (wildcards OK,
- *                              e.g. `*.example.edu`).
+ *                              e.g. `*.example.edu`). The pre-existing name.
  * The tunnel host stays as the DEFAULT so the current deployment keeps
  * working with zero config. Set the env vars above for any other deployment.
  */
@@ -117,6 +126,10 @@ const ALLOWED_HOSTS = [
   ...new Set([
     ...DEFAULT_ALLOWED_HOSTS,
     ...hostnamesFrom(
+      // ALLOWED_HOSTS is the operator-facing name (docs + Dockerfile build
+      // arg); ALLOWED_ORIGINS is the original one. Both are honoured so a
+      // runbook that sets either is not a silent no-op.
+      process.env.ALLOWED_HOSTS,
       process.env.ALLOWED_ORIGINS,
       process.env.TRUSTED_ORIGINS,
       process.env.NEXT_PUBLIC_SITE_URL,
@@ -125,8 +138,42 @@ const ALLOWED_HOSTS = [
   ]),
 ];
 
+/**
+ * BUILD-time Supabase target — is the baked public URL a HOSTED project?
+ *
+ * Read at module scope, exactly like `ALLOWED_HOSTS` above: this is build-time
+ * input, not runtime config (see the `/sb` gate in `rewrites()` below).
+ *
+ * Fail-closed by DIRECTION: an absent, malformed, or unrecognised value is
+ * treated as NOT hosted, which keeps the four local-Kong rules. That is the
+ * safe branch — a LOCAL build that lost its rules breaks every browser-direct
+ * Supabase call (`src/lib/supabase/client.ts` re-points loopback URLs at `/sb`),
+ * whereas a HOSTED build that keeps them merely carries dead routes the hosted
+ * browser never requests (`client.ts` passes a hosted URL through unchanged).
+ * Only a positive match on a real hosted project hostname returns `[]`.
+ */
+const SUPABASE_IS_HOSTED = (() => {
+  const raw = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").trim();
+  if (!raw) return false;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "https:") return false;
+    // Hosted projects live on `<project-ref>.supabase.co`; Supabase's India
+    // region mirrors that on `.supabase.in`. A self-hosted / dedicated
+    // deployment on its own domain does NOT match and keeps the local rules.
+    return /^[a-z0-9-]+\.supabase\.(co|in)$/i.test(url.hostname);
+  } catch {
+    return false;
+  }
+})();
+
 const nextConfig: NextConfig = {
   reactCompiler: true,
+  // Self-contained server bundle for the app container (plan B3.1 / gate O1):
+  // `.next/standalone` carries the traced node_modules + server.js. It does
+  // NOT copy `public/` or `.next/static` — the Dockerfile copies both
+  // explicitly (standalone does not auto-copy either).
+  output: "standalone",
   // exceljs is a heavy CJS Node module used only inside the export route —
   // keep it out of the bundler (runtime require, no client impact).
   serverExternalPackages: ["exceljs"],
@@ -138,7 +185,34 @@ const nextConfig: NextConfig = {
   // WebSocket does NOT upgrade through Next — use-notifications treats
   // postgres_changes as a latency accelerator (polling is the backbone), so
   // remote clients just fall back to the 20s poll cadence.
+  //
+  // ── GATED ON THE BUILD-TIME NEXT_PUBLIC_SUPABASE_URL (plan B1.7) ──
+  // The rules below hardcode the LOCAL Kong gateway (127.0.0.1:58021) and are
+  // WRONG for a hosted project. They are gated, not deleted, because they are
+  // still the correct rules for every local/self-hosted build.
+  //
+  // MENTAL-MODEL CORRECTION — the plan insists on this:
+  //   `rewrites()` is evaluated ONCE, at BUILD time, by Next's
+  //   `loadCustomRoutes`; the result is frozen into `.next/routes-manifest.json`
+  //   and served verbatim by `next start`. `next start` NEVER re-invokes this
+  //   function, and neither does a runtime env change. So the hosted flip is a
+  //   **BUILD-ARG flip, not an env flip**: setting NEXT_PUBLIC_SUPABASE_URL in
+  //   the container's runtime environment changes nothing about these routes —
+  //   the image must be REBUILT with the value as a build arg. (Contrast
+  //   `next dev`, which re-evaluates per request — a green `next dev` dry run
+  //   against hosted Supabase therefore does NOT prove the prod image.)
+  //   This is the same build-time family as ALLOWED_HOSTS above.
+  //
+  // Why gate at all, when hosted browsers never hit /sb (`client.ts` returns a
+  // hosted URL unchanged)? Because the stale 127.0.0.1:58021 destination would
+  // otherwise stay live dead code in the shipped image — an unauthenticated
+  // same-origin proxy surface pointing at a host that does not exist on the
+  // VPS. Gate it explicitly; do not rely on disuse.
   async rewrites() {
+    if (SUPABASE_IS_HOSTED) {
+      // Hosted Supabase: browser-direct HTTPS to <ref>.supabase.co, no proxy.
+      return [];
+    }
     const LOCAL_SUPABASE = "http://127.0.0.1:58021";
     return [
       { source: "/sb/rest/v1/:path*", destination: `${LOCAL_SUPABASE}/rest/v1/:path*` },

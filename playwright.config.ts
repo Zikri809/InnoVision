@@ -26,7 +26,82 @@ const NOWEBSEARCH_PORT = process.env.PLAYWRIGHT_NOWEBSEARCH_PORT ?? "3002";
  * the webServer env makes the harness bundle's env self-consistent every run.
  */
 
-export default defineConfig({
+/**
+ * ── S1/S5 kill-switch disarm: PROD_ENV_STRICT MUST stay pinned to "" ──────────
+ *
+ * `PROD_ENV_STRICT=1` arms the fail-closed production env gate
+ * (`src/lib/prod-guards.ts` via `src/instrumentation.ts`): with `NODE_ENV=
+ * production` — which `npm run start` always is — the app REFUSES TO START when
+ * any of the four kill switches is armed. That is correct for a deployment and
+ * FATAL for this harness, which arms all four on purpose (`E2E_RATE_LIMIT_
+ * DISABLED`, `NEXT_PUBLIC_E2E_FAKE_SEAM`, `FACE_MOCK_ENABLED`, `NEXT_PUBLIC_
+ * INTEGRITY_HARDENING_OFF`). The failure mode is brutal: the server exits
+ * immediately, the port is never bound, and every spec dies on Playwright's
+ * 300 s webServer timeout — `reuseExistingServer` cannot help, because there is
+ * no server to reuse.
+ *
+ * It is not a hypothetical: `docs/DEPLOY_VPS.md` §8.2 INSTRUCTS the operator to
+ * put `PROD_ENV_STRICT=1` in `.env.local` (`grep -c '^PROD_ENV_STRICT=1$'
+ * .env.local # must be 1`), and `:8-10` loads `.env.local` into `process.env`
+ * without overriding, while both app webServer env blocks below spread
+ * `...process.env`. So a developer who follows the runbook and then runs the
+ * e2e suite would break the whole suite. Same for a shell that exports it.
+ *
+ * The pin uses the same idiom as `TINYFISH_*` / `GLM_PROVIDER` below: an
+ * explicit value in the webServer env wins over `process.env` (Playwright
+ * merges `{...process.env, ...webServer.env}`) and over `.env.local` (Next's
+ * env loader never overwrites an already-present var). An EMPTY value, not
+ * `"0"`: `prod-guards` hard-fails only on exactly `"1"`, and "" is also what a
+ * fresh checkout has, so the harness env matches the no-config default.
+ *
+ * `assertProdEnvStrictPinned()` below fails the config load if either pin is
+ * ever removed, so this cannot regress silently.
+ */
+const PROD_ENV_STRICT_PIN = "";
+
+/** Regression guard for the pin above (see the block comment).
+ *
+ *  Checks every webServer entry that BOOTS THE NEXT APP (`npm run start` /
+ *  `next start` — the mock servers are plain node processes that never read
+ *  `PROD_ENV_STRICT`). Any such server must pin the gate off, because it runs
+ *  with `NODE_ENV=production` and therefore honours `prod-guards.ts`. Adding a
+ *  third app server without the pin fails the config load here rather than the
+ *  whole suite 300 s later. */
+function assertProdEnvStrictPinned(
+  servers: readonly { command?: string; env?: Record<string, string> }[],
+): void {
+  const appServers = servers.filter((s) => /(npm run start|next start)/.test(s.command ?? ""));
+  if (appServers.length === 0) {
+    throw new Error(
+      "playwright.config.ts: assertProdEnvStrictPinned found no app webServer " +
+        "(expected the `npm run start` entries). The guard's detection regex has " +
+        "rotted — fix it, do not delete the check.",
+    );
+  }
+  appServers.forEach((server, i) => {
+    const label = `app webServer #${i + 1} (${(server.command ?? "").slice(0, 60)}…)`;
+    const env = server.env ?? {};
+    if (!("PROD_ENV_STRICT" in env)) {
+      throw new Error(
+        `playwright.config.ts: ${label} has no PROD_ENV_STRICT pin. Add ` +
+          "`PROD_ENV_STRICT: PROD_ENV_STRICT_PIN` — without it a " +
+          ".env.local/shell carrying PROD_ENV_STRICT=1 makes the prod gate " +
+          "refuse to start the server and EVERY spec fails on the webServer " +
+          "timeout. See the pin comment at the top of this file.",
+      );
+    }
+    if (env.PROD_ENV_STRICT !== "") {
+      throw new Error(
+        `playwright.config.ts: ${label} pins PROD_ENV_STRICT=` +
+          `${JSON.stringify(env.PROD_ENV_STRICT)}; it MUST be "" — the harness ` +
+          "deliberately arms all four kill switches, so the prod gate must not " +
+          "be armed. See the pin comment at the top of this file.",
+      );
+    }
+  });
+}
+
+const config = defineConfig({
   testDir: "./e2e",
   testIgnore: process.env.FACE_SMOKE ? [] : ["**/insightface-smoke.spec.ts"],
   timeout: 30_000,
@@ -150,11 +225,28 @@ export default defineConfig({
         TINYFISH_API_KEY: "test-tinyfish-key",
         TINYFISH_SEARCH_URL: `http://127.0.0.1:${MOCK_TINYFISH_PORT}`,
         TINYFISH_FETCH_URL: `http://127.0.0.1:${MOCK_TINYFISH_PORT}`,
+        // S1/S5 — pin the prod fail-closed gate OFF for the harness. This block
+        // arms all four kill switches deliberately (below), and `npm run start`
+        // runs with NODE_ENV=production, so an inherited `PROD_ENV_STRICT=1`
+        // (a .env.local written by following docs/DEPLOY_VPS.md §8.2, or a
+        // shell export) would make instrumentation.ts refuse to boot and kill
+        // the entire suite on the 300 s webServer timeout. See the pin comment
+        // at the top of this file.
+        PROD_ENV_STRICT: PROD_ENV_STRICT_PIN,
         // chatStream's inter-chunk idle abort: the harness uses 3s so the
         // mock's [MOCK:stall] scenario (silent upstream) resolves in-test
         // instead of holding the route for the production 90s.
         AI_STREAM_IDLE_TIMEOUT_MS: "3000",
         OCR_VISION_MODEL: "gpt-4o-mini",
+        // GLM-OCR provider selector (src/lib/ai/glm-provider.ts). Pinned to the
+        // FREE local leg for the same reason as TINYFISH_API_KEY above: the
+        // harness must NEVER be able to spend money. A developer shell (or a
+        // .env.local that playwright.config.ts loads without overriding) with
+        // `GLM_PROVIDER=remote` would otherwise flip this build onto the
+        // METERED Z.ai leg, where e2c's OCR run — and the health GET's billed
+        // 1×1-PNG probe — would bill a real key. Fail-closed in the app, and
+        // explicit here so the harness env is self-consistent either way.
+        GLM_PROVIDER: "local",
         // InsightFace mock mode — E2E must NOT require a running Docker container.
         INSIGHTFACE_BASE_URL: "http://localhost:8000",
         FACE_MOCK_ENABLED: "1",
@@ -192,7 +284,27 @@ export default defineConfig({
         TINYFISH_API_KEY: "",
         TINYFISH_SEARCH_URL: "",
         TINYFISH_FETCH_URL: "",
+        // This instance inherits `...process.env` (unlike the main webServer,
+        // which pins it), so a developer's shell — or the .env.local this
+        // config loads — could leak `GLM_PROVIDER=remote` into a server that
+        // still serves requests. The metered leg is BILLED per token; pin the
+        // free leg explicitly. (TINYFISH_* above are cleared for the same
+        // "never inherit a real credential" reason.)
+        GLM_PROVIDER: "local",
+        // S1/S5 — same pin as the main block, for the same reason: this block
+        // spreads `...process.env`, so an inherited PROD_ENV_STRICT=1 would
+        // make the prod gate refuse to boot this instance and every
+        // chromium-nowebsearch spec would fail on its 120 s timeout. See the
+        // pin comment at the top of this file.
+        PROD_ENV_STRICT: PROD_ENV_STRICT_PIN,
       },
     },
   ],
 });
+
+// Fail the config load (not the suite, minutes later) if a future edit drops or
+// changes the pin on any app webServer. Reads the config just built, so the
+// webServer blocks stay the single source of truth.
+assertProdEnvStrictPinned(config.webServer as { command?: string; env?: Record<string, string> }[]);
+
+export default config;

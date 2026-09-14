@@ -34,6 +34,40 @@ test-results
 snapshots
 bench-glm-ocr.jsonl
 
+# Large / irrelevant trees that the build context was paying for on EVERY build
+# (defect: measured 41+ MB of context uploaded per build). These matter because
+# the Dockerfile has a `COPY . .` (build stage), so whatever survives this file
+# is BOTH uploaded to the daemon AND copied into the build stage — excluding it
+# here is what keeps it out of both. Verified: `git grep -n "COPY" Dockerfile`
+# shows the only whole-context copy is `COPY . .`; the rest are targeted
+# (package.json/package-lock.json, `--from=build` artifacts, exceljs).
+#   - e2e            (4.2 MB) Playwright specs; the Dockerfile ALSO prunes the
+#                    copy Next's tracer drags into .next/standalone
+#   - screenshots    (37 MB)  explore-script dumps
+#   - .zcode                  agent session artifacts
+#   - invoice_*               customer invoices (a real document, not test data)
+e2e
+screenshots
+.zcode
+invoice_edited.html
+invoice_from_html.pdf
+
+# Runtime state that must NEVER enter an image layer (VPS deployment).
+# These are written by the running app / ops scripts on the HOST, and the app
+# Dockerfile builds with `context: .` — so without these lines a later
+# `docker build` would copy host runtime state (including the spend ledger's
+# per-user token accounting and the prod-destructive audit trail) into the
+# build context, and `COPY . .` would bake it into a layer.
+#   - .prod-audit.log          : destructive-script audit trail (scripts/lib/remote-env.mjs)
+#   - .glm-spend-ledger.json*  : per-user daily OCR token/spend ledger (WS-CORE
+#     glm-spend.ts). The GLOB is load-bearing, not defensive: the ledger is
+#     written tmp-then-rename (`.glm-spend-ledger.json.tmp`, glm-spend.ts:258),
+#     so the exact-name rule alone left the temp sibling matching — a crash
+#     mid-write leaves that file holding the day's accounting, and it would then
+#     ride into the build context (and a `COPY . .`) unignored.
+.prod-audit.log*
+.glm-spend-ledger.json*
+
 # Local Supabase / tooling data
 supabase/.temp
 supabase/.branches
