@@ -1420,6 +1420,7 @@ export type Database = {
           correct_indices: number[] | null
           created_at: string
           explanation: string | null
+          generation_id: string | null
           id: string
           image_path: string | null
           options: string[]

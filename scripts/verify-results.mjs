@@ -86,12 +86,30 @@ function record(name, pass, detail = "") {
   console.log(`${pass ? "PASS" : "FAIL"}  ${name}${detail ? "  — " + detail : ""}`);
 }
 
+/**
+ * Unique 6-digit matric for harness students (audit-2 H-11 gate). The 99xxxx
+ * range is reserved by 0027 and rejected by the DB, so stay in 10xxxx-89xxxx.
+ * Per-process counter ⇒ no collision within a run.
+ */
+let harnessMatricSeq = 0;
+function nextHarnessMatric() {
+  harnessMatricSeq += 1;
+  const base = 100000 + (Number(String(Date.now()).slice(-5)) % 800000);
+  return String(((base + harnessMatricSeq) % 800000) + 100000);
+}
+
 async function createUser(email) {
   const { data, error } = await admin.auth.admin.createUser({
     email,
     password: "hunter2!Secure",
     email_confirm: true,
-    user_metadata: { full_name: email.split("@")[0] },
+    // audit-2 H-11 requires a matric before join_class will enroll a student,
+    // so every harness-created student needs one. Derived from a per-process
+    // counter so it is unique within a run and outside the reserved 99xxxx range.
+    user_metadata: {
+      full_name: email.split("@")[0],
+      matric_no: nextHarnessMatric(),
+    },
   });
   if (error) throw error;
   createdUsers.push(data.user.id);
@@ -314,6 +332,10 @@ async function main() {
       `rpc=${JSON.stringify(pReset.data)} status=${pRow?.status} auditBefore=${auditBefore.length} auditAfter=${auditAfter.length}`);
 
     // ── Status matrix: reset each assessment status directly-seeded ──
+    // audit-2 M-07 changed the contract for `completed`: a graded record is
+    // NOT resettable (`session_not_active`), so the expectation per status
+    // differs. The harness previously asserted `ok` for all four, which M-07
+    // made permanently false.
     let statusMatrixOk = true;
     const matrixDetails = [];
     for (const status of ["active", "paused", "flagged", "completed"]) {
@@ -326,11 +348,16 @@ async function main() {
         .from("audit_events")
         .select("id").eq("action", "session_reset").eq("subject_id", studentS1.id)
         .eq("metadata->>session_id", session.id);
-      const ok = r.data?.ok === true && (audit.data ?? []).length >= 1;
+      const ok =
+        status === "completed"
+          ? r.data?.error === "session_not_active" && (audit.data ?? []).length === 0
+          : r.data?.ok === true && (audit.data ?? []).length >= 1;
       if (!ok) statusMatrixOk = false;
-      matrixDetails.push(`${status}:${r.data?.ok === true ? "ok" : JSON.stringify(r.data)}`);
+      matrixDetails.push(
+        `${status}:${r.data?.ok === true ? "ok" : JSON.stringify(r.data)}`,
+      );
     }
-    record("Status matrix reset active/paused/flagged/completed → ok + audit each",
+    record("Status matrix reset active/paused/flagged → ok + audit; completed → refused (M-07)",
       statusMatrixOk, matrixDetails.join(" "));
 
     // ── Race pin: reset concurrent with an in-flight answer ─────────

@@ -17,7 +17,7 @@
 //       row → 0 rows (self-only policy intact after 0027)
 //   M7  security_barrier retained via drop+recreate; column ORDER pinned by
 //       a select("*") key-order probe (PostgREST emits view-definition order)
-//   M8  student self-update of own matric works under RLS; claiming another
+//   M8  matric is set-once: a set value cannot be changed or claimed (M-12)
 //       student's matric fails at the unique index
 //
 // NOT a unit test; run manually: node scripts/verify-matric.mjs
@@ -191,26 +191,41 @@ async function main() {
     JSON.stringify(starKeys ?? starErr?.message),
   );
 
-  // ── M8: RLS self-edit of own matric ────────────────────────────────────────
+  // ── M8: matric is SET-ONCE (audit-2 M-12) ─────────────────────────────────
+  // The original expectation predates audit-2: M-12 made a non-null matric
+  // IMMUTABLE (protect_profile_restricted_columns raises 42501
+  // cannot_change_matric_directly), and the capture path enforces set-once at
+  // the write (`.is("matric_no", null)`). So a self-update of an ALREADY-SET
+  // matric must now be REFUSED, and the stored value must be unchanged.
+  const before = await getProfile(m1.user.id);
   const { error: selfErr } = await stuClient
     .from("profiles")
     .update({ matric_no: "245678" })
     .eq("id", m1.user.id);
-  record("M8 student self-update of own matric allowed", !selfErr, selfErr?.message);
+  record(
+    "M8 student self-update of a SET matric is refused (M-12 immutable)",
+    Boolean(selfErr) && selfErr.code === "42501",
+    selfErr ? `${selfErr.code ?? "?"}: ${selfErr.message}` : "unexpectedly succeeded",
+  );
   const p8 = await getProfile(m1.user.id);
-  record("M8 self-update persisted", p8?.matric_no === "245678", `got ${p8?.matric_no}`);
+  record(
+    "M8 the stored matric is unchanged after the refused update",
+    p8?.matric_no === before?.matric_no,
+    `before=${before?.matric_no} after=${p8?.matric_no}`,
+  );
 
-  // Claiming ANOTHER student's matric → UNIQUE violation (23505). The value
-  // passes the format CHECK by construction, RLS permits the own-row update,
-  // and the 0019 trigger ignores matric_no — so assert the exact PG code.
+  // Claiming ANOTHER student's matric is also refused by the same immutability
+  // guard (it fires before the UNIQUE index can). The 23505 path is only
+  // reachable for a student who has NOT yet captured a matric — covered by the
+  // capture-flow checks above — so assert the guard that actually applies here.
   await admin.from("profiles").update({ matric_no: "354321" }).eq("id", m4b.user.id);
   const { error: claimErr } = await stuClient
     .from("profiles")
     .update({ matric_no: "354321" })
     .eq("id", m1.user.id);
   record(
-    "M8 claiming another student's matric fails (23505)",
-    Boolean(claimErr) && claimErr.code === "23505",
+    "M8 claiming another student's matric is refused (immutability guard)",
+    Boolean(claimErr) && claimErr.code === "42501",
     claimErr ? `${claimErr.code ?? "?"}: ${claimErr.message}` : "unexpectedly succeeded",
   );
 

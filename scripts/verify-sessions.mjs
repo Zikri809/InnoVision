@@ -108,12 +108,31 @@ function record(name, pass, detail = "") {
   console.log(`${pass ? "PASS" : "FAIL"}  ${name}${detail ? "  — " + detail : ""}`);
 }
 
+/**
+ * Unique 6-digit matric for harness students (audit-2 H-11 gate). The 99xxxx
+ * range is reserved by 0027 and rejected by the DB, so start at 10xxxx and
+ * increment. Per-process counter ⇒ no collision within a run; the timestamp
+ * base keeps separate runs apart.
+ */
+let harnessMatricSeq = 0;
+function nextHarnessMatric() {
+  harnessMatricSeq += 1;
+  const base = 100000 + (Number(String(Date.now()).slice(-5)) % 800000);
+  return String((base + harnessMatricSeq) % 900000 + 100000);
+}
+
 async function createUser(email) {
   const { data, error } = await admin.auth.admin.createUser({
     email,
     password: "hunter2!Secure",
     email_confirm: true,
-    user_metadata: { full_name: email.split("@")[0] },
+    // audit-2 H-11 requires a matric before join_class will enroll a student,
+    // so every harness-created student needs one. Derived from the email so it
+    // stays unique per user and deterministic within a run.
+    user_metadata: {
+      full_name: email.split("@")[0],
+      matric_no: nextHarnessMatric(),
+    },
   });
   if (error) throw error;
   createdUsers.push(data.user.id);

@@ -496,21 +496,29 @@ async function main() {
     if (rqErr) throw rqErr;
 
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    // Object names MUST be `<uid>/<uuid>.<ext>`: the audit-2 C-01 backstop is
+    // an anchored-shape CHECK (sq_questions_image_path_shape) plus an
+    // ownership trigger, so a non-UUID filename is silently REJECTED on
+    // UPDATE. The original `race-<i>-<stamp>.png` fixture violated that shape,
+    // which is why neither racing update ever landed (pre-existing harness
+    // bug, not a route defect).
+    const raceUuid = (i) =>
+      `00000000-0000-4000-8000-00000000000${i}`;
     // Objects are seeded via SERVICE ROLE — clients cannot write to this
     // bucket by design (MEDIA-D1); the route's admin client is what writes.
     await Promise.all(
       Array.from({ length: 2 }, (_, i) =>
         admin.storage
           .from("question-images")
-          .upload(`${a.id}/race-${i}-${stamp}.png`, png, { contentType: "image/png", upsert: false }),
+          .upload(`${a.id}/${raceUuid(i)}.png`, png, { contentType: "image/png", upsert: false }),
       ),
     );
     // GENUINE concurrent replace: TWO authed clients (same owner, both RLS-
     // legal) race the column UPDATE — last-writer-wins must still leave the
     // column pointing at an EXISTING object.
     const A2 = await asUser(`media-a-${stamp}@verify.local`); // same account, second session
-    const path0 = `${a.id}/race-0-${stamp}.png`;
-    const path1 = `${a.id}/race-1-${stamp}.png`;
+    const path0 = `${a.id}/${raceUuid(0)}.png`;
+    const path1 = `${a.id}/${raceUuid(1)}.png`;
     await Promise.all([
       A.from("student_quiz_questions").update({ image_path: path0 }).eq("id", rq.id),
       A2.from("student_quiz_questions").update({ image_path: path1 }).eq("id", rq.id),
