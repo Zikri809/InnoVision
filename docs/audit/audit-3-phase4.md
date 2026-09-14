@@ -15,11 +15,10 @@ passing** (this is the CI-blocking gate; `vitest run` alone is not) ·
 > file. Read that section too — it corrects the claim above (the coverage gate
 > was RED when this line was first written) and lists 12 further fixes.
 
-**SQL is NOT verified by execution** in this pass: no Docker daemon and no local
-Postgres were available, so the four new migrations were validated by re-reading
-against the live 0045/0046 definitions plus structural checks. Run
-`npm run supabase:start && npx supabase db reset` and the `verify:*` harnesses
-before trusting them.
+**SQL IS now verified by execution** (see "Live verification" at the bottom of
+this file). The four migrations were applied to a local Supabase and all 15
+`verify:*` harnesses pass — including the SV6/SV8 pins for the R2-FACE-F1
+polarity fix and the R2-RLS-F1 column-grant posture.
 
 ### Migrations added
 
@@ -380,8 +379,138 @@ coherent (`.env*` excluded; models resolve from the non-root user's `$HOME`;
 warnings) · `npm run lint:workflows` exit 0 · `node scripts/check-env-parity.mjs`
 exit 0 (39 keys) · `node scripts/check-i18n.mjs` exit 0 (1287/1287).
 
-**Unverified by execution, as before:** the four migrations (no Docker/Postgres
-here), the e2e suite (needs a live Supabase seam + production build), and the
-Docker image builds. `npx supabase db reset` + the `verify:*` harnesses are the
-acceptance gate for the SQL.
+**Verified by execution:** the four migrations (applied to a local Supabase;
+`db reset` applies all 50 from scratch) and all 15 `verify:*` harnesses.
 
+**Still unverified:** the e2e suite (needs a live Supabase seam + a production
+build) and the Docker image builds.
+
+
+---
+
+## Live verification (Docker + local Supabase, 2026-09-14)
+
+Docker Desktop was started and the migrations were applied to a live local
+Supabase. This section replaces the earlier "SQL is unverified" caveat.
+
+### Applied
+
+- `npx supabase migration up` → 0047, 0048, 0049, 0050 applied in order, no
+  errors (incremental upgrade path, i.e. the production path).
+- `npx supabase db reset` → all 50 migrations replayed from scratch, no errors.
+
+### Schema verified after the clean rebuild
+
+| Check | Result |
+|---|---|
+| `record_face_check` overloads | **1** (8-arg with `p_poses`; the 7-arg was dropped) |
+| `attach_frame_poses` | **absent** (E-F3 closed) |
+| `cron_health` | present |
+| `face_checks.nonce`, `quiz_sessions.resume_grace_until`, `questions.generation_id` | all present |
+| `profiles_full_name_len` | `validated = true` (the NOT VALID → backfill → VALIDATE path worked) |
+| `quiz_sessions_resume_grace` trigger | present |
+
+### RLS (R2-RLS-F1) — verified with a real authenticated session
+
+Table-level SELECT revoked, 20 `quiz_sessions` / 6 `session_answers` columns
+granted, and the sensitive ones actually refused:
+
+| Read as an authenticated student | Result |
+|---|---|
+| granted columns (`id,status,submitted_at`) | **200** |
+| `quiz_sessions.score` | **403 / 42501** |
+| `quiz_sessions.resume_grace_until` | **403 / 42501** |
+| `session_answers.is_correct` | **403 / 42501** |
+| `select *` (whole-row) | **403 / 42501** |
+| `student_session_view.score` before reveal | **200, `score: null`** |
+| `student_session_view.score` after reveal | **200, `score: 7`** |
+| base table `score` after reveal | still **403** |
+
+The count-only read the app depends on also works under column-only SELECT
+(`Content-Range: */0`), confirming the `ExecCheckOneRelPerms` reasoning.
+
+### RPCs exercised
+
+- `cron_health()` as service role → the five `innovision-*` jobs with
+  last status/run; as anon → `42501 permission denied for function` (the GRANT
+  is the control, exactly as documented after the dead runtime check was
+  removed).
+- `flag_verify_silent_sessions()` → runs clean (no 42703 — the E-F1 class of
+  drift is gone).
+- `join_class()` → valid code enrolls, re-join is `already_enrolled`, bad code
+  is `invalid_code`; the `for share` lock and `archived_at` check are both
+  present in the live body (so the H3-RACE-F4 fix did not break enrollment).
+
+### Harnesses — all 15 pass (474 checks)
+
+```
+verify-security        3/3      verify-results        21/21
+verify-classes        36/36     verify-student-quizzes 23/23
+verify-class-archiving 17/17    verify-clone-quiz     16/16
+verify-quizzes        83/83     verify-media          32/32
+verify-ai             16/16     verify-matric         15/15
+verify-sessions       74/74     verify-mediapipe      all intact
+verify-face           83/83     verify-silence        12/12
+verify-web-sources    23/23
+```
+
+**`verify-silence` 12/12 is the headline result.** It pins the R2-FACE-F1
+polarity fix against a live database:
+
+- **SV6a** — fresh outage claim with NO corroboration (the audit-2 C-02 attack
+  shape) → **FLAGGED**. Under the 0046 predicate this was exempt; the old pin
+  certified the vulnerability.
+- **SV6b** — fresh claim WITH a fresh verify attempt (honest sidecar 503) →
+  exempt (no false flag on a real outage).
+- **SV6c** — stale claim → flagged.
+- **SV8a/SV8b** — the new `resume_grace_until` guard is load-bearing in both
+  directions.
+
+`verify-sessions` 74/74 covers D56-D59 (autoclose seal, flagged-never-sealed,
+resurrect refusal, base-table column denial) and `verify-face` 83/83 exercises
+the new `record_face_check` `p_poses` path.
+
+### Harness fixes required to run (pre-existing staleness, not defects)
+
+Running the suite exposed four harness bugs that predate this work — each a
+fixture/expectation that was never updated when the audit-2 migrations changed
+the contract. All fixed in the harnesses, none in production code:
+
+1. **No harness student had a matric**, so `join_class` refused them with
+   `matric_required` (the H-11 gate, migration 0046) and nothing downstream
+   could run. Added a shared `nextHarnessMatric()` to the 8 harnesses that call
+   `join_class`.
+2. **verify-matric M8** expected a student to self-update an already-set matric;
+   M-12 made it immutable. Now asserts the immutability guard and that the
+   stored value is unchanged.
+3. **verify-results** expected `reset_session` to succeed for a `completed`
+   session; M-07 deliberately refuses it. The matrix now expects `ok` for
+   active/paused/flagged and `session_not_active` + no audit row for completed.
+4. **verify-media D11** seeded `race-<i>-<stamp>.png`, which violates the C-01
+   anchored-shape CHECK, so neither racing UPDATE landed and the check could
+   not observe the race. Fixtures now use `<uid>/<uuid>.png`.
+
+### Types
+
+`npm run gen:types` against the migrated schema adds
+`questions.generation_id` to the `append_question`/`answer_question` RPC return
+types (the hand-written edit had missed them). CI's `git diff --exit-code` drift
+gate requires this to be committed, so it is.
+
+### Operational finding from `cron_health()` (real, worth acting on)
+
+The first live `cron_health()` call reports three of the five jobs have
+**never run** on a freshly created local database:
+
+| job | ever ran |
+|---|---|
+| `innovision-flag-verify-silence` | yes (every minute) |
+| `innovision-quiz-autoclose` | yes (every 5 min) |
+| `innovision-retention` | **no** |
+| `innovision-notifications` | **no** |
+| `innovision-incident-prune` | **no** |
+
+The daily/weekly ones are simply not due yet on a fresh DB, so this is expected
+locally — but it is exactly the signal R2-FACE-F2 said was missing, and it
+demonstrates `/api/health` would surface a genuinely dead schedule. Confirm the
+three have run on any long-lived deployment.
