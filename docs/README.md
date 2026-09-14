@@ -4,7 +4,7 @@
 > is a historical record, and which has been superseded in part. When a plan
 > and the code disagree, the code + migrations win — then update the doc.
 >
-> Last reconciled: 2026-08-24 (after notifications 0022 and student practice quizzes 0023).
+> Last reconciled: 2026-09-14 (GLM-OCR provider toggle + VPS deployment docs: `GLM_OCR_SETUP.md` §6 remote leg, `DEPLOY_VPS.md` runbook, `COSTS.md` VPS model, `PLAN_VPS_DEPLOYMENT.md` status).
 
 ## ✅ Current / authoritative
 
@@ -17,8 +17,10 @@
 | **PLAN_MATRIC_EXCEL_EXPORT.md** | Matric numbers (migration 0027: 6-digit, 99xxxx reserved) + lecturer Excel export (`/api/quizzes/[id]/export`, exceljs, 3 sheets). Post-audit final; three subagent review iterations. |
 | **TESTING.md** | Test plan by layer: Vitest units, route tests, SQL harnesses (`verify:*.mjs`), E2E inventory. ⚠️ The Phase-7-era body predates the integrity suite — the suite's tests (I-vote/focus/advisory route tests, incident route tests, `vote`/`attention`/`vad` units, e16, verify-face 59 checks) are catalogued in PLAN_INTEGRITY_SUITE.md §5 instead; the student-quizzes suite lives in TESTING.md §2.7 + the E17 row. |
 | **INSIGHTFACE_SETUP.md** | Self-hosted InsightFace sidecar (single container, stateless; embeddings in Supabase). |
-| **GLM_OCR_SETUP.md** | Optional GLM-OCR (vLLM) extraction engine setup. |
-| **COSTS.md** | Infra/service cost breakdown for MVP scale. |
+| **GLM_OCR_SETUP.md** | Optional GLM-OCR extraction engine setup — the **local** Docker/vLLM leg (§1–§5, §7–§8) and the **remote Z.ai API** leg (§6: `GLM_PROVIDER=remote`, `layout_parsing`, envelope precedence, billed probe cache, spend governor, OWED live-curl list). |
+| **COSTS.md** | Infra/service cost model: VPS + hosted Supabase + Z.ai OCR. Every number tagged MEASURED / ESTIMATED / UNVERIFIED; the superseded Vercel-Hobby model is kept in §5 as history. |
+| **DEPLOY_VPS.md** | **Operator runbook** for the vCPU VPS deployment: Supabase dashboard pass, `link→push→repair` schema workflow, the BUILD-vs-RUNTIME env split, `TRUSTED_PROXY_COUNT`, container bring-up, Caddy/TLS/ufw, tokens + kill switches, cutover, the atomic backup/restore with RPO/RTO, free-tier quotas, and the smoke checklist. The *how* to the plan's *why*. |
+| **PLAN_VPS_DEPLOYMENT.md** | The deployment plan: laptop + GLM toggle (local vLLM ↔ Z.ai API) and vps-remote (vCPU VPS + hosted Supabase + Z.ai API). Reviewed design draft — see its banner for what is now IMPLEMENTED vs OWED-LIVE. |
 
 ## 🗺️ Roadmap (planned work — not yet spec)
 
@@ -68,7 +70,13 @@ context/invariants; verify details against code.
 
 - **Stack**: Next.js (App Router) · Supabase (Postgres, Auth, Storage) ·
   MediaPipe tasks-vision (face landmarker + hand landmarker, vendored) ·
-  self-hosted CompreFace (Docker) · optional GLM-OCR (vLLM).
+  self-hosted CompreFace (Docker) · optional GLM-OCR with **two legs** behind one
+  route (`GLM_PROVIDER=local` → Docker/vLLM, free; `remote` → the Z.ai API,
+  billed — `GLM_OCR_SETUP.md` §6).
+- **Deployment**: two targets — the **laptop stack** (local Supabase + local
+  GLM-OCR container) and the **vCPU VPS** (Next.js + InsightFace, hosted
+  free-tier Supabase, Z.ai OCR; no GPU, no vLLM container). Operator runbook:
+  `DEPLOY_VPS.md`; cost model: `COSTS.md`.
 - **Migrations**: `supabase/migrations/0001…0035` — authoritative schema.
   Regenerate types after schema changes: `npm run gen:types`.
 - **Face pipeline (current)**: enroll 3 angles → gate (blink + `'start'`
@@ -119,6 +127,8 @@ context/invariants; verify details against code.
   npm run verify:sessions # …plus verify:classes/quizzes/ai/results/security
   npm run verify:clone    # clone_quiz AP-2 probes (14 checks; ownership/archived/fidelity/cap-free)
   npm run check:i18n      # en <-> ms key parity
+  npm run check:env       # every env key read in src/** is documented in .env.local.example
+  node scripts/vps-smoke.mjs --base-url <origin> --email <lecturer> --password <pw>  # VPS smoke (ops gate O4)
   npx playwright test     # E2E (needs LECTURER_INVITE_CODE in .env.local)
   ```
 - **Known debt**: legacy E2E specs (e3/e5/e6/e7/e9b/e10–e15) still carry
