@@ -16,15 +16,19 @@ const MOCK_TINYFISH_PORT = process.env.MOCK_TINYFISH_PORT ?? "8788";
 const NOWEBSEARCH_PORT = process.env.PLAYWRIGHT_NOWEBSEARCH_PORT ?? "3002";
 
 /**
- * Build policy: ALWAYS rebuild fresh before every suite run.
+ * Build policy: By default, rebuild fresh before every suite run.
  *
- * The old smart-check (`src/`/`public/` mtime vs `.next/BUILD_ID`, PLAYWRIGHT_BUILD=0 to skip) was removed: NEXT_PUBLIC_* env vars
- * (NEXT_PUBLIC_E2E_FAKE_SEAM, NEXT_PUBLIC_SUPABASE_URL, ...) are inlined at
- * build time, so a bundle produced by a manual `npm run build` — or any build
- * without the harness env — bakes a dead fake-tracker seam into the suite and
- * fails face/gesture specs cluster-wide while looking "warm". Rebuilding under
- * the webServer env makes the harness bundle's env self-consistent every run.
+ * NEXT_PUBLIC_* env vars (NEXT_PUBLIC_E2E_FAKE_SEAM, NEXT_PUBLIC_SUPABASE_URL, ...)
+ * are inlined at build time, so a bundle produced by a manual `npm run build` — or
+ * any build without the harness env — bakes a dead fake-tracker seam into the suite.
+ * Rebuilding under the webServer env makes the harness bundle's env self-consistent.
+ * If PLAYWRIGHT_SKIP_BUILD is set (e.g. in CI where an explicit pre-build step has
+ * already built with the harness env), `npm run start` is executed directly without rebuilding.
  */
+const APP_COMMAND = process.env.PLAYWRIGHT_SKIP_BUILD
+  ? `npm run start -- -p ${PORT}`
+  : `npm run build && npm run start -- -p ${PORT}`;
+
 
 /**
  * ── S1/S5 kill-switch disarm: PROD_ENV_STRICT MUST stay pinned to "" ──────────
@@ -101,6 +105,97 @@ function assertProdEnvStrictPinned(
   });
 }
 
+/**
+ * Shared harness environment for both app webServer instances (ports :3000 and :3002).
+ *
+ * Ensures mock endpoints, rate limit bypasses, and safety pins are applied consistently
+ * so secondary servers (like chromium-nowebsearch) do not leak to external APIs or fail in CI.
+ */
+const HARNESS_BASE_ENV = {
+  ...process.env,
+  // The suite registers dozens of accounts from 127.0.0.1 inside a
+  // single rate-limit window; the app's anti-abuse budget (10/min)
+  // would silently reject the overflow and poison every later auth
+  // step. Raised for the harness only — production default is 10.
+  SIGNUP_RATE_LIMIT: "1000",
+  INVITE_RATE_LIMIT: "1000",
+  // Same class of flake for the reset path: e34 fires several
+  // resetPasswordForEmail calls (incl. per-IP budget) within one window
+  // and retries in CI. Raised for the harness only — production
+  // defaults stay 5/min per email and 30/min per IP (audit-3 R2-TOP-F5
+  // raised the IP budget to the classroom-NAT-tolerant login precedent),
+  // with a 10/day per-email ceiling (audit-3 R2-TOP-F3) that the harness
+  // also lifts.
+  RESET_RATE_LIMIT: "1000",
+  RESET_IP_RATE_LIMIT: "1000",
+  RESET_CONFIRM_RATE_LIMIT: "1000",
+  RESET_EMAIL_DAILY_LIMIT: "1000",
+  // Kill-switch for the ~60 hardcoded per-route budgets (VERIFY_RATE,
+  // START_RATE, the non-tunable `invite:global` 100/min signup bucket,
+  // ...) which the suite's 6-worker burst overflows mid-run — the
+  // 2026-09-04 mass-failure root cause (see TESTING §5.3). Inert in
+  // production (flag unset); rate limiting is still proven by the
+  // route-level vitest tests, which seed buckets directly.
+  E2E_RATE_LIMIT_DISABLED: "1",
+  // AU-2 matric-gate spec (e47) fires capture attempts in one window;
+  // raised for the harness only — production default stays 5/min per IP.
+  MATRIC_CAPTURE_RATE_LIMIT: "1000",
+  AI_BASE_URL: `http://127.0.0.1:${MOCK_AI_PORT}/v1`,
+  AI_API_KEY: "test-key",
+  AI_MODEL: "gpt-4o-mini",
+  // S1/S5 — pin the prod fail-closed gate OFF for the harness. This block
+  // arms all four kill switches deliberately (below), and `npm run start`
+  // runs with NODE_ENV=production, so an inherited `PROD_ENV_STRICT=1`
+  // (a .env.local written by following docs/DEPLOY_VPS.md §8.2, or a
+  // shell export) would make instrumentation.ts refuse to boot and kill
+  // the entire suite on the 300 s webServer timeout. See the pin comment
+  // at the top of this file.
+  PROD_ENV_STRICT: PROD_ENV_STRICT_PIN,
+  // chatStream's inter-chunk idle abort: the harness uses 3s so the
+  // mock's [MOCK:stall] scenario (silent upstream) resolves in-test
+  // instead of holding the route for the production 90s.
+  AI_STREAM_IDLE_TIMEOUT_MS: "3000",
+  OCR_VISION_MODEL: "gpt-4o-mini",
+  // GLM-OCR provider selector (src/lib/ai/glm-provider.ts). Pinned to the
+  // FREE local leg for the same reason as TINYFISH_API_KEY above: the
+  // harness must NEVER be able to spend money. A developer shell (or a
+  // .env.local that playwright.config.ts loads without overriding) with
+  // `GLM_PROVIDER=remote` would otherwise flip this build onto the
+  // METERED Z.ai leg, where e2c's OCR run — and the health GET's billed
+  // 1×1-PNG probe — would bill a real key. Fail-closed in the app, and
+  // explicit here so the harness env is self-consistent either way.
+  GLM_PROVIDER: "local",
+  // InsightFace mock mode — E2E must NOT require a running Docker container.
+  INSIGHTFACE_BASE_URL: "http://localhost:8000",
+  FACE_MOCK_ENABLED: "1",
+  // Fake tracker seams (face + hand). The suite serves the PRODUCTION
+  // build where NODE_ENV-based seam gating is dead — the seams need an
+  // explicit harness-only opt-in that survives the build (src/lib/face/
+  // seam-gate.ts). NEVER set this outside the Playwright harness.
+  NEXT_PUBLIC_E2E_FAKE_SEAM: "1",
+  // Integrity hardening OFF for the main suite (src/lib/integrity/
+  // hardening-gate.ts): clipboard/fullscreen lockdown must not fight
+  // headless runs (fullscreen events are flaky headless; copy guards
+  // would break fixture-building copy). Build-time inlined like the
+  // seam above — a run WITHOUT this var bakes the hardening IN, which
+  // is exactly what the opt-in e51 spec wants: running the harness
+  // with INTEGRITY_E2E=1 omits the kill switch (run e51 ONLY in that
+  // mode — see TESTING §5.2; the main suite would fail against a
+  // hardening-ON build).
+};
+
+// When running with INTEGRITY_E2E=1 (the dedicated e51 job), the hardening kill switch
+// must NEVER be present in the server's environment. If process.env or .env.local carried
+// NEXT_PUBLIC_INTEGRITY_HARDENING_OFF, delete it explicitly so it is absent from the webServers
+// and does not cause e51's opt-in check to skip.
+if (process.env.INTEGRITY_E2E === "1") {
+  delete (HARNESS_BASE_ENV as Record<string, string | undefined>).NEXT_PUBLIC_INTEGRITY_HARDENING_OFF;
+  delete process.env.NEXT_PUBLIC_INTEGRITY_HARDENING_OFF;
+} else {
+  (HARNESS_BASE_ENV as Record<string, string | undefined>).NEXT_PUBLIC_INTEGRITY_HARDENING_OFF = "1";
+  process.env.NEXT_PUBLIC_INTEGRITY_HARDENING_OFF = "1";
+}
+
 const config = defineConfig({
   testDir: "./e2e",
   testIgnore: process.env.FACE_SMOKE ? [] : ["**/insightface-smoke.spec.ts"],
@@ -112,8 +207,12 @@ const config = defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 1,
   maxFailures: process.env.CI ? 1 : undefined,
-  // Capped in CI to prevent runner CPU saturation; scaled to machine capacity locally
-  workers: process.env.CI ? 1 : Math.min(6, os.cpus().length || 4),
+  // Scaled to 2 workers in CI (2 vCPUs) to avoid test timeout; scaled to machine capacity locally
+  workers: process.env.CI_WORKERS
+    ? parseInt(process.env.CI_WORKERS, 10)
+    : process.env.CI
+      ? 2
+      : Math.min(6, os.cpus().length || 4),
   // HTML stays the human-facing report; `line` streams one stdout line per test
   // so agent/CI runs capture per-test results (incl. retries) without digging
   // through playwright-report/ blobs — a plain "html" reporter prints almost
@@ -183,120 +282,34 @@ const config = defineConfig({
       // PRODUCTION server: rebuilt fresh every run (see the build-policy note
       // above — env is inlined at build time, so the bundle must be produced
       // under THIS env block).
-      command: `npm run build && npm run start -- -p ${PORT}`,
+      command: APP_COMMAND,
       url: BASE_URL,
       reuseExistingServer: !process.env.CI,
       timeout: 300_000,
       env: {
-        ...process.env,
-        // The suite registers dozens of accounts from 127.0.0.1 inside a
-        // single rate-limit window; the app's anti-abuse budget (10/min)
-        // would silently reject the overflow and poison every later auth
-        // step. Raised for the harness only — production default is 10.
-        SIGNUP_RATE_LIMIT: "1000",
-        INVITE_RATE_LIMIT: "1000",
-        // Same class of flake for the reset path: e34 fires several
-        // resetPasswordForEmail calls (incl. per-IP budget) within one window
-        // and retries in CI. Raised for the harness only — production
-        // defaults stay 5/min per email and 30/min per IP (audit-3 R2-TOP-F5
-        // raised the IP budget to the classroom-NAT-tolerant login precedent),
-        // with a 10/day per-email ceiling (audit-3 R2-TOP-F3) that the harness
-        // also lifts.
-        RESET_RATE_LIMIT: "1000",
-        RESET_IP_RATE_LIMIT: "1000",
-        RESET_CONFIRM_RATE_LIMIT: "1000",
-        RESET_EMAIL_DAILY_LIMIT: "1000",
-        // Kill-switch for the ~60 hardcoded per-route budgets (VERIFY_RATE,
-        // START_RATE, the non-tunable `invite:global` 100/min signup bucket,
-        // ...) which the suite's 6-worker burst overflows mid-run — the
-        // 2026-09-04 mass-failure root cause (see TESTING §5.3). Inert in
-        // production (flag unset); rate limiting is still proven by the
-        // route-level vitest tests, which seed buckets directly.
-        E2E_RATE_LIMIT_DISABLED: "1",
-        // AU-2 matric-gate spec (e47) fires capture attempts in one window;
-        // raised for the harness only — production default stays 5/min per IP.
-        MATRIC_CAPTURE_RATE_LIMIT: "1000",
-        AI_BASE_URL: `http://127.0.0.1:${MOCK_AI_PORT}/v1`,
-        AI_API_KEY: "test-key",
-        AI_MODEL: "gpt-4o-mini",
+        ...HARNESS_BASE_ENV,
         // Grounded web search (grounded-search.md §9C): ALWAYS explicit —
         // never inherit a real TINYFISH_API_KEY from .env.local (the suite
         // would silently gain web mode on machines that have one).
         TINYFISH_API_KEY: "test-tinyfish-key",
         TINYFISH_SEARCH_URL: `http://127.0.0.1:${MOCK_TINYFISH_PORT}`,
         TINYFISH_FETCH_URL: `http://127.0.0.1:${MOCK_TINYFISH_PORT}`,
-        // S1/S5 — pin the prod fail-closed gate OFF for the harness. This block
-        // arms all four kill switches deliberately (below), and `npm run start`
-        // runs with NODE_ENV=production, so an inherited `PROD_ENV_STRICT=1`
-        // (a .env.local written by following docs/DEPLOY_VPS.md §8.2, or a
-        // shell export) would make instrumentation.ts refuse to boot and kill
-        // the entire suite on the 300 s webServer timeout. See the pin comment
-        // at the top of this file.
-        PROD_ENV_STRICT: PROD_ENV_STRICT_PIN,
-        // chatStream's inter-chunk idle abort: the harness uses 3s so the
-        // mock's [MOCK:stall] scenario (silent upstream) resolves in-test
-        // instead of holding the route for the production 90s.
-        AI_STREAM_IDLE_TIMEOUT_MS: "3000",
-        OCR_VISION_MODEL: "gpt-4o-mini",
-        // GLM-OCR provider selector (src/lib/ai/glm-provider.ts). Pinned to the
-        // FREE local leg for the same reason as TINYFISH_API_KEY above: the
-        // harness must NEVER be able to spend money. A developer shell (or a
-        // .env.local that playwright.config.ts loads without overriding) with
-        // `GLM_PROVIDER=remote` would otherwise flip this build onto the
-        // METERED Z.ai leg, where e2c's OCR run — and the health GET's billed
-        // 1×1-PNG probe — would bill a real key. Fail-closed in the app, and
-        // explicit here so the harness env is self-consistent either way.
-        GLM_PROVIDER: "local",
-        // InsightFace mock mode — E2E must NOT require a running Docker container.
-        INSIGHTFACE_BASE_URL: "http://localhost:8000",
-        FACE_MOCK_ENABLED: "1",
-        // Fake tracker seams (face + hand). The suite serves the PRODUCTION
-        // build where NODE_ENV-based seam gating is dead — the seams need an
-        // explicit harness-only opt-in that survives the build (src/lib/face/
-        // seam-gate.ts). NEVER set this outside the Playwright harness.
-        NEXT_PUBLIC_E2E_FAKE_SEAM: "1",
-        // Integrity hardening OFF for the main suite (src/lib/integrity/
-        // hardening-gate.ts): clipboard/fullscreen lockdown must not fight
-        // headless runs (fullscreen events are flaky headless; copy guards
-        // would break fixture-building copy). Build-time inlined like the
-        // seam above — a run WITHOUT this var bakes the hardening IN, which
-        // is exactly what the opt-in e51 spec wants: running the harness
-        // with INTEGRITY_E2E=1 omits the kill switch (run e51 ONLY in that
-        // mode — see TESTING §5.2; the main suite would fail against a
-        // hardening-ON build).
-        ...(process.env.INTEGRITY_E2E === "1"
-          ? {}
-          : { NEXT_PUBLIC_INTEGRITY_HARDENING_OFF: "1" }),
       },
     },
     {
       // Flag-off server instance (chromium-nowebsearch project): serves the
       // SAME .next build on a second port with TINYFISH_* explicitly cleared —
-      // process.env spread happens FIRST so these overrides win. node -e is
-      // used instead of a shell `while` (webServer commands run under cmd.exe
-      // on Windows).
+      // node -e is used instead of a shell `while` (webServer commands run under
+      // cmd.exe on Windows).
       command: `node -e "const fs=require('fs');(function w(){fs.existsSync('.next/BUILD_ID')?require('child_process').execSync('npm run start -- -p ${NOWEBSEARCH_PORT}',{stdio:'inherit'}):setTimeout(w,1000)})()"`,
       url: `http://localhost:${NOWEBSEARCH_PORT}`,
       reuseExistingServer: !process.env.CI,
-      timeout: 120_000,
+      timeout: 300_000,
       env: {
-        ...process.env,
+        ...HARNESS_BASE_ENV,
         TINYFISH_API_KEY: "",
         TINYFISH_SEARCH_URL: "",
         TINYFISH_FETCH_URL: "",
-        // This instance inherits `...process.env` (unlike the main webServer,
-        // which pins it), so a developer's shell — or the .env.local this
-        // config loads — could leak `GLM_PROVIDER=remote` into a server that
-        // still serves requests. The metered leg is BILLED per token; pin the
-        // free leg explicitly. (TINYFISH_* above are cleared for the same
-        // "never inherit a real credential" reason.)
-        GLM_PROVIDER: "local",
-        // S1/S5 — same pin as the main block, for the same reason: this block
-        // spreads `...process.env`, so an inherited PROD_ENV_STRICT=1 would
-        // make the prod gate refuse to boot this instance and every
-        // chromium-nowebsearch spec would fail on its 120 s timeout. See the
-        // pin comment at the top of this file.
-        PROD_ENV_STRICT: PROD_ENV_STRICT_PIN,
       },
     },
   ],

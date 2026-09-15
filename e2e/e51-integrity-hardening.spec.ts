@@ -7,6 +7,7 @@ import {
   joinClass,
   passAssessmentGate,
   registerUser,
+  setFaceVerifyMode,
 } from "./helpers";
 
 /**
@@ -74,6 +75,7 @@ test.describe("e51 — integrity hardening", () => {
     await expect(publishButton).toBeEnabled();
     await publishButton.click();
     await expect(lecturerPage.getByText(/^Live/)).toBeVisible();
+    await lecturerCtx.close();
 
     await registerUser(page, studentEmail, "student", LECTURER_INVITE_CODE);
     await joinClass(page, joinCode, classTitle);
@@ -83,6 +85,7 @@ test.describe("e51 — integrity hardening", () => {
     await page.getByRole("button", { name: "Start", exact: true }).click();
     await expect(page).toHaveURL(/\/play\/[0-9a-f-]+/);
 
+    await setFaceVerifyMode(page, "match");
     await passAssessmentGate(page);
 
     const card = page.locator("section[aria-labelledby='question-prompt']");
@@ -92,34 +95,51 @@ test.describe("e51 — integrity hardening", () => {
     const userSelect = await card.evaluate((el) => getComputedStyle(el).userSelect);
     expect(userSelect).toBe("none");
 
-    // The copy event is cancelled by the hardening's onCopy. React delegates
-    // at the root in the BUBBLE phase, and execCommand fires copy at the
-    // FOCUSED element — so focus a button inside the card first, and probe at
-    // DOCUMENT level (bubbles after React's root handler has run).
-    const copyCancelled = await page.evaluate(() => {
+    // The hardening blocks copy, cut, and context-menu events on the question card.
+    const { copyCancelled, cutCancelled, contextMenuCancelled } = await page.evaluate(() => {
       const card = document.querySelector("section[aria-labelledby='question-prompt']");
-      if (!card) return false;
-      const button = card.querySelector("button");
-      if (button) button.focus();
-      let prevented = false;
-      document.addEventListener(
-        "copy",
-        (e) => {
-          prevented = e.defaultPrevented;
-        },
-        { once: true },
-      );
-      const selection = window.getSelection();
-      if (selection) {
-        selection.removeAllRanges();
-        const range = document.createRange();
-        range.selectNodeContents(card);
-        selection.addRange(range);
-      }
-      document.execCommand("copy");
-      return prevented;
+      if (!card) return { copyCancelled: false, cutCancelled: false, contextMenuCancelled: false };
+      const prompt = card.querySelector("#question-prompt") || card;
+
+      const copyEvent = new Event("copy", { bubbles: true, cancelable: true });
+      prompt.dispatchEvent(copyEvent);
+
+      const cutEvent = new Event("cut", { bubbles: true, cancelable: true });
+      prompt.dispatchEvent(cutEvent);
+
+      const contextMenuEvent = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+      prompt.dispatchEvent(contextMenuEvent);
+
+      return {
+        copyCancelled: copyEvent.defaultPrevented,
+        cutCancelled: cutEvent.defaultPrevented,
+        contextMenuCancelled: contextMenuEvent.defaultPrevented,
+      };
     });
     expect(copyCancelled).toBe(true);
+    expect(cutCancelled).toBe(true);
+    expect(contextMenuCancelled).toBe(true);
+
+    // Negative control: events dispatched outside the card (e.g. document body) are not prevented.
+    const outsideEvents = await page.evaluate(() => {
+      const outsideCopy = new Event("copy", { bubbles: true, cancelable: true });
+      document.body.dispatchEvent(outsideCopy);
+
+      const outsideCut = new Event("cut", { bubbles: true, cancelable: true });
+      document.body.dispatchEvent(outsideCut);
+
+      const outsideContextMenu = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+      document.body.dispatchEvent(outsideContextMenu);
+
+      return {
+        copyNotPrevented: !outsideCopy.defaultPrevented,
+        cutNotPrevented: !outsideCut.defaultPrevented,
+        contextMenuNotPrevented: !outsideContextMenu.defaultPrevented,
+      };
+    });
+    expect(outsideEvents.copyNotPrevented).toBe(true);
+    expect(outsideEvents.cutNotPrevented).toBe(true);
+    expect(outsideEvents.contextMenuNotPrevented).toBe(true);
   });
 
   test("fullscreen requested at Begin; a later exit pauses with reason fullscreen_exit", async ({ page }) => {
@@ -153,6 +173,7 @@ test.describe("e51 — integrity hardening", () => {
     await expect(publishButton).toBeEnabled();
     await publishButton.click();
     await expect(lecturerPage.getByText(/^Live/)).toBeVisible();
+    await lecturerCtx.close();
 
     await registerUser(page, studentEmail, "student", LECTURER_INVITE_CODE);
     await joinClass(page, joinCode, classTitle);
@@ -162,13 +183,25 @@ test.describe("e51 — integrity hardening", () => {
     await page.getByRole("button", { name: "Start", exact: true }).click();
     await expect(page).toHaveURL(/\/play\/[0-9a-f-]+/);
 
+    await setFaceVerifyMode(page, "match");
+    const verifyPromise = page.waitForResponse(
+      (res) => res.url().includes("/api/face/verify") && res.status() === 200,
+      { timeout: 15_000 },
+    );
+
     // Begin click → the hardening requests fullscreen inside the gesture.
     await passAssessmentGate(page);
+    await verifyPromise;
+
     // requestFullscreen resolves a frame or two after the click; poll so a
     // scheduler hiccup retries instead of failing hard.
     await expect
       .poll(() => page.evaluate(() => Boolean(document.fullscreenElement)), { timeout: 5_000 })
       .toBe(true);
+
+    const card = page.locator("section[aria-labelledby='question-prompt']");
+    await expect(card).toBeVisible();
+    await expect(page.getByRole("alertdialog")).toBeHidden({ timeout: 10_000 });
 
     const pauseBodies: string[] = [];
     page.on("request", (req) => {
@@ -188,6 +221,8 @@ test.describe("e51 — integrity hardening", () => {
     await expect(page.getByText("Fullscreen was closed", { exact: true })).toBeVisible({
       timeout: 15_000,
     });
-    expect(pauseBodies.some((b) => b.includes("fullscreen_exit"))).toBe(true);
+    await expect
+      .poll(() => pauseBodies.some((b) => b.includes("fullscreen_exit")), { timeout: 10_000 })
+      .toBe(true);
   });
 });

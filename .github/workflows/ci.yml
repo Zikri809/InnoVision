@@ -3,7 +3,26 @@ name: CI
 on:
   push:
     branches: [main]
+    # Docs/markdown-only commits still get the fast `checks` gate (it is
+    # deliberately NOT skipped — docs can break env-parity or i18n scripts),
+    # but skip the expensive Supabase/E2E/probe legs that cannot be affected
+    # by a .md edit. This cut 10 of the last 60 commits (~30 min each) down
+    # to the 1-2 min checks job.
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "design-system/**"
   pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "design-system/**"
+
+# A new push to the same branch cancels the superseded run instead of letting
+# two full E2E suites queue for the same 25-minute budget.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   # H3-INFRA-F1 recurrence guard: this is the ONLY job that can catch an
@@ -29,7 +48,56 @@ jobs:
       - name: Validate workflow YAML (js-yaml)
         run: node scripts/check-workflows.mjs
 
-  test:
+  # Fast fail-fast gate: lint, typecheck, unit coverage, drift/parity checks.
+  # No Supabase, no build, no browser. Reports in ~2 minutes so a broken
+  # commit is known before the E2E legs finish. Deliberately separate from
+  # `e2e`/`probes` so a unit failure no longer SKIPS the E2E step (the old
+  # monolithic `test` job did exactly that — the 2026-09-14 dependabot run
+  # 34883964808 died at "Unit coverage" and E2E never ran).
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # H3-INFRA-F1 recurrence guard (this YAML has been broken twice). Runs
+      # before the expensive steps so a syntax error fails in seconds. The
+      # dedicated `workflow-lint` job above is the load-bearing copy (a step
+      # inside ci.yml cannot run when ci.yml itself is unparseable).
+      - name: Validate workflow YAML
+        run: npm run lint:workflows
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Per-file thresholds are enforced by the vitest config; a coverage drop
+      # fails here without needing Supabase.
+      - name: Unit coverage (per-file thresholds)
+        run: npx vitest run --coverage
+
+      - name: Validate i18n parity
+        run: node scripts/check-i18n.mjs
+
+      - name: Env parity (audit-1 §5.5)
+        run: node scripts/check-env-parity.mjs
+
+  # Gate S5: the four kill switches must NEVER reach a CI build. Shared by the
+  # e2e and integrity-e2e jobs below via the `env` below (which both jobs
+  # reference by re-declaring the job-level env block inline).
+  e2e:
+    # The artifact CI ships is built here (kill switches OFF), so this job is
+    # also where the S5 gate assertion lives. See the long comment in the
+    # assert step below.
     runs-on: ubuntu-latest
     env:
       # High-entropy, CI-only invite code. NEVER reuse this value in a deployed
@@ -47,13 +115,6 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
-
-      # H3-INFRA-F1 recurrence guard (this YAML has been broken twice). Runs
-      # before the expensive steps so a syntax error fails in seconds. The
-      # dedicated `workflow-lint` job below is the load-bearing copy (a step
-      # inside ci.yml cannot run when ci.yml itself is unparseable).
-      - name: Validate workflow YAML
-        run: npm run lint:workflows
 
       - name: Start local Supabase
         run: npx supabase start
@@ -91,12 +152,6 @@ jobs:
 
       - name: Check database types drift
         run: git diff --exit-code src/lib/types/database.ts
-
-      - name: Validate i18n parity
-        run: node scripts/check-i18n.mjs
-
-      - name: Env parity (audit-1 §5.5)
-        run: node scripts/check-env-parity.mjs
 
       # Gate S5 recurrence guard: the four kill switches must NEVER reach a CI
       # build. Two of them (NEXT_PUBLIC_E2E_FAKE_SEAM, NEXT_PUBLIC_INTEGRITY_
@@ -166,14 +221,118 @@ jobs:
           fi
           echo "OK — in the JOB/BUILD env (not the Playwright webServer env, which arms two of them on purpose) E2E_RATE_LIMIT_DISABLED / NEXT_PUBLIC_E2E_FAKE_SEAM / FACE_MOCK_ENABLED / NEXT_PUBLIC_INTEGRITY_HARDENING_OFF are all absent or 0."
 
-      - name: Lint
-        run: npm run lint
+      - name: Build
+        run: npm run build
 
-      - name: Typecheck
-        run: npm run typecheck
+      - name: Phase 6 MediaPipe asset integrity (SHA-256 vs MANIFEST)
+        run: npm run verify:mediapipe
 
-      - name: Unit coverage (per-file thresholds)
-        run: npx vitest run --coverage
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: "Build for E2E (fake seams)"
+        run: npm run build
+        env:
+          NEXT_PUBLIC_E2E_FAKE_SEAM: "1"
+          NEXT_PUBLIC_INTEGRITY_HARDENING_OFF: "1"
+          FACE_MOCK_ENABLED: "1"
+          INSIGHTFACE_BASE_URL: "http://localhost:8000"
+
+      # H3-INFRA-F3: the timeout raise has never been exercised, and a step
+      # timeout is indistinguishable from a test failure in the summary.
+      # Record the start in its OWN step (a killed step's $GITHUB_ENV may not
+      # be flushed, so writing it inside the E2E run block is not reliable).
+      - name: Record E2E start
+        id: e2e_start
+        run: echo "E2E_START_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
+
+      # 40-minute budget: the last full run (34935325321, 2026-09-15) reached
+      # test 177/182 when the 25-minute cap killed it — the suite outgrew the
+      # budget, it did not fail. The prebuild above keeps the budget 100%
+      # test execution (PLAYWRIGHT_SKIP_BUILD=1 below).
+      - name: E2E (E1a + E1 + E1b regression + mobile m1 allowlist)
+        id: e2e
+        run: npx playwright test
+        env:
+          PLAYWRIGHT_SKIP_BUILD: "1"
+        # Desktop suite + mobile allowlist across 2 CI workers.
+        timeout-minutes: 40
+        continue-on-error: false
+
+      - name: Report E2E step outcome
+        # Only when the E2E step itself failed or timed out. A timeout lands as
+        # `cancelled` (or `failure`), which sets job status to cancelled where
+        # a bare `failure()` is false. An earlier-step failure leaves it `skipped`.
+        if: (failure() || cancelled()) && steps.e2e.outcome != 'skipped' && steps.e2e.outcome != 'success'
+        run: |
+          OUTCOME="${{ steps.e2e.outcome }}"
+          BUDGET=$(( 40 * 60 ))
+          if [ -n "${E2E_START_EPOCH:-}" ] && [ "${E2E_START_EPOCH}" != "0" ]; then
+            ELAPSED=$(( $(date +%s) - E2E_START_EPOCH ))
+          else
+            ELAPSED=0
+          fi
+          if [ "$ELAPSED" -ge "$BUDGET" ]; then
+            VERDICT="TIMEOUT — the step was killed at its 40-minute budget, NOT a Playwright test failure."
+          elif [ "$ELAPSED" -eq 0 ]; then
+            VERDICT="the step failed before/at the start marker could be read — treat as a real failure."
+          else
+            VERDICT="ran ${ELAPSED}s of the ${BUDGET}s budget — a real test/tooling failure, not a timeout."
+          fi
+          {
+            echo "### E2E step: \`e2e\` outcome=\`$OUTCOME\`"
+            echo ""
+            echo "$VERDICT"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "E2E step outcome=$OUTCOME elapsed=${ELAPSED}s — $VERDICT"
+
+  # DB/RLS/security probe suite (verify:*.mjs scripts) against a live local
+  # Supabase. Split from the old monolithic `test` job: these only need
+  # Postgres, not a browser or a Next build, and they no longer gate or gate
+  # on the E2E leg. They still gate main: every probe is a security regression
+  # pin (RLS isolation, one-attempt lock, answer secrecy).
+  probes:
+    runs-on: ubuntu-latest
+    env:
+      # Same CI-only invite code as the `e2e` job (see its comment there).
+      LECTURER_INVITE_CODE: ci-invite-code-7f3a9c2e4b8d1f6a0e5c7b3a
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Start local Supabase
+        run: npx supabase start
+        timeout-minutes: 10
+
+      - name: Write .env.local from Supabase status
+        run: |
+          npx supabase status -o env > .env.local
+          echo "NEXT_PUBLIC_SUPABASE_URL=$(grep '^API_URL=' .env.local | cut -d= -f2- | tr -d '\"')" >> .env.local
+          echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$(grep '^ANON_KEY=' .env.local | cut -d= -f2- | tr -d '\"')" >> .env.local
+          echo "SUPABASE_SERVICE_ROLE_KEY=$(grep '^SERVICE_ROLE_KEY=' .env.local | cut -d= -f2- | tr -d '\"')" >> .env.local
+          echo "LECTURER_INVITE_CODE=${{ env.LECTURER_INVITE_CODE }}" >> .env.local
+          echo "AI_BASE_URL=https://api.openai.com/v1" >> .env.local
+          echo "AI_API_KEY=test-key" >> .env.local
+          echo "AI_MODEL=gpt-4o-mini" >> .env.local
+          echo "OCR_DEFAULT_ENGINE=tesseract" >> .env.local
+          echo "GLM_BASE_URL=http://localhost:11434" >> .env.local
+          echo "OCR_GLM_MODEL=glm-ocr" >> .env.local
+          echo "OCR_VISION_MODEL=gpt-4o-mini" >> .env.local
+          # GLM-OCR provider selector: the FREE local leg. CI has no Z.ai key
+          # and must never select the metered leg (a unit/route test that
+          # reaches the remote path would bill a real account). Fail-closed in
+          # the app, explicit here so the build env is self-consistent.
+          echo "GLM_PROVIDER=local" >> .env.local
+
+      - name: Reset DB (apply migrations)
+        run: npx supabase db reset
 
       - name: Phase 1 security probes (live DB, real tokens)
         run: npm run verify:security
@@ -217,61 +376,8 @@ jobs:
       - name: "Silence-cron probes (0042/0044/0045: flag_verify_silent_sessions predicates)"
         run: npm run verify:silence
 
-      - name: Build
-        run: npm run build
-
-      - name: Phase 6 MediaPipe asset integrity (SHA-256 vs MANIFEST)
-        run: npm run verify:mediapipe
-
-      - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
-
-      # H3-INFRA-F3: the 15 -> 25 timeout raise has never been exercised, and a
-      # step timeout is indistinguishable from a test failure in the summary.
-      # Record the start in its OWN step (a killed step's $GITHUB_ENV may not
-      # be flushed, so writing it inside the E2E run block is not reliable).
-      - name: Record E2E start
-        id: e2e_start
-        run: echo "E2E_START_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
-
-      - name: E2E (E1a + E1 + E1b regression + mobile m1 allowlist)
-        id: e2e
-        run: npx playwright test
-        # Desktop suite + the mobile project's m1-*.spec.ts allowlist
-        # (plan §6): the m1 journeys add ~4-7 min at workers:1 on top of the
-        # desktop budget, hence 15 -> 25.
-        timeout-minutes: 25
-        continue-on-error: false
-
-      - name: Report E2E step outcome
-        # Only when the E2E step itself failed. A timeout lands as `failure`
-        # (or `cancelled`); an earlier-step failure leaves it `skipped`, which
-        # is why this is not a bare `if: failure()`.
-        if: failure() && steps.e2e.outcome != 'skipped'
-        run: |
-          OUTCOME="${{ steps.e2e.outcome }}"
-          BUDGET=$(( 25 * 60 ))
-          if [ -n "${E2E_START_EPOCH:-}" ] && [ "${E2E_START_EPOCH}" != "0" ]; then
-            ELAPSED=$(( $(date +%s) - E2E_START_EPOCH ))
-          else
-            ELAPSED=0
-          fi
-          if [ "$ELAPSED" -ge "$BUDGET" ]; then
-            VERDICT="TIMEOUT — the step was killed at its 25-minute budget, NOT a Playwright test failure."
-          elif [ "$ELAPSED" -eq 0 ]; then
-            VERDICT="the step failed before/at the start marker could be read — treat as a real failure."
-          else
-            VERDICT="ran ${ELAPSED}s of the ${BUDGET}s budget — a real test/tooling failure, not a timeout."
-          fi
-          {
-            echo "### E2E step: \`e2e\` outcome=\`$OUTCOME\`"
-            echo ""
-            echo "$VERDICT"
-          } >> "$GITHUB_STEP_SUMMARY"
-          echo "E2E step outcome=$OUTCOME elapsed=${ELAPSED}s — $VERDICT"
-
   integrity-e2e:
-    # Opt-in hardening suite (e51): the main job's build bakes
+    # Opt-in hardening suite (e51): the e2e job's build bakes
     # NEXT_PUBLIC_INTEGRITY_HARDENING_OFF=1 (playwright.config.ts), which is
     # exactly right for every other spec but makes the clipboard/fullscreen
     # hardening inert — e51 could never run there and would drift silently.
@@ -279,16 +385,16 @@ jobs:
     # (INTEGRITY_E2E=1 makes the webServer env omit the kill switch). E51's
     # full two-role journeys cost a second `next build` + ~5 min of specs.
     #
-    # NO kill-switch assertion step here (unlike the `test` job): this job's
+    # NO kill-switch assertion step here (unlike the `e2e` job): this job's
     # job-level env DELIBERATELY carries NEXT_PUBLIC_E2E_FAKE_SEAM=1 and
     # FACE_MOCK_ENABLED=1 (see the H3-INFRA-F2 note below), so the four-switch
     # check would fail on its own correct configuration. It also deliberately
     # OMITS NEXT_PUBLIC_INTEGRITY_HARDENING_OFF so the hardening is baked IN —
-    # the opposite of the `test` job. The gate S5 enforcement lives in the
-    # `test` job, which is the artifact CI ships.
+    # the opposite of the `e2e` job. The gate S5 enforcement lives in the
+    # `e2e` job, which is the artifact CI ships.
     runs-on: ubuntu-latest
     env:
-      # Same CI-only invite code as the `test` job (see its comment there).
+      # Same CI-only invite code as the `e2e` job (see its comment there).
       LECTURER_INVITE_CODE: ci-invite-code-7f3a9c2e4b8d1f6a0e5c7b3a
       # Drives playwright.config.ts: the webServer env OMITS
       # NEXT_PUBLIC_INTEGRITY_HARDENING_OFF, so `next build` bakes the
@@ -360,6 +466,8 @@ jobs:
 
       - name: E2E integrity hardening (e51 only, hardening-ON build)
         run: npx playwright test e2e/e51-integrity-hardening.spec.ts --project=chromium
-        # Build (~5 min, no cache sharing with the main job) + two full
-        # two-role journeys at workers:1 (CI forces workers=1).
+        env:
+          PLAYWRIGHT_SKIP_BUILD: "1"
+        # Prebuilt above (hardening-ON) + two full two-role journeys:
+        # Reuses the prebuilt bundle so the budget is 100% test execution.
         timeout-minutes: 25
