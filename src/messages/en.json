@@ -976,6 +976,8 @@
     "unsupportedType": "Unsupported file type.",
     "fileTooLarge": "File is larger than 25 MB.",
     "uploadError": "Could not upload the file. Check your connection and try again.",
+    "uploadNetworkError": "Couldn't upload \"{name}\" — the file may still be downloading from the cloud. Download it to this device first, then pick it again.",
+    "fileNotDownloaded": "\"{name}\" hasn't downloaded to this device yet (it's a cloud placeholder). Open it once to download it, then pick it again.",
     "timeout": "Reading took longer than expected. Please try again.",
     "generationDelayed": "Generation is taking a little longer than usual. Please check your quiz in a moment.",
     "uploadAriaLabel": "Upload course slides or documents",

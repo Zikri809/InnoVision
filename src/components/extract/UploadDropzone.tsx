@@ -95,6 +95,15 @@ export function UploadDropzone({
         onError(t("fileTooLarge"));
         return;
       }
+      // Mobile cloud-drive picks (Drive/iCloud) can surface placeholder File
+      // objects whose bytes are not on the device yet: size 0 or undefined
+      // while the metadata renders fine. The upload fetch dies mid-stream on
+      // those ("Failed to fetch"), so refuse them HERE with a real diagnosis
+      // instead of a network error that sends the user chasing connectivity.
+      if (!f.size) {
+        onError(t("fileNotDownloaded", { name: f.name }));
+        return;
+      }
     }
 
     const newTotalBytes = totalBytes + list.reduce((acc, f) => acc + f.size, 0);
@@ -117,7 +126,17 @@ export function UploadDropzone({
         });
 
         if (error) {
-          onError(error.message);
+          // storage-js surfaces network-level failures (offline, mobile
+          // radio drop, a cloud placeholder whose bytes vanished between
+          // validation and upload) as the raw browser TypeError message —
+          // "Fetch Failed: Failed to fetch". That message is noise for the
+          // user; the actionable copy names the likely mobile cause.
+          console.error("[upload] storage upload failed:", error.message);
+          onError(
+            /fetch|network/i.test(error.message)
+              ? t("uploadNetworkError", { name: file.name })
+              : error.message,
+          );
           return;
         }
 
@@ -178,7 +197,13 @@ export function UploadDropzone({
           ref={inputRef}
           type="file"
           multiple
-          accept=".pdf,.docx,.pptx,.txt,.md,.png,.jpg,.jpeg,.webp"
+          // MIME types, not bare extensions: mobile browsers (iOS Safari in
+          // particular) build their picker sheet from `accept`, and an
+          // extension-only list gets read as "images" — the user gets the
+          // photo/camera sheet instead of the Files/document picker. The
+          // leading dots on the MIME entries also let desktop pickers match
+          // the extension-constrained files. Mirrors ALLOWED_EXTENSIONS.
+          accept="application/pdf,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx,application/vnd.openxmlformats-officedocument.presentationml.presentation,.pptx,text/plain,.txt,text/markdown,.md,image/png,.png,image/jpeg,.jpg,.jpeg,image/webp,.webp"
           className="hidden"
           disabled={disabled}
           onChange={(e) => handleFiles(e.target.files)}

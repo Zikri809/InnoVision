@@ -976,6 +976,8 @@
     "unsupportedType": "Jenis fail tidak disokong.",
     "fileTooLarge": "Saiz fail melebihi 25 MB.",
     "uploadError": "Tidak dapat memuat naik fail. Semak sambungan internet anda dan cuba lagi.",
+    "uploadNetworkError": "Tidak dapat memuat naik \"{name}\" — fail mungkin masih dimuat turun dari awan. Muat turun peranti ini dahulu, kemudian pilih semula.",
+    "fileNotDownloaded": "\"{name}\" belum dimuat turun ke peranti ini (ia tempahan awan). Buka fail itu sekali untuk memuat turun, kemudian pilih semula.",
     "timeout": "Proses membaca mengambil masa terlalu lama. Sila cuba lagi.",
     "generationDelayed": "Penjanaan mengambil masa sedikit lebih lama. Sila semak kuiz anda sebentar lagi.",
     "uploadAriaLabel": "Muat naik slaid atau dokumen kursus",
