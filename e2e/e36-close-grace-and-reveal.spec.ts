@@ -140,7 +140,11 @@ test("mid-session close: client auto-submits, submit grace succeeds, results rea
   // enters timeUp and hands off to submitNow() — the EndScreen with the
   // partial score is the persistent user-visible consequence.
   await student.getByRole("button", { name: /A2/i }).click();
-  await expect(student.getByText(/Practice complete/i)).toBeVisible({
+  // The EndScreen mounts BOTH compositions (mobile + wide) — scope to the
+  // visible one or the text match resolves to 2 elements.
+  await expect(
+    student.locator("p:visible", { hasText: /Practice complete/i }),
+  ).toBeVisible({
     timeout: 15_000,
   });
   await expect(
@@ -215,7 +219,7 @@ test("reveal-first-then-close: unrevealed submissions warn, CTA reveals, student
   await student.getByRole("button", { name: /A1/i }).click();
   await student.getByRole("button", { name: "Finish", exact: true }).click();
   await expect(
-    student.getByText(/released by your lecturer/i),
+    student.locator("p:visible", { hasText: /released by your lecturer/i }),
   ).toBeVisible({ timeout: 10_000 });
 
   // ── Lecturer opens the close dialog on the results dashboard: the
@@ -312,7 +316,7 @@ test("close-anyway: stranded pending state, later dashboard reveal recovers the 
   await student.getByRole("button", { name: /A1/i }).click();
   await student.getByRole("button", { name: "Finish", exact: true }).click();
   await expect(
-    student.getByText(/released by your lecturer/i),
+    student.locator("p:visible", { hasText: /released by your lecturer/i }),
   ).toBeVisible({ timeout: 10_000 });
 
   // ── Lecturer closes anyway (dialog warns; the destructive secondary is
@@ -345,7 +349,7 @@ test("close-anyway: stranded pending state, later dashboard reveal recovers the 
   await expect(student.getByRole("heading", { name: "Page not found" })).toBeVisible({
     timeout: 10_000,
   });
-  await expect(student.getByText(/Answer breakdown/)).toHaveCount(0);
+  await expect(student.locator("h2:visible", { hasText: /Answer breakdown/ })).toHaveCount(0);
 
   // ── Lecturer reveals LATER from the dashboard (one-way flip on a closed
   // quiz — QC-2 half 1 route relaxation, verify-pinned; here the UI).

@@ -113,9 +113,12 @@ test.describe("E9b — hand lost → server pause → blink recovery → answer"
       { present: false, fingers: 0, holdMs: 10_500 },
     ]);
 
-    // Warn chip ~3.3s after loss.
+    // Warn chip ~3.3s after loss. TWO nodes carry this copy: the GestureLayer
+    // camera chip (a visible <span>) and the play client's sr-only polite
+    // announcer (a 1px <div>, which Playwright still counts as visible) — a
+    // bare text match is a strict-mode violation. Target the rendered chip.
     await expect(
-      studentPage.getByText("Keep your hand visible to answer", { exact: true }),
+      studentPage.locator("span:visible", { hasText: "Keep your hand visible to answer" }),
     ).toBeVisible({ timeout: 8_000 });
 
     // The hand-loss pause route fires → server status becomes 'paused'.

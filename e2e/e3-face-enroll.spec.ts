@@ -111,7 +111,9 @@ test.describe("E3/E3b — face enrollment + assessment gate", () => {
     await expect(studentPage.getByRole("button", { name: /A Paris/ })).toBeDisabled();
     await studentPage.getByRole("button", { name: "Finish", exact: true }).click();
     // EndScreen heading carries a trailing emoji — match non-exact.
-    await expect(studentPage.getByText("Assessment complete", { exact: false })).toBeVisible({ timeout: 10_000 });
+    await expect(
+      studentPage.locator("p:visible", { hasText: "Assessment complete" }),
+    ).toBeVisible({ timeout: 10_000 });
 
     await lecturerCtx.close();
     await studentCtx.close();
@@ -296,7 +298,9 @@ test.describe("E3/E3b — face enrollment + assessment gate", () => {
 
     // Timer (3s) + grace (5s) + margin → EndScreen within ~20s, no deadlock.
     // (Heading carries a trailing emoji; score renders as "0 / N" — non-exact.)
-    await expect(studentPage.getByText("Assessment complete", { exact: false })).toBeVisible({ timeout: 20_000 });
+    await expect(
+      studentPage.locator("p:visible", { hasText: "Assessment complete" }),
+    ).toBeVisible({ timeout: 20_000 });
     await expect(studentPage.getByText(/0 \/ 1/)).toBeVisible();
 
     await lecturerCtx.close();

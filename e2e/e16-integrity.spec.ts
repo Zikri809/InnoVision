@@ -116,55 +116,95 @@ test.describe("E16 — integrity suite", () => {
     );
     const returnBtn = studentPage.getByRole("button", { name: "Return to the exam", exact: true });
     const flaggedText = studentPage.getByText("Assessment flagged", { exact: false });
-    // Simulated app-switch: the window stays VISIBLE but loses OS focus.
-    // Retries cover the post-gate 'recovering' window (the handler bails
-    // then); each iteration waits LONGER than FOCUS_BLUR_DEBOUNCE_MS so a
-    // re-dispatch can't perpetually reset the debounce. On the 3rd strike
-    // the RPC escalates to FLAGGED — accept that overlay too.
-    async function blurUntilOverlay(acceptFlagged = false) {
-      const target = acceptFlagged ? returnBtn.or(flaggedText) : returnBtn;
-      for (let i = 0; i < 8; i++) {
-        await studentPage.bringToFront();
-        await studentPage.evaluate(() => {
-          window.dispatchEvent(new Event("focus"));
-          window.dispatchEvent(new Event("blur"));
-        });
-        const appeared = await target
-          .waitFor({ state: "visible", timeout: 3500 })
-          .then(() => true)
-          .catch(() => false);
-        if (appeared) return;
-        await studentPage.waitForTimeout(500);
+
+    // The client dedupes a pause POST landing within FULLSCREEN_PAUSE_DEDUPE_MS
+    // (2s, use-fullscreen-guard.ts) of the previous one: that window collapses
+    // the fullscreen-exit + blur double-fire of a SINGLE app switch into one
+    // strike. Crucially, the deduped branch still flips the LOCAL overlay to
+    // paused WITHOUT POSTing — so "the overlay appeared" does NOT prove the
+    // server counted the strike. Two simulated strikes closer together than
+    // the window therefore stall focus_pause_count (observed: stuck at 1–2,
+    // status 'paused'/'active') and the run then waits forever for the
+    // escalation to 'flagged'.
+    //
+    // Each strike is therefore gated on the server round-trip: wait out the
+    // window, dispatch, and require the /pause POST RESPONSE before treating
+    // the strike as landed. Retries re-dispatch when a strike was deduped.
+    const PAUSE_DEDUPE_MS = 2_000;
+    let lastPausePostAt = 0;
+    studentPage.on("request", (req) => {
+      if (req.method() === "POST" && req.url().includes("/pause")) {
+        lastPausePostAt = Date.now();
       }
-      throw new Error("focus-loss pause overlay never appeared");
+    });
+
+    /** One strike: wait out the dedupe window, dispatch, await the POST. */
+    async function strikeOnce(): Promise<{ posted: boolean; serverStatus: string }> {
+      if (lastPausePostAt) {
+        const remaining = PAUSE_DEDUPE_MS + 300 - (Date.now() - lastPausePostAt);
+        if (remaining > 0) await studentPage.waitForTimeout(remaining);
+      }
+      const pauseResp = studentPage
+        .waitForResponse(
+          (r) => r.url().includes("/pause") && r.request().method() === "POST",
+          { timeout: 8_000 },
+        )
+        .catch(() => null);
+      await studentPage.bringToFront();
+      await studentPage.evaluate(() => {
+        window.dispatchEvent(new Event("focus"));
+        window.dispatchEvent(new Event("blur"));
+      });
+      const res = await pauseResp;
+      if (!res) return { posted: false, serverStatus: "" };
+      const body = (await res.json().catch(() => ({}))) as { sessionStatus?: string };
+      return { posted: true, serverStatus: body.sessionStatus ?? "" };
+    }
+
+    /** Drive strikes until the server reports the wanted status. */
+    async function strikeUntil(
+      want: (serverStatus: string) => boolean,
+      maxAttempts = 6,
+    ): Promise<string> {
+      let last = "";
+      for (let i = 0; i < maxAttempts; i++) {
+        const { posted, serverStatus } = await strikeOnce();
+        if (posted) last = serverStatus;
+        if (posted && want(serverStatus)) return serverStatus;
+      }
+      throw new Error(
+        `focus-loss escalation stalled: server never reported the expected ` +
+          `status after ${maxAttempts} strikes (last: ${JSON.stringify(last)})`,
+      );
     }
 
     try {
-      for (let strike = 1; strike <= 3; strike++) {
-        await blurUntilOverlay(strike === 3);
-        if (strike < 3) {
-          // Dedicated focus-loss copy — NOT the generic camera message.
-          await expect(
-            studentPage.getByText("You left the exam window", { exact: false }),
-          ).toBeVisible();
-          // An identity re-verify must FOLLOW the recovery (immediate
-          // post-recovery check, not the next 30–45s cadence tick). The 2s
-          // client min-gap defers the POST when a verify landed just before
-          // the pause, so 25s covers the worst case with wide margin;
-          // matching the round-tripped POST (any status) is the signal — the
-          // overlay-hidden assertion below pins that the recovery succeeded.
-          const reverify = studentPage.waitForResponse(
-            (r) => r.url().includes("/api/face/verify") && r.request().method() === "POST",
-            { timeout: 25_000 },
-          );
-          await returnBtn.click();
-          await triggerFaceLiveness(studentPage);
-          await reverify;
-          await expect(returnBtn).toBeHidden({ timeout: 15_000 });
-        }
+      // Strikes 1 and 2: each must reach the server as 'paused' (a deduped
+      // dispatch reports no status and is retried by strikeUntil).
+      for (let strike = 1; strike <= 2; strike++) {
+        await strikeUntil((s) => s === "paused");
+        // Dedicated focus-loss copy — NOT the generic camera message.
+        await expect(
+          studentPage.getByText("You left the exam window", { exact: false }),
+        ).toBeVisible();
+        // An identity re-verify must FOLLOW the recovery (immediate
+        // post-recovery check, not the next 30–45s cadence tick). The 2s
+        // client min-gap defers the POST when a verify landed just before
+        // the pause, so 25s covers the worst case with wide margin;
+        // matching the round-tripped POST (any status) is the signal — the
+        // overlay-hidden assertion below pins that the recovery succeeded.
+        const reverify = studentPage.waitForResponse(
+          (r) => r.url().includes("/api/face/verify") && r.request().method() === "POST",
+          { timeout: 25_000 },
+        );
+        await returnBtn.click();
+        await triggerFaceLiveness(studentPage);
+        await reverify;
+        await expect(returnBtn).toBeHidden({ timeout: 15_000 });
       }
 
       // 3rd strike → the RPC escalates to flagged.
+      await strikeUntil((s) => s === "flagged");
       await expect(flaggedText).toBeVisible({ timeout: 15_000 });
 
       const sessionId = studentPage.url().split("/play/")[1];

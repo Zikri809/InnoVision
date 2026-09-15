@@ -80,7 +80,9 @@ test.describe("E18 — results Excel export", () => {
     await studentPage.getByRole("button", { name: /Rome/ }).click();
     await studentPage.getByRole("button", { name: "Finish", exact: true }).click();
     // Unrevealed assessment end screen ("Assessment complete" is practice copy).
-    await fast(studentPage.getByText(/Assessment submitted!/i)).toBeVisible();
+    await fast(
+      studentPage.locator("p:visible", { hasText: /Assessment submitted!/i }),
+    ).toBeVisible();
 
     // ── 3. Export via the dashboard button + inspect the workbook ────
     await openResults(lecturerPage, CLASS_TITLE, QUIZ_TITLE);
@@ -91,8 +93,12 @@ test.describe("E18 — results Excel export", () => {
     ).toHaveCount(1);
 
     // ── RA-2: the on-screen "Question insights" section mirrors the model ──
-    await fast(lecturerPage.getByRole("button", { name: /Question insights/i })).toBeVisible();
-    await lecturerPage.getByRole("button", { name: /Question insights/i }).click();
+    // It is a LINK to its own route (/insights), not an in-page accordion —
+    // the redesign moved it out of the dashboard so the OS back gesture
+    // returns here and the URL stays shareable.
+    await fast(lecturerPage.getByRole("link", { name: /Question insights/i })).toBeVisible();
+    await lecturerPage.getByRole("link", { name: /Question insights/i }).click();
+    await expect(lecturerPage).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/insights/);
     // Q1 (2+2): the student answered correctly → 100% stat chip. The
     // never-picked-distractor hint FIRES here: with 2 options, the unpicked
     // "3" is a wrong option (distractor) — exactly the class-never-touched-it
@@ -111,6 +117,10 @@ test.describe("E18 — results Excel export", () => {
     await fast(q2Card.getByText(/Distractor never picked/i)).toHaveCount(0);
     // The section's summary line flips to the degenerate variant (Q2 is 0%).
     await fast(lecturerPage.getByText(/teaching gap/i)).toBeVisible();
+
+    // Back to the dashboard — Export Excel lives there, not on /insights.
+    await lecturerPage.goBack();
+    await expect(lecturerPage).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/results/);
 
     const downloadPromise = lecturerPage.waitForEvent("download");
     await lecturerPage.getByRole("button", { name: /Export Excel/i }).click();
@@ -134,8 +144,23 @@ test.describe("E18 — results Excel export", () => {
 
     // ── Sheet 1: header + the student's row ──────────────────────────
     const results = wb.getWorksheet("Results")!;
+    // Column positions are DERIVED from the header row, not hardcoded: the
+    // assessment layout carries four integrity columns (face fails / focus
+    // pauses / fullscreen exits / hand pauses) between Duration and Q1, so a
+    // literal column index rots the moment that set changes.
+    const headerRow = results.getRow(4);
+    const colOf = (header: string): number => {
+      for (let c = 1; c <= headerRow.cellCount; c++) {
+        if (headerRow.getCell(c).value === header) return c;
+      }
+      throw new Error(`export header "${header}" not found in row 4`);
+    };
+    const q1Col = colOf("Q1");
+    const q2Col = colOf("Q2");
+    // The integrity block sits between Duration (col 10) and Q1.
+    expect(q1Col).toBeGreaterThan(10);
+
     expect(results.getCell(4, 3).value).toBe("Name");
-    expect(results.getCell(4, 13).value).toBe("Q1");
 
     expect(results.getCell(5, 1).value).toBe(1); // first data row
     expect(results.getCell(5, 2).value).toBe(matric); // MATRIC from roster view
@@ -146,10 +171,10 @@ test.describe("E18 — results Excel export", () => {
     expect(results.getCell(5, 7).value).toBeCloseTo(0.5); // numeric percent
 
     // Per-question cells: chosen option letter + text, colored by correctness.
-    expect(results.getCell(5, 13).value).toBe("B — 4"); // Q1 correct choice
-    expect(results.getCell(5, 13).font?.color?.argb).toBe("FF166534"); // green
-    expect(results.getCell(5, 14).value).toBe("B — Rome"); // Q2 wrong choice
-    expect(results.getCell(5, 14).font?.color?.argb).toBe("FFB91C1C"); // red
+    expect(results.getCell(5, q1Col).value).toBe("B — 4"); // Q1 correct choice
+    expect(results.getCell(5, q1Col).font?.color?.argb).toBe("FF166534"); // green
+    expect(results.getCell(5, q2Col).value).toBe("B — Rome"); // Q2 wrong choice
+    expect(results.getCell(5, q2Col).font?.color?.argb).toBe("FFB91C1C"); // red
 
     // ── Sheet 2: answer key letters + stats ──────────────────────────
     const key = wb.getWorksheet("Questions & Key")!;

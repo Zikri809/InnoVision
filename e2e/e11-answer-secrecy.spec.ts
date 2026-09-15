@@ -169,7 +169,9 @@ test.describe("E11 — answer secrecy (assessment)", () => {
     expect(JSON.stringify(dupBody)).not.toContain("explanation");
     await studentPage.getByRole("button", { name: "Finish", exact: true }).click();
     // Hidden assessment → "awaiting release" message, NOT the score.
-    await expect(studentPage.getByText(/results will be released by your lecturer/i)).toBeVisible({ timeout: 10_000 });
+    await expect(
+      studentPage.locator("p:visible", { hasText: /results will be released by your lecturer/i }),
+    ).toBeVisible({ timeout: 10_000 });
 
     // ── Assert: no leaked ANSWER DATA across all captured OK responses ──
     // Value-based (see CORRECT_KEY_WITH_VALUE above): scans every phase,

@@ -114,7 +114,9 @@ test.describe("E13b — attendance = sessions", () => {
     await studentAPage.getByRole("button", { name: /Paris/i }).click();
     await expect(studentAPage.getByRole("button", { name: /^(Next|Finish)$/, exact: true })).toBeVisible();
     await studentAPage.getByRole("button", { name: "Finish", exact: true }).click();
-    await expect(studentAPage.getByText("Assessment complete", { exact: false })).toBeVisible({ timeout: 10_000 });
+    await expect(
+      studentAPage.locator("p:visible", { hasText: "Assessment complete" }),
+    ).toBeVisible({ timeout: 10_000 });
 
     // ── 3. Student B: unseamed click-first → face_unavailable_at marker ──
     await registerUser(studentBPage, STUDENT_B_EMAIL, "student", LECTURER_INVITE_CODE);
@@ -132,7 +134,9 @@ test.describe("E13b — attendance = sessions", () => {
     await studentBPage.getByRole("button", { name: /Paris/i }).click();
     await expect(studentBPage.getByRole("button", { name: /^(Next|Finish)$/, exact: true })).toBeVisible();
     await studentBPage.getByRole("button", { name: "Finish", exact: true }).click();
-    await expect(studentBPage.getByText("Assessment complete", { exact: false })).toBeVisible({ timeout: 10_000 });
+    await expect(
+      studentBPage.locator("p:visible", { hasText: "Assessment complete" }),
+    ).toBeVisible({ timeout: 10_000 });
 
     // ── 4. Student C: start + answer Q1, do NOT submit (in-progress) ──
     await registerUser(studentCPage, STUDENT_C_EMAIL, "student", LECTURER_INVITE_CODE);

@@ -106,17 +106,23 @@ test.describe("E4 — practice quiz click-first with resume + replay", () => {
 
     // Finish → submit → end screen with score 3/3.
     await studentPage.getByRole("button", { name: "Finish", exact: true }).click();
-    // The score is rendered as "3 / 3" in one element — match it robustly.
-    await expect(studentPage.getByText(/^3\s*\/\s*3$/)).toBeVisible({ timeout: 10_000 });
-    await expect(studentPage.getByText("100% correct", { exact: true })).toBeVisible();
+    // The EndScreen mounts BOTH compositions at once (mobile ScoreRing
+    // `lg:hidden` + wide "3 / 3" paragraph `lg:block`), so a bare text match
+    // resolves to 2 elements. Scope to the visible one (e36/e42 precedent).
+    await expect(
+      studentPage.locator(":visible", { hasText: /^3\s*\/\s*3$/ }).first(),
+    ).toBeVisible({ timeout: 10_000 });
+    await expect(studentPage.locator("p:visible", { hasText: "100% correct" })).toBeVisible();
 
     // ── 5. REPLAY sub-case: direct navigation to the completed session ──
     const sessionUrl = studentPage.url();
     await studentPage.goto(sessionUrl);
     await expect(studentPage).toHaveURL(sessionUrl);
     // EndScreen renders (not the quiz).
-    await expect(studentPage.getByText(/^3\s*\/\s*3$/)).toBeVisible();
-    await expect(studentPage.getByText("100% correct", { exact: true })).toBeVisible();
+    await expect(
+      studentPage.locator(":visible", { hasText: /^3\s*\/\s*3$/ }).first(),
+    ).toBeVisible();
+    await expect(studentPage.locator("p:visible", { hasText: "100% correct" })).toBeVisible();
 
     // ── 6. SQ-3: EndScreen "Try again" starts a REAL fresh attempt ──
     // (routes into a NEW /play/<uuid> session at Q1 — never the quiz list).

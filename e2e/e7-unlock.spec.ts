@@ -150,7 +150,9 @@ test.describe("E7 — lecturer unlock", () => {
     await studentPage.getByRole("button", { name: /4/i }).click();
     await expect(studentPage.getByRole("button", { name: /^(Next|Finish)$/, exact: true })).toBeVisible();
     await studentPage.getByRole("button", { name: "Finish", exact: true }).click();
-    await expect(studentPage.getByText("Assessment complete", { exact: false })).toBeVisible({ timeout: 10_000 });
+    await expect(
+      studentPage.locator("p:visible", { hasText: "Assessment complete" }),
+    ).toBeVisible({ timeout: 10_000 });
 
     await lecturerCtx.close();
     await studentCtx.close();

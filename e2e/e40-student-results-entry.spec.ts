@@ -72,12 +72,16 @@ test.describe("E40 — student results entry point", () => {
     await openQuizList(studentPage);
     await startQuizByTitle(studentPage, QUIZ_2);
     await completeQuiz(studentPage, ["14"], { next: "Next", finish: "Finish" });
-    await fast(studentPage.getByText(/Assessment submitted!/i)).toBeVisible();
+    await fast(
+      studentPage.locator("p:visible", { hasText: /Assessment submitted!/i }),
+    ).toBeVisible();
 
     await openQuizList(studentPage);
     await startQuizByTitle(studentPage, QUIZ_1);
     await completeQuiz(studentPage, ["6"], { next: "Next", finish: "Finish" });
-    await fast(studentPage.getByText(/Assessment submitted!/i)).toBeVisible();
+    await fast(
+      studentPage.locator("p:visible", { hasText: /Assessment submitted!/i }),
+    ).toBeVisible();
 
     // Neither revealed → BOTH cards are locked: a disabled "Awaiting
     // results" button each (no-retake merge), NEITHER is a link.
@@ -157,7 +161,9 @@ test.describe("E40 — student results entry point", () => {
     await startQuizByTitle(studentPage, "E40 Retake Quiz");
     const attempt1 = currentSessionId(studentPage);
     await completeQuiz(studentPage, ["16"], { next: "Next", finish: "Finish" });
-    await fast(studentPage.getByText(/Assessment submitted!/i)).toBeVisible();
+    await fast(
+      studentPage.locator("p:visible", { hasText: /Assessment submitted!/i }),
+    ).toBeVisible();
 
     // Back to list: quiz not revealed → awaiting chip (no link).
     await openQuizList(studentPage);

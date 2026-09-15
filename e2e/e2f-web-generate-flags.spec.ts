@@ -47,8 +47,13 @@ test.describe("E2F flags — web search disabled", () => {
     );
     await dialog.getByRole("button", { name: /continue with text/i }).click();
     await dialog.getByRole("button", { name: /generate quiz/i }).click();
+    // The payoff must survive FULL-suite load: with 6 workers the mock stream
+    // plus the route round trip can exceed the old 30s (observed once as a
+    // timeout while the dialog was still streaming "Drafting questions…").
+    // The sibling web-generate spec allows 120s for this same journey; this
+    // assertion is its terminal step, so give it matching headroom.
     await expect(
       dialog.getByText(/questions forged|soalan dihasilkan/i),
-    ).toBeVisible({ timeout: 30_000 });
+    ).toBeVisible({ timeout: 90_000 });
   });
 });

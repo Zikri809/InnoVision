@@ -7,8 +7,10 @@ import { registerUser, createClass, joinClass, openJoinDrawer, createQuizWithQue
  *   1. Lecturer archives a live class with an enrolled student → lands on the
  *      archived page; the archived page's search filter isolates the card.
  *   2. Student loses visibility: class gone from /student/classes, quiz gone
- *      from /student/quizzes; re-attempting the join code yields the inline
- *      hardcoded archived error (route.ts:103-107).
+ *      from /student/quizzes; re-attempting the join code yields the neutral
+ *      invalid-code error (audit-2 M-04 folded `class_archived` into
+ *      `invalid_code` so an archived class is not distinguishable from an
+ *      unknown code — no existence oracle).
  *   3. Restore: archived class detail still shows the roster (audit
  *      preservation) + the archived banner; restore via the filtered search
  *      → student sees class + quiz again.
@@ -101,13 +103,16 @@ test("student loses visibility; rejoin attempts hit the archived alert", async (
   await expect(student.getByText(QUIZ_TITLE, { exact: true })).toHaveCount(0);
   await expect(student.getByText("No quizzes available yet")).toBeVisible();
 
-  // Rejoin attempt → inline hardcoded archived error.
+  // Rejoin attempt → the neutral invalid-code error. audit-2 M-04 folded
+  // `class_archived` into `invalid_code` route-side so an archived class is
+  // indistinguishable from a code that never existed (no existence oracle):
+  // the distinct "archived" copy would confirm a class by that code is real.
   await student.goto("/student/classes");
   await openJoinDrawer(student);
   await student.getByLabel("Join code").fill(joinCode);
   await student.getByRole("button", { name: /^join class$/i }).click();
   await expect(
-    student.getByRole("alert").filter({ hasText: "This class has been archived and cannot be joined." }),
+    student.getByRole("alert").filter({ hasText: "That join code is not valid." }),
   ).toBeVisible();
 
   await ctx.close();

@@ -85,7 +85,7 @@ test("retake journey: enable on live quiz → spawn → chip → budget exhausti
   await student.getByRole("button", { name: /B2/i }).click();
   await student.getByRole("button", { name: "Finish", exact: true }).click();
   await expect(
-    student.getByText(/released by your lecturer/i),
+    student.locator("p:visible", { hasText: /released by your lecturer/i }),
   ).toBeVisible({ timeout: 10_000 });
 
   // ── 2. Default config: the completed card is LOCKED — a single DISABLED

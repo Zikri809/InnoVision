@@ -110,7 +110,9 @@ test.describe("m1 — mobile student journey", () => {
       next: "Next",
       finish: "Finish",
     });
-    await expect(page.getByText(/practice complete/i)).toBeVisible();
+    // EndScreen mounts BOTH compositions at once (mobile + wide), so scope to
+    // the visible one (the mobile project still renders the wide node hidden).
+    await expect(page.locator("p:visible", { hasText: /practice complete/i })).toBeVisible();
   });
 
   test("account sheet: toggles live inside the sheet below sm; Escape closes", async ({

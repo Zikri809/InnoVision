@@ -92,7 +92,7 @@ test.describe("E5 — assessment one-attempt lock", () => {
     // screen shows the "submitted" pending state — NOT a score (E5's scope is
     // the one-attempt lock, not the reveal flow, which E14/E15 own).
     await expect(
-      studentAPage.getByText("results will be released by your lecturer", { exact: false }),
+      studentAPage.locator("p:visible", { hasText: "results will be released by your lecturer" }),
     ).toBeVisible();
 
     // â”€â”€ 3. Completed attempt blocks restart (locked card) â”€â”€â”€â”€â”€

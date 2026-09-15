@@ -863,17 +863,31 @@ export async function revealQuiz(page: Page, classTitle: string, quizTitle: stri
  * Selector note: the dialog renders an X dismiss button whose sr-only label
  * is `common.close` ("Close") — a bare /close/i .last() would hit the X, not
  * the destructive confirm. Match the confirm's actual labels instead.
+ *
+ * Close lives inside the "Quiz actions" overflow menu (mobile polish round 2,
+ * 0ee6b6a) — NOT a standalone button — so the trigger must be opened first.
+ * The menuitem-or-button `.or()` keeps this working if the control moves back
+ * out of the menu (the e36 pattern).
  */
 export async function closeQuiz(page: Page, classTitle: string, quizTitle: string) {
   await openResults(page, classTitle, quizTitle);
-  const closeBtn = page.getByRole("button", { name: /close quiz/i });
+  const menuBtn = page.getByRole("button", { name: /quiz actions/i });
+  if (await menuBtn.isVisible()) {
+    await menuBtn.click();
+  }
+  const closeBtn = page
+    .getByRole("menuitem", { name: /close quiz/i })
+    .or(page.getByRole("button", { name: /close quiz/i }));
   await expect(closeBtn).toBeVisible();
   await closeBtn.click();
   const dialog = page.getByRole("dialog");
   const confirmBtn = dialog.getByRole("button", { name: /close quiz|close anyway/i });
   await expect(confirmBtn).toBeEnabled();
   await confirmBtn.click();
-  await expect(page.getByRole("button", { name: /close quiz/i })).toBeHidden({ timeout: 10_000 });
+  // The whole trigger (and the menu it opened) unmounts once status flips.
+  await expect(page.getByRole("button", { name: /quiz actions|close quiz/i })).toBeHidden({
+    timeout: 10_000,
+  });
 }
 
 /**

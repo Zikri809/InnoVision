@@ -153,9 +153,9 @@ test.describe("E24 — network failure UX", () => {
       timeout: 15_000,
     });
     await studentPage.getByRole("button", { name: /^(finish|next)$/i }).click();
-    await expect(studentPage.getByText(/practice complete|see results/i)).toBeVisible({
-      timeout: 20_000,
-    });
+    await expect(
+      studentPage.locator("p:visible", { hasText: /practice complete|see results/i }),
+    ).toBeVisible({ timeout: 20_000 });
 
     await lecturerCtx.close();
     await studentCtx.close();

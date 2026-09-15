@@ -89,7 +89,7 @@ test("auto-reveal flips on last submit — scored EndScreen, live link, lecturer
   await expect(student.locator("p:visible", { hasText: "100% correct" }).first()).toBeVisible({
     timeout: 10_000,
   });
-  await expect(student.getByText(/results will be released by your lecturer/i)).toHaveCount(0);
+  await expect(student.locator("p:visible", { hasText: /results will be released by your lecturer/i })).toHaveCount(0);
 
   // ── 2. List card: "View results" link already live (no lecturer action).
   await student.goto("/student/quizzes");
@@ -135,7 +135,7 @@ test("auto-reveal flips on last submit — scored EndScreen, live link, lecturer
   await startQuizByTitle(student, MANUAL_QUIZ);
   await completeQuiz(student, ["A2"], { next: "Next", finish: "Finish" });
   await expect(
-    student.getByText(/results will be released by your lecturer/i),
+    student.locator("p:visible", { hasText: /results will be released by your lecturer/i }),
   ).toBeVisible({ timeout: 10_000 });
 
   await student.goto("/student/quizzes");

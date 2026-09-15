@@ -74,14 +74,14 @@ test.describe("E39 — gradebook", () => {
     await startQuizByTitle(pageA, QUIZ_1);
     const sessionA1 = currentSessionId(pageA);
     expect(await completeQuiz(pageA, ["4", "Paris"], { next: "Next", finish: "Finish" })).toBe(sessionA1);
-    await fast(pageA.getByText(/Assessment submitted!/i)).toBeVisible();
+    await fast(pageA.locator("p:visible", { hasText: /Assessment submitted!/i })).toBeVisible();
 
     // A also completes QUIZ_2 perfectly (1/1).
     await pageA.goto("/student/quizzes");
     await fast(pageA).toHaveURL(/\/student\/quizzes/);
     await startQuizByTitle(pageA, QUIZ_2);
     await completeQuiz(pageA, ["25"], { next: "Next", finish: "Finish" });
-    await fast(pageA.getByText(/Assessment submitted!/i)).toBeVisible();
+    await fast(pageA.locator("p:visible", { hasText: /Assessment submitted!/i })).toBeVisible();
 
     // Student B: half on Q1 (wrong on Q2 → 1/2), NEVER starts Q2 — that
     // column renders em-dash for B (the UI has no mid-quiz skip; the
@@ -90,7 +90,7 @@ test.describe("E39 — gradebook", () => {
     await fast(pageB).toHaveURL(/\/student\/quizzes/);
     await startQuizByTitle(pageB, QUIZ_1);
     await completeQuiz(pageB, ["4", "Rome"], { next: "Next", finish: "Finish" });
-    await fast(pageB.getByText(/Assessment submitted!/i)).toBeVisible();
+    await fast(pageB.locator("p:visible", { hasText: /Assessment submitted!/i })).toBeVisible();
 
     // ── Gradebook: open from class detail ────────────────────────────
     await lecturerPage.goto("/lecturer/classes");

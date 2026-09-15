@@ -67,9 +67,15 @@ async function createQuizWithQuestion(
   await page.getByLabel("Option 2", { exact: true }).fill("Circle");
   const promptBox = page.getByRole("textbox", { name: /prompt/i });
   await promptBox.fill(prompt);
+  // Pick the option by NAME rather than a blind ArrowDown: the keyboard path
+  // races the listbox opening (a keypress landing before the popup is up
+  // leaves the key on Option 1 = "Square"), so the later "Circle" click
+  // graded as WRONG and the "Correct!" assertion failed. Selecting the option
+  // explicitly also makes the key independent of option ordering.
   await page.getByRole("combobox", { name: "Correct answer" }).click();
-  await page.keyboard.press("ArrowDown"); // Option 1 → Option 2
-  await page.keyboard.press("Enter");
+  await page.getByRole("option", { name: "Option 2" }).click();
+  // The trigger reflects the committed key — fail fast if the select missed.
+  await expect(page.getByRole("combobox", { name: "Correct answer" })).toContainText("Option 2");
 }
 
 test("stage image in the add-question dropzone → renders in self-play", async ({ page }) => {
@@ -104,7 +110,7 @@ test("stage image in the add-question dropzone → renders in self-play", async 
 
   // Answer to reach the feedback flow without image interference.
   await page.getByRole("button", { name: "Circle" }).click();
-  await expect(page.getByText(/correct!/i)).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: /correct!/i })).toBeVisible();
 });
 
 test("staged field interactions: validation, drag & drop, remove before submit", async ({ browser }) => {

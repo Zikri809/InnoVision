@@ -88,18 +88,18 @@ test.describe("M3 — Mobile Gradebook", () => {
     await pageA.goto("/student/quizzes");
     await startQuizByTitle(pageA, QUIZ_ALPHA);
     await completeQuiz(pageA, ["4", "Paris"], { next: "Next", finish: "Finish" });
-    await expect(pageA.getByText(/Assessment submitted!/i)).toBeVisible();
+    await expect(pageA.locator("p:visible", { hasText: /Assessment submitted!/i })).toBeVisible();
 
     await pageA.goto("/student/quizzes");
     await startQuizByTitle(pageA, QUIZ_BETA);
     await completeQuiz(pageA, ["25"], { next: "Next", finish: "Finish" });
-    await expect(pageA.getByText(/Assessment submitted!/i)).toBeVisible();
+    await expect(pageA.locator("p:visible", { hasText: /Assessment submitted!/i })).toBeVisible();
 
     // Student B: 50% on Alpha (1/2), unattempted Beta -> Cumulative 50%
     await pageB.goto("/student/quizzes");
     await startQuizByTitle(pageB, QUIZ_ALPHA);
     await completeQuiz(pageB, ["4", "Rome"], { next: "Next", finish: "Finish" });
-    await expect(pageB.getByText(/Assessment submitted!/i)).toBeVisible();
+    await expect(pageB.locator("p:visible", { hasText: /Assessment submitted!/i })).toBeVisible();
 
     // 3. Lecturer Navigates to Gradebook on Mobile Viewport
     // Close student contexts

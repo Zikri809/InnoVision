@@ -79,16 +79,29 @@ test.describe("E14 — results action buttons", () => {
     expect(seedErr).toBeNull();
 
     // ── 2. Lecturer: Unlock button (not the raw route) ───────────────
+    // Unlock / Face-exempt / Reset all live inside the row's "Session actions"
+    // overflow menu (one primary action + overflow for the rare admin ones) —
+    // open the menu, then click the item. The menu closes on selection.
     await openResults(lecturerPage, CLASS_TITLE, QUIZ_TITLE);
     const studentList = lecturerPage.getByRole("list");
     await expect(studentList.getByText("Flagged", { exact: true })).toHaveCount(1);
-    await lecturerPage.getByRole("button", { name: "Unlock", exact: true }).click();
+
+    /** Open the row's overflow menu and click one of its items. */
+    async function rowAction(name: string) {
+      await studentList
+        .getByRole("button", { name: /Session actions/i })
+        .first()
+        .click();
+      await lecturerPage.getByRole("menuitem", { name, exact: true }).click();
+    }
+
+    await rowAction("Unlock");
     // The dashboard refresh reconciles the unlocked row → no longer flagged.
     await expect(studentList.getByText("Flagged", { exact: true })).toHaveCount(0);
     await expect(studentList.getByText("In progress", { exact: true })).toHaveCount(1);
 
     // ── 3. Face-exempt dialog (reason required) ─────────────────────
-    await lecturerPage.getByRole("button", { name: "Face-exempt", exact: true }).click();
+    await rowAction("Face-exempt");
     await expect(
       lecturerPage.getByRole("dialog").getByRole("heading", { name: "Face-exempt", exact: true }),
     ).toBeVisible();
@@ -105,7 +118,7 @@ test.describe("E14 — results action buttons", () => {
     await expect(studentList.getByText("In progress", { exact: true })).toHaveCount(1);
 
     // ── 4. Reset confirm + CANCEL does not reset ────────────────────
-    await lecturerPage.getByRole("button", { name: "Reset", exact: true }).click();
+    await rowAction("Reset");
     await expect(
       lecturerPage.getByRole("dialog").getByRole("heading", { name: "Reset", exact: true }),
     ).toBeVisible();

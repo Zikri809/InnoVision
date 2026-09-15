@@ -223,12 +223,17 @@ test.describe("E10 — timer expiry (API + UI halves)", () => {
 
     // The client countdown (10s) hits 0 → auto-submit → EndScreen. Wait up to
     // ~25s for the countdown + submit round trip. (Heading carries a trailing
-    // emoji — match non-exact.)
-    await expect(studentPage.getByText("Assessment complete", { exact: false })).toBeVisible({ timeout: 25_000 });
-    // The answered score (1) is shown — stronger than a zero-answer auto-submit.
-    // The score <p> renders "1 / 2" (with a nested span) — filter by text.
+    // emoji — match non-exact.) The EndScreen mounts BOTH compositions at
+    // once (mobile `lg:hidden` + wide `lg:block`), so every end-screen locator
+    // must be scoped to the visible one — see e36/e42 for the precedent.
     await expect(
-      studentPage.locator("p").filter({ hasText: /^1\s*\/\s*2\s*$/ }),
+      studentPage.locator("p:visible", { hasText: "Assessment complete" }),
+    ).toBeVisible({ timeout: 25_000 });
+    // The answered score (1) is shown — stronger than a zero-answer auto-submit.
+    // Mobile renders a ScoreRing (label + "/ N" sub spans), wide renders a
+    // single "1 / 2" paragraph: the textContent match covers both shapes.
+    await expect(
+      studentPage.locator(":visible", { hasText: /^1\s*\/\s*2$/ }).first(),
     ).toBeVisible();
 
     await lecturerCtx.close();

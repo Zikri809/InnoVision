@@ -15,8 +15,16 @@
 
 /** @type {import('@playwright/test').Reporter} */
 export default class MinExecReporter {
-  /** @param {import('@playwright/test').Suite} suite */
-  onBegin(suite) {
+  /**
+   * Playwright calls `onBegin(config, suite)` — the suite is the SECOND
+   * argument. Reading it from the first left `this.suite` undefined (the
+   * config object has no `allTests`), so `onEnd` threw a TypeError and every
+   * run ended with a spurious reporter failure on top of the real result.
+   *
+   * @param {import('@playwright/test').FullConfig} _config
+   * @param {import('@playwright/test').Suite} suite
+   */
+  onBegin(_config, suite) {
     this.suite = suite;
   }
 

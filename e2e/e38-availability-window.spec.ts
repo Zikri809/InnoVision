@@ -316,7 +316,7 @@ test("mid-session window close: answer dead-screens with window copy, submit gra
   // The play client entered timeUp + auto-submitted: the EndScreen with the
   // window-driven auto-submit is the persistent user-visible consequence.
   await expect(
-    student.getByText(/Practice complete/i),
+    student.locator("p:visible", { hasText: /Practice complete/i }),
   ).toBeVisible({ timeout: 15_000 });
 
   // ── Submit-grace contract double-check via the API: the window-driven
@@ -334,9 +334,13 @@ test("mid-session window close: answer dead-screens with window copy, submit gra
   expect(submitBody.score).toBe(1);
 
   // ── The completed session URL stays reachable (practice = policy-revealed
-  // → EndScreen with the score), window notwithstanding.
+  // → EndScreen with the score), window notwithstanding. The EndScreen mounts
+  // BOTH compositions (mobile ScoreRing + wide paragraph), so scope to the
+  // visible one (e36 precedent).
   await student.goto(sessionUrl);
-  await expect(student.getByText(/^1\s*\/\s*2$/)).toBeVisible({ timeout: 10_000 });
+  await expect(
+    student.locator(":visible", { hasText: /^1\s*\/\s*2$/ }).first(),
+  ).toBeVisible({ timeout: 10_000 });
 
   await lecCtx.close();
   await stuCtx.close();

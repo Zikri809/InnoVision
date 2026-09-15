@@ -103,7 +103,7 @@ test("share flow — friend plays via link; login wall preserves it", async ({
   await expect(anon.getByText(/community-made practice content/i)).toBeVisible();
   await anon.getByRole("button", { name: /start practice/i }).click();
   await anon.getByRole("button", { name: "Paris" }).click(); // correct
-  await expect(anon.getByText(/correct!/i)).toBeVisible();
+  await expect(anon.getByRole("status").filter({ hasText: /correct!/i })).toBeVisible();
   await anon.getByRole("button", { name: /^(next|see results)$/i }).click();
   await expect(anon.locator("p:visible", { hasText: /practice complete/i })).toBeVisible();
   await anonCtx.close();

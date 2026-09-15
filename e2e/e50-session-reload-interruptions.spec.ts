@@ -440,7 +440,9 @@ test.describe("E50 — Mid-state Session Reload Interruptions", () => {
     await studentPage.getByRole("button", { name: "Next", exact: true }).click();
     await studentPage.getByRole("button", { name: /Paris/i }).click();
     await studentPage.getByRole("button", { name: "Finish", exact: true }).click();
-    await expect(studentPage.getByText(/Assessment submitted!|Assessment complete/i)).toBeVisible({ timeout: 15_000 });
+    await expect(
+      studentPage.locator("p:visible", { hasText: /Assessment submitted!|Assessment complete/i }),
+    ).toBeVisible({ timeout: 15_000 });
 
     await lecturerCtx.close();
     await studentCtx.close();

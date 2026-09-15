@@ -89,13 +89,19 @@ test.describe("E23 — builder mutations", () => {
 
     // Persistence: survive a full reload.
     await builder.reload();
-    const first = builder.locator("ul > li").first();
+    // Scope to TOP-LEVEL question rows only: the desktop row is `li > article`
+    // (e28 convention) and each row's option list is ALSO a `ul > li` nested
+    // inside, so a bare `ul > li` would match option rows too — `.last()` then
+    // resolves to a nested option (no move control) and the end-guard below
+    // can never find its button.
+    const cards = () => builder.locator("li:has(> article)");
+    const first = cards().first();
     await expect(first).toContainText("Q-two beta?");
 
     // End-guards: first row cannot move up, last cannot move down.
     await expect(first.getByRole("button", { name: /move up/i })).toBeDisabled();
     await expect(
-      builder.locator("ul > li").last().getByRole("button", { name: /move down/i }),
+      cards().last().getByRole("button", { name: /move down/i }),
     ).toBeDisabled();
   });
 

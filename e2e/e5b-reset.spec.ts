@@ -68,9 +68,9 @@ async function resolveQuizId(
  * screen; every reset is audited.
  *
  * Flow:
- * 1. Student completes attempt 1 (E5 locked state).
+ * 1. Student starts attempt 1 and answers Q1 — left ACTIVE (not submitted).
  * 2. Lecturer: results → Reset (destructive confirm dialog) → the row
- *    disappears (Completed count 0).
+ *    disappears.
  * 3. Student: Start again → SUCCEEDS (slot released — the E5b gate) → answers
  *    Q1 (the re-take is functionally live).
  * 4. Lecturer: resets the in-progress re-take row mid-flight.
@@ -81,6 +81,11 @@ async function resolveQuizId(
  *    assertion is mid-quiz.
  * 6. Audit: via the service-role client, `audit_events` has `session_reset`
  *    rows carrying `metadata.session_id`/`quiz_id` (D13 route-level).
+ * 7. M-07 (audit-2): a COMPLETED attempt is append-only — the same reset on
+ *    the finished record is refused (409 `session_not_active`), the row
+ *    survives, and nothing is audited. Steps 1–5 must therefore run on
+ *    non-completed rows: resetting a graded session used to destroy the
+ *    score evidence AND silently restore the retake budget.
  */
 test.describe("E5b — lecturer resets attempt", () => {
   test("reset releases the slot; mid-flight reset surfaces the D13 dead screen", async ({ browser }, testInfo) => {
@@ -108,7 +113,12 @@ test.describe("E5b — lecturer resets attempt", () => {
     });
     await revealQuiz(lecturerPage, CLASS_TITLE, QUIZ_TITLE);
 
-    // ── 1. Student: complete attempt 1 (E5 locked state) ────────────
+    // ── 1. Student: start attempt 1 and answer Q1 — deliberately NOT
+    //    submitted, so the row is the resettable `active` state. (audit-2
+    //    M-07: `reset_session` REFUSES `completed` sessions — deleting one
+    //    destroyed graded evidence AND silently restored the retake budget.
+    //    active/paused/flagged remain resettable; the refusal is pinned at
+    //    the end of this spec.)
     await registerUser(studentPage, STUDENT_EMAIL, "student", LECTURER_INVITE_CODE);
     await expect(studentPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
     await joinClass(studentPage, joinCode, CLASS_TITLE);
@@ -129,33 +139,34 @@ test.describe("E5b — lecturer resets attempt", () => {
     const session1Id = studentPage.url().split("/play/")[1];
     await expect(studentPage.getByText("What is 2+2?", { exact: true })).toBeVisible();
     await answerAndAwaitAdvance(studentPage, /4/i);
-    await studentPage.getByRole("button", { name: "Next", exact: true }).click();
-    await expect(studentPage.getByText("Capital of France?", { exact: true })).toBeVisible();
-    await answerAndAwaitAdvance(studentPage, /Paris/i);
-    await studentPage.getByRole("button", { name: "Finish", exact: true }).click();
-    await expect(studentPage.getByText("Assessment complete", { exact: false })).toBeVisible({ timeout: 10_000 });
+    // Stop here — the attempt stays `active` (no submit).
 
     // ── 2. Lecturer: results → Reset (confirm dialog) → row gone ─────
     await expect(async () => {
       await openResults(lecturerPage, CLASS_TITLE, QUIZ_TITLE);
     }).toPass({ timeout: 60_000 });
     const studentList1 = lecturerPage.getByRole("list");
-    await expect(studentList1.getByText("Completed", { exact: true })).toHaveCount(1);
-    // The Reset button is rendered on the completed row. The dialog-open
-    // click is retried (guarded on the dialog not already being up) so a lost
-    // dev-mode click cannot strand the reset.
+    await expect(studentList1.getByText("In progress", { exact: true })).toHaveCount(1);
+    // Reset lives in the row's "Session actions" overflow menu (the row keeps
+    // one primary action + overflow for the rare admin ones), so the menu must
+    // be opened first. The whole open-then-click is retried (guarded on the
+    // dialog not already being up) so a lost click cannot strand the reset.
     const resetDialogHeading = lecturerPage
       .getByRole("dialog")
       .getByRole("heading", { name: "Reset", exact: true });
     await expect(async () => {
       if (!(await resetDialogHeading.isVisible())) {
-        await lecturerPage.getByRole("button", { name: "Reset", exact: true }).click();
+        await studentList1
+          .getByRole("button", { name: /Session actions/i })
+          .first()
+          .click();
+        await lecturerPage.getByRole("menuitem", { name: "Reset", exact: true }).click();
       }
       await expect(resetDialogHeading).toBeVisible({ timeout: 5_000 });
     }).toPass({ timeout: 30_000 });
     await lecturerPage.getByRole("dialog").getByRole("button", { name: "Reset", exact: true }).click();
     // The row disappears after refresh.
-    await expect(studentList1.getByText("Completed", { exact: true })).toHaveCount(0);
+    await expect(studentList1.getByText("In progress", { exact: true })).toHaveCount(0);
 
     // Deterministic barrier: the lecturer's dashboard refreshing does NOT
     // prove a fresh student RSC render sees the released slot (separate
@@ -181,7 +192,7 @@ test.describe("E5b — lecturer resets attempt", () => {
     // ── 3. Student: Start again → SUCCEEDS (slot released) ──────────
     await gotoWithRetry(studentPage, "/student/quizzes");
     await expect(studentPage.getByText("Available quizzes", { exact: false })).toBeVisible();
-    await expect(studentPage.getByRole("list").getByText("Completed", { exact: true })).toHaveCount(0);
+    await expect(studentPage.getByRole("list").getByText("In progress", { exact: true })).toHaveCount(0);
     await expect(async () => {
       if (!/\/play\/[0-9a-f-]+/.test(studentPage.url())) {
         await studentPage.getByRole("button", { name: "Start", exact: true }).click();
@@ -204,7 +215,11 @@ test.describe("E5b — lecturer resets attempt", () => {
       .getByRole("heading", { name: "Reset", exact: true });
     await expect(async () => {
       if (!(await resetDialogHeading2.isVisible())) {
-        await lecturerPage.getByRole("button", { name: "Reset", exact: true }).click();
+        await studentList2
+          .getByRole("button", { name: /Session actions/i })
+          .first()
+          .click();
+        await lecturerPage.getByRole("menuitem", { name: "Reset", exact: true }).click();
       }
       await expect(resetDialogHeading2).toBeVisible({ timeout: 5_000 });
     }).toPass({ timeout: 30_000 });
@@ -249,6 +264,51 @@ test.describe("E5b — lecturer resets attempt", () => {
         type: "skip",
         description: "service-role seam unavailable — audit assertion skipped",
       });
+    }
+
+    // ── 7. M-07 (audit-2): a COMPLETED attempt is append-only ───────
+    // The reset above released the slot, so the student can start once more;
+    // complete it fully and then prove the terminal record is NOT deletable.
+    // This is the security property M-07 exists for: deleting a graded
+    // session destroyed the score evidence AND silently restored the retake
+    // budget (the budget counts `completed` attempts).
+    await gotoWithRetry(studentPage, "/student/quizzes");
+    await expect(async () => {
+      if (!/\/play\/[0-9a-f-]+/.test(studentPage.url())) {
+        await studentPage.getByRole("button", { name: "Start", exact: true }).click();
+      }
+      await expect(studentPage).toHaveURL(/\/play\/[0-9a-f-]+/, { timeout: 5_000 });
+    }).toPass({ timeout: 30_000 });
+    await expect(studentPage.getByText("What is 2+2?", { exact: true })).toBeVisible();
+    await answerAndAwaitAdvance(studentPage, /4/i);
+    await studentPage.getByRole("button", { name: "Next", exact: true }).click();
+    await expect(studentPage.getByText("Capital of France?", { exact: true })).toBeVisible();
+    await answerAndAwaitAdvance(studentPage, /Paris/i);
+    await studentPage.getByRole("button", { name: "Finish", exact: true }).click();
+    await expect(
+      studentPage.locator("p:visible", { hasText: "Assessment complete" }),
+    ).toBeVisible({ timeout: 10_000 });
+    const completedSessionId = studentPage.url().split("/play/")[1];
+
+    const refused = await lecturerPage.request.delete(`/api/sessions/${completedSessionId}/reset`);
+    expect(refused.status()).toBe(409);
+    expect((await refused.json()).error).toBe("session_not_active");
+
+    // The terminal record survived: the session row is still there, still
+    // completed, and no reset was audited against it.
+    if (admin) {
+      const { data: survivor } = await admin
+        .from("quiz_sessions")
+        .select("id, status, score")
+        .eq("id", completedSessionId)
+        .single();
+      expect(survivor?.status).toBe("completed");
+      const { count: refusedAudits } = await admin
+        .from("audit_events")
+        .select("*", { count: "exact", head: true })
+        .eq("action", "session_reset")
+        .eq("metadata->>session_id", completedSessionId);
+      expect(refusedAudits ?? 0).toBe(0);
     }
 
     void session1Id;
