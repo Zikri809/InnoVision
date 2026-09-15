@@ -52,6 +52,19 @@ yarn-error.log*
 !.env.local.example
 !.env.test
 
+# SOPS secrets — the ENCRYPTED file is committed, the PLAINTEXT never is.
+# The `.env*` rule above does NOT cover these: it matches names beginning with
+# `.env`, while these are `deploy/secrets/prod.env` and `prod.env.enc`. Without
+# the explicit rule below the decrypted plaintext (service-role key, Z.ai key,
+# sidecar token) would be committable, and `git add deploy/` would do it by
+# accident.
+deploy/secrets/prod.env
+deploy/secrets/prod.env.local
+deploy/secrets/*.agekey
+deploy/secrets/*.key
+# The encrypted payloads ARE tracked (`*.enc` is not ignored) — that is the
+# whole point of the SOPS setup, and the template is tracked too.
+
 # vercel
 .vercel
 

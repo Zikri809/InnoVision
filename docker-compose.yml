@@ -45,13 +45,20 @@
 #
 # Profile rule (compose spec): a service WITHOUT `profiles:` always starts on a
 # bare `docker compose up`; a service WITH one starts only when that profile is
-# requested. `glm-ocr` therefore carries `profiles: ["gpu"]` — a bare
-# `compose up` on a GPU-less VPS must never try to CREATE it (its nvidia device
-# reservation fails at create time, and the CPU fallback wants 16g/8cpu at
-# ~30 s/page, which is not a real fallback on a classroom VPS). Laptop/dev
-# keeps working via the explicit path: `docker compose --profile gpu up -d`
-# (or the existing `npm run glm:start`, which names the service directly and
-# pulls its profile in automatically).
+# requested. TWO services are profiled, and both are opt-in for the same reason
+# — neither can run on the current VPS:
+#   - `glm-ocr` carries `profiles: ["gpu"]`: a bare `compose up` on a GPU-less
+#     VPS must never try to CREATE it (its nvidia device reservation fails at
+#     create time, and the CPU fallback wants 16g/8cpu at ~30 s/page, which is
+#     not a real fallback on a classroom VPS). Laptop/dev keeps working via the
+#     explicit path: `docker compose --profile gpu up -d` (or the existing
+#     `npm run glm:start`, which names the service directly and pulls its
+#     profile in automatically).
+#   - `caddy` carries `profiles: ["tls"]`: the VPS already runs HOST NGINX on
+#     :80/:443, so starting Caddy would crash-loop on `address already in use`.
+#     Opt in only on a host with no other proxy: `--profile tls`.
+# A bare `docker compose up -d` therefore brings up exactly what the VPS needs:
+# app + insightface-service.
 name: innovision
 
 x-logging: &default-logging
@@ -82,7 +89,7 @@ services:
     build:
       context: .
       dockerfile: docker/glm-ocr/Dockerfile
-    image: innovision-glm-ocr:local
+    image: ${GLM_OCR_IMAGE:-innovision-glm-ocr:local}
     restart: unless-stopped
     environment:
       # audit-3 R3-DEP-F2: mirror of FACE_SIDECAR_TOKEN — the token guards bind
@@ -162,7 +169,7 @@ services:
     build:
       context: ./docker/insightface
       dockerfile: Dockerfile
-    image: innovision-insightface:local
+    image: ${INSIGHTFACE_IMAGE:-innovision-insightface:local}
     restart: unless-stopped
     environment:
       FACE_SIDECAR_TOKEN: "${FACE_SIDECAR_TOKEN:-}"
@@ -232,7 +239,7 @@ services:
         # harness-built image promoted to the VPS carries them forever.
         NEXT_PUBLIC_E2E_FAKE_SEAM: "0"
         NEXT_PUBLIC_INTEGRITY_HARDENING_OFF: "0"
-    image: innovision-app:local
+    image: ${APP_IMAGE:-innovision-app:local}
     restart: unless-stopped
     # RUNTIME env (read per request / at process start). ⚠️ ON THE VPS THIS FILE
     # MUST BE FRESH, NEVER A COPY OF THE LAPTOP'S .env.local — that copy carries
@@ -326,14 +333,36 @@ services:
     # so there is one source of truth; the image's instruction applies.
 
   # ── caddy — TLS termination + reverse proxy (plan §B3.3) ───────────────────
-  # Caddy issues and renews Let's Encrypt / ZeroSSL certificates automatically
-  # and does HTTP→HTTPS on its own. Requirements, all of which are operational
-  # and all of which fail loudly in the Caddy logs if missed:
-  #   1. DNS A/AAAA for {$SITE_HOST} must point at this host;
-  #   2. ports 80 AND 443 must be reachable from the internet (ACME uses 80 for
-  #      the HTTP-01 challenge, and the HTTP→HTTPS redirect needs it too);
-  #   3. /data must be a PERSISTENT volume — see the volumes note below.
+  # OPTIONAL. Only one process can bind host :80/:443, so this service is
+  # PROFILE-GATED and does NOT start on a bare `docker compose up -d`.
+  #
+  # WHICH PROXY IS IN FRONT — pick exactly one, and the choice is made by
+  # whether the host already runs a reverse proxy:
+  #
+  #   (a) HOST NGINX (the current VPS): nginx owns :80/:443 and proxies to
+  #       `127.0.0.1:3000`. Do NOT start this service. It would fail to bind
+  #       and crash-loop (`bind: address already in use`), and the loop is
+  #       invisible unless you read the container logs — the rest of the stack
+  #       stays healthy, so the symptom is only a restart counter climbing.
+  #       Enable with: `docker compose --profile tls up -d caddy`.
+  #       See deploy/nginx/innovision.conf for the matching nginx site.
+  #
+  #   (b) NO HOST PROXY (Caddy owns TLS): start it explicitly —
+  #       `docker compose --profile tls up -d`. Caddy issues and renews
+  #       Let's Encrypt / ZeroSSL certificates automatically and does HTTP→HTTPS
+  #       on its own. Requirements, all operational, all of which fail loudly in
+  #       the Caddy logs if missed:
+  #         1. DNS A/AAAA for {$SITE_HOST} must point at this host;
+  #         2. ports 80 AND 443 must be free (nothing else bound) and reachable
+  #            from the internet (ACME uses 80 for the HTTP-01 challenge, and
+  #            the HTTP→HTTPS redirect needs it too);
+  #         3. /data must be a PERSISTENT volume — see the volumes note below.
+  #
+  # TRUSTED_PROXY_COUNT depends on this choice: 1 behind EITHER single proxy
+  # (nginx or Caddy), 0 if the app is somehow reached directly. The app's
+  # default is 1, so both proxy postures are correct out of the box.
   caddy:
+    profiles: ["tls"]
     image: caddy:2-alpine
     restart: unless-stopped
     ports:

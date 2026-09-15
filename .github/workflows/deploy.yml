@@ -1,0 +1,469 @@
+# Deploy to the VPS — build + push images, then roll out over SSH.
+#
+# ── WHY `workflow_run` AND NOT `push` ────────────────────────────────────────
+# The requirement is "deploy right after CI passes", and GitHub gives exactly
+# one correct primitive for that: `workflow_run` fires when ANOTHER workflow
+# completes and hands you its conclusion. A `push`-triggered deploy would race
+# CI and ship a commit whose tests had not finished — the failure mode being a
+# broken artifact on the VPS that CI later reports as red, which is the worst
+# possible ordering.
+#
+# The `conclusion == 'success'` guard is load-bearing: `workflow_run` fires on
+# EVERY completion, including failures.
+#
+# `branches: [main]` filters on the branch the RUN targeted, which excludes
+# pull-request runs (their head branch is the PR branch) — so a PR never
+# deploys, no matter how green.
+#
+# ── JOB STRUCTURE ────────────────────────────────────────────────────────────
+#   resolve  — always runs; computes the SHA + image refs. Separate from
+#              `build` because a manual rollback skips the build but STILL
+#              needs the refs, and outputs of a skipped job are empty.
+#   build    — skipped on a rollback/skip_build dispatch.
+#   migrate  — pushes supabase/migrations to the HOSTED project. Runs in
+#              PARALLEL with `build` (they are independent) and GATES the
+#              rollout: `deploy` needs it. See deploy/sync-migrations.sh for
+#              why the schema is applied from CI and not from the VPS.
+#   deploy   — needs resolve + build + migrate; runs when resolve succeeded and
+#              build either succeeded or was deliberately skipped.
+#
+# The ordering that matters: migrations are applied BEFORE the new image starts
+# serving. A new image against an un-migrated schema 500s on whichever page
+# touches the newest migration; the old image against a migrated schema is the
+# compatible direction (migrations here are additive — drop-if-exists + create).
+#
+# `migrate` runs in PARALLEL with `build`, not after it. Deliberate: the two are
+# independent, and serializing would put the schema step on the critical path
+# behind the multi-minute insightface build for no safety gain. The one state
+# this permits is "schema advanced, build failed, nothing rolled out" — the old
+# image ignores the new columns, so it is benign, and the pipeline is red so the
+# next run reconciles it. (The opposite serialization — build first, then
+# migrate — would avoid that state at the cost of a slower deploy on every run.)
+#
+# ── WHY THE IMAGE IS BUILT HERE AND NOT ON THE VPS ──────────────────────────
+# `COSTS.md` §2.1 flags vCPU build minutes as UNVERIFIED and recommends GHCR
+# pull over build-on-VPS; the insightface image compiles insightface 0.7.3 from
+# sdist (Cython mesh extension) and bakes sha256-pinned model weights. Building
+# on a 2-vCPU host would also put a multi-minute CPU spike on the same box that
+# is serving students. GitHub runners are free for public repos and the image is
+# built ONCE and pulled by the VPS.
+#
+# ── THE BUILD ARGS COME FROM REPOSITORY CONFIG, NOT FROM THE VPS ────────────
+# `NEXT_PUBLIC_*`, `ALLOWED_HOSTS` and the `/sb` rewrite gate are INLINED by
+# `next build` (see deploy/build-images.sh for the verified proof), so they are
+# read from GitHub secrets/vars here and the VPS never sees them. The VPS-side
+# script then VERIFIES the running container baked what this job intended, which
+# is the only thing that can catch an image built for one origin deployed
+# beside an env file naming another.
+#
+# ── REQUIRED REPOSITORY CONFIGURATION ───────────────────────────────────────
+# Secrets (Settings → Secrets and variables → Actions → Secrets):
+#   NEXT_PUBLIC_SUPABASE_ANON_KEY  hosted anon key (public by design, but keep
+#                                  it out of the repo so it is rotatable)
+#   VPS_SSH_KEY                    private key for the deploy user
+#   SUPABASE_ACCESS_TOKEN          Supabase CLI token (sbp_…) — schema push
+#   SUPABASE_DB_PASSWORD           database password — schema push
+#   SMOKE_EMAIL / SMOKE_PASSWORD   optional; enables the post-deploy smoke
+#
+# ⚠️ SUPABASE_ACCESS_TOKEN and SUPABASE_DB_PASSWORD can ALTER/DROP every table in
+# the project. They are used by the `migrate` job ONLY and are never exposed to
+# the VPS — the app authenticates over HTTPS/PostgREST with the service-role key
+# and needs neither. This is the main reason migrations run here and not on the
+# host (see deploy/sync-migrations.sh).
+#
+# Variables (same page → Variables):
+#   NEXT_PUBLIC_SUPABASE_URL       https://<project-ref>.supabase.co
+#   SUPABASE_PROJECT_REF           <project-ref> (the schema-push target)
+#   SITE_ORIGIN                    https://<your-host>
+#   ALLOWED_HOSTS                  <your-host>
+#   VPS_HOST / VPS_USER            target host + deploy user (not root, ideally)
+#   VPS_PORT                       optional, defaults to 22
+#
+# Runtime secrets (ZAI_API_KEY, SUPABASE_SERVICE_ROLE_KEY, …) are NOT here —
+# they live in SOPS on the VPS. See deploy/secrets/README.md and
+# docs/DEPLOY_CICD.md.
+
+name: Deploy
+
+on:
+  workflow_run:
+    # Must match `name:` in ci.yml exactly. A typo here means the deploy NEVER
+    # fires and nothing reports that — the workflow simply never appears.
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  # Manual re-deploy or rollback of an already-built commit, without re-running
+  # CI. `rollback` redeploys the image refs recorded on the VPS.
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Commit SHA or ref to deploy (default: current main)"
+        required: false
+        default: ""
+      rollback:
+        description: "Roll back to the previously deployed image refs"
+        type: boolean
+        default: false
+      skip_build:
+        description: "Skip build+push; only re-run the rollout (images must already exist)"
+        type: boolean
+        default: false
+
+# GHCR push needs packages:write; checkout needs contents:read.
+permissions:
+  contents: read
+  packages: write
+
+# Never let two deploys overlap: two concurrent rollouts would both record a
+# "previous" image ref and one would record the OTHER's half-applied state,
+# making --rollback land somewhere neither operator expects.
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: Resolve target commit
+    runs-on: ubuntu-latest
+    # On a workflow_run, only proceed when CI actually passed.
+    if: |
+      github.event_name == 'workflow_dispatch'
+      || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    outputs:
+      app_image: ${{ steps.refs.outputs.app_image }}
+      face_image: ${{ steps.refs.outputs.face_image }}
+      sha: ${{ steps.refs.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute refs
+        id: refs
+        env:
+          # For workflow_run, `head_sha` is the exact commit CI validated. Using
+          # `github.sha` would resolve to the DEFAULT branch head, which may have
+          # moved on since CI ran — the classic "deployed something CI never
+          # tested" bug.
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          INPUT_REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_REF:-}" ]; then
+            SHA="$INPUT_REF"
+          elif [ -n "${RUN_SHA:-}" ]; then
+            SHA="$RUN_SHA"
+          else
+            SHA="$(git rev-parse HEAD)"
+          fi
+          # GHCR requires a lowercase repository path; the owner is `Zikri809`.
+          OWNER="$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          {
+            echo "sha=$SHA"
+            echo "app_image=ghcr.io/${OWNER}/innovision-app"
+            echo "face_image=ghcr.io/${OWNER}/innovision-insightface"
+          } >> "$GITHUB_OUTPUT"
+          echo "Target commit: $SHA"
+
+  build:
+    name: Build + push images
+    runs-on: ubuntu-latest
+    needs: [resolve]
+    # Skipped for a manual rollback (the refs already exist in GHCR) or an
+    # explicit skip_build.
+    #
+    # ⚠️ `inputs.*` is NULL on a workflow_run trigger, and a null is not `true`
+    # — so these comparisons are written to be true on that trigger. Reading
+    # `inputs.skip_build != true` alone would work, but it is stated as an
+    # explicit OR on the event name so the intent survives a future edit: on
+    # workflow_run there ARE no inputs, so the build must run.
+    if: |
+      needs.resolve.result == 'success'
+      && (github.event_name == 'workflow_run'
+          || (inputs.skip_build != true && inputs.rollback != true))
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+
+      # Buildx is required for the GHCR push and gives registry-backed layer
+      # caching, which matters: the insightface image compiles C extensions and
+      # would otherwise rebuild them on every run.
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The app image. TAG is the commit SHA so every deploy is traceable; the
+      # script also pushes `latest` for a manual `docker compose pull`.
+      - name: Build and push app image
+        env:
+          TAG: ${{ needs.resolve.outputs.sha }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          SITE_ORIGIN: ${{ vars.SITE_ORIGIN }}
+          # SITE_URL is read by site-url.ts for EMAILED links (reset, confirm,
+          # SSO callback) and is a different variable from the public origin.
+          # Both must be the same https:// value; setting only one yields
+          # working pages and broken emails.
+          SITE_URL: ${{ vars.SITE_ORIGIN }}
+          TRUSTED_ORIGINS: ${{ vars.SITE_ORIGIN }}
+          ALLOWED_HOSTS: ${{ vars.ALLOWED_HOSTS }}
+          APP_IMAGE: ${{ needs.resolve.outputs.app_image }}
+        run: bash deploy/build-images.sh --app-only --push
+
+      # The face sidecar is a separate step so an app build failure does not
+      # waste the expensive (C-extension compiling) face build.
+      - name: Build and push insightface image
+        env:
+          TAG: ${{ needs.resolve.outputs.sha }}
+          FACE_IMAGE: ${{ needs.resolve.outputs.face_image }}
+        run: bash deploy/build-images.sh --face-only --push
+
+      - name: Summary
+        run: |
+          {
+            echo "### Images pushed"
+            echo ""
+            echo "| image | tag |"
+            echo "|---|---|"
+            echo "| \`${{ needs.resolve.outputs.app_image }}\` | \`${{ needs.resolve.outputs.sha }}\` |"
+            echo "| \`${{ needs.resolve.outputs.face_image }}\` | \`${{ needs.resolve.outputs.sha }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  migrate:
+    name: Sync schema to hosted Supabase
+    runs-on: ubuntu-latest
+    needs: [resolve]
+    # Runs in PARALLEL with `build` — they are independent — and gates the
+    # rollout via `deploy: needs: [migrate]`.
+    #
+    # Skipped on a ROLLBACK: reverting an image must not also try to advance the
+    # schema, and a rollback may deliberately be running against a schema the
+    # older image expects. (A rollback does NOT revert migrations — see
+    # docs/DEPLOY_CICD.md §5. Note the asymmetry: schema moves forward, the
+    # image moves back, and that is only safe because migrations here are
+    # additive.)
+    if: |
+      needs.resolve.result == 'success'
+      && (github.event_name == 'workflow_run'
+          || inputs.rollback != true)
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # The Supabase CLI is a devDependency, so this installs a version pinned
+      # by package-lock.json rather than whatever `latest` happens to be. That
+      # matters more here than anywhere else in the pipeline: a CLI behaviour
+      # change would apply schema changes, not just build artifacts.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Push migrations + verify
+        env:
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: bash deploy/sync-migrations.sh
+
+      - name: Summary
+        if: success()
+        run: |
+          {
+            echo "### Schema synced"
+            echo ""
+            echo "Migrations applied to \`${{ vars.SUPABASE_PROJECT_REF }}\`; cron jobs and storage buckets verified."
+            echo ""
+            echo "⚠️ A push re-applies migration-owned dashboard settings — re-check the list in \`docs/DEPLOY_VPS.md\` §2.7."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Failure hint
+        if: failure()
+        run: |
+          {
+            echo "### Schema sync failed — rollout was SKIPPED"
+            echo ""
+            echo "The VPS still runs the previous image against the previous schema."
+            echo "Fix the cause above and re-run this workflow."
+            echo ""
+            echo "Common causes:"
+            echo "- the project is **paused** (free tier pauses after ~7 days idle) — resume it in the dashboard"
+            echo "- \`vector\` or \`pg_cron\` not pre-enabled — see \`docs/DEPLOY_VPS.md\` §3.1"
+            echo "- a migration aborted part-way — repair the history (§3.2)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Roll out on the VPS
+    runs-on: ubuntu-latest
+    needs: [resolve, build, migrate]
+    # `always()` so a SKIPPED build (rollback / skip_build) still reaches here —
+    # without it, `needs: build` being skipped would skip this job too, and
+    # rollback would be impossible. The explicit result checks are what keep a
+    # FAILED build from deploying.
+    #
+    # `migrate` is checked the same way: `skipped` is the correct state for a
+    # rollback, `failure` must block the rollout (a new image against an
+    # un-migrated schema 500s on whichever page touches the newest migration).
+    if: |
+      always()
+      && needs.resolve.result == 'success'
+      && (needs.build.result == 'success' || needs.build.result == 'skipped')
+      && (needs.migrate.result == 'success' || needs.migrate.result == 'skipped')
+    environment:
+      # Gives the rollout a deployment record in the GitHub UI and an optional
+      # approval gate (Settings → Environments → production → required
+      # reviewers). Add reviewers there if you want a human in the loop.
+      name: production
+      url: ${{ vars.SITE_ORIGIN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+
+      # The key is loaded into an agent and never written to disk, so a stray
+      # artifact upload in a later step cannot capture it.
+      - name: Set up SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_HOST: ${{ vars.VPS_HOST }}
+          VPS_PORT: ${{ vars.VPS_PORT }}
+        run: |
+          set -euo pipefail
+          [ -n "${VPS_SSH_KEY:-}" ] || { echo "::error::VPS_SSH_KEY secret is not set"; exit 1; }
+          [ -n "${VPS_HOST:-}" ] || { echo "::error::VPS_HOST variable is not set"; exit 1; }
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          eval "$(ssh-agent -s)" >> "$GITHUB_ENV"
+          keyfile="$(mktemp)"
+          chmod 600 "$keyfile"
+          printf '%s\n' "$VPS_SSH_KEY" > "$keyfile"
+          ssh-add "$keyfile" 2>/dev/null
+          rm -f "$keyfile"
+          PORT="${VPS_PORT:-22}"
+          # Host key pinning: without this the first connection would prompt and
+          # BatchMode would fail. Bounded so a dead host fails fast.
+          ssh-keyscan -p "$PORT" -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          {
+            echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK"
+            echo "SSH_AGENT_PID=$SSH_AGENT_PID"
+            echo "VPS_PORT=$PORT"
+          } >> "$GITHUB_ENV"
+
+      # ── Sync the VPS checkout to the built commit ─────────────────────────
+      # Done as its own step (not inside the deploy command) so a git failure is
+      # a clearly-labelled step failure rather than a confusing mid-rollout one.
+      # `--force` because the VPS checkout is a deployment artifact, not a
+      # working copy: a locally-modified docker-compose.yml would otherwise make
+      # `git pull` abort and the rollout would silently deploy the OLD compose.
+      - name: Sync VPS checkout
+        if: ${{ inputs.rollback != true }}
+        env:
+          VPS_HOST: ${{ vars.VPS_HOST }}
+          VPS_USER: ${{ vars.VPS_USER }}
+          SHA: ${{ needs.resolve.outputs.sha }}
+        run: |
+          set -euo pipefail
+          [ -n "${VPS_USER:-}" ] || { echo "::error::VPS_USER variable is not set"; exit 1; }
+          SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -p ${VPS_PORT}"
+          # shellcheck disable=SC2086
+          ssh $SSH_OPTS "${VPS_USER}@${VPS_HOST}" "
+            set -euo pipefail
+            cd /home/deploy/innovision 2>/dev/null || cd \$HOME/innovision
+            git fetch --prune --tags origin
+            git checkout --force '${SHA}'
+            echo \"VPS checkout now at \$(git rev-parse --short HEAD)\"
+          "
+
+      # ── Roll out ──────────────────────────────────────────────────────────
+      # The SCRIPT IS PIPED FROM THIS JOB, not run from the VPS checkout. Both
+      # exist at the same commit after the sync above, but piping makes the
+      # invariant explicit: the rollout logic that executes is always the one
+      # from the commit CI validated, never whatever the VPS happened to have.
+      - name: Roll out
+        env:
+          VPS_HOST: ${{ vars.VPS_HOST }}
+          VPS_USER: ${{ vars.VPS_USER }}
+          APP_IMAGE: ${{ needs.resolve.outputs.app_image }}
+          FACE_IMAGE: ${{ needs.resolve.outputs.face_image }}
+          TAG: ${{ needs.resolve.outputs.sha }}
+          ROLLBACK: ${{ inputs.rollback && '1' || '0' }}
+          EXPECT_BAKED_SUPABASE_ORIGIN: ${{ vars.EXPECT_BAKED_SUPABASE_ORIGIN }}
+          EXPECT_ALLOWED_HOSTS: ${{ vars.ALLOWED_HOSTS }}
+        run: |
+          set -euo pipefail
+          SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -p ${VPS_PORT}"
+          if [ "${ROLLBACK}" = "1" ]; then
+            echo "::notice::Rolling BACK to the previously deployed image refs"
+            ARGS="--rollback"
+          else
+            ARGS=""
+          fi
+          # `bash -s -- <args>` reads the script from stdin and passes ARGS as
+          # positional parameters. Env vars ride along in the command prefix.
+          # shellcheck disable=SC2086
+          ssh $SSH_OPTS "${VPS_USER}@${VPS_HOST}" \
+            "APP_IMAGE='${APP_IMAGE}' \
+             INSIGHTFACE_IMAGE='${FACE_IMAGE}' \
+             EXPECT_BAKED_SUPABASE_ORIGIN='${EXPECT_BAKED_SUPABASE_ORIGIN}' \
+             EXPECT_ALLOWED_HOSTS='${EXPECT_ALLOWED_HOSTS}' \
+             bash -s -- ${ARGS}" \
+            < deploy/remote-deploy.sh
+
+      # ── Post-deploy smoke (ops gate O4) ───────────────────────────────────
+      # Runs ON the VPS because it targets the loopback publish
+      # (127.0.0.1:3000); the app is not reachable from the runner by design.
+      #
+      # Gated on SMOKE_EMAIL/SMOKE_PASSWORD existing: without a lecturer account
+      # the authenticated checks cannot run, and the script reports a FAIL rather
+      # than a silent pass. Skipping loudly is honest; a green smoke with no
+      # login would not be. Set both secrets to enable it.
+      - name: Smoke (loopback, authenticated)
+        if: ${{ inputs.rollback != true }}
+        env:
+          VPS_HOST: ${{ vars.VPS_HOST }}
+          VPS_USER: ${{ vars.VPS_USER }}
+          SMOKE_EMAIL: ${{ secrets.SMOKE_EMAIL }}
+          SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SMOKE_EMAIL:-}" ] || [ -z "${SMOKE_PASSWORD:-}" ]; then
+            echo "::warning::SMOKE_EMAIL / SMOKE_PASSWORD are not set — skipping the authenticated post-deploy smoke. The rollout's own health, loopback and baked-var checks did run."
+            exit 0
+          fi
+          SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -p ${VPS_PORT}"
+          # --expect-provider remote: this host runs the metered Z.ai leg, and a
+          # probe reporting `local` would mean the deployment silently fell back
+          # to a vLLM that does not exist here.
+          # shellcheck disable=SC2086
+          ssh $SSH_OPTS "${VPS_USER}@${VPS_HOST}" \
+            "cd /home/deploy/innovision 2>/dev/null || cd \$HOME/innovision; \
+             node scripts/vps-smoke.mjs \
+               --base-url http://127.0.0.1:3000 \
+               --email '${SMOKE_EMAIL}' \
+               --password '${SMOKE_PASSWORD}' \
+               --expect-provider remote"
+
+      - name: Rollback hint
+        if: failure()
+        env:
+          VPS_HOST: ${{ vars.VPS_HOST }}
+          VPS_USER: ${{ vars.VPS_USER }}
+        run: |
+          {
+            echo "### Deploy failed"
+            echo ""
+            echo "The stack may be left partially updated. To roll back:"
+            echo ""
+            echo '```bash'
+            echo "ssh ${VPS_USER}@${VPS_HOST} 'cd /home/deploy/innovision && bash deploy/remote-deploy.sh --rollback'"
+            echo '```'
+            echo ""
+            echo "Or re-run this workflow from the Actions tab with the **rollback** input enabled."
+          } >> "$GITHUB_STEP_SUMMARY"

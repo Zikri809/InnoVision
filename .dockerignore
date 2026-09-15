@@ -68,6 +68,27 @@ invoice_from_html.pdf
 .prod-audit.log*
 .glm-spend-ledger.json*
 
+# SOPS secrets (deploy/secrets/). The app Dockerfile builds with `context: .`
+# and does `COPY . .` (Dockerfile:83), so anything present under the repo root
+# rides into a build layer. The plaintext `prod.env` is gitignored and normally
+# exists only ON THE VPS — but the failure this guards is a developer running
+# `sops -d` in place, or `bootstrap.sh`, on the machine doing the build. Without
+# these lines the service-role key, the Z.ai key and the sidecar token would be
+# baked into a layer, where `docker save` can read them even if a later layer
+# deletes the file.
+#
+# `*.enc` (the committed ciphertext) is excluded too: harmless to publish, but
+# useless inside the image, and shipping it only creates a way for an unrelated
+# layer diff to reveal when secrets were rotated.
+deploy/secrets/prod.env
+deploy/secrets/prod.env.local
+deploy/secrets/*.agekey
+deploy/secrets/*.key
+deploy/secrets/*.enc
+# Belt-and-braces: any env file under deploy/ at all.
+deploy/**/.env
+deploy/**/.env.local
+
 # Local Supabase / tooling data
 supabase/.temp
 supabase/.branches

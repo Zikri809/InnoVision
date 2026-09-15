@@ -1,0 +1,34 @@
+# Line-ending policy.
+#
+# WHY THIS FILE EXISTS: this repo is developed on Windows with
+# `core.autocrlf=true`, and the deploy artifacts run on Linux. Without an
+# explicit rule, `git add` rewrites shell scripts to CRLF on checkout and the
+# VPS fails with the classic
+#
+#   /bin/bash^M: bad interpreter: No such file or directory
+#
+# or, worse for a script that DOES run, `set -e` silently misparsing because a
+# trailing `\r` became part of a value. A deploy script that cannot be trusted
+# to be byte-identical across the checkout boundary is not a deploy script.
+#
+# `eol=lf` forces LF in the working tree regardless of `core.autocrlf`, so the
+# bytes on the VPS equal the bytes here.
+
+# Shell scripts and anything else executed directly on the VPS.
+*.sh text eol=lf
+
+# Container/config files that are parsed by tools with no CRLF tolerance.
+Dockerfile text eol=lf
+Dockerfile.* text eol=lf
+*.dockerfile text eol=lf
+Caddyfile text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.conf text eol=lf
+
+# SOPS-encrypted payloads: `-text` = NO conversion in either direction, so the
+# bytes are identical in the working tree and in the object store. This is
+# deliberately stricter than `eol=lf`: the file is a cryptographic artifact
+# (values + MAC), and a line-ending rewrite of a base64 blob is exactly the kind
+# of "harmless" transformation that makes a secret undecryptable at 3am.
+*.enc -text

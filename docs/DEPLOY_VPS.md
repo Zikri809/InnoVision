@@ -17,6 +17,25 @@
 > backup round-trip has not been rehearsed. Where a step can *silently succeed
 > while doing nothing*, it says so.
 
+> **AUTOMATED PIPELINE — read [`docs/DEPLOY_CICD.md`](./DEPLOY_CICD.md) first if
+> you want `git push` to deploy.** That file covers the CI → GHCR → VPS
+> pipeline: build after CI passes, SOPS+age secrets, the SSH rollout, and
+> rollback. This file remains the *host* runbook — Supabase project setup,
+> schema push, DNS, backups, cutover — and the reference for working on the box
+> directly when the pipeline fails.
+>
+> **Two topology changes this runbook predates:**
+> 1. **The host runs NGINX on :80/:443**, so §7's Caddy section does not apply.
+>    Use `deploy/nginx/innovision.conf` for the site config. The compose `caddy`
+>    service is now profile-gated (`profiles: ["tls"]`), so a bare
+>    `docker compose up -d` can no longer start it into a port conflict with
+>    nginx — that failure mode was a crash-looping Caddy beside a healthy stack,
+>    which reads as "nothing is wrong" until you check the restart counter.
+> 2. **The images are built in CI and pulled from GHCR**, not built on the VPS.
+>    §6's `docker compose build app` still works for a local image, but the
+>    deployed path sets `APP_IMAGE`/`INSIGHTFACE_IMAGE` in the project-root
+>    `.env` and runs `docker compose pull`. See `COSTS.md` §2.1 for why.
+
 ## Table of contents
 
 1. [Prereqs + topology](#1-prereqs--topology)
