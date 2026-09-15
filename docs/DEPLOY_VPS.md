@@ -1399,6 +1399,55 @@ the one exception (network-free manifest check) and it runs in CI.
 | Migration aborted midway | `vector` not in the `extensions` schema | §3.1 Step 1, §3.2 |
 | Storage uploads rejected after a push | Dashboard bucket limits/knobs clobbered by the push | §2.7 |
 | Export route returns 503 | `exceljs` did not resolve in the image | §12.3 |
+| **Login 502s for SOME accounts, zero app logs** | nginx `proxy_buffer_size` (default 4k) — a response whose `Set-Cookie` (Supabase SSR session incl. user metadata) pushes the header block past the buffer is aborted by nginx *after* the app succeeded | `sudo tail /var/log/nginx/error.log` → "upstream sent too big header"; fix + MEASURED numbers in `deploy/nginx/innovision.conf` (`proxy_buffer_size 16k`). Isolate by replaying the request at `127.0.0.1:3000` (always 200 → not the app) vs through nginx (502 → the proxy) |
+
+### 13.1 Case study — the account-dependent login 502 (2026-09-15)
+
+Kept because it is the purest example of the debugging discipline this
+runbook preaches: **when the app logs nothing, the failure is below the app.**
+
+Symptoms: login worked for seeded accounts and one fresh student, returned a
+bare "Something went wrong" (the form's catch branch) or a Cloudflare 502 page
+for a fresh lecturer. `docker compose logs app` recorded nothing at all on the
+failing requests. No code path differs by role in `login()` — the server action
+is role-blind.
+
+Isolation took four hops, cheapest first — this ordering is the lesson:
+
+1. **Direct GoTrue probe** (bypass the app): the credentials were valid →
+   not Supabase. Killed the "bad password / unconfirmed user" theory in one
+   request.
+2. **Drive the real form headlessly** (Playwright against prod): reproduced
+   deterministically — student 3/3 success, lecturer 3/3 `502` on the action
+   POST. Account-correlated, not random.
+3. **Replay the captured POST at `127.0.0.1:3000`** (bypass nginx): 200 every
+   time, 82 KB response, headers ~4.3 KB. The app was never the problem.
+4. **Replay through nginx on the VPS**: 502 — the hop was isolated without
+   ever reading nginx's error log (sudo was unavailable over the deploy key).
+
+Root cause, measured: the login action's response carries one giant
+`Set-Cookie` (the Supabase SSR session: access+refresh token + full user
+metadata). The lecturer's metadata (role, full name) makes its header block
+**4304 bytes** vs the student's **4032** — and nginx's default
+`proxy_buffer_size` is a single 4k buffer for the *entire* upstream response
+header block. Over the line → nginx aborts with `upstream sent too big
+header` → bare 502, no app log, because the app had already finished writing.
+
+Fix: `proxy_buffer_size 16k` (+ `proxy_buffers 4 16k`, `proxy_busy_buffers_size
+32k`) at server level in `deploy/nginx/innovision.conf`, now the canonical
+config with the measurement recorded inline.
+
+Two durable takeaways:
+
+- **A 502 with silent app logs is a proxy finding, not an app bug.** Check
+  nginx `error.log` first; the "upstream sent too big header" line would have
+  ended this in one command had sudo been available.
+- **"Works for some users" = compare a failing case against a passing one at
+  the byte level**, not at the feature level. The only delta was 272 bytes of
+  response headers — invisible in any functional test, decisive in a `wc -c`
+  on the header block. It will recur with any future header growth (bigger
+  session payloads, a long header added by a route) until the buffer is
+  raised — hence it lives in the canonical config, not in a server hand-edit.
 
 ---
 
