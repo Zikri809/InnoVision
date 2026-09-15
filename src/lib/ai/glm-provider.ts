@@ -68,7 +68,11 @@ export const REMOTE_MAX_DATAURL_CHARS = 36_000_000;
  * equality so a drift is caught by the suite rather than by a runtime bug).
  */
 export const LOCAL_MAX_PAGES = 200;
-/** Interim remote cap: the Z.ai docs conflict (100 vs 30 pages). */
+/** Remote page cap. Z.ai's API reference documents 30, its guide 100 —
+ * live-verified 2026-09-15: the endpoint parses up to 100 pages (its own 1214
+ * hard error names "PDF max 100 pages"). The LOWER documented value stays the
+ * fail-closed default; production raises it via `GLM_REMOTE_MAX_PAGES=100`
+ * (SOPS), which the probe reports to the picker as `maxPages`. */
 export const REMOTE_MAX_PAGES_DEFAULT = 30;
 
 export const DEFAULT_GLM_BASE_URL = "http://localhost:11434";

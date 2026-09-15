@@ -320,20 +320,23 @@ proof; the UI is never gated on an uncached billed call.
 | Image | ≤10 MB decoded | Route, before send (`REMOTE_MAX_IMAGE_BYTES`) |
 | PDF | ≤50 MB decoded | Route, before send (`REMOTE_MAX_PDF_BYTES`) |
 | Request body | ≤36 M chars | `readCappedJson`, provider-aware (`REMOTE_MAX_DATAURL_CHARS`) |
-| Pages | **30 (interim)** | Client pre-flight + route lower bound (`GLM_REMOTE_MAX_PAGES`) |
+| Pages | **100 in prod** (`GLM_REMOTE_MAX_PAGES=100` in SOPS); code default 30 | Client pre-flight + route lower bound (`GLM_REMOTE_MAX_PAGES`) |
 
 ⚠️ **The UI cannot reach the full remote allowance.** `REMOTE_MAX_DATAURL_CHARS`
 is derived from the app's own client upload cap (`MAX_FILE_BYTES = 25_000_000`,
 `src/lib/extract/types.ts`), which is **below** Z.ai's 50 MB PDF allowance — so
 the binding constraint for a PDF upload is InnoVision's 25 MB, not Z.ai's 50 MB.
 
-⚠️ **The 100-vs-30 page conflict is unresolved.** Z.ai's guide says 100 pages,
-its API reference says 30. This repo ships the **lower bound (30)** as an interim
-cap because a wrong guess upward means a silently truncated deck. The server is
-authoritative (`GLM_REMOTE_MAX_PAGES`, reported by the probe as `maxPages`); the
-client constant `MAX_OCR_PAGES_REMOTE` is only the fallback. `MAX_OCR_PAGES=200`
-stays as-is — it is the **local** rasterizer's bound, and the two legs are capped
-independently. Resolution is OWED (§6.7).
+**The 100-vs-30 page conflict — RESOLVED 2026-09-15.** Z.ai's guide says 100
+pages, its API reference says 30. Live verification against the production key
+settled it: the endpoint parses documents up to **100 pages** (its own 1214 hard
+error names "PDF max 100 pages", and a real PDF parses end to end). Production
+therefore runs `GLM_REMOTE_MAX_PAGES=100` (SOPS). The server is authoritative:
+the probe reports the effective cap to the picker as `maxPages`. The client
+constant `MAX_OCR_PAGES_REMOTE` stays at the lower documented bound (30) as the
+fail-closed fallback for a deployment without the env override.
+`MAX_OCR_PAGES=200` stays as-is — it is the **local** rasterizer's bound, and the
+two legs are capped independently.
 
 A PDF over the cap is refused **before any spend**: the client reads `numPages`
 via pdf.js and throws `glm_pages_exceeded` (413) before upload, and the route

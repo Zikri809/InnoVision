@@ -107,11 +107,13 @@ export const MIN_CHARS_PER_PAGE = 40;
  * streaming rasterizer (one page in flight), not by this number. */
 export const MAX_OCR_PAGES = 200;
 /**
- * gate G3/G8: page cap for the REMOTE (Z.ai `layout_parsing`) leg. INTERIM 30 —
- * the Z.ai docs conflict (guide says 100, API ref says 30); the lower bound is
- * the safe one until the live curl resolves it. The server is authoritative
- * (`GLM_REMOTE_MAX_PAGES`, reported by the probe as `maxPages`); this constant
- * is the client-side fallback and the documented default.
+ * gate G3/G8: page cap for the REMOTE (Z.ai `layout_parsing`) leg. Z.ai's docs
+ * conflict (guide 100, API ref 30); live-verified 2026-09-15 that the endpoint
+ * accepts up to 100 pages. The server is authoritative
+ * (`GLM_REMOTE_MAX_PAGES=100` in prod SOPS, reported by the probe as
+ * `maxPages`); this constant is the client-side fallback and the documented
+ * default, kept at the lower documented bound so a misconfigured deployment
+ * fails closed.
  *
  * `MAX_OCR_PAGES` (200) deliberately stays as-is: it is the LOCAL rasterizer's
  * CPU bound, and the two legs are capped independently.
