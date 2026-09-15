@@ -340,7 +340,13 @@ jobs:
           [ -n "${VPS_SSH_KEY:-}" ] || { echo "::error::VPS_SSH_KEY secret is not set"; exit 1; }
           [ -n "${VPS_HOST:-}" ] || { echo "::error::VPS_HOST variable is not set"; exit 1; }
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          eval "$(ssh-agent -s)" >> "$GITHUB_ENV"
+          # Deliberately NOT redirected into $GITHUB_ENV: `ssh-agent -s` also
+          # echoes "Agent pid NNNN", and GitHub's env-file parser rejects any
+          # non KEY=value line with "Invalid format" — killing the step. That
+          # was the exact failure of this pipeline's first-ever run
+          # (34964199162). The agent connection details are exported into the
+          # env file by the block at the bottom of this step instead.
+          eval "$(ssh-agent -s)" > /dev/null
           keyfile="$(mktemp)"
           chmod 600 "$keyfile"
           printf '%s\n' "$VPS_SSH_KEY" > "$keyfile"
