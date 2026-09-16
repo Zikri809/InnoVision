@@ -75,10 +75,10 @@ export function AppShell({
           <div className="flex min-w-0 items-center gap-2 sm:gap-6 md:gap-8">
             <Link href="/dashboard" aria-label={t("brand")} className="flex shrink-0 items-center gap-2.5">
               <span className="grid h-8 w-8 -rotate-4 place-items-center rounded-[12px] bg-primary font-heading text-base font-bold text-primary-foreground shadow-[0_3px_0_var(--primary-deep)]">
-                IV
+                E2
               </span>
               <span className="hidden font-heading text-[21px] font-semibold sm:inline">
-                InnoVision
+                Easy2U
               </span>
             </Link>
 

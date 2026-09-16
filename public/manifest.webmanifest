@@ -1,6 +1,6 @@
 {
-  "name": "InnoVision",
-  "short_name": "InnoVision",
+  "name": "Easy2U",
+  "short_name": "Easy2U",
   "description": "AI-powered gesture quizzes with face verification",
   "start_url": "/dashboard",
   "display": "standalone",

@@ -42,7 +42,7 @@ type Params = { params: Promise<{ code: string }> };
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { code } = await params;
   const normalized = normalizeShareCode(code);
-  if (!normalized) return { title: "InnoVision" };
+  if (!normalized) return { title: "Easy2U" };
   try {
     const supabase = await createClient();
     const { data } = await supabase.rpc("resolve_shared_student_quiz", {
@@ -51,16 +51,16 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
     if (data) {
       const meta = data as { title?: string; creator_first_name?: string };
       return {
-        title: meta.title ? `${meta.title} — InnoVision` : "InnoVision",
+        title: meta.title ? `${meta.title} — Easy2U` : "Easy2U",
         description: meta.creator_first_name
           ? `Practice quiz by ${meta.creator_first_name}`
-          : "Practice quiz on InnoVision",
+          : "Practice quiz on Easy2U",
       };
     }
   } catch {
     // Metadata is best-effort; the page itself renders the authoritative state.
   }
-  return { title: "InnoVision" };
+  return { title: "Easy2U" };
 }
 
 export default async function SharedQuizPage({ params }: Params) {

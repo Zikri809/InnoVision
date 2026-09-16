@@ -9,7 +9,7 @@ import {
 
 type Params = { params: Promise<{ quizId: string }> };
 
-export const metadata: Metadata = { title: "Practice — InnoVision" };
+export const metadata: Metadata = { title: "Practice — Easy2U" };
 
 /**
  * /play/student/[quizId] — SHELL-LESS self-play (same focused chrome as

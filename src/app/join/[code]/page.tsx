@@ -44,7 +44,7 @@ async function NeutralCard({ message, href, cta }: { message: string; href: stri
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslations("join");
-  return { title: `${t("confirmTitle")} — InnoVision` };
+  return { title: `${t("confirmTitle")} — Easy2U` };
 }
 
 type Params = { params: Promise<{ code: string }> };

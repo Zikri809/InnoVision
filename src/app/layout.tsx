@@ -6,6 +6,7 @@ import { getLocale, getMessages } from "next-intl/server";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { THEME_INIT_SCRIPT } from "@/lib/theme/theme";
+import { resolveSiteOrigin } from "@/lib/auth/site-url";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 
@@ -39,12 +40,32 @@ export const viewport = {
   colorScheme: "light dark",
 };
 
+// Same authoritative origin as email links (audit-2 H-02) — request headers
+// must not decide where OG/Twitter URLs resolve. Dev fallback keeps relative
+// og:image URLs working without SITE_URL.
+const SITE_ORIGIN = resolveSiteOrigin() ?? "http://localhost:3000";
+
+const SITE_DESCRIPTION = "AI-powered gesture quizzes with face verification";
+
 export const metadata: Metadata = {
-  title: "InnoVision",
-  description: "AI-powered gesture quizzes with face verification",
+  metadataBase: new URL(SITE_ORIGIN),
+  title: "Easy2U",
+  description: SITE_DESCRIPTION,
+  // og:image comes from ./opengraph-image.tsx (auto-wired by Next).
+  openGraph: {
+    title: "Easy2U",
+    description: SITE_DESCRIPTION,
+    type: "website",
+    siteName: "Easy2U",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Easy2U",
+    description: SITE_DESCRIPTION,
+  },
   appleWebApp: {
     capable: true,
-    title: "InnoVision",
+    title: "Easy2U",
     statusBarStyle: "default",
   },
   manifest: "/manifest.webmanifest",

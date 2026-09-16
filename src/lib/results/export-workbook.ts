@@ -94,7 +94,7 @@ export async function buildWorkbook(
   labels: WorkbookLabels,
 ): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
-  wb.creator = "InnoVision";
+  wb.creator = "Easy2U";
   wb.created = new Date(model.meta.generatedAtISO);
 
   const statusLabel = (status: ExportModel["students"][number]["status"]): string => {

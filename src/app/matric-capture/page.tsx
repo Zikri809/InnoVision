@@ -45,9 +45,9 @@ export default async function MatricCapturePage() {
       <div className="w-full max-w-md">
         <div className="mb-8 flex items-center justify-center gap-2.5">
           <span className="grid h-11 w-11 -rotate-4 place-items-center rounded-2xl bg-primary font-heading text-xl font-bold text-primary-foreground shadow-[0_4px_0_var(--primary-deep)]">
-            IV
+            E2
           </span>
-          <span className="font-heading text-2xl font-semibold">InnoVision</span>
+          <span className="font-heading text-2xl font-semibold">Easy2U</span>
         </div>
 
         <div className="rounded-[28px] border-[3px] border-border bg-card p-8 shadow-[var(--shadow-clay)]">

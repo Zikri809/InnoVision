@@ -4,7 +4,7 @@ export default function Loading() {
       <div className="flex items-center gap-3">
         <div className="size-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
         <span className="font-heading text-base font-semibold text-muted-foreground">
-          Loading InnoVision…
+          Loading Easy2U…
         </span>
       </div>
     </div>
