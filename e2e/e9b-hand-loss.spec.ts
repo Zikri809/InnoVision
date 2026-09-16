@@ -12,6 +12,7 @@ import {
   enrollViaFacePage,
   setFaceVerifyMode,
   recoverFromPause,
+  waitForHandLossPauseOverlay,
   passAssessmentGate,
 } from "./helpers";
 import { HOLD_MS } from "../src/lib/gestures/constants";
@@ -128,6 +129,11 @@ test.describe("E9b — hand lost → server pause → blink recovery → answer"
     );
     const pauseResponse = await pauseRes;
     expect(pauseResponse.status()).toBe(200);
+
+    // The paused overlay carries the `hand_lost` reason copy (NOT the face
+    // mismatch copy) — the same blink-recovery button, honest label.
+    await waitForHandLossPauseOverlay(studentPage);
+    await expect(studentPage.getByText("Face check paused", { exact: true })).toHaveCount(0);
 
     // Then GET paused (server-truth).
     await expect

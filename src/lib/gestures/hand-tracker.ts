@@ -2,6 +2,9 @@ import type { HandFrame, IHandTracker, Landmark } from "./types";
 import { landmarksToHandFrame } from "./finger-count";
 import { FingerStabilizer } from "./finger-stabilizer";
 import {
+  HAND_TRACK_FULL_INTERVAL_MS,
+} from "./constants";
+import {
   acquireCameraStream,
   releaseCameraStream,
   resolveStream,
@@ -50,7 +53,6 @@ export const HAND_MODEL_URL = "/models/hand_landmarker.task";
 
 const CAMERA_WIDTH_MAX = 640;
 const CAMERA_HEIGHT_MAX = 480;
-const FRAME_INTERVAL_MS = 33; // ~30fps cap
 
 type MediaPipeHandLandmarker = {
   detectForVideo(video: HTMLVideoElement, timestamp: number): {
@@ -85,6 +87,16 @@ export class HandLandmarkerTracker implements IHandTracker {
   private lastLuminanceAt = 0;
   private cachedLuminance: "good" | "too_dark" | "too_bright" = "good";
   private stabilizer = new FingerStabilizer();
+  /**
+   * Duty-cycle interval for DETECTION (MediaPipe inference + onFrame). The
+   * preview render (video + skeleton + luminance sampling) is decoupled and
+   * runs every rAF tick regardless, so the self-view never goes choppy while
+   * a phase consumes fewer frames (e.g. feedback/reading on CPU-bound hosts).
+   * Starts FULL; `setFrameInterval` moves it between tiers.
+   */
+  private detectionIntervalMs: number = HAND_TRACK_FULL_INTERVAL_MS;
+  /** Last-known landmarks for the between-detections preview render. */
+  private lastLandmarks: Landmark[][] | undefined = undefined;
   private visibilityHandler: (() => void) | null = null;
   private loadedMetadataHandler: (() => void) | null = null;
   private loadedMetadataTimer: ReturnType<typeof setTimeout> | null = null;
@@ -195,6 +207,8 @@ export class HandLandmarkerTracker implements IHandTracker {
   stop(): void {
     this.disposed = true;
     this.stabilizer.reset();
+    this.lastLandmarks = undefined;
+    this.detectionIntervalMs = HAND_TRACK_FULL_INTERVAL_MS;
     if (this.rafId !== null) {
       cancelAnimationFrame(this.rafId);
       this.rafId = null;
@@ -293,12 +307,15 @@ export class HandLandmarkerTracker implements IHandTracker {
         this.rafId = requestAnimationFrame((t) => this.detectLoop(t, onFrame, onError));
         return;
       }
-      if (now - this.lastFrameAt >= FRAME_INTERVAL_MS) {
-        this.lastFrameAt = now;
-        if (this.landmarker && this.video.readyState >= 2) {
+      if (this.landmarker && this.video.readyState >= 2) {
+        if (now - this.lastFrameAt >= this.detectionIntervalMs) {
+          this.lastFrameAt = now;
+          // MediaPipe inference runs ONLY at the duty-cycle rate — this is
+          // the expensive call (WASM, ~10-40ms/frame on CPU delegates).
           const results = this.landmarker.detectForVideo(this.video, now);
-          this.renderVideo();
+          this.lastLandmarks = results.landmarks;
           const frame = this.stabilizeFrame(landmarksToHandFrame(results));
+          this.renderVideo();
           const ctx = this.canvas.getContext("2d");
           if (ctx) {
             // Throttle photometric luminance sampling to ~4Hz (250ms).
@@ -318,6 +335,12 @@ export class HandLandmarkerTracker implements IHandTracker {
           }
           this.renderSkeleton(results.landmarks);
           onFrame(frame);
+        } else {
+          // Between detections: keep the preview alive with a fresh video
+          // frame + the last-known skeleton so the self-view stays smooth
+          // while the detection rate is duty-cycled down.
+          this.renderVideo();
+          this.renderSkeleton(this.lastLandmarks);
         }
       }
       this.rafId = requestAnimationFrame((t) => this.detectLoop(t, onFrame, onError));
@@ -332,6 +355,19 @@ export class HandLandmarkerTracker implements IHandTracker {
       this.releaseCamera();
       onError?.(err instanceof Error ? err : new Error(String(err)));
     }
+  }
+
+  /**
+   * Duty-cycle the DETECTION rate (clamped to the FULL tier floor). The
+   * stabilizer and hold tolerances are FRAME-COUNT based, so callers must
+   * only downshift while no hold can fire (phase-gated in GestureLayer) —
+   * semantics are preserved, only the frames-per-second changes.
+   */
+  setFrameInterval(ms: number): void {
+    this.detectionIntervalMs = Math.max(
+      Math.round(ms),
+      HAND_TRACK_FULL_INTERVAL_MS,
+    );
   }
 
   /**

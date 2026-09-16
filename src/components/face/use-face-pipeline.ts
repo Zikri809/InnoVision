@@ -61,7 +61,7 @@ export type FacePipelinePhase =
  * pause means "fullscreen was closed"; neither is a face problem), and it
  * clears on any non-paused status.
  */
-export type PausedReason = "face" | "focus_lost" | "fullscreen_exit";
+export type PausedReason = "face" | "focus_lost" | "fullscreen_exit" | "hand_lost";
 
 export type FacePipelineProps = {
   sessionId: string;
@@ -1031,6 +1031,7 @@ export function useFacePipeline(props: FacePipelineProps) {
       // network — the client overlay still shows; cadence re-checks.
     }
     if (statusRef.current === "ready") {
+      setPausedReason("hand_lost");
       setStatusBoth("paused");
     }
   }

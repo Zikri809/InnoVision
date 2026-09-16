@@ -44,12 +44,17 @@ export type HandSegment = {
 /**
  * The test seam every hand-tracking implementation satisfies. `start` may be
  * async (real boot) or sync (fake); `stop` must be idempotent (StrictMode
- * double-mounts).
+ * double-mounts). `setFrameInterval` is the duty-cycle seam (mirrors the face
+ * tracker's): the layer downshifts the DETECTION rate when the quiz phase
+ * consumes no input frames; implementations without it (the E2E fake) simply
+ * keep their tick rate.
  */
 export interface IHandTracker {
   start(onFrame: (frame: HandFrame) => void): Promise<void> | void;
   stop(): void;
   bindDOMElements?(elements: { video: HTMLVideoElement; canvas: HTMLCanvasElement }): void;
+  /** Duty-cycle the detection rate (ms between inference frames). */
+  setFrameInterval?(ms: number): void;
 }
 
 /** E2E control surface for scripting fake frames. */

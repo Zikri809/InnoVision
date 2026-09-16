@@ -20,6 +20,7 @@ import {
   RefreshCw,
   Sparkles,
   Wand2,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -37,7 +38,6 @@ import { UploadDropzone, type UploadedFileItem } from "./UploadDropzone";
 import { EnginePicker } from "./EnginePicker";
 import { OcrProgress } from "./OcrProgress";
 import { GenerationProgress } from "./GenerationProgress";
-import { BotAvatar } from "@/components/bot/bot-avatar";
 import {
   documentRetryOutcomes,
   extractErrorI18nKey,
@@ -92,11 +92,13 @@ function combineOutcomes(outcomes: FileOutcome[], fileCount: number): string {
 /**
  * AI generation from uploaded/pasted material. Two modes share this dialog:
  *  - "lecturer" (default): posts to /api/ai/generate-quiz with the full
- *    control set and refreshes the server components on success.
- *  - "student": posts to the practice-quiz endpoint passed via `endpoint`,
- *    HIDES steering/format-mix/mode controls (plan F1), and reports the
- *    generated questions through `onGenerated` so the editor can merge them
- *    locally (the practice editor owns its state; no router.refresh needed).
+ *    control set, streams via the GenerationProgress takeover, and refreshes
+ *    the server components on success.
+ *  - "student": posts to the practice-quiz endpoint passed via `endpoint`
+ *    (same NDJSON stream protocol, same takeover — Phase 3), HIDES steering/
+ *    format-mix/mode/web controls, and merges the generated questions into
+ *    the editor locally via `onGenerated` (the practice editor owns its
+ *    state; no router.refresh needed).
  */
 export function GenerateFromFileDialog({
   quizId,
@@ -188,6 +190,10 @@ export function GenerateFromFileDialog({
   // others were skipped. Drives an honest "{contributing} of {uploaded} files"
   // summary instead of counting uploads as sources.
   const [outcomes, setOutcomes] = useState<FileOutcome[]>([]);
+  // Whole-document-retry advisory is DERIVED from `outcomes` (which the
+  // provenance chips still need), so its dismissal is a separate latch —
+  // cleared by any new extraction run, which recomputes the verdict.
+  const [documentRetryDismissed, setDocumentRetryDismissed] = useState(false);
   /**
    * gate G6: the provider + caps the picker's probe reported. Forwarded into
    * every extraction so the pipeline knows which leg (and which page cap) it is
@@ -218,8 +224,11 @@ export function GenerateFromFileDialog({
   // audit-1 P1-10: stable per-RUN idempotency id. Created at the FIRST
   // submit of a run, REUSED across Try-again retries, cleared only when a
   // run definitively succeeds — so a retry after a post-commit abort
-  // dedupes server-side instead of duplicating the append.
-  const generationIdRef = useRef<string | null>(null);
+  // dedupes server-side instead of duplicating the append. State (not a
+  // ref) because the student stream body is a memo: it must react to the
+  // id being minted/retired. Deliberately NOT cleared by reset() — closing
+  // the dialog on an error keeps the id so the retry-after-reopen dedupes.
+  const [generationId, setGenerationId] = useState<string | null>(null);
 
   function reset() {
     activeAbortRef.current?.abort();
@@ -239,6 +248,7 @@ export function GenerateFromFileDialog({
     setWebFocusHint("");
     setExtractedText(null);
     setIsLowDensity(false);
+    setDocumentRetryDismissed(false);
     setProgress(null);
     setCurrentExtractingFile(null);
     setError(null);
@@ -385,6 +395,9 @@ export function GenerateFromFileDialog({
     const retryWhole = opts?.retryWhole === true;
     setBusy(true);
     setError(null);
+    // A new run recomputes both advisories from fresh outcomes, so a dismissal
+    // from the previous run must not leak into it.
+    setDocumentRetryDismissed(false);
 
     const controller = new AbortController();
     activeAbortRef.current = controller;
@@ -544,94 +557,25 @@ export function GenerateFromFileDialog({
     [outcomes],
   );
 
-  async function handleGenerate() {
+  function handleGenerate() {
     if (!extractedText || submitLock.current || busy) return;
     submitLock.current = true;
     setBusy(true);
     setError(null);
+    // audit-1 P1-10: mint the run's idempotency id HERE (event handler — the
+    // render-time studentBody memo only snapshots it). Reused across
+    // Try-again retries; retired on success in the outcome handler.
+    if (generationId === null) setGenerationId(crypto.randomUUID());
 
-    // Lecturer surface: step 2 morphs into the generating view IN PLACE —
-    // the status strip + Thinking accordion own the POST, the event stream,
+    // Both surfaces: step 2 morphs into the generating view IN PLACE — the
+    // GenerationProgress takeover owns the POST, the NDJSON event stream,
     // and the outcome (the /generating console route is retired). Closing
     // the dialog mid-run aborts the stream (truthful: nothing keeps running
     // hidden); a terminal error keeps the trace and offers Try again.
     // Web mode submits from step 1 (no extraction step) — advance to step 2
     // so the generating view's render gate (`step === 2`) fires.
-    if (!isStudent) {
-      setGenerating(true);
-      setGenRunId((n) => n + 1);
-      return;
-    }
-
-    const controller = new AbortController();
-    activeAbortRef.current = controller;
-    const timer = setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
-
-    if (!generationIdRef.current) generationIdRef.current = crypto.randomUUID();
-
-    try {
-      // Student-only legacy path: the lecturer surface returned above (its
-      // body lives in generationBody for the NDJSON stream).
-      const bodyPayload = {
-        extractedText,
-        questionCount,
-        difficulty,
-        language,
-        // Omit when empty — an explicit [] would trip the schema's min(1).
-        // audit-3 F-F5: provenance is the CONTRIBUTING subset only.
-        ...(contributingPaths.length > 0 ? { sourcePaths: contributingPaths } : {}),
-        // audit-1 P1-10: reused across retries; cleared on success below.
-        generationId: generationIdRef.current,
-      };
-
-      const res = await fetch(target, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(bodyPayload),
-        signal: controller.signal,
-      });
-
-      const body = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        // Student surface: map known error CODES to localized strings (the
-        // raw server messages are English-only); unknown codes fall back to
-        // the server message, then the generic.
-        const codeMap: Record<string, string> = {
-          question_cap_reached: t("errQuestionCap"),
-          rate_limited: t("errRateLimited"),
-          invalid_ai_output: t("errInvalidAi"),
-          ai_unavailable: t("errInvalidAi"),
-        };
-        setError(codeMap[body.error as string] ?? body.message ?? tCommon("errorGeneric"));
-        return;
-      }
-
-      if (isStudent && onGenerated) {
-        onGenerated(Array.isArray(body.questions) ? body.questions : [], {
-          capped: Boolean(body.capped),
-        });
-      } else {
-        toast.success(t("questionsGenerated"));
-        router.refresh();
-      }
-      onOpenChange(false);
-      reset();
-    } catch (err) {
-      if (controller.signal.aborted) return;
-      const aborted = err instanceof Error && err.name === "AbortError";
-      if (aborted) {
-        setError(t("generationDelayed"));
-        router.refresh();
-      } else {
-        setError(tCommon("errorGeneric"));
-      }
-    } finally {
-      clearTimeout(timer);
-      activeAbortRef.current = null;
-      submitLock.current = false;
-      setBusy(false);
-    }
+    setGenerating(true);
+    setGenRunId((n) => n + 1);
   }
 
   /** Body for the lecturer NDJSON stream — built at submit AND at retry, so
@@ -674,17 +618,37 @@ export function GenerateFromFileDialog({
     [webAugment, webFocusHint, quizId, extractedText, questionCount, generationMode, difficulty, formatDistribution, steeringPrompt, language, contributingPaths],
   );
 
+  /** Body for the student practice NDJSON stream (GenerateStudentQuizSchema
+   * is `.strict()` — lecturer-only keys like quizId/mode would 422). The
+   * idempotency id is minted in handleGenerate and read from the ref so a
+   * Try-again remount reuses the SAME run id (append dedupe, audit-1 P1-10).
+   * extractedText is clamped to the same 400k cap as the lecturer body;
+   * provenance is the contributing subset (audit-3 F-F5). */
+  const studentBody = useMemo(
+    () => ({
+      extractedText: (extractedText ?? "").slice(0, MAX_AGGREGATE_CHARS),
+      questionCount,
+      difficulty,
+      language,
+      ...(contributingPaths.length > 0 ? { sourcePaths: contributingPaths } : {}),
+      generationId: generationId ?? undefined,
+    }),
+    [extractedText, questionCount, difficulty, language, contributingPaths, generationId],
+  );
+
   /** Terminal outcomes from the in-dialog stream, reported at EVENT time:
-   * done/saved_refresh_failed mean the save is already committed — refresh
-   * the builder NOW (never at CTA click; the plan's merge-at-done rule) and
-   * reset. error/cancelled keep the dialog open (trace + Try again). */
+   * done/saved_refresh_failed mean the save is already committed — the
+   * lecturer's builder refreshes NOW (never at CTA click; the plan's
+   * merge-at-done rule); the student's rows already merged locally via
+   * `onGenerated` (fired inside the takeover's onDone). error/cancelled
+   * keep the dialog open (trace + Try again). */
   function handleGenerationOutcome(kind: string) {
     if (kind === "done" || kind === "saved_refresh_failed") {
       // Success: retire the run's idempotency id — a deliberate NEXT
       // generation must mint a fresh one (intended appends stay intended).
-      generationIdRef.current = null;
+      setGenerationId(null);
       toast.success(t("questionsGenerated"));
-      router.refresh();
+      if (!isStudent) router.refresh();
       submitLock.current = false;
       setBusy(false);
       return;
@@ -741,12 +705,20 @@ export function GenerateFromFileDialog({
         >
           <div aria-live="polite">
             {error && (
-              <p
-                className="rounded-xl border-[3px] border-destructive/40 bg-destructive/10 px-4 py-2.5 text-xs font-bold text-destructive"
+              <div
+                className="flex items-start gap-2.5 rounded-xl border-[3px] border-destructive/40 bg-destructive/10 px-4 py-2.5 text-xs font-bold text-destructive"
                 role="alert"
               >
-                {error}
-              </p>
+                <p className="min-w-0 flex-1">{error}</p>
+                <button
+                  type="button"
+                  onClick={() => setError(null)}
+                  aria-label={tCommon("dismissAria")}
+                  className="shrink-0 rounded-full p-1 text-destructive/80 transition hover:bg-destructive/15 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
+                >
+                  <X className="h-3.5 w-3.5" aria-hidden />
+                </button>
+              </div>
             )}
           </div>
 
@@ -898,8 +870,8 @@ export function GenerateFromFileDialog({
           {step === 2 && extractedText && generating && (
             <GenerationProgress
               key={genRunId}
-              endpoint="/api/ai/generate-quiz"
-              body={generationBody}
+              endpoint={target}
+              body={isStudent ? studentBody : generationBody}
               onOutcome={handleGenerationOutcome}
               onRetry={handleGenerationRetry}
               onReview={() => {
@@ -907,6 +879,7 @@ export function GenerateFromFileDialog({
                 // handleGenerationOutcome; this closes the dialog shell.
                 onOpenChange(false);
               }}
+              onGenerated={onGenerated}
             />
           )}
 
@@ -1002,9 +975,22 @@ export function GenerateFromFileDialog({
                     <AlertCircle className="size-4" />
                   </div>
                   <div className="min-w-0 space-y-1.5 flex-1">
-                    <p className="text-xs font-bold font-heading text-amber-950 dark:text-amber-200">
-                      {t("partialPagesTitle")}
-                    </p>
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-xs font-bold font-heading text-amber-950 dark:text-amber-200">
+                        {t("partialPagesTitle")}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPartialPages(null);
+                          setRateLimitedPages(null);
+                        }}
+                        aria-label={tCommon("dismissAria")}
+                        className="shrink-0 rounded-full p-1 text-amber-800/80 transition hover:bg-amber-500/20 hover:text-amber-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600 dark:text-amber-300/80 dark:hover:text-amber-200"
+                      >
+                        <X className="h-3.5 w-3.5" aria-hidden />
+                      </button>
+                    </div>
                     <p className="text-2xs font-semibold text-amber-900/90 dark:text-amber-300/90 leading-relaxed">
                       {t("partialPagesDesc", { failed: partialPages.failed, attempted: partialPages.attempted })}
                     </p>
@@ -1034,15 +1020,25 @@ export function GenerateFromFileDialog({
                   re-running it re-sends AND re-bills the whole file. This is
                   deliberately a SEPARATE affordance from the per-page retry
                   above so the cost model is explicit. */}
-              {documentRetryFiles.length > 0 && (
+              {documentRetryFiles.length > 0 && !documentRetryDismissed && (
                 <div className="flex items-start gap-3 rounded-2xl border-[3px] border-amber-500/30 bg-amber-500/10 p-3.5 shadow-[var(--shadow-clay-sm)]">
                   <div className="rounded-xl bg-amber-500/20 p-2 text-amber-700 dark:text-amber-300 shrink-0 mt-0.5">
                     <AlertCircle className="size-4" />
                   </div>
                   <div className="min-w-0 space-y-1.5 flex-1">
-                    <p className="text-xs font-bold font-heading text-amber-950 dark:text-amber-200">
-                      {t("documentRetryTitle")}
-                    </p>
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-xs font-bold font-heading text-amber-950 dark:text-amber-200">
+                        {t("documentRetryTitle")}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setDocumentRetryDismissed(true)}
+                        aria-label={tCommon("dismissAria")}
+                        className="shrink-0 rounded-full p-1 text-amber-800/80 transition hover:bg-amber-500/20 hover:text-amber-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600 dark:text-amber-300/80 dark:hover:text-amber-200"
+                      >
+                        <X className="h-3.5 w-3.5" aria-hidden />
+                      </button>
+                    </div>
                     <p className="text-2xs font-semibold text-amber-900/90 dark:text-amber-300/90 leading-relaxed">
                       {t("documentRetryDesc", {
                         files: documentRetryFiles.map((o) => o.name).join(", "),
@@ -1070,9 +1066,19 @@ export function GenerateFromFileDialog({
                     <AlertCircle className="size-4" />
                   </div>
                   <div className="min-w-0 space-y-1">
-                    <p className="text-xs font-bold font-heading text-amber-950 dark:text-amber-200">
-                      {t("lowDensityTitle")}
-                    </p>
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-xs font-bold font-heading text-amber-950 dark:text-amber-200">
+                        {t("lowDensityTitle")}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setIsLowDensity(false)}
+                        aria-label={tCommon("dismissAria")}
+                        className="shrink-0 rounded-full p-1 text-amber-800/80 transition hover:bg-amber-500/20 hover:text-amber-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600 dark:text-amber-300/80 dark:hover:text-amber-200"
+                      >
+                        <X className="h-3.5 w-3.5" aria-hidden />
+                      </button>
+                    </div>
                     <p className="text-2xs font-semibold text-amber-900/90 dark:text-amber-300/90 leading-relaxed">
                       {t("lowDensityDesc")}
                     </p>
@@ -1387,15 +1393,6 @@ export function GenerateFromFileDialog({
             </div>
           )}
         </div>
-
-        {busy && step === 2 && !generating && (
-          <div className="flex shrink-0 items-center justify-center gap-2.5 rounded-2xl border-[3px] border-primary/30 bg-primary/5 px-4 py-3">
-            <BotAvatar state="thinking" size={32} />
-            <span className="text-sm font-extrabold text-primary">
-              {t("generatingBtn")}
-            </span>
-          </div>
-        )}
 
         <ResponsiveModalFooter className="shrink-0 pt-3 border-t-[3px] border-border/40 flex items-center justify-between sm:justify-between gap-3 bg-card pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           {generating ? null : step === 1 ? (

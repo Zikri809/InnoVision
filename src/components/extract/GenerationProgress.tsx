@@ -85,12 +85,18 @@ const STAGE_ACTIVE_KEY: Record<GenerationStage, string> = {
  * Known error codes → localized sentence copy. Raw English server messages
  * are never rendered for these; unknown codes fall back to the generic
  * failure title + server message. `already_running` keeps its distinct
- * no-retry state.
+ * no-retry state. The student-route codes sit beside the search ones —
+ * the lecturer route never emits them, so the mapping can never mislabel
+ * a lecturer failure.
  */
 const ERROR_CODE_KEY: Record<string, string> = {
   search_unavailable: "errSearchUnavailable",
   search_failed: "errSearchFailed",
   search_corpus_thin: "errSearchThin",
+  question_cap_reached: "errQuestionCap",
+  rate_limited: "errRateLimited",
+  invalid_ai_output: "errInvalidAi",
+  ai_unavailable: "errInvalidAi",
 };
 
 const SUMMARY_THROTTLE_MS = 5_000;
@@ -142,6 +148,7 @@ export function GenerationProgress({
   onOutcome,
   onRetry,
   onReview,
+  onGenerated,
 }: {
   endpoint: string;
   body: Record<string, unknown>;
@@ -153,6 +160,10 @@ export function GenerationProgress({
   onRetry: () => void;
   /** Done CTA — purely navigational at the call site (save already handled). */
   onReview: () => void;
+  /** Student surface only: the done payload's question rows merge into the
+   * editor's local state (the editor owns its questions; no server refresh).
+   * Absent on the lecturer surface (refresh path). */
+  onGenerated?: (questions: unknown[], info: { capped: boolean }) => void;
 }) {
   const t = useTranslations("extract");
   const [liveLine, setLiveLine] = useState("");
@@ -211,10 +222,21 @@ export function GenerationProgress({
       announceThrottledInto(setLiveLine, liveKeyRef, t(STAGE_ACTIVE_KEY[stage])),
     announceTerminal: (kind, doneCount) =>
       announceNowInto(setLiveLine, liveKeyRef, terminalLine(kind, doneCount)),
+    onDone: (_count, payload) => {
+      // Student surface: merge the saved rows locally (the save committed —
+      // the merge is bookkeeping, not a second write). Capped notice mirrors
+      // the legacy path's partial-add honesty.
+      if (onGenerated) {
+        const p = (payload ?? {}) as { questions?: unknown[]; capped?: boolean };
+        onGenerated(Array.isArray(p.questions) ? p.questions : [], {
+          capped: Boolean(p.capped),
+        });
+      }
+      onOutcome("done", null);
+    },
+    onSavedRefreshFailed: () => onOutcome("saved_refresh_failed", null),
     onError: (code) => onOutcome("error", code),
     onCancelled: () => onOutcome("cancelled", null),
-    onDone: () => onOutcome("done", null),
-    onSavedRefreshFailed: () => onOutcome("saved_refresh_failed", null),
   });
 
   /** Localized terminal summary for the aria-live region. `doneCount` comes

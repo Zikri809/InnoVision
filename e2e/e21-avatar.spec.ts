@@ -26,7 +26,7 @@ test("badge uploads avatar → menu shows it; remove → initials return; matric
 
   // Open the account menu — the badge overlays the profile avatar in the
   // modal header (aria-label = media.upload).
-  const trigger = page.getByRole("button", { name: /your innovision account/i });
+  const trigger = page.getByRole("button", { name: /your easy2u account/i });
   await trigger.click();
 
   const badge = page
@@ -90,7 +90,7 @@ test("oversized photo and non-image upload surface inline alerts", async ({
 }) => {
   await registerUser(page, `avatar-err-${stamp}@e2e.test`, "student", "");
 
-  const trigger = page.getByRole("button", { name: /your innovision account/i });
+  const trigger = page.getByRole("button", { name: /your easy2u account/i });
   await trigger.click();
   const badge = page
     .getByRole("dialog")

@@ -9,6 +9,9 @@ import { HandLossMonitor } from "@/lib/gestures/hand-loss";
 import { mapFingersToOption } from "@/lib/gestures/finger-count";
 import {
   BOOT_TIMEOUT_MS,
+  HAND_TRACK_FEEDBACK_INTERVAL_MS,
+  HAND_TRACK_FULL_INTERVAL_MS,
+  HAND_TRACK_IDLE_INTERVAL_MS,
   HOLD_MS,
   MAX_ANSWER_FINGERS,
   PAUSE_AFTER_MS,
@@ -237,6 +240,23 @@ export function GestureLayer({
     blockInputRef.current = Boolean(blockInput);
     onPauseRef.current = onPause;
     stateRef.current = { optionCount, questionId, armed, nextArmed, answerMode, scanning, status };
+
+    // Detection duty cycle (CPU-bound hosts: two MediaPipe landmarkers run
+    // concurrently and the GPU delegate usually falls back to WASM). Phase-
+    // gated on what can CONSUME input frames: FULL while a question is
+    // answerable or the scan countdown runs, FEEDBACK during feedback dwell
+    // (palm-next hold stays live — 66ms keeps the 1.2s hold smooth), IDLE
+    // when nothing can fire (reading/locked states). Calibration stays FULL:
+    // it is the teaching moment — the finger tray must feel live — and it is
+    // brief. Frame-count downstream semantics (stabilizer run lengths,
+    // dropout tolerance) are preserved — only fps changes, and only when no
+    // hold is possible.
+    const tier = armed || scanning || status === "calibrating"
+      ? HAND_TRACK_FULL_INTERVAL_MS
+      : nextArmed
+        ? HAND_TRACK_FEEDBACK_INTERVAL_MS
+        : HAND_TRACK_IDLE_INTERVAL_MS;
+    trackerRef.current?.setFrameInterval?.(tier);
 
     frameHandlerRef.current = (frame) => {
       const s = stateRef.current;

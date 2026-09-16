@@ -230,14 +230,12 @@ export default function DevBotPage() {
               <OcrProgress page={3} total={12} label="Extracting text…" />
             </div>
           </Frame>
-          <Frame label="GenerateFromFileDialog — busy banner (thinking)">
+          {/* The old in-dialog busy banner was retired: every surface
+              generates through the GenerationProgress takeover now (the
+              student drawer included) — see /dev/generation for its states. */}
+          <Frame label="BotAvatar — thinking (the generating takeover lives at /dev/generation)">
             <div className="p-5">
-              <div className="flex items-center justify-center gap-2.5 rounded-2xl border-[3px] border-primary/30 bg-primary/5 px-4 py-3">
-                <BotAvatar state="thinking" size={32} />
-                <span className="text-sm font-extrabold text-primary">
-                  Generating questions…
-                </span>
-              </div>
+              <BotAvatar state="thinking" size={32} />
             </div>
           </Frame>
         </div>

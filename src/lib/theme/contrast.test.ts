@@ -110,3 +110,141 @@ describe("clay token contrast (AX-2, U-CX1..U-CX4)", () => {
     expect(pick("foreground", darkStart)).toBe(DARK.foreground);
   });
 });
+
+/**
+ * Landing hero mock — the gesture-quiz "live demo" card, now the client
+ * component src/components/landing/gesture-demo.tsx (moved out of page.tsx
+ * by the landing redesign; these gates moved with it).
+ *
+ * That mock renders a LIGHT quiz panel in BOTH themes (it reads as a picture of
+ * the product), but its ink was written with theme-flipping tokens. In dark mode
+ * --foreground is #ffedd5 and the panel's own gradient ends at orange-100
+ * #ffedd4 — one hex digit apart, so the question prompt rendered at 1.00:1 and
+ * was effectively invisible. Same class of bug on the "QUESTION 3" eyebrow
+ * (--primary on cream, 2.1:1), the selected "Queue" option (--accent
+ * #60a5fa on the fixed bg-blue-50, 2.34:1), and (redesign regression, caught
+ * by U-CX11) the hovered option (--primary on the fixed bg-orange-50).
+ *
+ * Rule this pins: text sitting on a colour that does NOT flip with the theme
+ * must use fixed palette values, never theme tokens.
+ *
+ * Tailwind v4 palette literals below are the oklch() values from
+ * node_modules/tailwindcss/theme.css converted to sRGB.
+ */
+const TW = {
+  orange50: "#fff7ed",
+  orange100: "#ffedd4",
+  orange700: "#ca3500",
+  orange950: "#441306",
+  blue50: "#eff6ff",
+  blue600: "#155dfc",
+  green200: "#b9f8cf",
+  green700: "#008236",
+} as const;
+
+describe("landing hero mock contrast (light panel, both themes)", () => {
+  const AA = 4.5;
+
+  it("U-CX6 question prompt on the panel gradient meets AA at BOTH gradient stops", () => {
+    // Pins the fix for the invisible-dark-mode-prompt bug: the old
+    // DARK.foreground value must fail here, the new one must pass.
+    expect(contrastRatio(DARK.foreground, TW.orange100)).toBeLessThan(AA);
+    expect(contrastRatio(DARK.foreground, TW.orange50)).toBeLessThan(AA);
+
+    expect(contrastRatio(TW.orange950, TW.orange50)).toBeGreaterThanOrEqual(AA);
+    expect(contrastRatio(TW.orange950, TW.orange100)).toBeGreaterThanOrEqual(AA);
+  });
+
+  it("U-CX7 QUESTION 3 eyebrow meets AA on both gradient stops", () => {
+    // Old value was text-primary: #fb923c (dark) / #f97316 (light).
+    expect(contrastRatio(DARK.primary, TW.orange50)).toBeLessThan(AA);
+    expect(contrastRatio(LIGHT.primary, TW.orange50)).toBeLessThan(AA);
+
+    expect(contrastRatio(TW.orange700, TW.orange50)).toBeGreaterThanOrEqual(AA);
+    expect(contrastRatio(TW.orange700, TW.orange100)).toBeGreaterThanOrEqual(AA);
+  });
+
+  it("U-CX8 selected option text meets AA on the fixed bg-blue-50 row", () => {
+    // Old value was text-accent, which flips to #60a5fa in dark mode.
+    expect(contrastRatio("#60a5fa", TW.blue50)).toBeLessThan(AA);
+
+    expect(contrastRatio(TW.blue600, TW.blue50)).toBeGreaterThanOrEqual(AA);
+  });
+
+  it("U-CX9 'Q3 of 6' counter meets AA on the card in both themes", () => {
+    // Old value was text-primary in both themes; light mode failed on white.
+    expect(contrastRatio(LIGHT.primary, "#ffffff")).toBeLessThan(AA);
+
+    expect(contrastRatio(TW.orange700, "#ffffff")).toBeGreaterThanOrEqual(AA);
+    expect(contrastRatio(DARK.primary, DARK.primaryForeground)).toBeGreaterThanOrEqual(AA);
+  });
+
+  it("U-CX10 verified-row and check-badge pairs stay legible", () => {
+    // The row sits on the dark clay card in dark mode; both runs must pass.
+    expect(contrastRatio("#d6a37a", DARK.primaryForeground)).toBeGreaterThanOrEqual(AA);
+    expect(contrastRatio("#60a5fa", DARK.primaryForeground)).toBeGreaterThanOrEqual(AA);
+    // Check badge glyph on its green-200 disc.
+    expect(contrastRatio(TW.green700, TW.green200)).toBeGreaterThanOrEqual(3);
+  });
+
+  it("U-CX11 drift tripwire: the hero mock's light-panel ink is not a theme token", () => {
+    // The assertions above are only literals; this one fails if the mock is
+    // edited back to a theme-flipping token on the light panel. Scoped to the
+    // gradient-backed header, since the option rows below it sit on bg-card and
+    // are SUPPOSED to flip with the theme.
+    const src = readFileSync(
+      resolve(__dirname, "..", "..", "components", "landing", "gesture-demo.tsx"),
+      "utf8",
+    );
+    // Strip JSX/line comments first: the explanatory comments above the fix
+    // mention the very class names being asserted against.
+    const code = src.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\/[^\n]*/g, "");
+
+    const panelStart = code.indexOf("bg-gradient-to-b from-orange-50");
+    expect(panelStart).toBeGreaterThan(-1);
+    // Header = eyebrow + prompt, i.e. everything before the options block.
+    const optionsStart = code.indexOf("relative mt-5", panelStart);
+    expect(optionsStart).toBeGreaterThan(panelStart);
+    const header = code.slice(panelStart, optionsStart);
+
+    // The light gradient panel must not use theme-flipping ink.
+    expect(header).not.toContain("text-primary");
+    expect(header).not.toContain("text-foreground");
+    expect(header).toContain("text-orange-700");
+    expect(header).toContain("text-orange-950");
+
+    // The selected option sits on a fixed bg-blue-50, so its text must be a
+    // fixed blue — not text-accent, which lightens to #60a5fa in dark mode.
+    const selectedRow = code.slice(code.indexOf("bg-blue-50", optionsStart));
+    expect(selectedRow.slice(0, 120)).not.toContain("text-accent");
+    expect(selectedRow.slice(0, 120)).toContain("text-blue-600");
+
+    // Redesign-era sibling of the bg-blue-50 bug: the HOVERED option sits on
+    // a fixed bg-orange-50, so its ink must be fixed text-orange-700, not
+    // text-primary (which is #fb923c in dark mode — ~2.2:1 on orange-50).
+    const hoveredRow = code.slice(code.indexOf("bg-orange-50", optionsStart));
+    expect(hoveredRow.slice(0, 160)).not.toContain("text-primary");
+    expect(hoveredRow.slice(0, 160)).toContain("text-orange-700");
+  });
+
+  it("U-CX12 the verified row keeps its sentence in a single inline flow", () => {
+    // Regression guard for the wrap scramble: as sibling flex children each
+    // text run wrapped independently, stacking "Hold up" / "fingers" / "Queue!".
+    const src = readFileSync(
+      resolve(__dirname, "..", "..", "components", "landing", "gesture-demo.tsx"),
+      "utf8",
+    );
+    const code = src.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\/[^\n]*/g, "");
+    const rowStart = code.indexOf("{t(\"demoWave\")}");
+    expect(rowStart).toBeGreaterThan(-1);
+    // The sentence lives inside one wrapping <span> — the same lookback
+    // window must contain that wrapper's opener (inline-flex + gap-2), so
+    // the icon and sentence stay one flow instead of stacking as separate
+    // flex items. (The last opener in the window is the inner green badge,
+    // hence a window-level match rather than a "last opener" check.)
+    const before = code.slice(Math.max(0, rowStart - 400), rowStart);
+    expect(before).toMatch(/<span[^>]*inline-flex[^>]*gap-2[^>]*>/);
+    // The demo's status strip is itself one wrapping flex row.
+    expect(code).toContain("flex flex-wrap items-center gap-x-4");
+  });
+});

@@ -258,7 +258,9 @@ export function FaceVerifier({
                   ? t("fullscreenExitTitle")
                   : pausedReason === "focus_lost"
                     ? t("focusLostTitle")
-                    : t("pausedTitle")}
+                    : pausedReason === "hand_lost"
+                      ? t("handLostTitle")
+                      : t("pausedTitle")}
             </p>
             <p className="mx-auto mt-2 max-w-xs text-sm font-semibold text-muted-foreground">
               {status === "recovering"
@@ -267,7 +269,9 @@ export function FaceVerifier({
                   ? t("fullscreenExitBody")
                   : pausedReason === "focus_lost"
                     ? t("focusLostBody")
-                    : t("pausedBody")}
+                    : pausedReason === "hand_lost"
+                      ? t("handLostBody")
+                      : t("pausedBody")}
             </p>
             {/* Anti-replay challenge copy: the recovering overlay names the
                 RANDOM direction (a pre-recorded blink video can't match it).
@@ -288,7 +292,9 @@ export function FaceVerifier({
             </div>
             {status === "paused" && (
               <Button size="lg" className="mt-6 w-full sm:w-auto" onClick={onRecover}>
-                {pausedReason === "face" ? t("recoverBtn") : t("focusLostBtn")}
+                {pausedReason === "face" || pausedReason === "hand_lost"
+                  ? t("recoverBtn")
+                  : t("focusLostBtn")}
               </Button>
             )}
 

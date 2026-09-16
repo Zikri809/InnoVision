@@ -3,11 +3,15 @@
 > Status: Phases 0/1/1.5/2 SHIPPED and critic-gated (3 rounds × 2 subagent
 > critics on the implementation; final verdicts SHIP-WITH-NOTES /
 > GATE-READY-WITH-NOTES; every blocker+major resolved and verified).
+> Phase 3 (student drawer console) SHIPPED 2026-09-16: the student surface
+> generates through the SAME GenerationProgress takeover as the lecturer
+> (the route's stream protocol was already live; the client was flipped to
+> it and Refine-stage parity added — the legacy fetch path is retired).
 > Pre-demo gate: `node scripts/smoke-real-provider.mjs` (§F) — 0 failures
 > against Kenari on 2026-09-05 (deepseek-v4-flash emits no reasoning_content
 > at these prompt sizes → Deep-mode drawer will use its documented degrade
-> until the GLM swap). Remaining phases: 3 (student drawer console), 4 (Deep
-> mode UI), 5 (calc tool), 6 (question cards), 7 (TinyFish topic mode).
+> until the GLM swap). Remaining phases: 4 (Deep mode UI), 5 (calc tool),
+> 6 (question cards), 7 (TinyFish topic mode).
 
 ## Demo-day escape hatches (documented degradation switches)
 
@@ -152,14 +156,17 @@ code + copy.
   (unabortable parse holds the guard ≤120s): documented.
 - Mobile: explicitly stacked/vertical rail spec (lecturers generate on phones).
 
-## Phase 3 — Student console (in-dialog)
+## Phase 3 — Student console (in-dialog) — SHIPPED 2026-09-16
 
-Collapsible single panel above the footer; step-2 controls collapse into a
-compact "generating view" (88–94dvh vertical budget is the real constraint).
-Merge happens at the `done` event, NOT at CTA click (drawer can be dismissed
-via handle — CTA-time merge produces invisible success after a paid generation).
-Fast default effort (no Deep on student side — asymmetry accepted and
-documented: students get speed, lecturers get the opt-in spectacle).
+Shipped as the SAME GenerationProgress takeover as the lecturer surface (not
+the originally sketched collapsible panel): one streamed generating view to
+maintain, desktop + mobile drawer alike. Merge still happens at the `done`
+event, NOT at CTA click (drawer can be dismissed via handle — CTA-time merge
+produces invisible success after a paid generation); the student editor
+merges rows locally via `onGenerated` instead of `router.refresh`. The
+student route's stream protocol was already live — the client flip, a
+Refine-stage parity emission, and the retired legacy fetch path complete it.
+Deep mode remains lecturer-only (Phase 4); students keep the fast default.
 
 ## Phase 4 — Deep mode (lecturer-only, opt-in)
 
@@ -327,7 +334,9 @@ deltas + TinyFish envelope).
 
 ## Accepted tradeoffs (decided, not open)
 
-1. Spectacle asymmetry: students get fast+light console, lecturers get Deep.
+1. Spectacle asymmetry narrowed to Deep mode only: both surfaces share the
+   same streamed takeover console (Phase 3); lecturers alone get the opt-in
+   Deep effort (Phase 4).
 2. Rate-limit quota burns on cancel.
 3. "Computed" badge is session-ephemeral (no persistence migration).
 4. Regenerate-question stays fast/legacy.

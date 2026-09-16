@@ -43,13 +43,12 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { copyFor } from "@/lib/notifications/copy";
+import { entryIds, splitEntries, type Entry } from "@/lib/notifications/digest";
 import { resolveNotificationLink } from "@/lib/notifications/link";
 import { useNotifications } from "@/lib/notifications/use-notifications";
 import { EmptyState } from "@/components/ui/empty-state";
 import { NotificationBellRingingIllustration } from "@/components/illustrations/notification-bell-ringing";
 import {
-  DIGEST_TYPES,
-  PINNED_TYPES,
   type NotificationItem,
   type NotificationType,
 } from "@/lib/notifications/types";
@@ -108,46 +107,6 @@ function relativeTime(iso: string, locale: string): string {
   return rtf.format(-Math.round(diffMs / 2_592_000_000), "month");
 }
 
-interface DigestGroup {
-  type: NotificationType;
-  count: number;
-  newest: NotificationItem;
-}
-
-interface Entry {
-  key: string;
-  item?: NotificationItem;
-  group?: DigestGroup;
-}
-
-function splitEntries(items: NotificationItem[]): {
-  pinned: NotificationItem[];
-  recent: Entry[];
-} {
-  const pinned = items.filter((n) => n.readAt == null && PINNED_TYPES.has(n.type));
-  const pinnedIds = new Set(pinned.map((n) => n.id));
-  const recent: Entry[] = [];
-  const groups = new Map<string, DigestGroup>();
-  for (const n of items) {
-    if (pinnedIds.has(n.id)) continue;
-    if (n.readAt == null && DIGEST_TYPES.has(n.type)) {
-      const entity = str(n.payload.class_id) ?? str(n.payload.quiz_id) ?? n.id;
-      const gk = `${n.type}:${entity}`;
-      const existing = groups.get(gk);
-      if (existing) {
-        existing.count += 1;
-      } else {
-        const group: DigestGroup = { type: n.type, count: 1, newest: n };
-        groups.set(gk, group);
-        recent.push({ key: gk, group });
-      }
-    } else {
-      recent.push({ key: n.id, item: n });
-    }
-  }
-  return { pinned, recent };
-}
-
 export function NotificationBell({
   userId,
   role,
@@ -197,7 +156,12 @@ export function NotificationBell({
 
   const homeHref = role === "lecturer" ? "/lecturer/classes" : "/student/classes";
 
-  async function openItem(item: NotificationItem) {
+  async function openItem(entry: Entry) {
+    // A grouped row stands for every event behind it — read them ALL. Marking
+    // only the rendered `newest` left its siblings unread, so the badge barely
+    // moved and the row re-rendered as a smaller group right after the tap.
+    const ids = entryIds(entry);
+    const item = entry.item ?? entry.group!.newest;
     // Optimistic close BEFORE navigation (plan W1 sheet-close-on-navigate):
     // the sheet must never hang open over the destination.
     setOpen(false);
@@ -222,13 +186,13 @@ export function NotificationBell({
         .maybeSingle();
       if (!data) {
         // Dead target (deleted quiz): stop drawing attention, land somewhere safe.
-        void markRead([item.id]);
+        void markRead(ids);
         router.push(homeHref);
         return;
       }
     }
 
-    void markRead([item.id]);
+    void markRead(ids);
     router.push(href);
   }
 
@@ -250,7 +214,7 @@ export function NotificationBell({
     const Icon = iconFor(item.type, item.payload);
     const copy = copyFor(item.type, item.payload);
     const unread = item.readAt == null;
-    const count = entry.group?.count ?? 1;
+    const count = entry.group?.items.length ?? 1;
 
     const title =
       entry.group && count > 1
@@ -264,7 +228,7 @@ export function NotificationBell({
       <li key={entry.key} className="min-w-0">
         <button
           type="button"
-          onClick={() => void openItem(item)}
+          onClick={() => void openItem(entry)}
           className="flex w-full items-start gap-2.5 p-2.5 text-left transition-colors hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-ring"
         >
           <Icon
@@ -370,7 +334,16 @@ export function NotificationBell({
               </span>
             )}
           </PopoverTrigger>
-          <PopoverContent className="w-[380px] max-w-[calc(100vw-1.5rem)]">
+          {/* Height cap is REQUIRED for the internal scroll below: without a
+              bounded height the list's `min-h-0 flex-1` has no ceiling to
+              shrink against, so the panel grew past the viewport and the last
+              rows were unreachable (measured 1801px tall in a 720px window).
+              `--available-height` is Base UI's own anchor-to-viewport space, so
+              the panel self-limits on short windows instead of hardcoding one;
+              the 32rem cap stops it becoming a full-height wall on tall ones.
+              The var carries a fallback so a missing var degrades to the fixed
+              cap rather than to no cap at all. */}
+          <PopoverContent className="flex max-h-[min(var(--available-height,32rem),32rem)] w-[380px] max-w-[calc(100vw-1.5rem)] flex-col">
             <div className="flex items-center gap-2 pb-3">
               <span className="font-heading text-lg font-bold">
                 {t("panel.title")}

@@ -225,141 +225,143 @@ export function ClassesPageClient({
         </div>
       </section>
 
-      {/* ── Create + list ── */}
-      <section>
-        <div className="mb-4 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <h2 className="font-heading text-xl font-semibold">{t("myClasses")}</h2>
-            {activeClasses.length > 0 && (
-              <span className="rounded-full bg-primary/15 px-2.5 py-0.5 text-xs font-extrabold text-primary">
-                {activeClasses.length}
-              </span>
-            )}
-          </div>
+      {/* ── Create + list (bento: create card left, classes right ≥lg) ── */}
+      <section className="grid items-start gap-6 lg:grid-cols-[340px_1fr]">
+        {/* Desktop sticky sidebar create card (≥lg). Hidden <lg where the
+            header button + drawer own the flow. */}
+        <Card className="hidden lg:block lg:sticky lg:top-6">
+          <CardHeader>
+            <div className="mb-1 grid h-11 w-11 place-items-center rounded-2xl bg-orange-100 text-primary dark:bg-orange-950/50">
+              <Plus className="h-5 w-5" aria-hidden />
+            </div>
+            <CardTitle>{t("createCardTitle")}</CardTitle>
+            <CardDescription>
+              {t("createCardSubtitle")}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>{createForm("desktop")}</CardContent>
+        </Card>
 
-          <div className="flex items-center gap-2">
-            {/* Create trigger <lg (≥lg has the sticky sidebar card). The
-                dock's center "+" also creates classes via the action sheet —
-                this header button is the direct single-purpose shortcut that
-                the e2e helper's "New Class" exact-match relies on. */}
-            <ResponsiveModal open={mobileCreateOpen} onOpenChange={(open) => { setMobileCreateOpen(open); if (!open) setError(null); }}>
-              <ResponsiveModalTrigger asChild>
-                <Button
-                  size="xs"
-                  className="hit-slop h-8 max-sm:h-8 gap-1.5 rounded-xl px-3 text-xs font-bold lg:hidden shadow-[0_2px_0_var(--primary-deep)]"
-                >
-                  <Plus className="h-3.5 w-3.5" aria-hidden />
-                  <span>{t("newClassBtn")}</span>
-                </Button>
-              </ResponsiveModalTrigger>
-              <ResponsiveModalContent className="sm:max-w-sm">
-                <ResponsiveModalHeader className="flex-row items-center gap-3.5 pb-5 text-left">
-                  <div className="grid size-12 shrink-0 place-items-center rounded-[15px] bg-orange-100 text-primary dark:bg-orange-950/50">
-                    <SquarePen className="h-6 w-6" aria-hidden />
-                  </div>
-                  <div className="min-w-0">
-                    <ResponsiveModalTitle>{t("createCardTitle")}</ResponsiveModalTitle>
-                    <ResponsiveModalDescription>
-                      {t("createCardSubtitle")}
-                    </ResponsiveModalDescription>
-                  </div>
-                </ResponsiveModalHeader>
-                <div className="pt-2">
-                  {createForm(
-                    "mobile",
-                    <ResponsiveModalClose asChild>
-                      <Button type="button" variant="outline" className="h-12 flex-1 rounded-[16px] text-base">
-                        {t("cancelBtn")}
-                      </Button>
-                    </ResponsiveModalClose>,
-                  )}
-                </div>
-              </ResponsiveModalContent>
-            </ResponsiveModal>
+        <div>
+          <div className="mb-4 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <h2 className="font-heading text-xl font-semibold">{t("myClasses")}</h2>
+              {activeClasses.length > 0 && (
+                <span className="rounded-full bg-primary/15 px-2.5 py-0.5 text-xs font-extrabold text-primary">
+                  {activeClasses.length}
+                </span>
+              )}
+            </div>
 
-            {archivedCount > 0 && activeClasses.length === 0 && (
-              <Link
-                href="/lecturer/classes/archived"
-                className="inline-flex items-center gap-1.5 rounded-full border-[3px] border-border bg-card px-3.5 py-1 text-xs font-extrabold text-muted-foreground shadow-[var(--shadow-clay-sm)] transition-[transform,border-color,color] duration-180 hover:-translate-y-0.5 hover:border-primary hover:text-primary active:translate-y-0 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/40"
-              >
-                <Archive className="h-3.5 w-3.5" aria-hidden />
-                <span>{t("viewArchivedClasses", { count: archivedCount })}</span>
-                <ArrowRight className="h-3 w-3" aria-hidden />
-              </Link>
-            )}
-          </div>
-        </div>
-
-        {activeClasses.length === 0 ? (
-          <EmptyState
-            illustration={EmptyBoxIllustration}
-            title={t("emptyTitle")}
-            subtitle={t("emptySubtitle")}
-            className="rounded-[28px] border-[3px] bg-card/60 px-8 py-16"
-            action={
-              archivedCount > 0 ? (
-                <p className="mt-4 text-xs font-semibold text-muted-foreground">
-                  <Link
-                    href="/lecturer/classes/archived"
-                    className="font-extrabold text-primary underline underline-offset-4 hover:text-primary/80 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/40"
+            <div className="flex items-center gap-2">
+              {/* Create trigger <lg (≥lg has the sticky sidebar card). The
+                  dock's center "+" also creates classes via the action sheet —
+                  this header button is the direct single-purpose shortcut that
+                  the e2e helper's "New Class" exact-match relies on. */}
+              <ResponsiveModal open={mobileCreateOpen} onOpenChange={(open) => { setMobileCreateOpen(open); if (!open) setError(null); }}>
+                <ResponsiveModalTrigger asChild>
+                  <Button
+                    size="xs"
+                    className="hit-slop h-8 max-sm:h-8 gap-1.5 rounded-xl px-3 text-xs font-bold lg:hidden shadow-[0_2px_0_var(--primary-deep)]"
                   >
-                    {t("viewArchivedClasses", { count: archivedCount })} →
-                  </Link>
-                </p>
-              ) : null
-            }
-          />
-        ) : (
-          <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr))]">
-            {activeClasses.map((c) => (
-              <li key={c.id}>
+                    <Plus className="h-3.5 w-3.5" aria-hidden />
+                    <span>{t("newClassBtn")}</span>
+                  </Button>
+                </ResponsiveModalTrigger>
+                <ResponsiveModalContent className="sm:max-w-sm">
+                  <ResponsiveModalHeader className="flex-row items-center gap-3.5 pb-5 text-left">
+                    <div className="grid size-12 shrink-0 place-items-center rounded-[15px] bg-orange-100 text-primary dark:bg-orange-950/50">
+                      <SquarePen className="h-6 w-6" aria-hidden />
+                    </div>
+                    <div className="min-w-0">
+                      <ResponsiveModalTitle>{t("createCardTitle")}</ResponsiveModalTitle>
+                      <ResponsiveModalDescription>
+                        {t("createCardSubtitle")}
+                      </ResponsiveModalDescription>
+                    </div>
+                  </ResponsiveModalHeader>
+                  <div className="pt-2">
+                    {createForm(
+                      "mobile",
+                      <ResponsiveModalClose asChild>
+                        <Button type="button" variant="outline" className="h-12 flex-1 rounded-[16px] text-base">
+                          {t("cancelBtn")}
+                        </Button>
+                      </ResponsiveModalClose>,
+                    )}
+                  </div>
+                </ResponsiveModalContent>
+              </ResponsiveModal>
+
+              {archivedCount > 0 && activeClasses.length === 0 && (
                 <Link
-                  href={`/lecturer/classes/${c.id}`}
-                  className="group flex items-center gap-3.5 rounded-[22px] border-[3px] border-border bg-card p-4 shadow-[var(--shadow-clay)] transition-[transform,box-shadow] duration-200 hover:-translate-y-1 hover:shadow-[8px_10px_0_rgba(194,65,12,0.16)] active:translate-y-[3px] active:shadow-[0_2px_0_rgba(194,65,12,0.16)] focus-visible:outline-[3px] focus-visible:outline-ring focus-visible:outline-offset-2"
+                  href="/lecturer/classes/archived"
+                  className="inline-flex items-center gap-1.5 rounded-full border-[3px] border-border bg-card px-3.5 py-1 text-xs font-extrabold text-muted-foreground shadow-[var(--shadow-clay-sm)] transition-[transform,border-color,color] duration-180 hover:-translate-y-0.5 hover:border-primary hover:text-primary active:translate-y-0 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/40"
                 >
-                  <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-primary/15 font-heading text-lg font-bold text-primary">
-                    {c.title.trim().charAt(0).toUpperCase()}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-heading text-base font-semibold leading-snug">
-                      {c.title}
+                  <Archive className="h-3.5 w-3.5" aria-hidden />
+                  <span>{t("viewArchivedClasses", { count: archivedCount })}</span>
+                  <ArrowRight className="h-3 w-3" aria-hidden />
+                </Link>
+              )}
+            </div>
+          </div>
+
+          {activeClasses.length === 0 ? (
+            <EmptyState
+              illustration={EmptyBoxIllustration}
+              title={t("emptyTitle")}
+              subtitle={t("emptySubtitle")}
+              className="rounded-[28px] border-[3px] bg-card/60 px-8 py-16"
+              action={
+                archivedCount > 0 ? (
+                  <p className="mt-4 text-xs font-semibold text-muted-foreground">
+                    <Link
+                      href="/lecturer/classes/archived"
+                      className="font-extrabold text-primary underline underline-offset-4 hover:text-primary/80 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/40"
+                    >
+                      {t("viewArchivedClasses", { count: archivedCount })} →
+                    </Link>
+                  </p>
+                ) : null
+              }
+            />
+          ) : (
+            <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr))]">
+              {activeClasses.map((c) => (
+                <li key={c.id}>
+                  <Link
+                    href={`/lecturer/classes/${c.id}`}
+                    className="group flex items-center gap-3.5 rounded-[22px] border-[3px] border-border bg-card p-4 shadow-[var(--shadow-clay)] transition-[transform,box-shadow] duration-200 hover:-translate-y-1 hover:shadow-[8px_10px_0_rgba(194,65,12,0.16)] active:translate-y-[3px] active:shadow-[0_2px_0_rgba(194,65,12,0.16)] focus-visible:outline-[3px] focus-visible:outline-ring focus-visible:outline-offset-2"
+                  >
+                    <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-primary/15 font-heading text-lg font-bold text-primary">
+                      {c.title.trim().charAt(0).toUpperCase()}
                     </span>
-                    <span className="mt-0.5 flex items-center gap-2 text-xs font-extrabold text-muted-foreground">
-                      <span>{t("quizCount", { count: c.quizCount })}</span>
-                      {/* The join code is the lecturer's share-out — keep it
-                          one glance away, mono + tracking as before. */}
-                      <span className="rounded-full border-2 border-border bg-muted px-2 font-mono text-[10.5px] font-bold tracking-wider">
-                        {c.join_code}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-heading text-base font-semibold leading-snug">
+                        {c.title}
+                      </span>
+                      <span className="mt-0.5 flex items-center gap-2 text-xs font-extrabold text-muted-foreground">
+                        <span>{t("quizCount", { count: c.quizCount })}</span>
+                        {/* The join code is the lecturer's share-out — keep it
+                            one glance away, mono + tracking as before. */}
+                        <span className="rounded-full border-2 border-border bg-muted px-2 font-mono text-[10.5px] font-bold tracking-wider">
+                          {c.join_code}
+                        </span>
                       </span>
                     </span>
-                  </span>
-                  <span
-                    aria-hidden
-                    className="grid h-8 w-8 shrink-0 place-items-center rounded-[11px] border-[3px] border-border bg-card text-primary transition-transform duration-200 group-hover:translate-x-0.5"
-                  >
-                    <ArrowRight className="h-4 w-4" />
-                  </span>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
+                    <span
+                      aria-hidden
+                      className="grid h-8 w-8 shrink-0 place-items-center rounded-[11px] border-[3px] border-border bg-card text-primary transition-transform duration-200 group-hover:translate-x-0.5"
+                    >
+                      <ArrowRight className="h-4 w-4" />
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </section>
-
-      {/* Desktop sticky sidebar create card (≥lg). Hidden <lg where the
-          header button + drawer own the flow. */}
-      <Card className="hidden lg:block lg:sticky lg:top-6">
-        <CardHeader>
-          <div className="mb-1 grid h-11 w-11 place-items-center rounded-2xl bg-orange-100 text-primary">
-            <Plus className="h-5 w-5" aria-hidden />
-          </div>
-          <CardTitle>{t("createCardTitle")}</CardTitle>
-          <CardDescription>
-            {t("createCardSubtitle")}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>{createForm("desktop")}</CardContent>
-      </Card>
 
       {/* ── Mobile create drawer ──
           One form, one place. The header "New Class" button (above) is the

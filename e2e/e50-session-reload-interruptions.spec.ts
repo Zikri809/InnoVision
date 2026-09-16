@@ -13,6 +13,7 @@ import {
   recoverFromPause,
   setFacePeriodic,
   waitForPauseOverlay,
+  waitForHandLossPauseOverlay,
   waitForFlaggedOverlay,
   completeCalibration,
   playGestureSequence,
@@ -269,7 +270,11 @@ test.describe("E50 — Mid-state Session Reload Interruptions", () => {
       { present: false, fingers: 0, holdMs: 10_500 },
     ]);
     await pauseRes;
-    await waitForPauseOverlay(studentPage);
+    // The hand-loss pause sets the `hand_lost` reason — the overlay shows
+    // "Hands left the camera", not the face-mismatch copy. The recovery
+    // button/flow is the same blink flow either way.
+    await waitForHandLossPauseOverlay(studentPage);
+    await expect(studentPage.getByText("Face check paused", { exact: true })).toHaveCount(0);
 
     // Direct answer returns 409
     const directAnswerBefore = await studentPage.request.post(`/api/sessions/${sessionId}/answer`, {
@@ -282,6 +287,10 @@ test.describe("E50 — Mid-state Session Reload Interruptions", () => {
 
     // 6. Assert pause overlay restores immediately
     await waitForPauseOverlay(studentPage);
+    // NOTE: after a reload the CLIENT re-seeds pausedReason to its "face"
+    // default (the pause cause is not persisted server-side), so the restored
+    // overlay legitimately shows the face copy even though the pause was a
+    // hand loss. Pinning that here guards the default-seed behavior.
     await expect(studentPage.getByText("Face check paused", { exact: true })).toBeVisible();
     await expect(studentPage.getByRole("button", { name: "Blink to recover", exact: true })).toBeVisible();
 

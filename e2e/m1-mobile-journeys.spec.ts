@@ -122,7 +122,7 @@ test.describe("m1 — mobile student journey", () => {
     const email = `${UNIQUE}-acct@student.innovision.test`;
     await fastRegisterUser(page, email, "student", process.env.LECTURER_INVITE_CODE!);
 
-    await page.getByRole("button", { name: /your innovision account/i }).click();
+    await page.getByRole("button", { name: /your easy2u account/i }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
     // Toggles relocated into the sheet <sm (plan W1).

@@ -191,17 +191,21 @@ test.describe("E24 — network failure UX", () => {
     );
     await dialog.getByRole("button", { name: /generate quiz/i }).click();
 
-    // Inline failure alert (role=alert INSIDE the dialog — generate failures
-    // never toast; only success does) + NO rows landed + retry possible.
-    await expect(dialog.getByRole("alert")).toBeVisible({ timeout: 20_000 });
+    // Terminal failure inside the GenerationProgress takeover (e2d is the
+    // reference for this flow — the old role=alert strip was retired with the
+    // generating console): failure headline + Try-again CTA INSIDE the dialog
+    // (generate failures never toast; only success does) + NO rows landed.
+    // SR announcement rides the takeover's polite live region (no role=alert).
+    await expect(
+      dialog.getByText(/generation failed|penjanaan gagal/i).first(),
+    ).toBeVisible({ timeout: 20_000 });
+    await expect(dialog.getByRole("button", { name: /try again|cuba lagi/i })).toBeVisible();
     await expect(page.locator("ul > li")).toHaveCount(0);
-    await expect(dialog.getByRole("button", { name: /generate quiz/i })).toBeEnabled({
-      timeout: 10_000,
-    });
 
-    // Recovery: unroute → the same click succeeds against the mock AI.
+    // Recovery: unroute → "Try again" (same takeover, remounted) succeeds
+    // against the mock AI.
     await page.unroute(/\/api\/student-quizzes\/[\w-]+\/generate$/);
-    await dialog.getByRole("button", { name: /generate quiz/i }).click();
+    await dialog.getByRole("button", { name: /try again|cuba lagi/i }).click();
     await expect(
       page.locator("li", { hasText: /velocity/i }).first(),
     ).toBeVisible({ timeout: 45_000 });

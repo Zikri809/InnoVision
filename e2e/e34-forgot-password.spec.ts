@@ -152,5 +152,5 @@ test("new reset pages render BM copy after language toggle", async ({ page }) =>
 test("confirm page renders a single brand link (no duplicate logo)", async ({ page }) => {
   await page.goto("/reset-password/confirm");
   // Accessible name concatenates the "IV" mark + wordmark, so match substring.
-  await expect(page.getByRole("link", { name: /InnoVision/ })).toHaveCount(1);
+  await expect(page.getByRole("link", { name: /Easy2U/ })).toHaveCount(1);
 });

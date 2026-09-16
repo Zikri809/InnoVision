@@ -777,6 +777,16 @@ export async function waitForPauseOverlay(page: Page) {
   await expect(page.getByText("Face check paused", { exact: true })).toBeVisible({ timeout: 15_000 });
 }
 
+/**
+ * Wait for the hand-loss paused overlay. The hand-loss pause sets the
+ * `hand_lost` paused reason, so the overlay shows "Hands left the camera"
+ * — NOT the face-mismatch copy ("Face check paused"). Recovery is the same
+ * blink flow ("Blink to recover" button).
+ */
+export async function waitForHandLossPauseOverlay(page: Page) {
+  await expect(page.getByText("Hands left the camera", { exact: true })).toBeVisible({ timeout: 15_000 });
+}
+
 /** Click "Blink to recover", then trigger blink + head turn to recover from paused. */
 export async function recoverFromPause(page: Page) {
   const btn = page.getByRole("button", { name: "Blink to recover", exact: true });
@@ -785,8 +795,12 @@ export async function recoverFromPause(page: Page) {
   // runRecovery calls waitForBlink, then the anti-replay head-turn challenge
   // — resolve both via the fake.
   await triggerFaceLiveness(page);
-  // The paused overlay clears once recovered.
+  // The paused overlay clears once recovered. The overlay stack carries BOTH
+  // copies (face + hand-lost branches render different titles for the same
+  // BlockingOverlay), so wait on whichever title is showing — the first
+  // visible one — by awaiting both to be hidden.
   await expect(page.getByText("Face check paused", { exact: true })).toBeHidden({ timeout: 10_000 });
+  await expect(page.getByText("Hands left the camera", { exact: true })).toBeHidden({ timeout: 10_000 });
 }
 
 /** Wait for the flagged overlay (3 fails → lecturer decision). */

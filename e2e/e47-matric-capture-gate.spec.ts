@@ -105,7 +105,7 @@ test.describe("E47 — AU-2 matric capture gate", () => {
     // The 0038 name claim surfaced: the app-shell menu trigger shows only
     // initials; the full name (trigger-mapped from the OIDC `name` claim)
     // renders in the profile dialog — open it and assert.
-    await page.getByRole("button", { name: "Your InnoVision account" }).click();
+    await page.getByRole("button", { name: "Your Easy2U account" }).click();
     await fast(page.getByText("SSO E47 Student")).toBeVisible();
     await page.keyboard.press("Escape");
 

@@ -17,7 +17,7 @@ import {
   type ChatMessage,
   type ChatResult,
 } from "@/lib/ai/client";
-import { generateQuiz, type GenerateQuizResult } from "@/lib/ai/quiz-prompt";
+import { generateQuiz, type GenerateQuizLibEvent, type GenerateQuizResult } from "@/lib/ai/quiz-prompt";
 import { aiQuizToRows, GENERATION_BUDGET_MS } from "@/lib/ai/quiz-schema";
 import { nativeExtract } from "@/lib/extract/native";
 import {
@@ -295,6 +295,9 @@ async function runAiGeneration(
   opts: {
     signal?: AbortSignal;
     onDelta?: Parameters<typeof chatStream>[0]["onDelta"];
+    /** Milestone observer (stream mode): forwards the lib's validation-retry
+     * marker so the stream can emit the Refine stage (lecturer-route parity). */
+    onLibEvent?: (ev: GenerateQuizLibEvent) => void;
   } = {},
 ): Promise<GenerateQuizResult> {
   const ai = createAiClient();
@@ -331,6 +334,7 @@ async function runAiGeneration(
     formatDistribution: "mixed",
     steeringPrompt: undefined,
     deadlineMs: ctx.deadlineMs,
+    onEvent: opts.onLibEvent,
   });
 }
 
@@ -552,12 +556,19 @@ function streamGeneration(ctx: GenerationContext, request: Request): Response {
         }
 
         send({ type: "stage", stage: "draft", status: "start" });
+        let refineActive = false;
         const result = await runAiGeneration(ctx, prepared.text, {
           signal: internal.signal,
           onDelta: (d) => {
             deltasFlowing = true;
             if (d.reasoning) send({ type: "reasoning", text: d.reasoning });
             if (d.content) send({ type: "content_delta", text: d.content });
+          },
+          onLibEvent: (ev) => {
+            if (ev.type === "attempt_retry") {
+              refineActive = true;
+              send({ type: "stage", stage: "refine", status: "start" });
+            }
           },
         });
         if (internal.signal.aborted) {
@@ -569,6 +580,11 @@ function streamGeneration(ctx: GenerationContext, request: Request): Response {
           return;
         }
         send({ type: "stage", stage: "draft", status: "done" });
+        // A retry pass happened: close the Refine stage so the rail doesn't
+        // spin forever on the success screen (truth rule — it DID refine).
+        if (refineActive) {
+          send({ type: "stage", stage: "refine", status: "done" });
+        }
 
         // Save is a silent phase again — re-arm the heartbeat.
         deltasFlowing = false;

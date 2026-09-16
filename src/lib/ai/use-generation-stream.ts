@@ -103,8 +103,10 @@ export function useGenerationStream({
    * `done` carries the question count from the payload (the component's
    * state hasn't committed yet when this fires synchronously). */
   announceTerminal: (kind: TerminalKind, doneCount?: number) => void;
-  /** Save committed + payload fetched. */
-  onDone?: (count: number) => void;
+  /** Save committed + payload fetched. `payload` is the route's terminal
+   * body (lecturer `{quiz,questions}`; student `{questions,capped}`) —
+   * surfaces that merge locally (student editor) consume it here. */
+  onDone?: (count: number, payload: unknown) => void;
   /** Save committed but the refetch failed — retry must NOT be offered. */
   onSavedRefreshFailed?: () => void;
   /** Terminal failure (already_running included). */
@@ -343,7 +345,7 @@ export function useGenerationStream({
                 setDoneCount(count);
                 setPhase("done");
                 cbRef.current.announceTerminal("done", count);
-                cbRef.current.onDone?.(count);
+                cbRef.current.onDone?.(count, ev.payload);
                 break;
               }
             }
