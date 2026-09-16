@@ -258,3 +258,34 @@ matric capture gate E2E.
 4. Set a new password → confirm → lands signed-in on `/dashboard`.
 5. Sign out, sign in with the NEW password → success; with the OLD password →
    failure.
+
+**2026-09-16 — Resend custom SMTP verified (hosted) + local mirror shipped**
+- HOSTED (project yjzezkvfbeknknzaqymw): Dashboard → Authentication → SMTP
+  relays through Resend (`smtp.resend.com:465`, user `resend`, password =
+  the account's `RESEND_KEY`), sender **Easy2U <noreply@zikr-i.uk>** (the
+  zikr-i.uk domain is verified at Resend), minimum interval 60 s. Live proof:
+  a recovery request for `ropelast5@gmail.com` from the dashboard produced a
+  Gmail-delivered email "from Easy2U <noreply@zikr-i.uk>", mailed-by
+  send.zikr-i.uk, TLS standard, subject "Reset your password" (default
+  template). Delivery therefore works to ANY recipient — the earlier probe
+  500s were an undeliverable no-MX recipient, not an allowlist.
+- LOCAL MIRROR: `supabase/config.toml [auth.email.smtp]` now carries the same
+  relay/sender contract with `pass = "env(RESEND_KEY)"` (documented in
+  `.env.local.example`; the key lives in `.env.local`). Verified live:
+  `supabase start` with the key exported → local `/auth/v1/recover` for a
+  real Gmail address returned 200 in ~4 s with a matching GoTrue no-error
+  log; without the key the stack still BOOTS but every send fails loud
+  (GoTrue 500) — deliberate, and CI is unaffected because the suite never
+  reads email (e34 pins the UI/no-oracle contract; the hermetic happy-path
+  seam remains impossible per the admin-link verdict above).
+- Relay semantics worth remembering: Resend ACCEPTS a message at SMTP time
+  and bounces undeliverable recipients ASYNC (verified with a raw
+  `smtplib.SMTP_SSL` probe), so a 200 from `/recover` means "relayed", not
+  "delivered"; a synchronous GoTrue 500 means the relay itself was
+  unreachable/unauthenticated.
+- Manual-check status: step 1 ✓ (SMTP configured, template renders — the
+  ropelast5 email above IS the hosted happy-path email hop). Steps 2–5 (the
+  full app UI journey in hosted mode: forgot form → generic copy → email
+  click-through → confirm → new-password sign-in) are NOT yet
+  click-through-verified in this session and remain open; e34 already pins
+  the UI contract hermetically.

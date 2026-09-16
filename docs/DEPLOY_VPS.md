@@ -162,6 +162,35 @@ Dashboard → **Authentication → Emails / SMTP**. The built-in sender is rate
 limited and unsuitable for real traffic. Configure a real SMTP provider
 (host/port/user/password/from-address), then send a test.
 
+**Configured (2026-09-16) — Resend relay, verified working.** The hosted
+project sends through Resend's SMTP relay:
+
+| Setting | Value |
+|---|---|
+| Sender | `Easy2U <noreply@zikr-i.uk>` (zikr-i.uk is verified at Resend) |
+| Host / Port | `smtp.resend.com` / `465` (implicit TLS) |
+| Username / Password | `resend` / the account `RESEND_KEY` (in `.env.local`, never committed) |
+| Minimum interval per user | 60 s |
+
+Verified live: dashboard "Send password recovery" for a real Gmail user
+delivered "from Easy2U <noreply@zikr-i.uk>", mailed-by send.zikr-i.uk. Note
+the relay's semantics: Resend ACCEPTS a message at SMTP time and bounces
+undeliverable recipients asynchronously, so a 200 from `/auth/v1/recover`
+means "relayed", not "delivered"; a synchronous GoTrue 500 ("Error sending
+recovery email") means the relay was unreachable/unauthenticated.
+
+**Local mirror:** `supabase/config.toml [auth.email.smtp]` carries the same
+relay/sender contract with `pass = "env(RESEND_KEY)"`. The supabase CLI
+auto-loads `.env.local` from the repo root before parsing the config, so a
+plain `npx supabase start` already resolves it. Without the key the local
+stack still boots but every auth-email send fails loud (GoTrue 500) —
+deliberate; CI and the Playwright suite never read email.
+
+⚠️ Do NOT run the Playwright e2e suite with `RESEND_KEY` resolvable: e34's
+recovery requests would relay to fake addresses and hard-bounce against your
+production sending domain (Resend suspends accounts on sustained bounce
+rates). Keyless, the sends 500 and the suite stays green.
+
 Local dev sets `enable_confirmations = false` (`supabase/config.toml`); the
 hosted project's equivalent is **Authentication → Providers → Email →
 "Confirm email"**.

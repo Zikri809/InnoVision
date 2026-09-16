@@ -27,10 +27,77 @@ jwt_expiry = 3600
 enable_signup = true
 enable_anonymous_sign_ins = false
 
+# ── Custom SMTP: mirror of the HOSTED project's Resend sender ────────────────
+# The hosted project (Dashboard → Authentication → SMTP) relays auth email
+# through Resend's SMTP relay with the zikr-i.uk domain verified at Resend.
+# Values below mirror that panel exactly:
+#   sender    Easy2U <noreply@zikr-i.uk>
+#   relay     smtp.resend.com:465, user "resend", password = Resend API key
+#   interval  hosted pins "Minimum interval per user" to 60s; local keeps the
+#             CLI default (1s, GOTRUE_SMTP_MAX_FREQUENCY) so the Playwright
+#             suite can request recovery for the SAME account twice within a
+#             minute (e34). App-layer budgets (RESET_* in reset.ts) are the
+#             anti-abuse control that is tested; GoTrue's min-interval is a
+#             hosted hardening knob, not part of the delivery contract.
+#
+# RESEND_KEY is resolved by the supabase CLI itself, which auto-loads
+# `.env.local` from the repo root before parsing this file (the same
+# `env(...)` interpolation the upstream template ships for SendGrid) — no
+# manual export is needed. The key lives in `.env.local`; the example
+# documents it in `.env.local.example`.
+#
+# ▶ WITHOUT RESEND_KEY in the environment (fresh clone, CI): `pass` stays the
+#   literal string "env(RESEND_KEY)", GoTrue's relay auth fails, and every
+#   auth-email send returns 500 "Error sending recovery email". That is the
+#   deliberate fail-loud contract — a broken mail path must look broken. The
+#   Playwright suite does not need real delivery (the PKCE recovery email
+#   cannot be read hermetically; e34 pins the UI/no-oracle contract instead),
+#   so CI stays green: the reset action swallows the GoTrue 500 as generic
+#   success by design.
+#
+# Because zikr-i.uk is a VERIFIED Resend domain, delivery works to any
+# deliverable recipient on both hosted and this mirror (Resend still applies
+# its own suppression list / bounce handling). Relay semantics: Resend
+# ACCEPTS a message at SMTP time and bounces UNDELIVERABLE recipients
+# asynchronously (verified with a raw smtplib.SMTP_SSL probe to
+# smtp.resend.com:465), so `recover` for e.g. an @example.com address still
+# returns 200 on both hosted and local — a synchronous GoTrue 500 there means
+# the relay itself was unreachable/unauthenticated, not that the recipient
+# was refused.
+#
+# ⚠️ LOCAL E2E: do NOT run the Playwright suite with RESEND_KEY resolvable.
+# e34 fires ~4 recovery requests per run for fake @e2e.test/@innovision.test
+# addresses; through the real relay those are guaranteed hard bounces against
+# your PRODUCTION sending domain, and sustained bounce rates get Resend
+# accounts suspended. Without the key every send 500s, which the reset action
+# swallows as generic success — the suite is green either way. (In CI the key
+# is never present: `supabase start` runs before .env.local is written.)
+[auth.email.smtp]
+enabled = true
+host = "smtp.resend.com"
+port = 465
+user = "resend"
+pass = "env(RESEND_KEY)"
+admin_email = "noreply@zikr-i.uk"
+sender_name = "Easy2U"
+
 [auth.email]
 enable_signup = true
 double_confirm_changes = true
 enable_confirmations = false
+
+# Inbucket (local mail catcher) UI. `[inbucket]` is the deprecated spelling —
+# CLI ≥2.113 warns and renames it; use `[local_smtp]` directly. The UI port
+# moved off the default 54324 because that port sits inside a Windows/Hyper-V
+# excluded-port range on this machine (netsh interface ipv4 show
+# excludedportrange protocol=tcp), which fails the container bind; 54370 is
+# outside every reserved range here. Only the UI port moves — with the Resend
+# mirror above enabled, GoTrue relays through Resend and this catcher simply
+# sits idle (its SMTP listener would only receive mail if the mirror were
+# disabled).
+[local_smtp]
+enabled = true
+port = 54370
 
 [studio]
 enabled = true
