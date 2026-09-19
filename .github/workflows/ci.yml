@@ -33,7 +33,7 @@ jobs:
   workflow-lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v4
         with:
@@ -57,7 +57,7 @@ jobs:
   checks:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v4
         with:
@@ -111,7 +111,7 @@ jobs:
       # (>= 24 chars) per environment and rotate it.
       LECTURER_INVITE_CODE: ci-invite-code-7f3a9c2e4b8d1f6a0e5c7b3a
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v4
         with:
@@ -302,7 +302,7 @@ jobs:
       # Same CI-only invite code as the `e2e` job (see its comment there).
       LECTURER_INVITE_CODE: ci-invite-code-7f3a9c2e4b8d1f6a0e5c7b3a
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v4
         with:
@@ -421,7 +421,7 @@ jobs:
       FACE_MOCK_ENABLED: "1"
       INSIGHTFACE_BASE_URL: "http://localhost:8000"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v4
         with:
