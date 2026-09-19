@@ -193,19 +193,28 @@ async function main() {
   record("D5 student sees 0 question rows (empty quiz)", (s1Questions0 ?? []).length === 0);
 
   // ── D19: A adds 3 questions ──────────────────────────────────
+  // 0054 revoked SELECT on base `questions` from `authenticated`, so a direct
+  // `.insert().select("correct_index")` now fails: PostgREST's RETURNING needs
+  // the column privilege 0054 deliberately withholds (the answer key is an
+  // oracle). The real authoring path is the SECURITY-DEFINER `append_question`
+  // RPC, which returns the row without needing any base-table grant — so the
+  // harness goes through exactly the surface the app uses.
   const questions = [
-    { order_index: 0, type: "mcq", prompt: "Q1", options: ["a", "b"], correct_index: 0 },
-    { order_index: 1, type: "mcq", prompt: "Q2", options: ["x", "y", "z"], correct_index: 2 },
-    { order_index: 2, type: "true_false", prompt: "Q3", options: ["True", "False"], correct_index: 1 },
+    { type: "mcq", prompt: "Q1", options: ["a", "b"], correct_index: 0 },
+    { type: "mcq", prompt: "Q2", options: ["x", "y", "z"], correct_index: 2 },
+    { type: "true_false", prompt: "Q3", options: ["True", "False"], correct_index: 1 },
   ];
   const added = [];
   for (const q of questions) {
-    const { data, error } = await clientA
-      .from("questions")
-      .insert({ quiz_id: quiz1.id, ...q })
-      .select("id, order_index, correct_index")
-      .single();
-    assertNoError("insert question", { error });
+    const { data, error } = await clientA.rpc("append_question", {
+      p_quiz_id: quiz1.id,
+      p_type: q.type,
+      p_prompt: q.prompt,
+      p_options: q.options,
+      p_correct_index: q.correct_index,
+      p_explanation: "",
+    });
+    assertNoError("append question", { error });
     added.push(data);
   }
   record("D19 A adds 3 questions", added.length === 3, JSON.stringify(added.map((a) => a.order_index)));
@@ -219,14 +228,18 @@ async function main() {
     `S1 sees ${(s1Questions ?? []).length} (expect 0)`);
 
   // ── D6: owner reads questions → correct_index present ────────
+  // The owner-predicated VIEW is the only readable path for a lecturer
+  // (0054 revoked the base-table column). This is the migrated surface the
+  // app itself uses (builder/results/export), so the probe exercises the real
+  // read path rather than a grant that no longer exists.
   const { data: aQuestions, error: aQErr } = await clientA
-    .from("questions")
+    .from("lecturer_questions_view")
     .select("id, correct_index")
     .eq("quiz_id", quiz1.id)
     .order("order_index");
   record("D6 owner reads questions with correct_index", !aQErr && (aQuestions ?? []).length === 3
     && aQuestions.every((q) => typeof q.correct_index === "number"),
-    JSON.stringify(aQuestions ?? []));
+    aQErr?.message ?? JSON.stringify(aQuestions ?? []));
 
   // ── D20: lecturer B cannot read A's quiz or questions ────────
   const { data: bQuiz } = await clientB.from("quizzes").select("id").eq("id", quiz1.id).maybeSingle();
@@ -255,7 +268,7 @@ async function main() {
   record("D19 reorder_questions succeeds", !reorderErr, reorderErr?.message ?? "");
 
   const { data: reordered } = await clientA
-    .from("questions")
+    .from("lecturer_questions_view")
     .select("id, order_index")
     .eq("quiz_id", quiz1.id)
     .order("order_index");
@@ -290,7 +303,7 @@ async function main() {
   );
   const appendErrors = appendResults.filter((r) => r.error);
   const { data: concQuestions } = await clientA
-    .from("questions")
+    .from("lecturer_questions_view")
     .select("order_index")
     .eq("quiz_id", concQ.id);
   const indexes = (concQuestions ?? []).map((q) => q.order_index).sort((a, b) => a - b);

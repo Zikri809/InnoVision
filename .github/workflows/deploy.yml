@@ -283,16 +283,27 @@ jobs:
 
       # AI_MARK_WORKER_* provision the 0057 sweep's POST target INTO THE
       # DATABASE (Vault / app.settings) — `sweep_ai_marks()` runs in Postgres
-      # and cannot read the VPS env file. Both are optional with sane defaults:
-      # the URL defaults to SITE_ORIGIN + the worker path, and the key defaults
-      # to SUPABASE_SERVICE_ROLE_KEY (the route's own fallback), so a standard
-      # deploy needs no new secret. Set the AI_MARK_WORKER_KEY secret only to
-      # use a rotatable, marking-specific bearer.
+      # and cannot read the VPS env file. The URL defaults to SITE_ORIGIN + the
+      # worker path.
+      #
+      # SUPABASE_SERVICE_ROLE_KEY is passed here for exactly one reason: it is
+      # the DEFAULT bearer the worker route accepts (the route falls back to it
+      # when AI_MARK_WORKER_KEY is unset), so the sweep must be given the same
+      # value. This job ALREADY holds SUPABASE_ACCESS_TOKEN and
+      # SUPABASE_DB_PASSWORD, which can ALTER/DROP every table — the
+      # service-role key is strictly LESS privileged than credentials this
+      # runner already carries, so this does not widen the CI trust boundary.
+      # It is still never exposed to the VPS by this job.
+      #
+      # Set the AI_MARK_WORKER_KEY secret only to use a rotatable,
+      # marking-specific bearer instead (then also set it in SOPS prod.env.enc
+      # so the route reads the same value).
       - name: Push migrations + verify
         env:
           SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SITE_ORIGIN: ${{ vars.SITE_ORIGIN }}
           AI_MARK_WORKER_URL: ${{ vars.AI_MARK_WORKER_URL }}
           AI_MARK_WORKER_KEY: ${{ secrets.AI_MARK_WORKER_KEY }}

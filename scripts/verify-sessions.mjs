@@ -221,14 +221,24 @@ async function main() {
   }
 
   async function addQuestions(quizId, questions) {
+    // 0054 revoked SELECT on base `questions` from `authenticated` (the answer
+    // key is a pre-reveal oracle), so `.insert().select("correct_index")` no
+    // longer works. `append_question` is the SECURITY-DEFINER authoring RPC the
+    // app itself uses; it returns the row (id/order_index/correct_index/options)
+    // without needing any base-table grant.
     const rows = [];
-    for (let i = 0; i < questions.length; i++) {
-      const { data, error } = await clientA
-        .from("questions")
-        .insert({ quiz_id: quizId, order_index: i, ...questions[i] })
-        .select("id, order_index, correct_index, options")
-        .single();
-      assertNoError("insert question", { error });
+    for (const q of questions) {
+      const { data, error } = await clientA.rpc("append_question", {
+        p_quiz_id: quizId,
+        p_type: q.type,
+        p_prompt: q.prompt,
+        p_options: q.options,
+        p_correct_index: q.correct_index ?? null,
+        p_correct_indices: q.correct_indices ?? null,
+        p_answer_key: q.answer_key ?? null,
+        p_explanation: q.explanation ?? "",
+      });
+      assertNoError("append question", { error });
       rows.push(data);
     }
     return rows;
@@ -283,7 +293,7 @@ async function main() {
   {
     const sessionId = assessmentQuiz ? (await clientS1.from("quiz_sessions").select("id")
       .eq("quiz_id", assessmentQuiz.id).eq("student_id", studentS1.id).single()).data.id : null;
-    const qs = (await clientA.from("questions").select("id, correct_index")
+    const qs = (await clientA.from("lecturer_questions_view").select("id, correct_index")
       .eq("quiz_id", assessmentQuiz.id).order("order_index")).data;
     const q1 = qs[0];
 
@@ -375,7 +385,7 @@ async function main() {
       `keys=${Array.isArray(starRows) && starRows.length ? Object.keys(starRows[0]).join(",") : "?"}`);
 
     const { data: ownerRows } = await clientA
-      .from("questions")
+      .from("lecturer_questions_view")
       .select("id, correct_index")
       .eq("quiz_id", quiz.id)
       .order("order_index");
@@ -466,7 +476,7 @@ async function main() {
     await publish(pQuiz.id);
     const pStart = await clientS1.rpc("start_quiz_session", { p_quiz_id: pQuiz.id });
     const pSession = pStart.data.session.id;
-    const pQ = (await clientA.from("questions").select("id, correct_index").eq("quiz_id", pQuiz.id).order("order_index")).data[0];
+    const pQ = (await clientA.from("lecturer_questions_view").select("id, correct_index").eq("quiz_id", pQuiz.id).order("order_index")).data[0];
     const pAns = await clientS1.rpc("answer_question", {
       p_session_id: pSession, p_question_id: pQ.id, p_selected_index: pQ.correct_index,
     });
@@ -524,7 +534,7 @@ async function main() {
     await publish(quiz.id);
     const start = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
     const sessionId = start.data.session.id;
-    const qs = (await clientA.from("questions").select("id, correct_index").eq("quiz_id", quiz.id).order("order_index")).data;
+    const qs = (await clientA.from("lecturer_questions_view").select("id, correct_index").eq("quiz_id", quiz.id).order("order_index")).data;
 
     // Answer one question correctly while still in time.
     await clientS1.rpc("answer_question", {
@@ -566,7 +576,7 @@ async function main() {
     // S1 starts + answers + submits.
     const start = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
     const s1Session = start.data.session.id;
-    const qs = (await clientA.from("questions").select("id, correct_index").eq("quiz_id", quiz.id).order("order_index")).data;
+    const qs = (await clientA.from("lecturer_questions_view").select("id, correct_index").eq("quiz_id", quiz.id).order("order_index")).data;
     await clientS1.rpc("answer_question", {
       p_session_id: s1Session, p_question_id: qs[0].id, p_selected_index: qs[0].correct_index,
     });
@@ -606,7 +616,7 @@ async function main() {
     await publish(quiz.id);
     const s1 = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
     const s1Session = s1.data.session.id;
-    const qs = (await clientA.from("questions").select("id, correct_index").eq("quiz_id", quiz.id).order("order_index")).data;
+    const qs = (await clientA.from("lecturer_questions_view").select("id, correct_index").eq("quiz_id", quiz.id).order("order_index")).data;
     await clientS1.rpc("answer_question", {
       p_session_id: s1Session, p_question_id: qs[0].id, p_selected_index: qs[0].correct_index,
     });
@@ -713,7 +723,7 @@ async function main() {
     const sA = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
     await clientS1.rpc("submit_session", { p_session_id: sA.data.session.id });
     const sB = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
-    const qs = (await clientA.from("questions").select("id, correct_index").eq("quiz_id", quiz.id).order("order_index")).data;
+    const qs = (await clientA.from("lecturer_questions_view").select("id, correct_index").eq("quiz_id", quiz.id).order("order_index")).data;
     await clientS1.rpc("answer_question", {
       p_session_id: sB.data.session.id, p_question_id: qs[0].id, p_selected_index: qs[0].correct_index,
     });

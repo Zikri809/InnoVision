@@ -76,7 +76,12 @@ SUPABASE_ACCESS_TOKEN="${SUPABASE_ACCESS_TOKEN:-}"
 # Both are OPTIONAL: when the URL cannot be determined the step warns and skips
 # (marking stays operator-invokable, per DEPLOY_VPS.md). It never fails the
 # deploy — the schema and image are still correct.
-AI_MARK_WORKER_URL="${AI_MARK_WORKER_URL:-${SITE_ORIGIN:-}}"
+# The URL default MUST append the worker path: defaulting to a bare SITE_ORIGIN
+# would POST the claimed batch to the homepage, which returns HTML with a 200 —
+# the sweep would look healthy while no answer was ever marked. Strip any
+# trailing slash from the origin first so the join cannot produce `//api/...`.
+_ai_mark_origin="${SITE_ORIGIN%/}"
+AI_MARK_WORKER_URL="${AI_MARK_WORKER_URL:-${_ai_mark_origin:+${_ai_mark_origin}/api/internal/ai-mark-sweep}}"
 AI_MARK_WORKER_KEY="${AI_MARK_WORKER_KEY:-${SUPABASE_SERVICE_ROLE_KEY:-}}"
 
 # Expected post-push invariants, from DEPLOY_VPS.md §3.1 steps 5-6.

@@ -223,8 +223,11 @@ async function main() {
     longCloneErr?.message ?? `${longClone?.title.length} chars, ends: "${longClone?.title.slice(-12)}"`);
 
   // AP2-D2 — question fidelity.
-  const { data: srcQuestions } = await clientA.from("questions").select("*").eq("quiz_id", srcQuiz).order("order_index");
-  const { data: cloneQuestions } = await clientA.from("questions").select("*").eq("quiz_id", cloneId).order("order_index");
+  // Read through `lecturer_questions_view`: 0054 revoked SELECT on base
+  // `questions` from `authenticated`, and this probe needs the answer-key /
+  // image columns, so the owner-predicated view is the only readable path.
+  const { data: srcQuestions } = await clientA.from("lecturer_questions_view").select("*").eq("quiz_id", srcQuiz).order("order_index");
+  const { data: cloneQuestions } = await clientA.from("lecturer_questions_view").select("*").eq("quiz_id", cloneId).order("order_index");
   const fidelity =
     cloneQuestions?.length === 3 &&
     cloneQuestions.every((q, i) =>
