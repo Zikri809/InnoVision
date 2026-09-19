@@ -513,6 +513,28 @@ describe("QT-1 — student domain rejects multi_select (v1 scope)", () => {
     );
     expect(res.status).toBe(400);
   });
+
+  it("QT1-11 POST/PATCH a short_text body → 400 (D-31/D12 scope)", async () => {
+    const ctx = makeStudentQuizContext();
+    fakeHolder.current = ctx.client;
+    const { questions, questionRoute } = await importAll();
+    const shortText = {
+      type: "short_text",
+      prompt: "Explain photosynthesis.",
+      options: [] as string[],
+      answerKey: "Mentions light energy and chlorophyll.",
+    };
+
+    const posted = await questions.POST(req(shortText), {
+      params: Promise.resolve({ id: ctx.quizId }),
+    });
+    expect(posted.status).toBe(400);
+
+    const patched = await questionRoute.PATCH(req(shortText), {
+      params: Promise.resolve({ id: ctx.quizId, questionId: ctx.q1 }),
+    });
+    expect(patched.status).toBe(400);
+  });
 });
 
 describe("H3-ATOM-F1 — scoped replace preserves concurrently-added rows", () => {

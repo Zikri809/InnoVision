@@ -79,7 +79,7 @@ export async function loadQuizInsights(quizId: string): Promise<
       .from("lecturer_session_view")
       // GET-envelope columns MINUS verify_nonce (the student replay token).
       .select(
-        "id, quiz_id, student_id, mode, status, score, started_at, submitted_at, last_activity_at, face_unavailable_at, face_exempt, face_fail_streak, focus_pause_count, attempt",
+        "id, quiz_id, student_id, mode, status, score, started_at, submitted_at, last_activity_at, face_unavailable_at, face_exempt, face_fail_streak, focus_pause_count, attempt, pending_count",
       )
       .eq("quiz_id", quizId)
       // Representative-session policy (export route's feed): started_at DESC,
@@ -88,8 +88,10 @@ export async function loadQuizInsights(quizId: string): Promise<
       .order("id", { ascending: false })
       .limit(RESULTS_SESSION_LIMIT),
     getClassRoster(supabase, quiz.class_id),
+    // 0054 revoked the key columns from `authenticated`; the owner-predicated
+    // view is the only readable path.
     supabase
-      .from("questions")
+      .from("lecturer_questions_view")
       .select("id, order_index, type, prompt, options, correct_index, correct_indices, explanation")
       .eq("quiz_id", quizId)
       .order("order_index", { ascending: true }),
@@ -117,13 +119,18 @@ export async function loadQuizInsights(quizId: string): Promise<
     selected_index: number | null;
     selected_indices: number[] | null;
     is_correct: boolean;
+    answer_text: string | null;
+    skipped: boolean;
+    mark_status: string;
   };
   const { data: answerRows, error: answersError } =
     sessionIds.length === 0
       ? { data: [] as InsightAnswerRow[], error: null as null }
       : await supabase
           .from("lecturer_answers_view")
-          .select("session_id, question_id, selected_index, selected_indices, is_correct")
+          .select(
+            "session_id, question_id, selected_index, selected_indices, is_correct, answer_text, skipped, mark_status",
+          )
           .in("session_id", sessionIds)
           .limit(ANSWERS_LIMIT);
   if (answersError) {

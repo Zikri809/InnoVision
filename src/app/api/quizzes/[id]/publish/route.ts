@@ -49,8 +49,10 @@ export async function POST(request: Request, { params }: Params) {
   }
 
   // Route pre-check for a clean 409; the DB trigger enforces it as backstop.
+  // 0054 revoked the base table from `authenticated`, so the count reads the
+  // owner-predicated view.
   const { count, error: countError } = await supabase
-    .from("questions")
+    .from("lecturer_questions_view")
     .select("id", { count: "exact", head: true })
     .eq("quiz_id", id);
 

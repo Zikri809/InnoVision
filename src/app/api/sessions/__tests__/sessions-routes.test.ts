@@ -354,7 +354,7 @@ describe("I-S8 — cross-origin start/answer/submit → 403 invalid_origin", () 
 });
 
 describe("I-S9 — answer rate limit → 429", () => {
-  it("returns 429 after seeding the answer bucket", async () => {
+  it("returns 429 after seeding the per-user answer bucket (60/min, audit-4 M7)", async () => {
     const ctx = playContext();
     ctx.client.seedSession({
       id: "00000000-0000-4000-8000-0000000000aa",
@@ -363,9 +363,29 @@ describe("I-S9 — answer rate limit → 429", () => {
       mode: "practice",
       status: "active",
     });
-    _seedRateLimit(`answer:${STUDENT_ID}`, 120);
+    _seedRateLimit(`answer:${STUDENT_ID}`, 60);
     const res = await answer.POST(req({ questionId: QUESTION_D, selectedIndex: 0 }), {
       params: Promise.resolve({ id: "00000000-0000-4000-8000-0000000000aa" }),
+    });
+    expect(res.status).toBe(429);
+    expect((await res.json()).error).toBe("rate_limited");
+  });
+
+  it("returns 429 after seeding the per-session secondary bucket (30/min, audit-4 M7)", async () => {
+    const ctx = playContext();
+    const sessionId = "00000000-0000-4000-8000-0000000000aa";
+    ctx.client.seedSession({
+      id: sessionId,
+      quiz_id: QUIZ_C,
+      student_id: STUDENT_ID,
+      mode: "practice",
+      status: "active",
+    });
+    // The per-user bucket has headroom (0 hits); only the per-session key is
+    // saturated — the secondary check must still reject.
+    _seedRateLimit(`answer-session:${sessionId}:${STUDENT_ID}`, 30);
+    const res = await answer.POST(req({ questionId: QUESTION_D, selectedIndex: 0 }), {
+      params: Promise.resolve({ id: sessionId }),
     });
     expect(res.status).toBe(429);
     expect((await res.json()).error).toBe("rate_limited");
@@ -1053,5 +1073,169 @@ describe("QT1 — multi-select answers", () => {
     );
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ recorded: true });
+  });
+});
+
+/**
+ * R13/S11/B5-1 (PLAN_GESTURE_OFF_RICH_TYPES): the two NEW answer shapes —
+ * `skipped` and `answerText` — plus the shape-exclusivity rule the shared
+ * schema owns. The SQL semantics (pending ledger queue, skip's terminal
+ * assessment behaviour) are pinned by the live verify harness; these prove
+ * the ROUTE passes the fields through and maps the new error code.
+ */
+describe("I-SHORT — short_text + skip answer paths", () => {
+  const SHORT_Q = "00000000-0000-4000-8000-0000000000d1";
+  const SESSION_ID = "00000000-0000-4000-8000-0000000000aa";
+
+  function shortContext(mode: "practice" | "assessment" = "assessment") {
+    const ctx = playContext();
+    ctx.client.seedQuestion({
+      id: SHORT_Q,
+      quiz_id: QUIZ_C,
+      order_index: 4,
+      type: "short_text",
+      prompt: "Explain photosynthesis.",
+      options: [],
+      correct_index: null,
+      answer_key: "Light energy is converted to chemical energy.",
+      max_score: 1,
+      explanation: null,
+    });
+    ctx.client.seedSession({
+      id: SESSION_ID,
+      quiz_id: QUIZ_C,
+      student_id: STUDENT_ID,
+      mode,
+      status: "active",
+    });
+    return ctx;
+  }
+
+  it("SHORT-1 assessment short_text → keyless recorded ack (never is_correct)", async () => {
+    const ctx = shortContext("assessment");
+    const res = await answer.POST(
+      req({ questionId: SHORT_Q, answerText: "plants make sugar" }),
+      { params: Promise.resolve({ id: SESSION_ID }) },
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ recorded: true });
+    const row = ctx.client.tables["session_answers"]!.find((a) => a.question_id === SHORT_Q);
+    expect(row?.mark_status).toBe("pending");
+    expect(row?.answer_text).toBe("plants make sugar");
+  });
+
+  it("SHORT-2 practice short_text → needs_review row, no AI spend (D12)", async () => {
+    const ctx = shortContext("practice");
+    const res = await answer.POST(
+      req({ questionId: SHORT_Q, answerText: "plants make sugar" }),
+      { params: Promise.resolve({ id: SESSION_ID }) },
+    );
+    expect(res.status).toBe(200);
+    const row = ctx.client.tables["session_answers"]!.find((a) => a.question_id === SHORT_Q);
+    expect(row?.mark_status).toBe("needs_review");
+  });
+
+  it("SHORT-3 answerText is TRIMMED at the Zod boundary", async () => {
+    const ctx = shortContext();
+    await answer.POST(
+      req({ questionId: SHORT_Q, answerText: "   spaced   " }),
+      { params: Promise.resolve({ id: SESSION_ID }) },
+    );
+    const row = ctx.client.tables["session_answers"]!.find((a) => a.question_id === SHORT_Q);
+    expect(row?.answer_text).toBe("spaced");
+  });
+
+  it("SHORT-4 an empty/whitespace answerText → 400 (Zod min(1))", async () => {
+    shortContext();
+    for (const answerText of ["", "   "]) {
+      const res = await answer.POST(
+        req({ questionId: SHORT_Q, answerText }),
+        { params: Promise.resolve({ id: SESSION_ID }) },
+      );
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it("SHORT-5 over-500 answerText → 400 (input cap)", async () => {
+    shortContext();
+    const res = await answer.POST(
+      req({ questionId: SHORT_Q, answerText: "x".repeat(501) }),
+      { params: Promise.resolve({ id: SESSION_ID }) },
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("SHORT-6 invalid_answer_text from the RPC → 400 (typed, not 503)", async () => {
+    const ctx = shortContext();
+    ctx.client.rpcResult = { data: { error: "invalid_answer_text" }, error: null };
+    const res = await answer.POST(
+      req({ questionId: SHORT_Q, answerText: "ok" }),
+      { params: Promise.resolve({ id: SESSION_ID }) },
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("invalid_answer_text");
+  });
+
+  it("SHORT-7 assessment skip → recorded ack + a graded 0 row", async () => {
+    const ctx = shortContext("assessment");
+    const res = await answer.POST(
+      req({ questionId: SHORT_Q, skipped: true }),
+      { params: Promise.resolve({ id: SESSION_ID }) },
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ recorded: true });
+    const row = ctx.client.tables["session_answers"]!.find((a) => a.question_id === SHORT_Q);
+    expect(row?.skipped).toBe(true);
+    expect(row?.mark_status).toBe("marked");
+    expect(row?.mark_score).toBe(0);
+  });
+
+  it("SHORT-8 practice skip → is_correct:false feedback, no key", async () => {
+    shortContext("practice");
+    const res = await answer.POST(
+      req({ questionId: SHORT_Q, skipped: true }),
+      { params: Promise.resolve({ id: SESSION_ID }) },
+    );
+    expect(res.status).toBe(200);
+    // mapAnswerPayload re-keys snake→camel; correct_index:null passes through.
+    expect(await res.json()).toEqual({ isCorrect: false, correctIndex: null });
+  });
+
+  it("SHORT-9 skip + an answer field → 400 (shape exclusivity)", async () => {
+    shortContext();
+    const res = await answer.POST(
+      req({ questionId: SHORT_Q, skipped: true, answerText: "both" }),
+      { params: Promise.resolve({ id: SESSION_ID }) },
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("invalid_body");
+  });
+
+  it("SHORT-10 answerText + selectedIndex → 400 (shape exclusivity)", async () => {
+    shortContext();
+    const res = await answer.POST(
+      req({ questionId: SHORT_Q, answerText: "text", selectedIndex: 0 }),
+      { params: Promise.resolve({ id: SESSION_ID }) },
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("SHORT-11 skipped:false alone is rejected by the RPC (not the schema)", async () => {
+    // `skipped:false` is the ONE present field, so the shape-exclusive Zod arm
+    // parses it; the RPC's short_text branch then requires answer text and
+    // rejects the payload-less row with `invalid_answer_text`. audit-4 M13:
+    // the old `[200,400]` disjunction passed on EITHER outcome, guarding
+    // nothing — pin the actual contract: the route FORWARDS, the RPC decides,
+    // and the rejection maps to 400 (not a 503 fall-through).
+    const ctx = shortContext();
+    const res = await answer.POST(
+      req({ questionId: SHORT_Q, skipped: false }),
+      { params: Promise.resolve({ id: SESSION_ID }) },
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("invalid_answer_text");
+    // The schema did NOT reject it client-side — the RPC is the authority.
+    expect(ctx.client.rpcCalls.some((c) => c.name === "answer_question")).toBe(true);
+    expect(ctx.client.rpcResult.error).toBeNull();
   });
 });

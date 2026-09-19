@@ -58,13 +58,18 @@ export const dynamic = "force-dynamic";
  * server-side with the detail and reported to the caller as booleans.
  */
 
-/** The five schedules created across 0019/0022/0030/0042. */
+/** The seven schedules created across 0019/0022/0030/0042/0059. */
 const EXPECTED_JOBS = [
   "innovision-retention",
   "innovision-quiz-autoclose",
   "innovision-notifications",
   "innovision-flag-verify-silence",
   "innovision-incident-prune",
+  // 0059: the AI marking pair. Both are expected even where pg_net is
+  // unavailable — the sweep job still claims (its POST is best-effort) and
+  // the escalate job is the only thing that resolves exhausted rows.
+  "innovision-ai-mark-sweep",
+  "innovision-ai-mark-escalate",
 ] as const;
 
 // A probe is polled by uptime monitors; 30/min per IP is far above any real

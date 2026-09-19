@@ -78,6 +78,20 @@
 #   ALLOWED_HOSTS                  <your-host>
 #   VPS_HOST / VPS_USER            target host + deploy user (not root, ideally)
 #   VPS_PORT                       optional, defaults to 22
+#   AI_MARK_WORKER_URL             optional; defaults to
+#                                  <SITE_ORIGIN>/api/internal/ai-mark-sweep
+#
+# Secrets (one more, both optional):
+#   AI_MARK_WORKER_KEY             optional; the bearer /api/internal/ai-mark-sweep
+#                                  accepts. Defaults to SUPABASE_SERVICE_ROLE_KEY,
+#                                  so the standard deploy sets nothing here.
+#                                  Set it only for a rotatable, marking-specific
+#                                  key (then also set the same value on the VPS
+#                                  app env, since the route reads it there).
+#
+# The `migrate` job writes AI_MARK_WORKER_URL/KEY into the DATABASE (Vault /
+# app.settings) because `sweep_ai_marks()` runs in Postgres and cannot read the
+# VPS env file. See deploy/sync-migrations.sh and docs/DEPLOY_VPS.md §3.1 step 5b.
 #
 # Runtime secrets (ZAI_API_KEY, SUPABASE_SERVICE_ROLE_KEY, …) are NOT here —
 # they live in SOPS on the VPS. See deploy/secrets/README.md and
@@ -267,11 +281,21 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # AI_MARK_WORKER_* provision the 0057 sweep's POST target INTO THE
+      # DATABASE (Vault / app.settings) — `sweep_ai_marks()` runs in Postgres
+      # and cannot read the VPS env file. Both are optional with sane defaults:
+      # the URL defaults to SITE_ORIGIN + the worker path, and the key defaults
+      # to SUPABASE_SERVICE_ROLE_KEY (the route's own fallback), so a standard
+      # deploy needs no new secret. Set the AI_MARK_WORKER_KEY secret only to
+      # use a rotatable, marking-specific bearer.
       - name: Push migrations + verify
         env:
           SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SITE_ORIGIN: ${{ vars.SITE_ORIGIN }}
+          AI_MARK_WORKER_URL: ${{ vars.AI_MARK_WORKER_URL }}
+          AI_MARK_WORKER_KEY: ${{ secrets.AI_MARK_WORKER_KEY }}
         run: bash deploy/sync-migrations.sh
 
       - name: Summary

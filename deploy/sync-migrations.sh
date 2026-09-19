@@ -54,8 +54,33 @@ SUPABASE_PROJECT_REF="${SUPABASE_PROJECT_REF:-}"
 SUPABASE_DB_PASSWORD="${SUPABASE_DB_PASSWORD:-}"
 SUPABASE_ACCESS_TOKEN="${SUPABASE_ACCESS_TOKEN:-}"
 
+# AI marking worker provisioning (0057's sweep_ai_marks POST target).
+#
+# WHY THESE ARE DB SETTINGS AND NOT APP ENV: `sweep_ai_marks()` runs INSIDE
+# Postgres and reads `app.settings.ai_mark_worker_url` + the Vault secret
+# `ai_mark_worker_key`. It cannot read the app container's `.env.local`, so
+# putting them only in SOPS would leave the sweep finding NULL: it would claim
+# rows and never POST, and every short_text answer would stay `pending` forever
+# (which blocks v_all_done, so the quiz never auto-reveals). This step closes
+# that gap — the values reach the database here, in CI, where the schema push
+# already runs and the DB credentials already live.
+#
+# AI_MARK_WORKER_URL  the public origin + /api/internal/ai-mark-sweep. Defaults
+#                     to SITE_ORIGIN (the same host the app serves on) when the
+#                     dedicated var is unset, so a standard deploy needs no new
+#                     configuration.
+# AI_MARK_WORKER_KEY  the bearer the route accepts. Defaults to
+#                     SUPABASE_SERVICE_ROLE_KEY (the route's own fallback), so
+#                     the default deployment provisions no new secret.
+#
+# Both are OPTIONAL: when the URL cannot be determined the step warns and skips
+# (marking stays operator-invokable, per DEPLOY_VPS.md). It never fails the
+# deploy — the schema and image are still correct.
+AI_MARK_WORKER_URL="${AI_MARK_WORKER_URL:-${SITE_ORIGIN:-}}"
+AI_MARK_WORKER_KEY="${AI_MARK_WORKER_KEY:-${SUPABASE_SERVICE_ROLE_KEY:-}}"
+
 # Expected post-push invariants, from DEPLOY_VPS.md §3.1 steps 5-6.
-EXPECTED_CRON_JOBS="${EXPECTED_CRON_JOBS:-5}"
+EXPECTED_CRON_JOBS="${EXPECTED_CRON_JOBS:-7}"
 EXPECTED_BUCKETS="${EXPECTED_BUCKETS:-4}"
 
 DRY_RUN=0
@@ -81,8 +106,15 @@ Required environment:
   SUPABASE_ACCESS_TOKEN    Supabase CLI access token (sbp_...)
 
 Optional:
-  EXPECTED_CRON_JOBS       default 5   (DEPLOY_VPS.md §3.1 step 5)
+  EXPECTED_CRON_JOBS       default 7   (DEPLOY_VPS.md §3.1 step 5; 0059 added the AI marking pair)
   EXPECTED_BUCKETS         default 4   (DEPLOY_VPS.md §3.1 step 6)
+  SITE_ORIGIN              default for AI_MARK_WORKER_URL (https://<host>)
+  AI_MARK_WORKER_URL       the sweep's POST target; default <SITE_ORIGIN>/api/internal/ai-mark-sweep
+  AI_MARK_WORKER_KEY       the bearer the worker route accepts; default SUPABASE_SERVICE_ROLE_KEY
+
+The two AI_MARK_* values are written into the DATABASE (app.settings + Vault),
+because sweep_ai_marks() runs in Postgres and cannot read the app's env file.
+When AI_MARK_WORKER_URL cannot be determined the step warns and skips.
 
 Idempotent: with nothing pending it reports "up to date" and exits 0.
 USAGE
@@ -242,10 +274,11 @@ ok "vector extension present in schema 'extensions'"
 
 if [ "$pg_cron_count" = "0" ]; then
   die "the 'pg_cron' extension is NOT enabled on the hosted project.
-    The five schedules (0019/0022/0030/0042) are created inside guarded blocks
-    and 'create extension pg_cron' needs superuser, so the push would report
-    SUCCESS with ZERO jobs and the app would look healthy while autoclose, the
-    silence check and both prunes never run. Enable it FIRST:
+    The seven schedules (0019/0022/0030/0042 + 0059's AI sweep/escalate pair)
+    are created inside guarded blocks and 'create extension pg_cron' needs
+    superuser, so the push would report SUCCESS with ZERO jobs and the app
+    would look healthy while autoclose, the silence check, both prunes and AI
+    marking never run. Enable it FIRST:
       Dashboard → Database → Extensions → enable 'pg_cron'
     Then re-run this script (DEPLOY_VPS.md §3.1 step 2)."
 fi
@@ -358,10 +391,71 @@ if cron_json="$(npx --no-install supabase db query --linked --output-format json
     The schedules did not take. Because the migration versions are now recorded
     as APPLIED, re-running db push will NOT retry them — re-create the jobs from
     the dashboard Cron UI, or 'supabase migration repair <version> --status
-    reverted' for 0019/0022/0030/0042 and push again (DEPLOY_VPS.md §3.1 step 5)."
+    reverted' for 0019/0022/0030/0042/0059 and push again (DEPLOY_VPS.md §3.1 step 5)."
   fi
 else
-  warn "could not query cron.job (permissions?) — verify the five schedules manually (DEPLOY_VPS.md §3.1 step 5)"
+  warn "could not query cron.job (permissions?) — verify the seven schedules manually (DEPLOY_VPS.md §3.1 step 5)"
+fi
+
+# 6b-ii — the AI marking worker URL/key. `sweep_ai_marks()` reads these from the
+# DATABASE (it cannot see the app's env file), so an unprovisioned project
+# claims rows and never POSTs: short_text answers stay `pending` forever, which
+# blocks v_all_done and the quiz never auto-reveals. This is the step that makes
+# the feature actually function on a fresh deploy.
+#
+# Idempotent: `alter database ... set` overwrites, and the Vault write deletes
+# any prior secret of the same name first (vault.create_secret raises on a
+# duplicate name). A failure here WARNS rather than dies — the schema is already
+# correct and marking can be driven by the operator curl fallback, so a hard
+# failure would block an otherwise-good deploy.
+if [ -n "$AI_MARK_WORKER_URL" ] && [ -n "$AI_MARK_WORKER_KEY" ]; then
+  # VAULT IS THE PRIMARY HOME for both values, because it is the only mechanism
+  # that works on a hosted project: `alter database ... set` requires superuser,
+  # which the hosted `postgres` role does not have. Vault is available on every
+  # paid/hosted plan and is encrypted at rest, which is the right place for the
+  # key regardless. `app.settings` remains the migration's fallback read for
+  # self-hosted installs where Vault may be absent.
+  #
+  # vault.create_secret takes its value as a SQL literal (it is a function
+  # argument, not a parameterizable placeholder through this CLI), so reject a
+  # single quote rather than trusting the shape: a broken deploy log is far
+  # better than an injected statement against the production database.
+  case "$AI_MARK_WORKER_URL" in
+    *"'"*) die "AI_MARK_WORKER_URL contains a single quote — refusing to interpolate it into SQL" ;;
+  esac
+  case "$AI_MARK_WORKER_KEY" in
+    *"'"*) die "AI_MARK_WORKER_KEY contains a single quote — refusing to interpolate it into SQL" ;;
+  esac
+
+  # Delete-then-create keeps the step re-runnable; vault.create_secret rejects a
+  # duplicate name.
+  vault_sql="do \$\$ begin
+    delete from vault.secrets where name in ('ai_mark_worker_url', 'ai_mark_worker_key');
+    perform vault.create_secret('$AI_MARK_WORKER_URL', 'ai_mark_worker_url',
+      'POST target for 0057 sweep_ai_marks (Bearer to /api/internal/ai-mark-sweep)');
+    perform vault.create_secret('$AI_MARK_WORKER_KEY', 'ai_mark_worker_key',
+      'Bearer for /api/internal/ai-mark-sweep (0057 sweep_ai_marks)');
+  end \$\$;"
+  if npx --no-install supabase db query --linked "$vault_sql" >/dev/null 2>&1; then
+    ok "ai_mark_worker_url + ai_mark_worker_key stored in Vault"
+  else
+    warn "could not write the Vault secrets (Vault unavailable on this plan?) —"
+    warn "trying app.settings, which sweep_ai_marks also reads (self-hosted path)"
+    if npx --no-install supabase db query --linked \
+         "alter database postgres set app.settings.ai_mark_worker_url to '$AI_MARK_WORKER_URL'" \
+         >/dev/null 2>&1 \
+       && npx --no-install supabase db query --linked \
+         "alter database postgres set app.settings.ai_mark_worker_key to '$AI_MARK_WORKER_KEY'" \
+         >/dev/null 2>&1; then
+      ok "ai_mark_worker_url + ai_mark_worker_key provisioned as database-level settings"
+    else
+      warn "could not provision either store — set them manually (DEPLOY_VPS.md §3.1 step 5b)."
+      warn "Until then short_text AI marking does NOT fire (answers stay pending)."
+    fi
+  fi
+else
+  warn "AI_MARK_WORKER_URL/KEY not provided (no SITE_ORIGIN / service-role key) —"
+  warn "short_text AI marking will NOT fire until they are provisioned (DEPLOY_VPS.md §3.1 step 5b)"
 fi
 
 # 6c — storage buckets. Migration-owned, so a push should have created them; the

@@ -76,7 +76,10 @@ test.describe("E24 — network failure UX", () => {
     // Connectivity returns → the SAME option click records and reaches feedback.
     await studentPage.unroute("**/api/sessions/*/answer");
     await studentPage.getByRole("button", { name: /Paris/i }).click();
-    await expect(studentPage.getByText(/correct/i)).toBeVisible({ timeout: 10_000 });
+    // The practice verdict chip, matched EXACTLY: a loose /correct/i also hits
+    // the practice oracle warning ("Practice reveals correctness…"), which
+    // renders on the same screen (e45's idiom).
+    await expect(studentPage.getByText("Correct! ✓")).toBeVisible({ timeout: 10_000 });
     // No duplicate-question corruption: exactly one probe row remains in play.
     await expect(studentPage.getByText("Offline probe?", { exact: true })).toHaveCount(1);
 
@@ -128,7 +131,7 @@ test.describe("E24 — network failure UX", () => {
     // Answer the only question → feedback → Next fires the FINAL submit.
     await studentPage.route("**/api/sessions/*/submit", (r) => r.abort("internetdisconnected"));
     await studentPage.getByRole("button", { name: /yes/i }).click();
-    await expect(studentPage.getByText(/correct/i)).toBeVisible({ timeout: 10_000 });
+    await expect(studentPage.getByText("Correct! ✓")).toBeVisible({ timeout: 10_000 });
     const failedSubmit = studentPage.waitForEvent("requestfailed");
     // One question → the feedback button label is Finish, not Next. Anchor
     // strictly: the unanchored /next/i ALSO matches the Next.js dev-tools

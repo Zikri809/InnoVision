@@ -56,7 +56,7 @@ export async function POST(request: Request, { params }: Params) {
     return invalidBody(firstIssueMessage(parsed.error.issues, "Invalid quiz data."));
   }
 
-  const { title, mode, timeLimitSec, opensAt, closesAt, allowRetake, maxAttempts, shuffleQuestions } = parsed.data;
+  const { title, mode, timeLimitSec, opensAt, closesAt, allowRetake, maxAttempts, shuffleQuestions, gesturesEnabled } = parsed.data;
   const effectiveTimeLimitSec = mode === "practice" ? null : (timeLimitSec ?? null);
 
   const { data: quiz, error } = await supabase
@@ -74,9 +74,16 @@ export async function POST(request: Request, { params }: Params) {
       // QT-3 applies to BOTH play modes (unlike the retake config above) —
       // shoulder-surfing protection matters in practice just as much.
       shuffle_questions: shuffleQuestions ?? false,
+      // v4.9/D9: `?? true`, NOT `?? false` like shuffle above. The two
+      // differ deliberately: enabling shuffle CHANGES the answers a student
+      // sees, so defaulting it on would alter existing behaviour, whereas
+      // gestures have been ON for every quiz since the feature shipped —
+      // defaulting them off here would silently strip the modality from
+      // every newly created quiz.
+      gestures_enabled: gesturesEnabled ?? true,
       status: "draft",
     })
-    .select("id, class_id, title, mode, status, time_limit_sec, opens_at, closes_at, allow_retake, max_attempts, shuffle_questions, created_at")
+    .select("id, class_id, title, mode, status, time_limit_sec, opens_at, closes_at, allow_retake, max_attempts, shuffle_questions, gestures_enabled, created_at")
     .single();
 
   if (error) {

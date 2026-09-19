@@ -263,12 +263,14 @@ export async function joinClass(page: Page, joinCode: string, classTitle: string
 }
 
 type QuestionInput = {
-  type?: "mcq" | "true_false" | "multi_select";
+  type?: "mcq" | "true_false" | "multi_select" | "short_text";
   prompt: string;
   options: string[];
   correctIndex?: number;
   /** QT-1: multi-select answer key (sorted+distinct canonical set). */
   correctIndices?: number[];
+  /** v4.9: the short_text rubric (required by the schema for that type). */
+  answerKey?: string;
   explanation?: string;
 };
 
@@ -289,6 +291,12 @@ export async function createQuizWithQuestions(
     publish?: boolean;
     /** QT-3: check "Shuffle question & option order" before creating. */
     shuffle?: boolean;
+    /**
+     * v4.9: turn the "Hand gestures" switch OFF before creating. The switch
+     * lives in the quiz-settings dialog (opened from the builder), so this is
+     * applied AFTER creation rather than on the create form.
+     */
+    gesturesOff?: boolean;
   },
 ) {
   // Open the class.
@@ -358,7 +366,32 @@ export async function createQuizWithQuestions(
       await composer.getByLabel("Type").click();
       await page.getByRole("option", { name: "Multi-select" }).click();
     }
+    if (q.type === "short_text") {
+      await composer.getByLabel("Type").click();
+      await page.getByRole("option", { name: "Short answer (AI-marked)" }).click();
+    }
     await composer.getByRole("textbox", { name: "Question prompt" }).fill(q.prompt);
+
+    // v4.9 short_text: the options editor is replaced by a single rubric
+    // textarea, so the option-filling block below must be skipped entirely.
+    if (q.type === "short_text") {
+      await composer
+        .getByLabel("Answer key / rubric")
+        .fill(q.answerKey ?? "Mentions the key idea.");
+      if (q.explanation) {
+        await composer.getByLabel("Explanation (optional)").fill(q.explanation);
+      }
+      await composer.getByRole("button", { name: /add this question/i }).click();
+      await expect(
+        composer.getByRole("textbox", { name: "Question prompt" }),
+      ).toHaveValue("");
+      await expect(page.getByText(q.prompt, { exact: true })).toBeVisible();
+      if (isMobileBuilder) {
+        await page.getByRole("button", { name: "Done", exact: true }).click();
+        await expect(page.getByRole("dialog")).toHaveCount(0);
+      }
+      continue;
+    }
 
     // Fill options 1..N, adding extra option inputs as needed. True/False
     // options are disabled (auto-filled True/False) — skip filling them.
@@ -418,6 +451,53 @@ export async function createQuizWithQuestions(
   }
 }
 
+
+/**
+ * v4.9: flip the quiz-level "Hand gestures" switch in the builder's quiz
+ * settings dialog. The switch is DRAFT-FROZEN (the DB trigger rejects a
+ * change once the quiz leaves draft), so this must run BEFORE publish.
+ *
+ * The builder is left with the dialog closed, back on the builder page.
+ */
+export async function setGesturesToggle(page: Page, enabled: boolean) {
+  // The settings trigger is an icon button labelled "Quiz settings".
+  await page.getByRole("button", { name: /quiz settings/i }).first().click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  const toggle = page.getByTestId("gestures-toggle");
+  await expect(toggle).toBeVisible();
+  const isOn = (await toggle.getAttribute("aria-checked")) === "true";
+  if (isOn !== enabled) await toggle.click();
+  await dialog.getByRole("button", { name: /^save/i }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  // The save handler fires `router.refresh()`, which re-renders the RSC and
+  // remounts this dialog with fresh props. Waiting for the toggle's own
+  // read-back would need a re-open, so wait for the network to settle and
+  // let the refresh land before any caller re-reads it.
+  await page.waitForLoadState("networkidle").catch(() => {});
+  await expect(async () => {
+    const now = await readGesturesToggle(page);
+    expect(now).toBe(enabled);
+  }).toPass({ timeout: 10_000 });
+}
+
+/**
+ * v4.9: does the quiz-settings dialog currently show gestures as ON?
+ * Re-opens the dialog and closes it again (Cancel), so it is safe to call
+ * mid-flow. Used to prove the flag PERSISTED after a save or a clone.
+ */
+export async function readGesturesToggle(page: Page): Promise<boolean> {
+  await page.getByRole("button", { name: /quiz settings/i }).first().click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  const toggle = page.getByTestId("gestures-toggle");
+  await expect(toggle).toBeVisible();
+  const isOn = (await toggle.getAttribute("aria-checked")) === "true";
+  await dialog.getByRole("button", { name: /cancel/i }).first().click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  return isOn;
+}
+
 // ── Phase 6 gesture helpers ─────────────────────────────────────────────
 
 type FakeSegment = { present?: boolean; fingers: number; holdMs: number };
@@ -466,6 +546,53 @@ export async function fakeHandFrame(page: Page, handPresent: boolean, fingerCoun
     },
     [handPresent, fingerCount] as const,
   );
+}
+
+/**
+ * v4.9 (E-53): count how many times the app CALLED `start()` on the fake
+ * tracker. The init script installs the global unconditionally, so its mere
+ * presence proves nothing about the app — `start()` being called is the real
+ * "the gesture layer booted" signal, and it is the only way to assert the
+ * NEGATIVE (flag off ⇒ never booted) without measuring the harness.
+ *
+ * Mirrors `installFakeHandTracker`'s two-pronged approach for the reason
+ * documented there: the student flow uses Next.js client-side (SPA)
+ * navigation, which does NOT create a new document, so `addInitScript` alone
+ * would never run in the already-loaded page. Both are needed —
+ * `addInitScript` covers reloads/direct navigation, `page.evaluate` covers
+ * the current document.
+ *
+ * Call AFTER `installFakeHandTracker` so the wrapper lands on the real
+ * tracker object.
+ */
+export async function countFakeTrackerStarts(page: Page): Promise<() => Promise<number>> {
+  const wrap = () => {
+    const w = window as unknown as {
+      __INNOVISION_FAKE_HAND_TRACKER__?: { start(cb: unknown): void };
+      __INNOVISION_FAKE_START_COUNT__?: number;
+    };
+    w.__INNOVISION_FAKE_START_COUNT__ = 0;
+    const tracker = w.__INNOVISION_FAKE_HAND_TRACKER__;
+    if (!tracker) return;
+    const original = tracker.start.bind(tracker);
+    const wrapped: { (cb: unknown): void; __wrapped?: boolean } = (cb: unknown) => {
+      w.__INNOVISION_FAKE_START_COUNT__ = (w.__INNOVISION_FAKE_START_COUNT__ ?? 0) + 1;
+      original(cb);
+    };
+    // Idempotent: both prongs can run in one document (a reload after the
+    // evaluate), and double-wrapping would double-count.
+    if ((tracker.start as { __wrapped?: boolean }).__wrapped) return;
+    wrapped.__wrapped = true;
+    tracker.start = wrapped;
+  };
+  await page.addInitScript(wrap);
+  await page.evaluate(wrap);
+  return async () =>
+    page.evaluate(
+      () =>
+        (window as unknown as { __INNOVISION_FAKE_START_COUNT__?: number })
+          .__INNOVISION_FAKE_START_COUNT__ ?? 0,
+    );
 }
 
 /**

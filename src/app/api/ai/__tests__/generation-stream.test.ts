@@ -30,19 +30,26 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: () => fakeHolder.current,
 }));
 
-// Student route's durable daily-usage seam (service-role table): stub the
-// admin client — count 0 (under limit), upsert succeeds.
+// Student route's durable daily-usage seam (service-role table): the usage
+// arm is stubbed — count 0 (under limit), upsert succeeds. The lecturer
+// route's question readback also runs on the service-role client (D2-19:
+// 0054 revoked the base `questions` table from `authenticated`), so every
+// other table resolves to the SAME fake DB the user-scoped client serves —
+// one in-memory source of truth for both.
 const adminStub = {
-  from: () => ({
-    select: () => ({
-      eq: () => ({
-        eq: () => ({
-          maybeSingle: async () => ({ data: { count: 0 } }),
-        }),
-      }),
-    }),
-    upsert: async () => ({ error: null }),
-  }),
+  from: (table: string) =>
+    table === "ai_generation_usage"
+      ? {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                maybeSingle: async () => ({ data: { count: 0 } }),
+              }),
+            }),
+          }),
+          upsert: async () => ({ error: null }),
+        }
+      : fakeHolder.current!.from(table),
 };
 const adminHolder: { current: typeof adminStub | undefined } = { current: undefined };
 vi.mock("@/lib/supabase/admin", () => ({

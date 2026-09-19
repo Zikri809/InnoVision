@@ -132,7 +132,7 @@ async function duplicateQuestionImages(
     // randomUUID, …) must NULL every clone row's image_path rather than
     // leave rows referencing objects we can no longer reason about.
     console.error("duplicate image phase error:", err);
-    await supabase.from("questions").update({ image_path: null }).eq("quiz_id", newQuizId);
+    await createAdminClient().from("questions").update({ image_path: null }).eq("quiz_id", newQuizId);
     // `failed: null` = unknown/degraded — the per-image tally was lost with
     // the crashed loop (M-15: previously invisible behind a bare 201).
     return { copied: 0, failed: null };
@@ -144,15 +144,18 @@ async function duplicateQuestionImagesInner(
   userId: string,
   newQuizId: string,
 ): Promise<DuplicateImageOutcome> {
+  // 0054 revoked `image_path` from `authenticated` — the owner-predicated view
+  // is the only readable path (a base-table read would 403, and the catch
+  // below would then NULL every cloned image silently).
   const { data: cloned, error: selectError } = await supabase
-    .from("questions")
+    .from("lecturer_questions_view")
     .select("id, image_path")
     .eq("quiz_id", newQuizId)
     .not("image_path", "is", null);
 
   if (selectError) {
     console.error("duplicate image select error:", selectError);
-    await supabase.from("questions").update({ image_path: null }).eq("quiz_id", newQuizId);
+    await createAdminClient().from("questions").update({ image_path: null }).eq("quiz_id", newQuizId);
     return { copied: 0, failed: null };
   }
 
@@ -170,7 +173,7 @@ async function duplicateQuestionImagesInner(
     const srcPath = question.image_path;
 
     const clearPath = async () => {
-      await supabase
+      await createAdminClient()
         .from("questions")
         .update({ image_path: null })
         .eq("id", question.id)
@@ -203,9 +206,12 @@ async function duplicateQuestionImagesInner(
       continue;
     }
 
-    // Column UPDATE via the USER client (least privilege; RLS re-checks
-    // clone ownership) — image-route pattern.
-    const { error: updateError } = await supabase
+    // Column UPDATE via the ADMIN client: 0054 revoked `image_path` from
+    // `authenticated`, so a user-scoped write would fail 42501. The clone is
+    // owner-proved by the caller's auth + the owner-pinned source check above;
+    // the statement stays scoped by id AND quiz_id (n18: the old comment
+    // claimed the user client — stale since the revocation migration).
+    const { error: updateError } = await createAdminClient()
       .from("questions")
       .update({ image_path: newPath })
       .eq("id", question.id)

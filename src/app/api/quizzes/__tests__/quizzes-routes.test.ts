@@ -27,7 +27,19 @@ vi.mock("@/lib/supabase/admin", () => {
       list: async () => ({ data: [], error: null }),
     }),
   };
-  const client = { storage };
+  // Table access delegates to the SAME in-memory fake DB the user client uses:
+  // 0054 revoked `questions` from `authenticated`, so the question PATCH/DELETE
+  // routes now run their writes on the admin client, and a stub would make
+  // every "row updated/deleted" assertion vacuous. Only `storage` stays a
+  // boundary mock (a real external service, not a table).
+  const client = {
+    storage,
+    from: (table: string) => {
+      const db = fakeHolder.current;
+      if (!db) throw new Error(`admin client .from(${table}) with no fake DB installed`);
+      return db.from(table);
+    },
+  };
   return {
     createAdminClient: () => client,
     tryCreateAdminClient: () => (adminState.hasKey ? client : null),
@@ -978,7 +990,10 @@ describe("C-F2 — questions route cap + error mapping", () => {
     // Both helpers come from the same dynamic import — the earlier edit only
     // destructured _seedRateLimit, leaving _resetRateLimiter undefined below.
     const { _seedRateLimit, _resetRateLimiter } = await import("@/lib/classes/rate-limit");
-    _seedRateLimit(`quiz-author:${ctx.ownerId}`, 120);
+    // audit-4 M7: the AUTHOR budget is 30/min — seed exactly at the limit so
+    // this assertion fails if the constant drifts (a seed above the limit
+    // would stay green at any value ≤ it).
+    _seedRateLimit(`quiz-author:${ctx.ownerId}`, 30);
     expect((await questions.POST(req(VALID_Q), { params: Promise.resolve({ id: QUIZ_C }) })).status).toBe(429);
 
     _resetRateLimiter();
@@ -1126,7 +1141,7 @@ describe("question route — PATCH/DELETE error mapping + image sweep", () => {
     expect((await questionRoute.PATCH(cross, params)).status).toBe(403);
 
     const { _seedRateLimit } = await import("@/lib/classes/rate-limit");
-    _seedRateLimit(`quiz-author:${ctx.ownerId}`, 120);
+    _seedRateLimit(`quiz-author:${ctx.ownerId}`, 30);
     expect((await questionRoute.PATCH(req(VALID_Q), params)).status).toBe(429);
   });
 
@@ -1198,7 +1213,7 @@ describe("question route — PATCH/DELETE error mapping + image sweep", () => {
     expect((await questionRoute.DELETE(cross, params)).status).toBe(403);
 
     const { _seedRateLimit } = await import("@/lib/classes/rate-limit");
-    _seedRateLimit(`quiz-author:${ctx.ownerId}`, 120);
+    _seedRateLimit(`quiz-author:${ctx.ownerId}`, 30);
     expect((await questionRoute.DELETE(req(), params)).status).toBe(429);
   });
 });

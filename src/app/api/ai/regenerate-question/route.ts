@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { requireLecturer } from "@/lib/classes/guards";
 import { requireQuizOwner } from "@/lib/quizzes/guards";
 import { isUuid } from "@/lib/classes/roster";
@@ -75,8 +76,13 @@ export async function POST(request: Request, context?: { params?: Promise<{ id?:
 
   if (!isUuid(questionId)) return notFound();
 
-  // 2. Fetch the question user-scoped (RLS: lecturer-of-quiz only).
-  const { data: questionRow, error: qErr } = await supabase
+  // 2. Fetch the question with the SERVICE-ROLE client (D2-19): 0054 revoked
+  //    the base table from `authenticated`, and the `is_lecturer_of_quiz`
+  //    predicate this view enforces needs the quiz id we are about to read —
+  //    so the row is fetched first and ownership is proven by
+  //    `requireQuizOwner` on the next step.
+  const admin = createAdminClient();
+  const { data: questionRow, error: qErr } = await admin
     .from("questions")
     .select("id, quiz_id, order_index, type, prompt, options, correct_index, correct_indices, explanation")
     .eq("id", questionId)
@@ -141,7 +147,7 @@ async function handleRegenerate(ctx: {
     id: string;
     quiz_id: string;
     order_index: number;
-    type: "mcq" | "true_false" | "multi_select";
+    type: "mcq" | "true_false" | "multi_select" | "short_text";
     prompt: string;
     options: string[];
     correct_index: number | null;
@@ -153,8 +159,21 @@ async function handleRegenerate(ctx: {
 }): Promise<NextResponse> {
   const { supabase, questionId, questionRow, instruction, signal } = ctx;
 
-  // Load siblings for coherence (excluding the target).
-  const { data: siblingRows, error: sibErr } = await supabase
+  // short_text (v4.9) has no arm in the AI question contract: its key is a
+  // lecturer-authored rubric, and a rewrite would have to invent one. Reject
+  // it here rather than feed the model an option-less row it cannot answer
+  // (the builder hides the button for the type; this is the route's backstop).
+  if (questionRow.type === "short_text") {
+    return unprocessable(
+      "Short-text questions cannot be regenerated — edit the answer key instead.",
+      "unsupported_question_type",
+    );
+  }
+
+  // Load siblings for coherence (excluding the target). Service-role read —
+  // same D2-19 reason as the target fetch above; ownership was proven before
+  // this helper is reached.
+  const { data: siblingRows, error: sibErr } = await createAdminClient()
     .from("questions")
     .select("id, quiz_id, order_index, type, prompt, options, correct_index, correct_indices, explanation")
     .eq("quiz_id", questionRow.quiz_id)
@@ -178,14 +197,19 @@ async function handleRegenerate(ctx: {
           explanation: r.explanation ?? undefined,
         }
       : {
-          type: r.type,
+          type: r.type as "mcq" | "true_false",
           prompt: r.prompt,
           options: r.options,
           correct_index: r.correct_index ?? 0,
           explanation: r.explanation ?? undefined,
         };
   const target = toAi(questionRow);
-  const siblings = (siblingRows ?? []).map(toAi);
+  // short_text siblings carry no options/correct_index, so they cannot enter
+  // the AI context as questions — they are dropped rather than coerced into a
+  // shape the model would then imitate.
+  const siblings = (siblingRows ?? [])
+    .filter((r) => r.type !== "short_text")
+    .map((r) => toAi(r as typeof questionRow));
 
   // 6. AI call. Explicit deadline (same budget as generate-quiz) so the route
   // never silently inherits a changed default inside regenerateQuestion. The
@@ -245,7 +269,16 @@ async function handleRegenerate(ctx: {
   }
 
   // 7. Quiz-scoped UPDATE (WHERE id AND quiz_id); trigger error → 409.
-  const { data: updated, error: updErr } = await supabase
+  //
+  // The ADMIN client, not the user client: 0054 revoked the answer-key
+  // columns from `authenticated`, and a table-level UPDATE grant is required
+  // to write at all — the user-scoped write now fails 42501 "permission
+  // denied for table questions". Authorization is unchanged: this route
+  // already proved ownership via `requireQuizOwner` above, and the UPDATE is
+  // still scoped by BOTH id and quiz_id. The readback is admin for the same
+  // reason (it selects correct_index/correct_indices).
+  const admin = createAdminClient();
+  const { data: updated, error: updErr } = await admin
     .from("questions")
     .update({
       type: q.type,

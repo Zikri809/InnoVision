@@ -61,6 +61,10 @@ export function GradebookClient({
   archived: boolean;
 }) {
   const t = useTranslations("lecturer.gradebook");
+  // Second hook for the cross-surface pending label: `play.shortText.pending`
+  // is the ONE place that phrase is authored (X2-9 — the export route reads
+  // the same key via tFor, so screen and workbook can never disagree).
+  const tPlay = useTranslations("play");
   // Mirrors ROSTER_LIMIT in @/lib/classes/roster — kept local so this client
   // island never imports the server roster module (audit-3 B-F6).
   const ROSTER_DISPLAY_LIMIT = 100;
@@ -426,7 +430,18 @@ export function GradebookClient({
                     </td>
                     {row.cells.map((cell, i) => (
                       <td key={model.quizzes[i].id} className="border-l-2 border-border/60 px-3 py-2.5 text-center tabular-nums">
-                        {cell ? (
+                        {cell && cell.pendingCount > 0 ? (
+                          // Neutral pending state, never a number: the D10 score
+                          // SUM excludes unmarked answers, so a percent here
+                          // would understate a partially-marked attempt.
+                          <span className="inline-flex items-center rounded-md border-[2px] border-border bg-muted px-2 py-0.5 text-xs font-bold text-muted-foreground">
+                            {tPlay("shortText.pending")}
+                            <span className="sr-only">
+                              {" "}
+                              ({cell.pendingCount}/{cell.total})
+                            </span>
+                          </span>
+                        ) : cell ? (
                           <span className="font-bold">
                             {cell.percent}
                             <span className="text-muted-foreground">%</span>
@@ -449,6 +464,12 @@ export function GradebookClient({
                             {row.cumulativePercent}
                             <span className="text-muted-foreground">%</span>
                           </>
+                        ) : row.hasPending ? (
+                          // audit-4 M7: a fully-attempted row awaiting marks
+                          // must not read as "not attempted".
+                          <span className="inline-flex items-center rounded-md border-[2px] border-border bg-muted px-2 py-0.5 text-xs font-bold text-muted-foreground">
+                            {tPlay("shortText.pending")}
+                          </span>
                         ) : (
                           t("notAttempted")
                         )}

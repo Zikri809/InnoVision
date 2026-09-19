@@ -52,6 +52,121 @@ export type Database = {
         }
         Relationships: []
       }
+      ai_marking_ledger: {
+        Row: {
+          attempt_version: number
+          attempts: number
+          claim_token: string | null
+          claimed_at: string | null
+          created_at: string
+          day: string
+          id: string
+          idempotency_key: string
+          question_id: string
+          quiz_id: string
+          session_id: string
+          status: string
+          tokens: number
+          usd: number
+        }
+        Insert: {
+          attempt_version?: number
+          attempts?: number
+          claim_token?: string | null
+          claimed_at?: string | null
+          created_at?: string
+          day?: string
+          id?: string
+          idempotency_key: string
+          question_id: string
+          quiz_id: string
+          session_id: string
+          status?: string
+          tokens?: number
+          usd?: number
+        }
+        Update: {
+          attempt_version?: number
+          attempts?: number
+          claim_token?: string | null
+          claimed_at?: string | null
+          created_at?: string
+          day?: string
+          id?: string
+          idempotency_key?: string
+          question_id?: string
+          quiz_id?: string
+          session_id?: string
+          status?: string
+          tokens?: number
+          usd?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_marking_ledger_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "lecturer_questions_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_marking_ledger_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "questions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_marking_ledger_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "student_question_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_marking_ledger_quiz_id_fkey"
+            columns: ["quiz_id"]
+            isOneToOne: false
+            referencedRelation: "quizzes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_marking_ledger_quiz_id_fkey"
+            columns: ["quiz_id"]
+            isOneToOne: false
+            referencedRelation: "student_closed_revealed_quiz_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_marking_ledger_quiz_id_fkey"
+            columns: ["quiz_id"]
+            isOneToOne: false
+            referencedRelation: "student_quiz_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_marking_ledger_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "lecturer_session_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_marking_ledger_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "quiz_sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_marking_ledger_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "student_session_view"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       audit_events: {
         Row: {
           action: string
@@ -418,6 +533,7 @@ export type Database = {
       }
       questions: {
         Row: {
+          answer_key: string | null
           correct_index: number | null
           correct_indices: number[] | null
           created_at: string
@@ -425,6 +541,7 @@ export type Database = {
           generation_id: string | null
           id: string
           image_path: string | null
+          max_score: number
           options: string[]
           order_index: number
           prompt: string
@@ -432,6 +549,7 @@ export type Database = {
           type: Database["public"]["Enums"]["question_type"]
         }
         Insert: {
+          answer_key?: string | null
           correct_index?: number | null
           correct_indices?: number[] | null
           created_at?: string
@@ -439,13 +557,15 @@ export type Database = {
           generation_id?: string | null
           id?: string
           image_path?: string | null
-          options: string[]
+          max_score?: number
+          options?: string[]
           order_index: number
           prompt: string
           quiz_id: string
           type: Database["public"]["Enums"]["question_type"]
         }
         Update: {
+          answer_key?: string | null
           correct_index?: number | null
           correct_indices?: number[] | null
           created_at?: string
@@ -453,6 +573,7 @@ export type Database = {
           generation_id?: string | null
           id?: string
           image_path?: string | null
+          max_score?: number
           options?: string[]
           order_index?: number
           prompt?: string
@@ -595,6 +716,7 @@ export type Database = {
           closes_at: string | null
           created_at: string
           created_by: string
+          gestures_enabled: boolean
           id: string
           max_attempts: number
           mode: Database["public"]["Enums"]["quiz_mode"]
@@ -615,6 +737,7 @@ export type Database = {
           closes_at?: string | null
           created_at?: string
           created_by: string
+          gestures_enabled?: boolean
           id?: string
           max_attempts?: number
           mode?: Database["public"]["Enums"]["quiz_mode"]
@@ -635,6 +758,7 @@ export type Database = {
           closes_at?: string | null
           created_at?: string
           created_by?: string
+          gestures_enabled?: boolean
           id?: string
           max_attempts?: number
           mode?: Database["public"]["Enums"]["quiz_mode"]
@@ -723,33 +847,61 @@ export type Database = {
       }
       session_answers: {
         Row: {
+          answer_text: string | null
           answered_at: string
+          attempt_version: number
           id: string
           is_correct: boolean
+          mark_metadata: Json | null
+          mark_score: number | null
+          mark_status: string
+          marked_at: string | null
           question_id: string
           selected_index: number | null
           selected_indices: number[] | null
           session_id: string
+          skipped: boolean
         }
         Insert: {
+          answer_text?: string | null
           answered_at?: string
+          attempt_version?: number
           id?: string
           is_correct: boolean
+          mark_metadata?: Json | null
+          mark_score?: number | null
+          mark_status?: string
+          marked_at?: string | null
           question_id: string
           selected_index?: number | null
           selected_indices?: number[] | null
           session_id: string
+          skipped?: boolean
         }
         Update: {
+          answer_text?: string | null
           answered_at?: string
+          attempt_version?: number
           id?: string
           is_correct?: boolean
+          mark_metadata?: Json | null
+          mark_score?: number | null
+          mark_status?: string
+          marked_at?: string | null
           question_id?: string
           selected_index?: number | null
           selected_indices?: number[] | null
           session_id?: string
+          skipped?: boolean
         }
         Relationships: [
+          {
+            foreignKeyName: "session_answers_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "lecturer_questions_view"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "session_answers_question_id_fkey"
             columns: ["question_id"]
@@ -879,15 +1031,29 @@ export type Database = {
     Views: {
       lecturer_answers_view: {
         Row: {
+          answer_text: string | null
           answered_at: string | null
+          attempt_version: number | null
           id: string | null
           is_correct: boolean | null
+          mark_metadata: Json | null
+          mark_score: number | null
+          mark_status: string | null
+          marked_at: string | null
           question_id: string | null
           selected_index: number | null
           selected_indices: number[] | null
           session_id: string | null
+          skipped: boolean | null
         }
         Relationships: [
+          {
+            foreignKeyName: "session_answers_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "lecturer_questions_view"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "session_answers_question_id_fkey"
             columns: ["question_id"]
@@ -963,6 +1129,79 @@ export type Database = {
           },
         ]
       }
+      lecturer_questions_view: {
+        Row: {
+          answer_key: string | null
+          correct_index: number | null
+          correct_indices: number[] | null
+          created_at: string | null
+          explanation: string | null
+          generation_id: string | null
+          id: string | null
+          image_path: string | null
+          max_score: number | null
+          options: string[] | null
+          order_index: number | null
+          prompt: string | null
+          quiz_id: string | null
+          type: Database["public"]["Enums"]["question_type"] | null
+        }
+        Insert: {
+          answer_key?: string | null
+          correct_index?: number | null
+          correct_indices?: number[] | null
+          created_at?: string | null
+          explanation?: string | null
+          generation_id?: string | null
+          id?: string | null
+          image_path?: string | null
+          max_score?: number | null
+          options?: string[] | null
+          order_index?: number | null
+          prompt?: string | null
+          quiz_id?: string | null
+          type?: Database["public"]["Enums"]["question_type"] | null
+        }
+        Update: {
+          answer_key?: string | null
+          correct_index?: number | null
+          correct_indices?: number[] | null
+          created_at?: string | null
+          explanation?: string | null
+          generation_id?: string | null
+          id?: string | null
+          image_path?: string | null
+          max_score?: number | null
+          options?: string[] | null
+          order_index?: number | null
+          prompt?: string | null
+          quiz_id?: string | null
+          type?: Database["public"]["Enums"]["question_type"] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "questions_quiz_id_fkey"
+            columns: ["quiz_id"]
+            isOneToOne: false
+            referencedRelation: "quizzes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "questions_quiz_id_fkey"
+            columns: ["quiz_id"]
+            isOneToOne: false
+            referencedRelation: "student_closed_revealed_quiz_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "questions_quiz_id_fkey"
+            columns: ["quiz_id"]
+            isOneToOne: false
+            referencedRelation: "student_quiz_view"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       lecturer_session_view: {
         Row: {
           attempt: number | null
@@ -976,6 +1215,7 @@ export type Database = {
           id: string | null
           last_activity_at: string | null
           mode: Database["public"]["Enums"]["quiz_mode"] | null
+          pending_count: number | null
           quiz_id: string | null
           score: number | null
           started_at: string | null
@@ -995,6 +1235,7 @@ export type Database = {
           id?: string | null
           last_activity_at?: string | null
           mode?: Database["public"]["Enums"]["quiz_mode"] | null
+          pending_count?: never
           quiz_id?: string | null
           score?: number | null
           started_at?: string | null
@@ -1014,6 +1255,7 @@ export type Database = {
           id?: string | null
           last_activity_at?: string | null
           mode?: Database["public"]["Enums"]["quiz_mode"] | null
+          pending_count?: never
           quiz_id?: string | null
           score?: number | null
           started_at?: string | null
@@ -1054,15 +1296,27 @@ export type Database = {
       }
       student_answers_view: {
         Row: {
+          answer_text: string | null
           answered_at: string | null
+          attempt_version: number | null
           id: string | null
           is_correct: boolean | null
+          mark_score: number | null
+          mark_status: string | null
           question_id: string | null
           selected_index: number | null
           selected_indices: number[] | null
           session_id: string | null
+          skipped: boolean | null
         }
         Relationships: [
+          {
+            foreignKeyName: "session_answers_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "lecturer_questions_view"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "session_answers_question_id_fkey"
             columns: ["question_id"]
@@ -1123,6 +1377,7 @@ export type Database = {
           class_id: string | null
           closes_at: string | null
           created_at: string | null
+          gestures_enabled: boolean | null
           id: string | null
           mode: Database["public"]["Enums"]["quiz_mode"] | null
           opens_at: string | null
@@ -1251,6 +1506,7 @@ export type Database = {
           class_id: string | null
           closes_at: string | null
           created_at: string | null
+          gestures_enabled: boolean | null
           id: string | null
           max_attempts: number | null
           mode: Database["public"]["Enums"]["quiz_mode"] | null
@@ -1394,10 +1650,12 @@ export type Database = {
     Functions: {
       answer_question: {
         Args: {
+          p_answer_text?: string
           p_question_id: string
           p_selected_index?: number
           p_selected_indices?: number[]
           p_session_id: string
+          p_skipped?: boolean
         }
         Returns: Json
       }
@@ -1407,15 +1665,18 @@ export type Database = {
       }
       append_question: {
         Args: {
+          p_answer_key?: string
           p_correct_index?: number
           p_correct_indices?: number[]
           p_explanation?: string
+          p_max_score?: number
           p_options: string[]
           p_prompt: string
           p_quiz_id: string
           p_type: Database["public"]["Enums"]["question_type"]
         }
         Returns: {
+          answer_key: string | null
           correct_index: number | null
           correct_indices: number[] | null
           created_at: string
@@ -1423,6 +1684,7 @@ export type Database = {
           generation_id: string | null
           id: string
           image_path: string | null
+          max_score: number
           options: string[]
           order_index: number
           prompt: string
@@ -1467,6 +1729,7 @@ export type Database = {
       }
       backfill_notification_state: { Args: never; Returns: Json }
       can_student_view_quiz: { Args: { p_quiz_id: string }; Returns: boolean }
+      check_mark_spend: { Args: { p_quiz: string }; Returns: Json }
       clone_quiz: {
         Args: { p_dest_class_id: string; p_src_quiz_id: string }
         Returns: string
@@ -1474,11 +1737,13 @@ export type Database = {
       compare_face_baseline: { Args: { p_embedding: string }; Returns: Json }
       cron_health: { Args: never; Returns: Json }
       enroll_face: { Args: { p_samples: Json }; Returns: Json }
+      escalate_stale_marks: { Args: never; Returns: number }
       exempt_face_session: {
         Args: { p_reason: string; p_session_id: string }
         Returns: Json
       }
       face_baseline_status: { Args: never; Returns: Json }
+      finalize_ai_mark: { Args: { p_rows: Json }; Returns: Json }
       flag_verify_silent_sessions: { Args: never; Returns: number }
       get_verify_proof_secret: { Args: never; Returns: string }
       grant_face_consent: { Args: never; Returns: Json }
@@ -1500,6 +1765,15 @@ export type Database = {
       join_class: { Args: { code: string }; Returns: Json }
       mark_notifications_read: { Args: { p_ids: string[] }; Returns: Json }
       mark_notifications_read_before: { Args: { p_seq: number }; Returns: Json }
+      override_answer_mark: {
+        Args: {
+          p_mark: number
+          p_question_id: string
+          p_reason: string
+          p_session_id: string
+        }
+        Returns: Json
+      }
       pause_session: {
         Args: { p_reason?: string; p_session_id: string }
         Returns: Json
@@ -1508,6 +1782,7 @@ export type Database = {
       prune_expired_incident_clips: { Args: never; Returns: Json }
       prune_expired_notifications: { Args: never; Returns: Json }
       quiz_autoclose: { Args: never; Returns: number }
+      recheck_quiz_completion: { Args: { p_quiz: string }; Returns: undefined }
       record_face_check: {
         Args: {
           p_frames: string[]
@@ -1602,12 +1877,14 @@ export type Database = {
       }
       self_recover_session: { Args: { p_session_id: string }; Returns: Json }
       start_quiz_session: { Args: { p_quiz_id: string }; Returns: Json }
+      student_pending_count: { Args: { p_session_id: string }; Returns: Json }
       student_quiz_share_action: {
         Args: { p_action: string; p_code?: string; p_quiz_id: string }
         Returns: Json
       }
       student_results: { Args: { p_quiz_id: string }; Returns: Json }
       submit_session: { Args: { p_session_id: string }; Returns: Json }
+      sweep_ai_marks: { Args: never; Returns: Json }
       unlock_session: { Args: { p_session_id: string }; Returns: Json }
     }
     Enums: {
@@ -1627,7 +1904,7 @@ export type Database = {
         | "face_enrollment_held"
         | "quiz_closed"
         | "session_unlocked"
-      question_type: "mcq" | "true_false" | "multi_select"
+      question_type: "mcq" | "true_false" | "multi_select" | "short_text"
       quiz_mode: "practice" | "assessment"
       quiz_status: "draft" | "live" | "closed"
       session_status: "active" | "paused" | "flagged" | "completed"
@@ -1779,7 +2056,7 @@ export const Constants = {
         "quiz_closed",
         "session_unlocked",
       ],
-      question_type: ["mcq", "true_false", "multi_select"],
+      question_type: ["mcq", "true_false", "multi_select", "short_text"],
       quiz_mode: ["practice", "assessment"],
       quiz_status: ["draft", "live", "closed"],
       session_status: ["active", "paused", "flagged", "completed"],

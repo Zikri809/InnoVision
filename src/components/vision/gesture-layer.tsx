@@ -21,6 +21,7 @@ import {
 } from "@/lib/gestures/constants";
 import { getFakeHandTracker } from "@/lib/gestures/fake-seam";
 import { isFakeFaceSeamEnabled } from "@/lib/face/seam-gate";
+import { isPalmNextAllowed } from "@/lib/sessions/gesture-arming";
 import { HandLandmarkerTracker } from "@/lib/gestures/hand-tracker";
 import type { HandFrame, HoldProgress, IHandTracker } from "@/lib/gestures/types";
 import type { FaceStatus } from "@/lib/face/types";
@@ -66,6 +67,8 @@ const HOLD_DROPOUT_FRAME_TOLERANCE = 2;
  * calibration→PIP transition.
  */
 export function GestureLayer({
+  enabled = true,
+  hasFingerInput = true,
   mode,
   optionCount,
   questionId,
@@ -86,6 +89,17 @@ export function GestureLayer({
   onStatusChange,
   children,
 }: {
+  /** Quiz-level kill switch (quizzes.gestures_enabled, v4.9). When false the
+   * layer renders its children UNWRAPPED: no boot effect, no tracker, no
+   * camera permission prompt, no bundle fetch. The flag is a QUIZ property
+   * (draft-frozen, so it cannot change mid-live) and wins over any user
+   * setting — the lecturer chose the modality for this assessment. */
+  enabled?: boolean;
+  /** Whether the CURRENT question can be answered by fingers. False for
+   * short_text (0 options, typed answer) — the AnswerPad never arms for it,
+   * so the `< MAX_ANSWER_FINGERS` guard on palm-next is meaningless there
+   * and would wrongly deny "next" on a question with few options. */
+  hasFingerInput?: boolean;
   mode: "practice" | "assessment";
   optionCount: number;
   questionId: string;
@@ -124,7 +138,10 @@ export function GestureLayer({
   children: ReactNode;
 }) {
   const t = useTranslations("vision");
-  const [status, setStatus] = useState<GestureStatus>("booting");
+  // R1: the init MUST key on `enabled` — an unconditional "booting" leaves
+  // the layer stuck in a status whose branch renders the camera shell even
+  // though the boot effect below deliberately never runs.
+  const [status, setStatus] = useState<GestureStatus>(enabled ? "booting" : "off");
 
   const [handLost, setHandLost] = useState<HandLost>(null);
   const [scanning, setScanning] = useState(false);
@@ -172,6 +189,7 @@ export function GestureLayer({
     questionId,
     armed,
     nextArmed,
+    hasFingerInput,
     answerMode,
     scanning,
     status,
@@ -239,7 +257,7 @@ export function GestureLayer({
     sessionPausedRef.current = Boolean(sessionPaused);
     blockInputRef.current = Boolean(blockInput);
     onPauseRef.current = onPause;
-    stateRef.current = { optionCount, questionId, armed, nextArmed, answerMode, scanning, status };
+    stateRef.current = { optionCount, questionId, armed, nextArmed, hasFingerInput, answerMode, scanning, status };
 
     // Detection duty cycle (CPU-bound hosts: two MediaPipe landmarkers run
     // concurrently and the GPU delegate usually falls back to WASM). Phase-
@@ -364,7 +382,19 @@ export function GestureLayer({
       //    question can never be a valid answer, so it is a safe "next" affordance.
       //    (QT-1 multi questions cap at 4 options, so this gate never blocks
       //    them; in multi mode palm means COMMIT while armed anyway — 2b/3.)
-      if (s.nextArmed && s.optionCount < MAX_ANSWER_FINGERS && !s.scanning) {
+      // B6-7/B7-5: the `< MAX_ANSWER_FINGERS` term exists because finger 5
+      // on a 5-option question could be a valid ANSWER pose. For a type with
+      // no finger input at all (short_text: 0 options) that concern does not
+      // exist, and the term would wrongly deny palm-next — so it applies
+      // only when the answer pad is actually in play. The predicate lives in
+      // src/lib/sessions/gesture-arming.ts (U-65 pins it).
+      if (s.nextArmed
+          && isPalmNextAllowed({
+               hasFingerInput: s.hasFingerInput,
+               optionCount: s.optionCount,
+               maxAnswerFingers: MAX_ANSWER_FINGERS,
+             })
+          && !s.scanning) {
         if (frame.fingerCount === 5) {
           nextDropCountRef.current = 0;
           const nextRes = nextHoldRef.current.update(5, now);
@@ -495,6 +525,18 @@ export function GestureLayer({
   // checks the boot id + disposed/timed-out so a late success can never
   // re-activate gestures after `off`/unmount (StrictMode-safe).
   useEffect(() => {
+    // R2/R18: the ONE body-gated effect. Every other effect self-gates on
+    // `status`/`trackerRef`, so gating them too would be redundant. The
+    // fake-seam branch is INSIDE this gate deliberately: a harness seam must
+    // not resurrect gestures on a quiz whose flag is off, which is what E-53
+    // asserts (zero bundle fetch, fake seam included).
+    if (!enabled) {
+      disposedRef.current = true;
+      trackerRef.current?.stop();
+      trackerRef.current = null;
+      return;
+    }
+
     disposedRef.current = false;
     timedOutRef.current = false;
     const bootId = ++bootIdRef.current;
@@ -752,6 +794,22 @@ export function GestureLayer({
 
   return (
     <div className="relative w-full min-h-full">
+      {/* ── Quiz flag OFF (FC-4) ──
+          Rendered BEFORE the status branches and as a bare pass-through: no
+          camera shell, no calibration, no status chip, no hidden video node.
+          The boot effect above never ran, so there is no tracker to stop and
+          nothing to leak.
+
+          ORDER MATTERS: `status === "off"` is ALSO the user-skip state (the
+          calibration panel's Skip button sets it), and that branch below
+          still renders the hidden video node + the "gestures unavailable"
+          chip that e9c-calibration-skip and m2-mobile-play-chrome assert.
+          Replacing that branch outright would break both specs and lose the
+          skip affordance — so the flag gets its own branch instead. */}
+      {!enabled ? (
+        <div className="mx-auto flex w-full max-w-3xl flex-col">{children}</div>
+      ) : (
+        <>
       {/* ── Calibration & Booting Mode: Centered single-column calibration guide ── */}
       {(status === "calibrating" || status === "booting") && (
         <div className="mx-auto flex w-full max-w-2xl flex-col gap-4">
@@ -996,6 +1054,8 @@ export function GestureLayer({
             {t("scanCountdown")}
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );

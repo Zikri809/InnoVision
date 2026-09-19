@@ -19,9 +19,12 @@ import { z } from "zod";
  *    trigger, 0037). `correctIndex` must be ABSENT for multi and
  *    `correctIndices` ABSENT otherwise (strictly symmetric so no mapping
  *    site silently drops a field).
+ *  - `short_text` (v4.9): ZERO options; the key is `answerKey`, a non-blank
+ *    rubric of ≤ 500 chars that the AI marker grades against. Empty options
+ *    are the DB convention (D2-1) and the schema pins the same shape.
  *  - `correctIndex` must be < options.length (a selected answer must exist).
  *  - lengths mirror the DB CHECK constraints (title ≤ 200, prompt ≤ 2000,
- *    option ≤ 500, explanation ≤ 2000).
+ *    option ≤ 500, explanation ≤ 2000, answer_key ≤ 500).
  */
 
 export const OPTION_MIN = 1;
@@ -38,6 +41,8 @@ export const TRUE_FALSE_OPTIONS = 2;
  * exist. Mirrors the questions_multi_option_cap DB CHECK (0037).
  */
 export const MULTI_SELECT_OPTIONS_MAX = 4;
+/** S6/FS-7: the AI grading input cap, mirrored by the DB CHECK in 0052. */
+export const ANSWER_KEY_MAX = 500;
 
 // Invisible/bidi control characters that could visually reorder or hide text
 // (bidi marks/embeds/isolates, zero-width chars, soft hyphen, word joiner).
@@ -65,22 +70,24 @@ export const TIME_LIMIT_MAX_SEC = 7200; // 2 hours (120 minutes)
 /** A single question as sent from the client (camelCase on the wire). */
 export const QuestionInputSchema = z
   .object({
-    type: z.enum(["mcq", "true_false", "multi_select"]),
+    type: z.enum(["mcq", "true_false", "multi_select", "short_text"]),
     prompt: z
       .string()
       .trim()
       .min(1, "Prompt is required.")
       .max(PROMPT_MAX, `Prompt must be at most ${PROMPT_MAX} characters.`),
-    options: z
-      .array(
-        z
-          .string()
-          .trim()
-          .min(OPTION_MIN, "Options must not be empty.")
-          .max(OPTION_MAX, `Options must be at most ${OPTION_MAX} characters.`),
-      )
-      .min(MCQ_OPTIONS_MIN, "A question needs at least 2 options.")
-      .max(MCQ_OPTIONS_MAX, "A question can have at most 5 options."),
+    // B5-5/B6-2: the schema-level 2..5 bounds moved INTO the per-type arms
+    // below. A global min(2) rejected short_text (0 options) before any
+    // superRefine could run, making the type unauthorable. Only the
+    // per-element shape stays here; the per-type cardinality lives in the
+    // arms so it can mirror the DB CHECK (0052).
+    options: z.array(
+      z
+        .string()
+        .trim()
+        .min(OPTION_MIN, "Options must not be empty.")
+        .max(OPTION_MAX, `Options must be at most ${OPTION_MAX} characters.`),
+    ),
     correctIndex: z
       .number()
       .int()
@@ -88,7 +95,12 @@ export const QuestionInputSchema = z
       .max(2_147_483_647)
       .optional(),
     // QT-1 multi-select answer key. Element ceiling = PG int4 (the column is
-    // int[]); cardinality mirrors the answer-set cap in AnswerSchema.
+    // int[]); cardinality mirrors the answer-set cap in AnswerSchema. n12:
+    // the ceiling is MULTI_SELECT_OPTIONS_MAX (4), NOT MCQ_OPTIONS_MAX (5) —
+    // this array only ever exists on a multi_select row, whose option list is
+    // capped at 4 by the palm-commit amendment, so a 5-element set could never
+    // reference existing options (the OOB arm below also rejects it, but the
+    // bound itself must agree with the D1 cap it mirrors).
     correctIndices: z
       .array(
         z
@@ -98,7 +110,19 @@ export const QuestionInputSchema = z
           .max(2_147_483_647),
       )
       .min(1, "Select at least one correct answer.")
-      .max(MCQ_OPTIONS_MAX, `A question can have at most ${MCQ_OPTIONS_MAX} correct answers.`)
+      .max(
+        MULTI_SELECT_OPTIONS_MAX,
+        `A question can have at most ${MULTI_SELECT_OPTIONS_MAX} correct answers.`,
+      )
+      .optional(),
+    // short_text rubric (v4.9): the text the AI marker grades against. The
+    // 1..500 bound mirrors questions_answer_key_shape (0052) and the input
+    // cap that keeps one answer from monopolizing the quiz's daily budget.
+    answerKey: z
+      .string()
+      .trim()
+      .min(1, "An answer key is required for short-text questions.")
+      .max(ANSWER_KEY_MAX, `The answer key must be at most ${ANSWER_KEY_MAX} characters.`)
       .optional(),
     explanation: z
       .string()
@@ -108,6 +132,61 @@ export const QuestionInputSchema = z
       .nullable(),
   })
   .superRefine((q, ctx) => {
+    // ── short_text (v4.9) ─────────────────────────────────────────────
+    // ZERO options (the DB convention is the EMPTY array, not NULL — D2-1),
+    // a required rubric, and none of the index-key fields. Handled FIRST
+    // because every other arm below assumes an option list to index into.
+    if (q.type === "short_text") {
+      if (q.options.length !== 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["options"],
+          message: "Short-text questions have no options.",
+        });
+      }
+      if (q.correctIndex !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["correctIndex"],
+          message: "Short-text questions are graded against an answer key, not an option index.",
+        });
+      }
+      if (q.correctIndices !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["correctIndices"],
+          message: "Short-text questions are graded against an answer key, not option indices.",
+        });
+      }
+      if (q.answerKey === undefined || q.answerKey.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["answerKey"],
+          message: "An answer key is required for short-text questions.",
+        });
+      }
+      return;
+    }
+
+    // No other type may carry a rubric.
+    if (q.answerKey !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["answerKey"],
+        message: "answerKey is only valid for short-text questions.",
+      });
+    }
+
+    // Per-type option cardinality (B5-5: moved out of the schema-level
+    // bounds so short_text could exist; each arm mirrors the DB CHECK).
+    if (q.type === "mcq" && q.options.length > MCQ_OPTIONS_MAX) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["options"],
+        message: `A question can have at most ${MCQ_OPTIONS_MAX} options.`,
+      });
+    }
+
     if (q.type === "multi_select") {
       if (q.options.length > MULTI_SELECT_OPTIONS_MAX) {
         ctx.addIssue({
@@ -179,6 +258,15 @@ export const QuestionInputSchema = z
         message: "True/False questions must have exactly 2 options.",
       });
     }
+    // All remaining types need at least 2 options (the lower bound the
+    // schema-level min(2) used to enforce).
+    if (q.options.length < MCQ_OPTIONS_MIN) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["options"],
+        message: "A question needs at least 2 options.",
+      });
+    }
     const distinct = new Set(q.options.map((o) => o.toLowerCase()));
     if (distinct.size !== q.options.length) {
       ctx.addIssue({
@@ -203,6 +291,17 @@ export const StudentQuestionInputSchema = QuestionInputSchema.superRefine((q, ct
       code: z.ZodIssueCode.custom,
       path: ["type"],
       message: "Multi-select questions are not supported on student quizzes.",
+    });
+  }
+  // D12: practice quizzes are mcq/true_false only. short_text has no AI
+  // marking path in practice (no spend budget) and the DB CHECK
+  // student_questions_no_new_types (0052) enforces the same scope, so the
+  // boundary rejects it with a clean 400 instead of an unmapped DB error.
+  if (q.type === "short_text") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["type"],
+      message: "Short-text questions are not supported on student quizzes.",
     });
   }
 });
@@ -272,6 +371,15 @@ const QuizFieldsSchema = z.object({
    * payload that omits it.
    */
   shuffleQuestions: z.boolean().nullable().optional(),
+  /**
+   * v4.9 quiz-level gesture kill switch (migration 0052). DRAFT-ONLY like
+   * shuffleQuestions: the DB trigger quiz_status_transition freezes it once
+   * the quiz leaves draft (FS-8), and the route's hasNonWindowFields check
+   * turns a live PATCH into a 409 before the DB has to reject it. Nullable +
+   * optional for the same reason as shuffleQuestions — a required boolean
+   * would 400 every existing payload that omits it.
+   */
+  gesturesEnabled: z.boolean().nullable().optional(),
 });
 
 /**

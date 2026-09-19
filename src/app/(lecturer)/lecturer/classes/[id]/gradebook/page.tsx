@@ -2,6 +2,7 @@ import { redirect, notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getClassRoster } from "@/lib/classes/roster";
 import { buildGradebookModel, GRADEBOOK_QUIZ_LIMIT } from "@/lib/results/gradebook";
+import { coerceScore } from "@/lib/results/derive";
 import { ProfilePendingPanel, LoadErrorPanel } from "@/components/layout/load-state";
 import { GradebookClient } from "./gradebook-client";
 
@@ -86,7 +87,9 @@ export default async function GradebookPage({
   // skipped when there are no column quizzes.
   const { data: questionRows, error: questionsError } = quizIds.length
     ? await supabase
-        .from("questions")
+        // 0054 revoked the base table from `authenticated`; the
+        // owner-predicated view is the only readable path.
+        .from("lecturer_questions_view")
         .select("quiz_id")
         .in("quiz_id", quizIds)
         .limit(QUESTION_COUNT_LIMIT)
@@ -97,6 +100,7 @@ export default async function GradebookPage({
   }
   const countByQuiz = new Map<string, number>();
   for (const row of questionRows ?? []) {
+    if (!row.quiz_id) continue;
     countByQuiz.set(row.quiz_id, (countByQuiz.get(row.quiz_id) ?? 0) + 1);
   }
 
@@ -109,7 +113,7 @@ export default async function GradebookPage({
     ? await supabase
         .from("lecturer_session_view")
         .select(
-          "id, quiz_id, student_id, status, score, started_at, submitted_at, last_activity_at, face_fail_streak, focus_pause_count, fullscreen_pause_count, hand_pause_count, face_fail_count, attempt",
+          "id, quiz_id, student_id, status, score, started_at, submitted_at, last_activity_at, face_fail_streak, focus_pause_count, fullscreen_pause_count, hand_pause_count, face_fail_count, attempt, pending_count",
           { count: "exact" },
         )
         .in("quiz_id", quizIds)
@@ -139,7 +143,9 @@ export default async function GradebookPage({
       id: s.id,
       student_id: s.student_id,
       status: s.status,
-      score: s.score,
+      // NUMERIC over the wire → string; coerce at the boundary so the model's
+      // sums and percentages always see a number.
+      score: coerceScore(s.score),
       started_at: s.started_at,
       submitted_at: s.submitted_at,
       last_activity_at: s.last_activity_at,
@@ -149,6 +155,7 @@ export default async function GradebookPage({
       hand_pause_count: s.hand_pause_count,
       face_fail_count: s.face_fail_count,
       attempt: s.attempt,
+      pending_count: s.pending_count,
     });
     sessionsByQuiz.set(s.quiz_id, list);
   }

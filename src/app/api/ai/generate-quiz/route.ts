@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { requireQuizOwner } from "@/lib/quizzes/guards";
 import { isUuid } from "@/lib/classes/roster";
 import { rateLimit } from "@/lib/classes/rate-limit";
 import { GenerateQuizSchema } from "@/lib/ai/validation";
-import { createAiClient, chatCompletions, chatStream, AI_MODEL, type ChatMessage, type ChatResult } from "@/lib/ai/client";
+import { createAiClient, chatCompletions, chatStream, AI_MODEL, NO_CHAT_USAGE, type ChatMessage, type ChatResult } from "@/lib/ai/client";
 import {
   generateQuiz,
   type GenerateQuizLibEvent,
@@ -155,7 +156,7 @@ export async function POST(request: Request, context?: { params?: Promise<{ id?:
   // contract that must stay a JSON STATUS, so it runs before the stream opens
   // (stream mode included). Legacy order preserved: guard → precheck → work.
   if (parsed.data.mode === "append") {
-    const precheck = await appendCapacityError(supabase, quizId, parsed.data.questionCount ?? 10);
+    const precheck = await appendCapacityError(quizId, parsed.data.questionCount ?? 10);
     if (precheck) {
       inFlight.delete(quizId);
       return precheck;
@@ -192,15 +193,21 @@ type GenerationContext = {
   deadlineMs: number;
 };
 
-/** 422/400 for an append request that can't fit (pre-stream JSON segment). */
+/**
+ * 422/400 for an append request that can't fit (pre-stream JSON segment).
+ *
+ * Service-role read (D2-19): 0054 revoked the base `questions` table from
+ * `authenticated`, so this count cannot run on the user-scoped client. The
+ * route is already lecturer-and-owner gated above, and the RPC's own cap
+ * check stays authoritative — this is only the friendly pre-check.
+ */
 async function appendCapacityError(
-  supabase: GenerationContext["supabase"],
   quizId: string,
   questionCount: number,
 ): Promise<NextResponse | null> {
-  const { count: existingCount, error: countError } = await supabase
+  const { count: existingCount, error: countError } = await createAdminClient()
     .from("questions")
-    .select("*", { count: "exact", head: true })
+    .select("id", { count: "exact", head: true })
     .eq("quiz_id", quizId);
 
   if (countError) {
@@ -548,7 +555,9 @@ async function runAiGeneration(
             onDelta: opts.onDelta,
           });
           if (!r.ok) {
-            if (r.error === "timeout") return { ok: false, error: "timeout" };
+            if (r.error === "timeout") {
+              return { ok: false, error: "timeout", usage: NO_CHAT_USAGE };
+            }
             // Cancelled maps into the generic channel; the ROUTE checks the
             // abort signal between phases and emits the dedicated
             // `cancelled` event instead.
@@ -556,9 +565,11 @@ async function runAiGeneration(
               ok: false,
               error: "ai_error",
               message: r.error === "cancelled" ? "cancelled" : r.message,
+              usage: NO_CHAT_USAGE,
             };
           }
-          return { ok: true, text: r.text };
+          // The streaming path does not parse usage (no booking consumer).
+          return { ok: true, text: r.text, usage: NO_CHAT_USAGE };
         }
       : async (messages, timeoutMs) =>
           chatCompletions({ client: ai, model: AI_MODEL, messages, timeoutMs, signal: opts.signal });
@@ -742,11 +753,15 @@ async function saveGeneration(
   // both the stream done-event and the legacy JSON payload previously
   // reported "0 questions" on every success. Read the saved rows back: the
   // payload carries the REAL questions (and the client's count stops lying).
-  const { data: savedQuestions, error: readBackError } = await supabase
-    .from("questions")
-    .select("id, quiz_id, order_index, type, prompt, options, correct_index, correct_indices, explanation")
-    .eq("quiz_id", quizId)
-    .order("order_index", { ascending: true });
+  // Service-role read (D2-19): 0054 revoked the base table from `authenticated`.
+  const readBack = () =>
+    createAdminClient()
+      .from("questions")
+      .select("id, quiz_id, order_index, type, prompt, options, correct_index, correct_indices, explanation")
+      .eq("quiz_id", quizId)
+      .order("order_index", { ascending: true });
+
+  const { data: savedQuestions, error: readBackError } = await readBack();
 
   if (readBackError) {
     // audit-2 L-11: a failed readback used to degrade to an ok-with-[]
@@ -755,11 +770,7 @@ async function saveGeneration(
     // (compounding M-26). Retry once; if it still fails, return the same
     // honest saved_refresh_failed contract the quiz-object arm uses.
     console.error("Saved question readback error (retrying once):", readBackError);
-    const retry = await supabase
-      .from("questions")
-      .select("id, quiz_id, order_index, type, prompt, options, correct_index, correct_indices, explanation")
-      .eq("quiz_id", quizId)
-      .order("order_index", { ascending: true });
+    const retry = await readBack();
     if (retry.error) {
       console.error("Saved question readback retry failed:", retry.error);
       return { kind: "saved_refresh_failed", questions: [] };

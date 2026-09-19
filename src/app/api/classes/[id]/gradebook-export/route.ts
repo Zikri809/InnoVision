@@ -13,6 +13,7 @@ import {
   safeText,
   type ExportSessionInput,
 } from "@/lib/results/export";
+import { coerceScore } from "@/lib/results/derive";
 import { buildGradebookModel, GRADEBOOK_QUIZ_LIMIT } from "@/lib/results/gradebook";
 import { RESULTS_SESSION_LIMIT } from "@/lib/results/constants";
 import { sanitizeFilenamePart } from "@/lib/auth/matric";
@@ -122,7 +123,7 @@ export async function GET(_request: Request, { params }: Params) {
           supabase
             .from("lecturer_session_view")
             .select(
-              "id, quiz_id, student_id, status, score, started_at, submitted_at, last_activity_at, face_fail_streak, focus_pause_count, fullscreen_pause_count, hand_pause_count, face_fail_count, attempt",
+              "id, quiz_id, student_id, status, score, started_at, submitted_at, last_activity_at, face_fail_streak, focus_pause_count, fullscreen_pause_count, hand_pause_count, face_fail_count, attempt, pending_count",
               { count: "exact" },
             )
             .in("quiz_id", quizIds)
@@ -130,7 +131,9 @@ export async function GET(_request: Request, { params }: Params) {
             .order("id", { ascending: false })
             .limit(SESSIONS_LIMIT),
           supabase
-            .from("questions")
+            // 0054 revoked the base table from `authenticated`; the
+            // owner-predicated view is the only readable path.
+            .from("lecturer_questions_view")
             .select("quiz_id")
             .in("quiz_id", quizIds)
             .limit(QUESTION_COUNT_LIMIT),
@@ -160,7 +163,9 @@ export async function GET(_request: Request, { params }: Params) {
       id: s.id,
       student_id: s.student_id,
       status: s.status,
-      score: s.score,
+      // NUMERIC over the wire → string; coerce at the boundary so every
+      // downstream sum/percent sees a number.
+      score: coerceScore(s.score),
       started_at: s.started_at,
       submitted_at: s.submitted_at,
       last_activity_at: s.last_activity_at,
@@ -170,12 +175,14 @@ export async function GET(_request: Request, { params }: Params) {
       hand_pause_count: s.hand_pause_count,
       face_fail_count: s.face_fail_count,
       attempt: s.attempt,
+      pending_count: s.pending_count,
     });
     sessionsByQuiz.set(s.quiz_id, list);
   }
 
   const countByQuiz = new Map<string, number>();
   for (const row of questionCountRows ?? []) {
+    if (!row.quiz_id) continue;
     countByQuiz.set(row.quiz_id, (countByQuiz.get(row.quiz_id) ?? 0) + 1);
   }
 
@@ -233,10 +240,24 @@ export async function GET(_request: Request, { params }: Params) {
       i + 1,
       row.matricNo === null ? null : safeText(row.matricNo),
       row.fullName === null ? null : safeText(row.fullName),
+      // audit-4 round-3 (M10 residual): a cell with unresolved AI marks is
+      // PROVISIONAL — the on-screen gradebook renders the neutral pending
+      // chip, so the summary sheet writes the same label, never the partial
+      // number.
       ...row.cells.map((cell) =>
-        cell === null || cell.percent === null ? null : cell.percent / 100,
+        cell === null || cell.pendingCount > 0
+          ? cell === null
+            ? null
+            : t("play.shortText.pending")
+          : cell.percent === null
+            ? null
+            : cell.percent / 100,
       ),
-      row.cumulativePercent === null ? null : row.cumulativePercent / 100,
+      row.hasPending
+        ? t("play.shortText.pending")
+        : row.cumulativePercent === null
+          ? null
+          : row.cumulativePercent / 100,
       row.faceFails,
       row.fullscreenPauses,
       row.handPauses,
@@ -299,13 +320,18 @@ export async function GET(_request: Request, { params }: Params) {
       selected_index: number | null;
       selected_indices: number[] | null;
       is_correct: boolean;
+      answer_text: string | null;
+      skipped: boolean;
+      mark_status: string;
     };
     const { data: answerRows, error: answersError } =
       sessionIds.length === 0
         ? { data: [] as AnswerRow[], error: null as null }
         : await supabase
             .from("lecturer_answers_view")
-            .select("session_id, question_id, selected_index, selected_indices, is_correct")
+            .select(
+              "session_id, question_id, selected_index, selected_indices, is_correct, answer_text, skipped, mark_status",
+            )
             .in("session_id", sessionIds)
             .limit(ANSWERS_LIMIT);
     if (answersError) {
@@ -314,7 +340,7 @@ export async function GET(_request: Request, { params }: Params) {
     }
 
     const { data: questionRowsForQuiz, error: qQuestionsError } = await supabase
-      .from("questions")
+      .from("lecturer_questions_view")
       .select("id, order_index, type, prompt, options, correct_index, correct_indices, explanation")
       .eq("quiz_id", quiz.id)
       .order("order_index", { ascending: true });
@@ -330,7 +356,9 @@ export async function GET(_request: Request, { params }: Params) {
       quiz: { title: quiz.title, mode: quiz.mode, status: quiz.status },
       className: cls?.title ?? null,
       generatedAtISO: new Date().toISOString(),
-      questions: questionRowsForQuiz ?? [],
+      // View-generated types mark every column nullable; the underlying
+      // columns are NOT NULL (same narrowing as the sessions feed above).
+      questions: (questionRowsForQuiz ?? []) as unknown as Parameters<typeof buildExportModel>[0]["questions"],
       roster: roster.map((r) => ({
         student_id: r.student_id,
         full_name: r.full_name,
@@ -339,6 +367,9 @@ export async function GET(_request: Request, { params }: Params) {
       sessions: quizSessions,
       answers: (answerRows ?? []) as import("@/lib/results/export").ExportAnswerInput[],
       answersTruncated,
+      // Absolute key form: this route's `t` is not namespaced (X2-9).
+      pendingLabel: t("play.shortText.pending"),
+      skippedLabel: t("play.skip.skipped"),
       nowMs: Date.now(),
     });
 
@@ -362,7 +393,13 @@ export async function GET(_request: Request, { params }: Params) {
           s.status,
           s.score,
           s.total,
-          s.percent === null ? null : s.percent / 100,
+          // audit-4 round-3: unresolved AI marks make the percent provisional;
+          // write the neutral pending label (never the partial number).
+          s.pendingCount > 0
+            ? t("play.shortText.pending")
+            : s.percent === null
+              ? null
+              : s.percent / 100,
         ]),
       ],
     });

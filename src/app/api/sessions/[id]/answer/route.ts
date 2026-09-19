@@ -21,8 +21,18 @@ export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ id: string }> };
 
-// Per-user rate limit on answers (30 questions + retries comfortably fits).
-const ANSWER_RATE = { limit: 120, windowMs: 60 * 1000 };
+// Per-user rate limit on answers. audit-4 M7: spec §7 deliberately TIGHTENED
+// this from the pre-v4.9 120/min to 60/min — short_text answers each queue an
+// AI marking call, so the per-user budget is the first bound on marking spend.
+const ANSWER_RATE = { limit: 60, windowMs: 60 * 1000 };
+
+// Secondary per-session bound (audit-4 M7). 30/min matches the quiz's
+// 30-question ceiling answered once, so a legitimate full run plus a small
+// retry pass fits inside the window; a scripted loop or multi-tab retry storm
+// against ONE session is capped even when the per-user budget has headroom.
+// Keyed by (session, user) so two students sharing a device never throttle
+// each other.
+const ANSWER_SESSION_RATE = { limit: 30, windowMs: 60 * 1000 };
 
 /**
  * POST /api/sessions/[id]/answer — grade + record an answer.
@@ -45,7 +55,8 @@ const ANSWER_RATE = { limit: 120, windowMs: 60 * 1000 };
  *    assessment answers stay secrecy-safe; the RPC replays the stored result
  *    for practice)
  *  - `invalid_question` / `invalid_selected_index` /
- *    `invalid_selected_indices` (QT-1) → 400
+ *    `invalid_selected_indices` (QT-1) / `invalid_answer_text` (short_text's
+ *    1..500 trim bound) → 400
  *  - transport error → 503
  *  - success → 200 with the RPC payload passed through after mechanical
  *    key mapping (is_correct→isCorrect; practice adds correct_index→
@@ -66,6 +77,9 @@ export async function POST(request: Request, { params }: Params) {
   if (!rateLimit(`answer:${auth.userId}`, ANSWER_RATE)) {
     return rateLimited("Too many answers. Try again in a minute.");
   }
+  if (!rateLimit(`answer-session:${id}:${auth.userId}`, ANSWER_SESSION_RATE)) {
+    return rateLimited("Too many answers for this session. Try again in a minute.");
+  }
 
   // Body cap: selectedIndices is Zod-capped at 5 elements, but a huge JSON
   // body would be parsed BEFORE Zod sees it (sibling-route convention).
@@ -80,13 +94,16 @@ export async function POST(request: Request, { params }: Params) {
   }
 
   // Exactly one answer field is present (Zod one-of). supabase-js drops
-  // `undefined` keys, and both 0037 RPC params default to null — so the
-  // absent side resolves to NULL at the RPC (old 3-arg overload dropped).
+  // `undefined` keys, and every 0055 RPC param defaults to null/false — so the
+  // absent side resolves to its SQL default at the RPC (the pre-0055 arities
+  // were dropped, so there is no overload to fall into).
   const { data, error } = await supabase.rpc("answer_question", {
     p_session_id: id,
     p_question_id: parsed.data.questionId,
     p_selected_index: parsed.data.selectedIndex,
     p_selected_indices: parsed.data.selectedIndices,
+    p_answer_text: parsed.data.answerText,
+    p_skipped: parsed.data.skipped,
   });
 
   if (error) {
@@ -123,7 +140,8 @@ export async function POST(request: Request, { params }: Params) {
   if (
     payload?.error === "invalid_question" ||
     payload?.error === "invalid_selected_index" ||
-    payload?.error === "invalid_selected_indices"
+    payload?.error === "invalid_selected_indices" ||
+    payload?.error === "invalid_answer_text"
   ) {
     return jsonError(String(payload.error), undefined, 400);
   }

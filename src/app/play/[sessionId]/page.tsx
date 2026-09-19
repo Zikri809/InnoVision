@@ -13,6 +13,7 @@ import {
 } from "@/lib/sessions/shuffle";
 import { PlayClient } from "@/components/quiz/play-client";
 import { EndScreen } from "@/components/quiz/end-screen";
+import { coerceScore } from "@/lib/results/derive";
 import type { FaceStatus } from "@/lib/face/types";
 
 export const dynamic = "force-dynamic";
@@ -22,7 +23,10 @@ type PageProps = { params: Promise<{ sessionId: string }> };
 type QuestionRow = {
   id: string;
   order_index: number;
-  type: "mcq" | "true_false" | "multi_select";
+  // n16: short_text is reachable here — `student_question_view` returns it
+  // and play-client's Question union already includes it. Omitting it here
+  // made the `as QuestionRow[]` cast at the fetch site a type lie.
+  type: "mcq" | "true_false" | "multi_select" | "short_text";
   prompt: string;
   options: string[];
   has_image: boolean;
@@ -53,6 +57,8 @@ type QuizRow = {
   time_limit_sec: number | null;
   results_revealed_at: string | null;
   shuffle_questions: boolean | null;
+  /** v4.9: quiz-level gesture kill switch (0052/0060 projection). */
+  gestures_enabled: boolean | null;
 };
 
 type AnswerRow = {
@@ -62,13 +68,19 @@ type AnswerRow = {
   is_correct: boolean | null;
   /** QT-1: multi-select rows carry the canonical selection set instead. */
   selected_indices: number[] | null;
+  /** v4.9: own answer text — UNGATED in the view so a resumed short_text
+   * shows what the student typed, pre-reveal included (FS-12). */
+  answer_text: string | null;
+  /** v4.9: a resumed SKIP must seed as skipped, not as is_correct:false —
+   * otherwise the card renders a red ✗ for a deliberate non-answer. */
+  skipped: boolean;
 };
 
 /** One per-question result row from `student_results` (score + breakdown). */
 export type ResultsBreakdownRow = {
   question_id: string;
   order_index: number;
-  type: "mcq" | "true_false" | "multi_select";
+  type: "mcq" | "true_false" | "multi_select" | "short_text";
   prompt: string;
   options: string[];
   selected_index: number | null;
@@ -78,6 +90,17 @@ export type ResultsBreakdownRow = {
   correct_indices: number[] | null;
   explanation: string | null;
   has_image?: boolean;
+  /** v4.9: the student's typed answer (short_text) — reveal-gated upstream
+   * by `student_results`, which is itself reveal-gated. */
+  answer_text?: string | null;
+  /** v4.9: the rubric, shown beside the answer post-reveal. */
+  answer_key?: string | null;
+  /** v4.9: the student chose Skip (renders the Skipped chip, never a ✗). */
+  skipped?: boolean | null;
+  /** v4.9: pending | marked | needs_review | failed. */
+  mark_status?: string | null;
+  mark_score?: number | null;
+  attempt_version?: number | null;
 };
 
 /**
@@ -151,7 +174,7 @@ export default async function PlayPage({ params }: PageProps) {
       ? Promise.resolve({ data: [] as AnswerRow[], error: null })
       : supabase
           .from("student_answers_view")
-          .select("question_id, selected_index, selected_indices, is_correct")
+          .select("question_id, selected_index, selected_indices, is_correct, answer_text, skipped")
           .eq("session_id", sessionId);
 
   // P7: `exists(face_checks)` → hasFaceChecks (the assessment gate is NOT
@@ -179,7 +202,7 @@ export default async function PlayPage({ params }: PageProps) {
   const [quizRes, questionsRes, answersRes, faceChecksRes, profileRes, baselineRes] = await Promise.allSettled([
     supabase
       .from("student_quiz_view")
-      .select("id, title, mode, status, time_limit_sec, results_revealed_at, shuffle_questions")
+      .select("id, title, mode, status, time_limit_sec, results_revealed_at, shuffle_questions, gestures_enabled")
       .eq("id", s.quiz_id)
       .maybeSingle()
       .then(async (r) =>
@@ -187,7 +210,7 @@ export default async function PlayPage({ params }: PageProps) {
           ? r
           : supabase
               .from("student_closed_revealed_quiz_view")
-              .select("id, title, mode, status, time_limit_sec, results_revealed_at, shuffle_questions")
+              .select("id, title, mode, status, time_limit_sec, results_revealed_at, shuffle_questions, gestures_enabled")
               .eq("id", s.quiz_id)
               .maybeSingle(),
       ),
@@ -312,14 +335,31 @@ export default async function PlayPage({ params }: PageProps) {
 
     const total = questions.length > 0 ? questions.length : breakdown.length;
 
+    // FS-4/FC-3: the pending count needs a source that is NOT reveal-gated —
+    // student_results returns `not_revealed` until the lecturer releases, so
+    // reading it there would leave the banner stuck in state (b) forever.
+    // student_pending_count is a count, not an oracle, and is own-session
+    // scoped, so it answers pre-reveal.
+    let pendingCount = 0;
+    {
+      const { data: pc } = await supabase.rpc("student_pending_count", {
+        p_session_id: s.id,
+      });
+      const row = pc as { pending_count?: unknown } | null;
+      if (typeof row?.pending_count === "number") pendingCount = row.pending_count;
+    }
+
     return (
       <EndScreen
         session={s}
         quiz={quiz}
         revealed={revealed}
-        score={revealed ? s.score : null}
+        // D8: NUMERIC crosses PostgREST as a string — coerce at the boundary
+        // so EndScreen's arithmetic never sees "1.5".
+        score={revealed ? coerceScore(s.score) : null}
         total={total}
         breakdown={revealed ? breakdown : []}
+        initialPendingCount={pendingCount}
       />
     );
   }
@@ -373,7 +413,17 @@ export default async function PlayPage({ params }: PageProps) {
   return (
     <PlayClient
       sessionId={s.id}
-      quiz={{ id: quiz.id, title: quiz.title, mode: quiz.mode, timeLimitSec: quiz.time_limit_sec }}
+      quiz={{
+        id: quiz.id,
+        title: quiz.title,
+        mode: quiz.mode,
+        timeLimitSec: quiz.time_limit_sec,
+        // FC-1: the flag rides the student_quiz_view projection (students
+        // have owner-only RLS on base `quizzes`, so the view is the only
+        // read path). `?? true` mirrors the column default for a legacy row
+        // read through a stale cache.
+        gesturesEnabled: quiz.gestures_enabled ?? true,
+      }}
       questions={presentedQuestions}
       initialAnswers={presentedAnswers}
       initialIndex={initialIndex}

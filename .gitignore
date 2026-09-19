@@ -108,6 +108,10 @@ next-env.d.ts
 # scratch: dev logs, probe scripts, throwaway screenshots
 /.tmp/
 /.tmp_*
+# audit/coverage scratch produced by critic + coverage runs (not repo artifacts;
+# the `/.tmp_*` rule above is root-anchored and does NOT match these names)
+/tmp_audit/
+/tmp_cov/
 
 # transient agent-work scratch (transcripts, probes, repro dirs) — skills stay tracked
 /.agents/*

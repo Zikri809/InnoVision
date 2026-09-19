@@ -1,0 +1,23 @@
+-- ═══════════════════════════════════════════════════════════════════════
+-- 0051 — question_type enum growth (PLAN_GESTURE_OFF_RICH_TYPES)
+--
+-- D8: Supabase applies ONE migration file per transaction, and Postgres
+-- forbids USING a new enum value in the same transaction that added it
+-- ("unsafe use of new value of enum type"). So this file contains ONLY the
+-- ADD VALUE statement and nothing else — every consumer (the options CHECK
+-- arms, the shape guards, answer_question's grading branch) lives in 0052
+-- and later.
+--
+-- The 0036 precedent (multi_select) is a whole single-ADD-VALUE file for
+-- exactly this reason.
+--
+-- Scope: short_text only — a free-text answer the AI marker grades against
+-- `questions.answer_key`. (An `ordering` drag-sort type was designed in the
+-- plan and then CUT before implementation; it never shipped, so there is no
+-- enum value, no correct_order column, and no DnD surface to remove.)
+--
+-- Idempotent: ADD VALUE IF NOT EXISTS so a re-run after a partial apply is a
+-- no-op rather than a duplicate_object abort.
+-- ═══════════════════════════════════════════════════════════════════════
+
+alter type public.question_type add value if not exists 'short_text';

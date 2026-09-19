@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   rateLimit,
   recordRateLimitHit,
+  recentHitCount,
   resetRateLimit,
   _resetRateLimiter,
 } from "@/lib/classes/rate-limit";
@@ -97,6 +98,23 @@ describe("recordRateLimitHit / resetRateLimit (audit-3 A-F4)", () => {
     // 'b' kept its history.
     expect(recordRateLimitHit("a", { windowMs: 60_000 })).toBe(1);
     expect(recordRateLimitHit("b", { windowMs: 60_000 })).toBe(2);
+  });
+
+  // audit-4 round-3: the override replay guard's read-only probe. It must NOT
+  // record (the bug it replaced stamped a hit on entry, fabricating success
+  // after a failed first attempt).
+  it("recentHitCount reads without recording, and prunes by its window", () => {
+    vi.useFakeTimers();
+    expect(recentHitCount("probe", { windowMs: 60_000 })).toBe(0);
+    recordRateLimitHit("probe", { windowMs: 60_000 });
+    recordRateLimitHit("probe", { windowMs: 60_000 });
+    // Two reads in a row: the count must not grow (no implicit recording).
+    expect(recentHitCount("probe", { windowMs: 60_000 })).toBe(2);
+    expect(recentHitCount("probe", { windowMs: 60_000 })).toBe(2);
+    // A failed attempt (which must never stamp the key) leaves it at 0.
+    expect(recentHitCount("never-succeeded", { windowMs: 60_000 })).toBe(0);
+    vi.advanceTimersByTime(60_001);
+    expect(recentHitCount("probe", { windowMs: 60_000 })).toBe(0);
   });
 
   it("respects the bucket cap: a flood of fresh keys cannot grow the map unbounded", () => {

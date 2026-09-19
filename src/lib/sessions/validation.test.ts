@@ -109,3 +109,75 @@ describe("U-S4 — SubmitSchema boundary", () => {
     expect(SubmitSchema.safeParse(null).success).toBe(false);
   });
 });
+
+/**
+ * FC-8/R13 (PLAN_GESTURE_OFF_RICH_TYPES §7): the two new answer shapes.
+ *
+ * The shared schema cannot see the question's type, so it enforces SHAPE
+ * EXCLUSIVITY ONLY — `answerText ⇒ short_text` and `skipped`'s per-mode rules
+ * belong to the RPC, which reads the question row. These pin the boundary
+ * rules the schema DOES own: exactly one of four fields, and the 1..500 trim
+ * bound on the free-text answer.
+ */
+describe("U-SHORT — answerText + skipped shape exclusivity", () => {
+  it("accepts a trimmed answerText alone", () => {
+    const parsed = AnswerSchema.safeParse({ questionId: QUESTION_ID, answerText: "  sugar  " });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.answerText).toBe("sugar");
+  });
+
+  it("accepts skipped:true alone", () => {
+    expect(
+      AnswerSchema.safeParse({ questionId: QUESTION_ID, skipped: true }).success,
+    ).toBe(true);
+  });
+
+  it("rejects an empty / whitespace-only answerText", () => {
+    for (const answerText of ["", "   ", "\n\t"]) {
+      expect(
+        AnswerSchema.safeParse({ questionId: QUESTION_ID, answerText }).success,
+      ).toBe(false);
+    }
+  });
+
+  it("rejects an answerText over 500 characters", () => {
+    expect(
+      AnswerSchema.safeParse({ questionId: QUESTION_ID, answerText: "x".repeat(500) }).success,
+    ).toBe(true);
+    expect(
+      AnswerSchema.safeParse({ questionId: QUESTION_ID, answerText: "x".repeat(501) }).success,
+    ).toBe(false);
+  });
+
+  it("rejects answerText combined with any index field", () => {
+    expect(
+      AnswerSchema.safeParse({ questionId: QUESTION_ID, answerText: "t", selectedIndex: 0 })
+        .success,
+    ).toBe(false);
+    expect(
+      AnswerSchema.safeParse({ questionId: QUESTION_ID, answerText: "t", selectedIndices: [0] })
+        .success,
+    ).toBe(false);
+  });
+
+  it("rejects skipped combined with any answer payload", () => {
+    expect(
+      AnswerSchema.safeParse({ questionId: QUESTION_ID, skipped: true, selectedIndex: 0 })
+        .success,
+    ).toBe(false);
+    expect(
+      AnswerSchema.safeParse({ questionId: QUESTION_ID, skipped: true, answerText: "t" })
+        .success,
+    ).toBe(false);
+  });
+
+  it("rejects a missing answer field (all four absent)", () => {
+    expect(AnswerSchema.safeParse({ questionId: QUESTION_ID }).success).toBe(false);
+  });
+
+  it("rejects a non-boolean skipped", () => {
+    expect(
+      AnswerSchema.safeParse({ questionId: QUESTION_ID, skipped: "yes" }).success,
+    ).toBe(false);
+  });
+});

@@ -69,7 +69,7 @@ export async function PATCH(request: Request, { params }: Params) {
 
   // UpdateQuizSchema has NO defaults (see validation.ts), so an empty body
   // parses to {} and this guard is reachable — it is not dead code.
-  const { title, mode, timeLimitSec, opensAt, closesAt, allowRetake, maxAttempts, shuffleQuestions } = parsed.data;
+  const { title, mode, timeLimitSec, opensAt, closesAt, allowRetake, maxAttempts, shuffleQuestions, gesturesEnabled } = parsed.data;
   if (
     title === undefined &&
     mode === undefined &&
@@ -78,12 +78,13 @@ export async function PATCH(request: Request, { params }: Params) {
     closesAt === undefined &&
     allowRetake === undefined &&
     maxAttempts === undefined &&
-    shuffleQuestions === undefined
+    shuffleQuestions === undefined &&
+    gesturesEnabled === undefined
   ) {
     return invalidBody("No editable fields provided.");
   }
 
-  const patch = { title, mode, timeLimitSec, opensAt, closesAt, allowRetake, maxAttempts, shuffleQuestions };
+  const patch = { title, mode, timeLimitSec, opensAt, closesAt, allowRetake, maxAttempts, shuffleQuestions, gesturesEnabled };
 
   // Availability windows (QC-3) and retake config (QC-4) are LIVE-quiz
   // management: a payload carrying ONLY those fields bypasses the draft-only
@@ -110,7 +111,7 @@ export async function PATCH(request: Request, { params }: Params) {
     .from("quizzes")
     .update(updates)
     .eq("id", id)
-    .select("id, class_id, title, mode, status, time_limit_sec, opens_at, closes_at, allow_retake, max_attempts, shuffle_questions, created_at")
+    .select("id, class_id, title, mode, status, time_limit_sec, opens_at, closes_at, allow_retake, max_attempts, shuffle_questions, gestures_enabled, created_at")
     .maybeSingle();
 
   if (error) {
@@ -198,8 +199,10 @@ export async function DELETE(request: Request, { params }: Params) {
     if (!path) return;
     paths.set(bucket, [...(paths.get(bucket) ?? []), path]);
   };
+  // 0054 revoked `image_path` from `authenticated` — the owner-predicated view
+  // is the only readable path for this sweep.
   const { data: questionRows } = await supabase
-    .from("questions")
+    .from("lecturer_questions_view")
     .select("image_path")
     .eq("quiz_id", id);
   for (const row of questionRows ?? []) {

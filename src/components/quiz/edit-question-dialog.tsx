@@ -32,13 +32,15 @@ import { QuestionImageField } from "@/components/media/question-image-field";
 import type { QuestionRow } from "@/app/(lecturer)/lecturer/quizzes/[id]/builder/quiz-builder-client";
 
 type QuestionDraft = {
-  type: "mcq" | "true_false" | "multi_select";
+  type: "mcq" | "true_false" | "multi_select" | "short_text";
   prompt: string;
   options: string[];
   /** Single-answer key (mcq / true_false). Absent on multi drafts. */
   correctIndex?: number;
   /** QT-1: sorted+distinct multi answer key. Absent on single-answer drafts. */
   correctIndices?: number[];
+  /** v4.9: the short_text rubric. Absent on every other type. */
+  answerKey?: string;
   explanation: string;
 };
 
@@ -91,9 +93,15 @@ function EditQuestionForm({
     prompt: question.prompt,
     options: [...question.options],
     // QT-1: multi rows seed the set; singles the scalar (strictly one-of).
+    // v4.9: short_text carries NO index key at all — seeding correctIndex 0
+    // would make the schema reject the very first save of an existing
+    // short_text row.
     ...(question.type === "multi_select"
       ? { correctIndices: [...(question.correct_indices ?? [])] }
-      : { correctIndex: question.correct_index ?? 0 }),
+      : question.type === "short_text"
+        ? {}
+        : { correctIndex: question.correct_index ?? 0 }),
+    ...(question.type === "short_text" ? { answerKey: question.answer_key ?? "" } : {}),
     explanation: question.explanation ?? "",
   }));
   const [saving, setSaving] = useState(false);
@@ -209,8 +217,14 @@ function EditQuestionForm({
       options: draft.options,
       // QT-1: strictly one-of by type — multi carries the sorted set and no
       // scalar, singles the reverse (QuestionInputSchema enforces both ways).
-      correctIndex: draft.type === "multi_select" ? undefined : draft.correctIndex,
+      correctIndex:
+        draft.type === "multi_select" || draft.type === "short_text"
+          ? undefined
+          : draft.correctIndex,
       correctIndices: draft.type === "multi_select" ? draft.correctIndices : undefined,
+      // v4.9: the rubric travels with short_text and is omitted elsewhere
+      // (the route maps it to questions.answer_key).
+      answerKey: draft.type === "short_text" ? draft.answerKey : undefined,
       explanation: draft.explanation,
     };
 
@@ -261,8 +275,22 @@ function EditQuestionForm({
               <Select
                 value={draft.type}
                 onValueChange={(v) => {
-                  const type = v as "mcq" | "true_false" | "multi_select";
+                  const type = v as "mcq" | "true_false" | "multi_select" | "short_text";
                   setDraft((d) => {
+                    if (type === "short_text") {
+                      // v4.9: a rubric question has NO options and no index
+                      // key. The DB convention is the EMPTY array (0052), so
+                      // the draft clears the list rather than carrying dead
+                      // entries the schema would reject.
+                      return {
+                        ...d,
+                        type,
+                        options: [],
+                        correctIndex: undefined,
+                        correctIndices: undefined,
+                        answerKey: d.answerKey ?? "",
+                      };
+                    }
                     if (type === "true_false") {
                       return {
                         ...d,
@@ -297,6 +325,9 @@ function EditQuestionForm({
                       options: d.options.length >= 2 ? d.options : ["", ""],
                       correctIndex: d.correctIndices?.[0] ?? 0,
                       correctIndices: undefined,
+                      // Leaving short_text clears the rubric — a stale key on
+                      // an mcq draft would fail the schema's no-answerKey arm.
+                      answerKey: undefined,
                     };
                   });
                 }}
@@ -309,7 +340,9 @@ function EditQuestionForm({
                         ? tCommon("trueFalse")
                         : v === "multi_select"
                           ? tCommon("multiSelect")
-                          : tCommon("mcq")
+                          : v === "short_text"
+                            ? tBuilder("shortTextLabel")
+                            : tCommon("mcq")
                     }
                   </SelectValue>
                 </SelectTrigger>
@@ -317,10 +350,11 @@ function EditQuestionForm({
                   <SelectItem value="mcq">{tCommon("mcq")}</SelectItem>
                   <SelectItem value="true_false">{tCommon("trueFalse")}</SelectItem>
                   <SelectItem value="multi_select">{tCommon("multiSelect")}</SelectItem>
+                  <SelectItem value="short_text">{tBuilder("shortTextLabel")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            {draft.type === "multi_select" ? (
+            {draft.type === "short_text" ? null : draft.type === "multi_select" ? (
               // QT-1: a dropdown cannot multi-select — correct ANSWERS are a
               // toggle-button group (aria-pressed per option).
               <div className="space-y-1.5" role="group" aria-label={tBuilder("correctAnswersLabel")}>
@@ -404,6 +438,26 @@ function EditQuestionForm({
               className="resize-y"
             />
           </div>
+
+          {/* v4.9: short_text is graded against a RUBRIC, not an option list. */}
+          {draft.type === "short_text" && (
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-q-answer-key" className="text-xs font-extrabold text-foreground">
+                {tBuilder("answerKeyLabel")}
+              </Label>
+              <Textarea
+                id="edit-q-answer-key"
+                value={draft.answerKey ?? ""}
+                onChange={(e) => setDraft((d) => ({ ...d, answerKey: e.target.value }))}
+                rows={3}
+                maxLength={500}
+                required
+                placeholder={tBuilder("answerKeyPlaceholder")}
+                className="resize-y"
+              />
+              <p className="text-xs font-bold text-muted-foreground">{tBuilder("answerKeyHint")}</p>
+            </div>
+          )}
 
           {/* Image sits between prompt and options — same order as the
               add-question form and the player (WYSIWYG authoring). Commits

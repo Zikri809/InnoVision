@@ -162,6 +162,24 @@ export function resetRateLimit(key: string): void {
 }
 
 /**
+ * Read-only probe: how many hits for `key` are still inside `windowMs`, WITHOUT
+ * recording one. `rateLimit` both reads and writes (it always pushes a hit),
+ * so it cannot back a pure "has this succeeded recently?" check. Used by the
+ * override route's replay guard (audit-4 B2), where the hit may only be
+ * stamped after the write succeeded — a probe that recorded on entry would
+ * recreate the fabricated-success bug it replaces.
+ */
+export function recentHitCount(key: string, opts: { windowMs: number }): number {
+  if (RATE_LIMIT_DISABLED) return 0;
+  const bucket = buckets.get(key);
+  if (!bucket) return 0;
+  const now = Date.now();
+  // Prune with the caller's window (the bucket's own windowMs is the same for
+  // this key — one route owns it) so an expired success reads as zero.
+  return bucket.timestamps.filter((t) => now - t < opts.windowMs).length;
+}
+
+/**
  * Test-only: pre-seed a bucket with `count` hits so a test can force a 429
  * without waiting out a window. Used by route-handler tests (I-A7).
  */

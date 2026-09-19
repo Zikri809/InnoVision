@@ -50,6 +50,8 @@ export function GradebookMobile({
   visibleRows: GradebookRow[];
 }) {
   const t = useTranslations("lecturer.gradebook");
+  // Same cross-surface pending label as the desktop table (X2-9).
+  const tPlay = useTranslations("play");
   const [open, setOpen] = useState<OpenState>(null);
 
   const openStudent = useMemo(
@@ -183,7 +185,13 @@ export function GradebookMobile({
                       "text-amber-600 dark:text-amber-400",
                   )}
                 >
-                  {row.cumulativePercent === null ? "—" : `${row.cumulativePercent}%`}
+                  {row.cumulativePercent !== null
+                    ? `${row.cumulativePercent}%`
+                    : row.hasPending
+                      ? // audit-4 M7: attempted-but-awaiting-marks must not
+                        // read as "—" (the desktop "not attempted" analogue).
+                        tPlay("shortText.pending")
+                      : "—"}
                 </span>
               </span>
             </button>
@@ -218,7 +226,11 @@ export function GradebookMobile({
                 )}
               >
                 {t("colCumulative")}:{" "}
-                {openStudent?.cumulativePercent == null ? "—" : `${openStudent.cumulativePercent}%`}
+                {openStudent?.cumulativePercent != null
+                  ? `${openStudent.cumulativePercent}%`
+                  : openStudent?.hasPending
+                    ? tPlay("shortText.pending")
+                    : "—"}
               </span>
             </ResponsiveModalDescription>
           </ResponsiveModalHeader>
@@ -226,11 +238,19 @@ export function GradebookMobile({
             {openStudent?.cells.map((cell, i) => {
               const quiz = model.quizzes[i];
               const percent = cell?.percent ?? null;
+              const pending = (cell?.pendingCount ?? 0) > 0;
               return (
                 <li key={quiz.id} className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
                   <span className="min-w-0 truncate text-sm font-bold text-foreground" title={quiz.title}>
                     {quiz.title}
                   </span>
+                  {pending ? (
+                    // Neutral pending state: the score is provisional while an
+                    // AI mark is outstanding, so no percentage is shown.
+                    <span className="shrink-0 rounded-md border-[2px] border-border bg-muted px-2 py-0.5 text-xs font-bold text-muted-foreground">
+                      {tPlay("shortText.pending")}
+                    </span>
+                  ) : (
                   <span
                     className={cn(
                       "shrink-0 text-sm font-extrabold tabular-nums",
@@ -242,11 +262,12 @@ export function GradebookMobile({
                     {percent === null ? "—" : `${percent}%`}
                     {cell?.score != null && (
                       <span className="ml-1.5 text-2xs font-bold text-muted-foreground">
-                        {cell.score}/{cell.total}
+                        {cell.score}/{cell.resolved}
                         {cell.attempt != null && cell.attempt > 1 ? ` ·#${cell.attempt}` : ""}
                       </span>
                     )}
                   </span>
+                  )}
                 </li>
               );
             })}
@@ -279,7 +300,12 @@ export function GradebookMobile({
                 const buckets = [0, 0, 0, 0, 0]; // 0-49, 50-64, 65-79, 80-89, 90-100
                 let attempted = 0;
                 for (const row of visibleRows) {
-                  const percent = row.cells[idx]?.percent ?? null;
+                  const cell = row.cells[idx] ?? null;
+                  // audit-4 M10: a pending cell's percent is null in the model
+                  // now, but keep the explicit guard so a partially-marked
+                  // attempt can never enter the distribution as a real score.
+                  if (cell === null || cell.pendingCount > 0) continue;
+                  const percent = cell.percent;
                   if (percent === null) continue;
                   attempted++;
                   if (percent < 50) buckets[0]++;
@@ -314,19 +340,28 @@ export function GradebookMobile({
             {visibleRows.map((row) => {
               const idx = model.quizzes.findIndex((q) => q.id === openQuiz?.id);
               const cell = row.cells[idx] ?? null;
+              // audit-4 M10: the per-quiz sheet must mirror the desktop cell —
+              // a pending cell is a neutral chip, never a provisional percent.
+              const pending = (cell?.pendingCount ?? 0) > 0;
               return (
                 <li key={row.studentId} className="flex items-center justify-between gap-3 rounded-xl px-2 py-1.5">
                   <span className="min-w-0 truncate text-sm font-bold text-foreground">
                     {row.fullName ?? row.matricNo ?? row.studentId}
                   </span>
-                  <span
-                    className={cn(
-                      "shrink-0 rounded-full border-[3px] px-2.5 py-0.5 text-xs font-extrabold tabular-nums",
-                      scoreTone(cell?.percent ?? null),
-                    )}
-                  >
-                    {cell?.percent === null || cell == null ? "—" : `${cell.percent}%`}
-                  </span>
+                  {pending ? (
+                    <span className="shrink-0 rounded-full border-[2px] border-border bg-muted px-2.5 py-0.5 text-xs font-bold text-muted-foreground">
+                      {tPlay("shortText.pending")}
+                    </span>
+                  ) : (
+                    <span
+                      className={cn(
+                        "shrink-0 rounded-full border-[3px] px-2.5 py-0.5 text-xs font-extrabold tabular-nums",
+                        scoreTone(cell?.percent ?? null),
+                      )}
+                    >
+                      {cell?.percent === null || cell == null ? "—" : `${cell.percent}%`}
+                    </span>
+                  )}
                 </li>
               );
             })}

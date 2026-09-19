@@ -3,6 +3,7 @@ import type { ResultsSessionInput, ResultsSessionRow } from "./types";
 import {
   assembleResultsRows,
   buildIntegrityTimeline,
+  coerceScore,
   deriveSessionDisplayStatus,
   summarizeFaceChecks,
 } from "./derive";
@@ -605,6 +606,56 @@ describe("U-T4d — assembleResultsRows", () => {
       rows[0].integrityTimeline.map((e) => (e.kind === "audit" ? e.action : e.kind)),
     ).toEqual(["unavailable", "unlock"]);
     expect(rows[0].legacyHistory).toEqual([]);
+  });
+});
+
+// ── D12: coerceScore NaN/non-finite guard ─────────────────────────────
+// `quiz_sessions.score` is NUMERIC (0053), which PostgREST serialises as a
+// STRING — and the "never NaN → NaN%" property is the whole reason the helper
+// exists. These pins freeze every arm of the byte-exact helper: nullish,
+// numeric strings, garbage, non-finite numbers, and pass-through numbers.
+
+describe("D12 — coerceScore", () => {
+  it("null/undefined → null", () => {
+    expect(coerceScore(null)).toBeNull();
+    expect(coerceScore(undefined)).toBeNull();
+  });
+
+  it("numeric strings parse (NUMERIC-over-the-wire shape)", () => {
+    expect(coerceScore("1.5")).toBe(1.5);
+    expect(coerceScore("0.5")).toBe(0.5);
+    expect(coerceScore("0")).toBe(0);
+    expect(coerceScore("2")).toBe(2);
+  });
+
+  it("unparseable strings → null (never NaN)", () => {
+    expect(coerceScore("abc")).toBeNull();
+    expect(coerceScore("")).toBeNull();
+    // audit-4 round-3: `Number("   ")` is 0, so a whitespace-only string must
+    // be rejected by the trim guard — otherwise an absent score renders "0".
+    expect(coerceScore("   ")).toBeNull();
+    expect(coerceScore("\t\n")).toBeNull();
+    expect(coerceScore("1.5abc")).toBeNull();
+  });
+
+  it("non-finite numbers → null (NaN / ±Infinity never propagate)", () => {
+    expect(coerceScore(Number.NaN)).toBeNull();
+    expect(coerceScore(Number.POSITIVE_INFINITY)).toBeNull();
+    expect(coerceScore(Number.NEGATIVE_INFINITY)).toBeNull();
+  });
+
+  it("finite numbers pass through unchanged", () => {
+    expect(coerceScore(0)).toBe(0);
+    expect(coerceScore(0.5)).toBe(0.5);
+    expect(coerceScore(1.5)).toBe(1.5);
+    expect(coerceScore(-1)).toBe(-1);
+  });
+
+  it("non-number, non-string values → null (booleans/objects/arrays)", () => {
+    expect(coerceScore(true)).toBeNull();
+    expect(coerceScore(false)).toBeNull();
+    expect(coerceScore({})).toBeNull();
+    expect(coerceScore([])).toBeNull();
   });
 });
 

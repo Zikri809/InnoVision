@@ -63,6 +63,7 @@ function EditQuizForm({
 }) {
   const locale = useLocale();
   const t = useTranslations("lecturer.dialogs");
+  const tBuilder = useTranslations("lecturer.builder");
   const tDetail = useTranslations("lecturer.classDetail");
   const tCommon = useTranslations("common");
 
@@ -98,6 +99,10 @@ function EditQuizForm({
   // Per-student shuffling (QT-3). FROZEN metadata like title/mode/time limit
   // — draft-only, hence the metadataLocked disable below.
   const [shuffleQuestions, setShuffleQuestions] = useState<boolean>(quiz.shuffle_questions ?? false);
+  // v4.9 gesture kill switch. Same draft-only freeze as shuffle above.
+  // `?? true` matches the column default: a legacy row read through a stale
+  // cache must not silently present the switch as OFF.
+  const [gesturesEnabled, setGesturesEnabled] = useState<boolean>(quiz.gestures_enabled ?? true);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -220,6 +225,11 @@ function EditQuizForm({
     // Shuffle diff (QT-3): draft-only (frozen metadata); only sent when changed.
     if (shuffleQuestions !== (quiz.shuffle_questions ?? false)) {
       payload.shuffleQuestions = shuffleQuestions;
+    }
+
+    // Gesture-switch diff (v4.9): same draft-only freeze.
+    if (gesturesEnabled !== (quiz.gestures_enabled ?? true)) {
+      payload.gesturesEnabled = gesturesEnabled;
     }
 
     if (Object.keys(payload).length === 0) {
@@ -553,6 +563,24 @@ function EditQuizForm({
               {t("shuffleQuestions")}
             </label>
             <p className="text-xs font-semibold text-muted-foreground">{t("shuffleQuestionsHelper")}</p>
+          </fieldset>
+
+          {/* Hand gestures (v4.9): the quiz-level input-modality switch.
+              DRAFT-FROZEN like shuffle above — flipping it mid-live would
+              leave some students answering by gesture and others by keyboard
+              against one quiz row, with no per-student migration path. */}
+          <fieldset className="space-y-2" disabled={saving}>
+            <label className="flex items-center gap-2.5 text-sm font-semibold text-foreground cursor-pointer">
+              <Switch
+                id="edit-quiz-gestures"
+                data-testid="gestures-toggle"
+                checked={gesturesEnabled}
+                onCheckedChange={(checked) => setGesturesEnabled(checked)}
+                disabled={saving || metadataLocked}
+              />
+              {tBuilder("gesturesToggle")}
+            </label>
+            <p className="text-xs font-semibold text-muted-foreground">{tBuilder("gesturesHint")}</p>
           </fieldset>
         </div>
       </form>

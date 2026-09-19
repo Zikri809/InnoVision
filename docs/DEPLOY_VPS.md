@@ -338,7 +338,7 @@ hit `/api/health` from the browser, or query the scheduler directly (there is no
 supabase db query --linked "select jobname, schedule, active from cron.job order by jobname;"
 ```
 
-Expected — five rows, matching `0019/0022/0030/0042`:
+Expected — seven rows, matching `0019/0022/0030/0042/0059`:
 
 | Job | Schedule |
 |---|---|
@@ -347,12 +347,62 @@ Expected — five rows, matching `0019/0022/0030/0042`:
 | `innovision-quiz-autoclose` | `*/5 * * * *` |
 | `innovision-flag-verify-silence` | `* * * * *` |
 | `innovision-incident-prune` | `23 4 * * *` |
+| `innovision-ai-mark-sweep` | `* * * * *` |
+| `innovision-ai-mark-escalate` | `*/5 * * * *` |
 
 **Zero rows here means Step 2 did not take** — go back and enable pg_cron, then
 re-run `supabase db push` (the schedules are inside the migration bodies, so
 they will not re-run once the version is recorded as applied: re-create them
 from the dashboard Cron UI, or `supabase migration repair <v> --status reverted`
 first — see §3.2).
+
+**Step 5b — provision the AI marking worker (short_text).**
+
+`innovision-ai-mark-sweep` calls `sweep_ai_marks()`, which CLAIMS pending
+`short_text` answers and POSTs them to `/api/internal/ai-mark-sweep`. That
+function runs **inside Postgres**, so it cannot read the app container's
+`.env.local` — it reads its two settings from the **database**:
+
+| Setting | Where it is read | What it is |
+|---|---|---|
+| `ai_mark_worker_url` | Vault secret, else `app.settings.ai_mark_worker_url` | the worker URL: `https://<your-host>/api/internal/ai-mark-sweep` |
+| `ai_mark_worker_key` | Vault secret, else `app.settings.ai_mark_worker_key` | the Bearer the route accepts (default: the service-role key) |
+
+**`deploy/sync-migrations.sh` provisions both automatically** after the push,
+from `AI_MARK_WORKER_URL` (default `<SITE_ORIGIN>/api/internal/ai-mark-sweep`)
+and `AI_MARK_WORKER_KEY` (default `SUPABASE_SERVICE_ROLE_KEY`). On the CI path
+nothing further is needed — the step warns loudly if it could not write them.
+
+If you are deploying by hand, or the script warned, run the equivalent once
+(Vault first; `app.settings` is the fallback for hosts without Vault):
+
+```bash
+# URL — Vault (preferred; encrypted at rest)
+supabase db query --linked "select vault.create_secret('https://<your-host>/api/internal/ai-mark-sweep', 'ai_mark_worker_url', 'AI mark sweep POST target');"
+
+# KEY — Vault (use the service-role key unless you set a dedicated one)
+supabase db query --linked "select vault.create_secret('<service-role-key>', 'ai_mark_worker_key', 'AI mark sweep bearer');"
+```
+
+> ⚠️ **Without these, `short_text` marking silently never runs.** The sweep
+> still CLAIMS rows (so they show `marking`), but with no URL it skips the POST,
+> the answers stay `pending`, and `v_all_done` blocks — the quiz never
+> auto-reveals for ANY student until the config lands. This is the same failure
+> the §"cron jobs missing" table describes, and it is invisible from the student
+> side beyond the pending banner.
+
+Verify with:
+
+```bash
+supabase db query --linked "select name from vault.secrets where name like 'ai_mark_%';"
+# → ai_mark_worker_key, ai_mark_worker_url
+```
+
+The bearer on the route must match. If you set a dedicated
+`AI_MARK_WORKER_KEY` secret, set the SAME value on the VPS app env (SOPS
+`prod.env.enc`) — the route reads it there (`AI_MARK_WORKER_KEY`, falling back
+to `SUPABASE_SERVICE_ROLE_KEY`). If you leave it unset, both ends default to the
+service-role key and there is nothing to keep in sync.
 
 **Step 6 — verify storage RLS applied.**
 
@@ -418,7 +468,7 @@ Two real cases:
   hand, then `repair <0039 version> --status reverted` and re-push so the whole
   migration replays against a known state.
 - **pg_cron jobs missing** (§3.1 Step 5). The migration is recorded as applied
-  but created nothing. Either create the five schedules in the dashboard Cron UI
+  but created nothing. Either create the seven schedules in the dashboard Cron UI
   (no history change needed), or `repair … --status reverted`, pre-enable
   pg_cron properly, and re-push.
 
@@ -1006,14 +1056,14 @@ node scripts/vps-smoke.mjs --base-url https://<your-host> \
   --expect-cron --expect-provider remote
 ```
 
-Pass `--expect-cron` only once the five jobs actually exist (§3.1 Step 5) — it
+Pass `--expect-cron` only once the seven jobs actually exist (§3.1 Step 5) — it
 turns cron failures fatal, so on a project whose scheduler is still being enabled
 it converts a known-incomplete state into a red run.
 
 ### 9.4 Keep-alive for free-tier pausing
 
 Free-tier Supabase projects pause after ~7 days of inactivity, and **pausing
-stops all five cron jobs** (§11.2). Two options:
+stops all seven cron jobs** (§11.2). Two options:
 
 - **Keep-alive**: an external monitor (or a cron on another host) that hits
   `https://<your-host>/api/health` every few minutes. This counts as activity for
@@ -1253,7 +1303,7 @@ migration whose objects now exist must be marked `applied`, or the next
 The retention/prune crons are **load-bearing infrastructure, not hygiene**: they
 are what keeps `incident-footage` and the DB from growing without bound.
 
-### 11.2 What pausing stops — all 5 crons, in order of damage
+### 11.2 What pausing stops — all 7 crons, in order of damage
 
 Free-tier pausing halts every `pg_cron` job. The order in which that hurts:
 
@@ -1266,6 +1316,16 @@ Free-tier pausing halts every `pg_cron` job. The order in which that hurts:
 3. **`innovision-incident-prune`** (`23 4 * * *`) and **`innovision-retention`**
    (`17 3 * * *`) — nothing is pruned, so storage and DB grow toward the quota.
 4. **`innovision-notifications`** (`43 3 * * 6`) — weekly digest/cleanup stalls.
+5. **`innovision-ai-mark-sweep`** (`* * * * *`, every minute) — short_text
+   answers are never claimed, so they stay `pending`. A pending answer blocks
+   `v_all_done`, which means the quiz never auto-reveals for ANY student in
+   the class until the job resumes. The pending banner tells the student
+   "usually under a minute", so the stall is visible but not diagnosable from
+   the student side.
+6. **`innovision-ai-mark-escalate`** (`*/5 * * * *`) — rows that exhausted
+   their retry cap are never resolved to `needs_review`, so the same
+   never-reveals block persists even after the sweep resumes. This job is the
+   only path that clears an exhausted row.
 
 The **quota death spiral**: pause → no prune → storage crosses 1 GB → uploads
 fail (which is an exam-critical path) → the only fix is deleting data you may
@@ -1332,8 +1392,8 @@ What it asserts (hard — a failure exits non-zero):
 
 **It only REPORTS the `cron` block** unless `--expect-cron` is passed. That is
 deliberate: `/api/health` returns `ok: true` even when `cron.degraded: true`, so
-a smoke asserting top-level `ok` would pass a deployment whose five schedules are
-all dead. **Assert on `cron.*`, never on `ok`.**
+a smoke asserting top-level `ok` would pass a deployment whose seven schedules
+are all dead. **Assert on `cron.*`, never on `ok`.**
 
 ### 12.2 Manual smoke
 
@@ -1350,7 +1410,7 @@ curl -s https://<your-host>/api/health | jq '{ok, db, uptimeSec}'
 |---|---|---|
 | Liveness | `curl -s .../api/health \| jq .ok` | `true` |
 | DB | `... \| jq .db.reachable` | `true` |
-| **Cron** (lecturer session) | log in as a lecturer, then `GET /api/health` | a `cron` block with `jobs[5]` and `missing: []`. ⚠️ `cron.ok` is DATA-DEPENDENT: on a fresh project `neverRan` is non-empty until each schedule has fired once, so `ok:false` there is honest, not broken. Judge by `missing` + `neverRan`, not by `ok` alone |
+| **Cron** (lecturer session) | log in as a lecturer, then `GET /api/health` | a `cron` block with `jobs[7]` and `missing: []`. ⚠️ `cron.ok` is DATA-DEPENDENT: on a fresh project `neverRan` is non-empty until each schedule has fired once, so `ok:false` there is honest, not broken. Judge by `missing` + `neverRan`, not by `ok` alone |
 | Login round trip | sign in in the browser | lands authenticated, no silent form reset |
 | Quiz session | open a class → quiz → session as a student | loads, timer runs |
 | OCR (remote leg) | lecturer → generate from file → AI Vision Scanner | picker shows the engine with a Cloud badge; a small PDF extracts |

@@ -91,6 +91,11 @@ jobs:
       - name: Env parity (audit-1 §5.5)
         run: node scripts/check-env-parity.mjs
 
+      # audit-4 M5 (E-60): sealed-table reads, per-migration NOTIFY, the
+      # health↔sync↔0059 cron count tie, and the six frozen §0 testids.
+      - name: Sealed-table gate (audit-4 M5 / E-60)
+        run: npm run check:sealed
+
   # Gate S5: the four kill switches must NEVER reach a CI build. Shared by the
   # e2e and integrity-e2e jobs below via the `env` below (which both jobs
   # reference by re-declaring the job-level env block inline).

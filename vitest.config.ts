@@ -46,6 +46,7 @@ export default defineConfig({
         "src/lib/supabase/middleware.ts",
         "src/lib/vision/camera.ts",
         "src/app/api/ai/**",
+        "src/app/api/internal/**",
         "src/app/api/quizzes/**",
         "src/app/api/student-quizzes/**",
         "src/app/api/question-images/**",
@@ -74,6 +75,11 @@ export default defineConfig({
         "src/lib/extract/tesseract.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
         "src/lib/extract/glm-ocr.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
         "src/app/api/ai/**/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
+        // PLAN_GESTURE_OFF_RICH_TYPES: the service-role sweep route is
+        // bearer-gated (A6-12) and the marking worker owns the fence +
+        // strict-parse contract (S6/FS-7) — both carry dedicated suites.
+        "src/app/api/internal/ai-mark-sweep/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
+        "src/lib/ai/marking-worker.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
         // P3 quiz routes are tested by P3's test suite (above). audit-1 §5.2:
         // these were 0-gated ("tested-but-ungated" — deleting assertions stayed
         // green); they now carry floors AT their measured coverage in the §5.2
@@ -88,6 +94,12 @@ export default defineConfig({
         // end-screen, student-quizzes-client) are E2E-covered (P4 precedent)
         // and excluded from the report entirely — no 0-threshold keys needed.
         "src/lib/sessions/timer.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        // v4.9 (E-58): the practice oracle counter — pure, storage-injected,
+        // unit-pinned by U-58-1..10.
+        "src/lib/sessions/practice-oracle.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        // audit-4 M4 (U-65): the gesture-arming predicates — pure, unit-pinned
+        // by the 6-case matrix; deleting the suite must fail this floor.
+        "src/lib/sessions/gesture-arming.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/lib/sessions/validation.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         // QT-3: deterministic per-session shuffle (golden vectors + round-trip
         // + transforms, U-QT3-1..18). QuestionRow types are shared.
@@ -186,6 +198,8 @@ export default defineConfig({
         "src/lib/audio/vad.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/app/api/sessions/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
         "src/app/api/sessions/[id]/answer/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
+        // PLAN_GESTURE_OFF_RICH_TYPES §5: lecturer mark adjudication.
+        "src/app/api/sessions/[id]/override/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
         "src/app/api/sessions/[id]/submit/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },
         // P8: session reset route (I21) — mirrors the sibling session routes.
         "src/app/api/sessions/[id]/reset/route.ts": { lines: 60, statements: 60, functions: 60, branches: 50 },

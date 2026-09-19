@@ -14,6 +14,7 @@ import {
   chatCompletions,
   chatStream,
   AI_MODEL,
+  NO_CHAT_USAGE,
   type ChatMessage,
   type ChatResult,
 } from "@/lib/ai/client";
@@ -313,14 +314,18 @@ async function runAiGeneration(
           onDelta: opts.onDelta,
         });
         if (!r.ok) {
-          if (r.error === "timeout") return { ok: false, error: "timeout" };
+          if (r.error === "timeout") {
+            return { ok: false, error: "timeout", usage: NO_CHAT_USAGE };
+          }
           return {
             ok: false,
             error: "ai_error",
             message: r.error === "cancelled" ? "cancelled" : r.message,
+            usage: NO_CHAT_USAGE,
           };
         }
-        return { ok: true, text: r.text };
+        // The streaming path does not parse usage (no booking consumer).
+        return { ok: true, text: r.text, usage: NO_CHAT_USAGE };
       }
     : async (messages, timeoutMs) =>
         chatCompletions({ client: ai, model: AI_MODEL, messages, timeoutMs, signal: opts.signal });

@@ -270,11 +270,44 @@ unaffected — marker frames short-circuit before the sidecar.
 | D47 | **Anon denial (P5)** | raw-anon PostgREST call to `start_quiz_session`/`answer_question`/`submit_session` → denied (execute revoked); anon SELECT on `quiz_sessions`/`session_answers` → 0 rows (RLS/grants) |
 | — | **Quiz-delete guard (P5, route-owned)** | quiz DELETE with sessions → 409 `quiz_has_sessions` (route test **I-S12**; the DB layer cascades by design — D41 is deliberately not a D-test) |
 
+### 3.1 pgTAP suites (`supabase/tests/`, `npx supabase test db`)
+
+The D-table above documents the *manual/exploratory* DB contract. The
+**`supabase/tests/` pgTAP suites are the executable half** and are the ones CI
+must run — a D-row with no corresponding assertion here is documentation, not a
+gate.
+
+```bash
+npx supabase start          # once
+npx supabase test db        # all suites
+npx supabase test db supabase/tests/0057_sweep.sql   # one suite
+```
+
+| File | Covers | Assertions |
+|---|---|---|
+| `0052_question_shape.sql` | I-25: per-type option cardinality (mcq 2..5, true_false exactly 2, multi 2..4, short_text 0), the three-way `questions_correct_shape`, the short_text shape/rubric CHECKs (incl. the 500-char `answer_key` ceiling), the `0/0.5/1` mark ladder, `answer_text` <=500, the pending/skip shape CHECKs, a `mark_metadata` JSONB smoke insert, the `gestures_enabled DEFAULT true NOT NULL` pin, and the `student_questions_no_new_types` scope guard | 27 |
+| `0054_privs.sql` | I-23: the column-privilege seal. Asserts `has_column_privilege` is FALSE for every S1-withheld column (`is_correct`, `mark_score`, `mark_status`, `marked_at`, `answer_text`, `attempt_version`, `mark_metadata`, `answer_key`, `correct_index/indices`, `image_path`), that no table-level SELECT survives, that the definer RPCs (`finalize_ai_mark`, `check_mark_spend`, `sweep_ai_marks`, `escalate_stale_marks`, `recheck_quiz_completion`) are NOT executable by `authenticated` **or `anon`**, and that the barrier views project exactly what they claim (ungated `answer_text`/`skipped`, reveal-gated `mark_status`/`mark_score`, owner-gated `lecturer_questions_view.answer_key`) | 40 |
+| `0055_submit_pending.sql` | I-20: a pending answer contributes 0 (D10 SUM + pending filter), `v_all_done` is FALSE while any answer quiz-wide is pending so the quiz does NOT auto-reveal, `quiz_autoclose` refuses for the same reason, the completed-count excludes pending sessions, `student_pending_count` answers pre-reveal and returns `not_found` for a foreign session, a 0.5 mark survives the recompute as 1.5 (the NUMERIC column's whole purpose), and the `already_submitted` branch RECOMPUTES after a post-submit override while the unrevealed->`score:null` arm stays intact (M6) | 31 |
+| `0057_sweep.sql` | I-24: the sweep lifecycle - claim mints ONE shared `claim_token` and advances `attempts`, a second sweep does not re-claim inside the lease but a claim staler than 5 min IS re-claimed (crashed-worker recovery), the A6-4 stale-token finalize is DISCARDED and the ledger row stays `marking` with its token, a low-confidence mark routes to `needs_review` while the score stands, a model FAILURE leaves the answer pending so R3-M2 retries it, the D2-13 epoch guard discards BOTH a post-override write and a true stale-epoch write against a still-pending answer, R3-MIN3 closes the discarded ledger row, A6-1 escalation reaches an exhausted row, and the digest/v_all_done re-fire from finalize against a genuinely SUBMITTED session (incl. the honest 2h-quiet-window hold) | 46 |
+| `0058_override.sql` | I-21: override validation (NULL mark / bad reason / over-max / foreign question / no answer row all return typed errors, never a silent `ok:true`), the D10 recompute, `attempt_version` incrementing as the override epoch, an `audit_events` row, NO `last_activity_at` OR `submitted_at` stamp (D4), no extra `session_submitted` notification, and the C6/L1 re-publish - the override NULLs `results_revealed_at` under its GUC while the one-way trigger still blocks an un-reveal outside it | 24 |
+| `0059_cron.sql` | I-22: A7-1's TWO separate schedules (1-min sweep, 5-min escalate) with the pinned commands, BOTH pinned as single statements (own transactions, no merge), both active, not duplicated, the count is exactly SEVEN (the value `EXPECTED_JOBS` / `EXPECTED_CRON_JOBS` must match), and `cron_health()` reports both | 15 |
+| `0061_practice_skip.sql` | I-26 (audit-4 M8/A5-5): practice re-answer after a skip — the scalar upsert resets `skipped` (no 23514), the re-answer re-grades, and the short_text → skip → short_text cycle exercises every practice ON CONFLICT branch in `answer_question` | 12 |
+
+**Counts are the `select plan(N)` values in each suite and must be updated in the same commit as the assertion.** Running total: 27 + 40 + 31 + 46 + 24 + 15 + 12 = **195**.
+
+**Why privilege assertions rather than query results** (`0054_privs.sql`): a
+column-level `REVOKE` is a NO-OP while a table-level `SELECT` grant exists -
+`ACLMASK_ANY` satisfies every column read (the 0048 lesson). So the only honest
+check is "does the role hold SELECT on this column at all", which is exactly
+what `has_column_privilege` answers.
+
+**Why the suites run inside `begin; . rollback;`**: each file creates its own
+fixtures (auth users, profiles, a class, a quiz) and rolls them back, so the
+suites are order-independent and rerunnable against a persistent local DB.
+
 ---
 
 ## 4. API / Integration Tests (Vitest + MSW)
-
-| # | Route | Case | Expected |
 |---|---|---|---|
 | I1 | `POST /api/face/enroll` | no consent yet | 403 (consent gate) |
 | I2 | enroll | 3 base64 JPEG frames (front/left/right), pose valid | CompreFace subject + `face_enrollment_status='enrolled'`; returns ok |
@@ -402,7 +435,7 @@ unaffected — marker frames short-circuit before the sidecar.
 | E42 | **Per-student shuffle (QT-3)** | lecturer creates an untimed practice quiz with "Shuffle question & option order" checked (3 questions, 4/5/4 options) → service-role probe `quizzes.shuffle_questions=true` → student starts, spec re-derives the session's plan from the sessionId (shared module import) and asserts the rendered first prompt + per-position option accessible names EQUAL the derived plan (also after a reload — determinism) → answers every question by its CORRECT option TEXT in the derived presented order → full score 3/3 → service-role probe: every persisted `session_answers.selected_index` equals the CANONICAL `correct_index` → EndScreen breakdown shows each prompt once with ✓ on the clicked option | presented order matches the derived plan; the wire stays canonical; review matches what the student saw |
 | E2F | **Grounded web-search generation (TinyFish topic mode)** — `e2f-web-generate.spec.ts` + `e2f-web-generate-flags.spec.ts` (flags project) | lecturer selects the "Web topic" source mode in the generate dialog and submits a topic carrying a `[MOCK:tf_*]` scenario marker (echo chain: topic → query planner → mock AI → mock-tinyfish-server, all stateless/parallel-safe): happy path (`tf_ok`: 3 search results on 3 distinct hostnames, page 3 carries an "IGNORE PREVIOUS INSTRUCTIONS" injection fixture) asserts the search stage + tool trace lines, the web-variant payoff stamp, and exactly 3 builder chips (`role="link"`, `data-testid="web-source-chip"`, exact fixture hrefs) with the injection text absent from saved prompts; `tf_thin` → distinct localized `search_corpus_thin` strip + topic preserved on retry; `tf_5xx`/`tf_401` → `search_failed` vs `search_unavailable` (DIFFERENT localized copy); `tf_slow` (8s search delay) → deterministic mid-search cancel + immediate retry not locked out; `tf_partial` → skipped-fetch line + exactly 2 chips; mobile 360×640 (`test.use` viewport) happy path with no horizontal overflow; student surface shows no chooser. Server-side TinyFish calls are proven via the mock's `GET /__requests` log (`expect.poll`) — `page.route` cannot see them. The flags spec runs on the `chromium-nowebsearch` project (second server port, `TINYFISH_API_KEY=""` explicitly): chooser hidden + paste flow intact (escape hatch 1). Dup/429-retry/scoring/caps are unit-pinned in `tinyfish.test.ts` + `web-generate.test.ts` | every scenario's strip copy is localized; zero rows saved on any failure; the flag cleanly disables the feature |
 | E52 | **QR class join (scan-to-enroll)** — `e2e/e52-qr-join.spec.ts`, 4 serial tests | (1) lecturer registers + creates a class → DETAIL page "Show QR" (archived gating checked later) → dialog renders the QR + resolved `{origin}/join/{code}` URL; student joins via `/join/{code}` confirm card → `/student/classes` shows the class → re-visit asserts the localized `already_enrolled` copy. (2) EXISTING account: anonymous `/join/{code}` hits the middleware login bounce → password sign-in → `?redirect=` returns to the join → confirm completes. (3) FIRST-DAY account: bounce → Register link (carries `?redirect=`) → inline registration (matric via the exported `matricForEmail` hash — no timestamp-slice collisions) → post-signup push lands on `/join` → join completes. (4) `/join/zz` (malformed) → neutral invalid card; lecturer scanning → `lecturerNotice` info card with no join CTA; archive the class → archived DETAIL page (via "View audit" link — the archived list title is not clickable) shows NO QR affordance. Error mapping unit-pinned in `src/app/join/[code]/join-errors.test.ts`; redirect-chain sanitization (incl. the dot-segment `//`-output guard) unit-pinned in `redirect.test.ts` | confirm-join is user-initiated; typed errors localized; the bounce chain survives both the login and register paths; archived classes hide the QR |
-
+| E-60 | **Rich-type audit gate** (CI: `npm run check:sealed`) | `scripts/check-sealed-tables.mjs` scans USER-scoped `src/**` clients on the sealed tables (`questions`, `session_answers`, `quiz_sessions`, `ai_marking_ledger`) for reads outside an admin client (explicit allowlist with reasons); requires a terminal `NOTIFY pgrst, 'reload schema'` in each recreation file (0054/0055/0057/0058/0060); ties `EXPECTED_JOBS` = `EXPECTED_CRON_JOBS` = the 0059 expected count (all 7); and asserts all six frozen testids exist. **Wired into `.github/workflows/ci.yml` (checks job) and `package.json` (`check:sealed`).** Known limitation: computed access (`supabase["from"]`), destructured `from`, and const table names evade the regex scan — it is a drift alarm, not a sandbox. | Zero unaccounted sealed-table reads; one terminal NOTIFY per recreation file; cron constants agree; frozen testids present |
 ### 5.2 Integrity hardening suite (e51, opt-in) — clipboard + fullscreen
 
 `e2e/e51-integrity-hardening.spec.ts` exercises the client hardening (copy/cut/context-menu blocked + `user-select: none` on the question card; fullscreen requested at Begin; an exit → pause POST with `reason: 'fullscreen_exit'`).

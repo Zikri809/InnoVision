@@ -110,7 +110,7 @@ function req(headers: Record<string, string> = {}): Request {
   return new Request("http://localhost/api/health", { headers });
 }
 
-/** The five healthy schedules the cron RPC reports. */
+/** The seven healthy schedules the cron RPC reports (0059 added the AI pair). */
 function healthyCron() {
   return {
     jobs: [
@@ -119,8 +119,10 @@ function healthyCron() {
       { job: "innovision-notifications", active: true, lastStatus: "succeeded", lastRunAt: "2026-09-12T03:43:00Z", everRan: true },
       { job: "innovision-flag-verify-silence", active: true, lastStatus: "succeeded", lastRunAt: "2026-09-13T03:59:00Z", everRan: true },
       { job: "innovision-incident-prune", active: true, lastStatus: "succeeded", lastRunAt: "2026-09-13T04:23:00Z", everRan: true },
+      { job: "innovision-ai-mark-sweep", active: true, lastStatus: "succeeded", lastRunAt: "2026-09-13T04:24:00Z", everRan: true },
+      { job: "innovision-ai-mark-escalate", active: true, lastStatus: "succeeded", lastRunAt: "2026-09-13T04:25:00Z", everRan: true },
     ],
-    count: 5,
+    count: 7,
   };
 }
 
@@ -208,7 +210,7 @@ describe("GET /api/health — authenticated lecturer (gate S6)", () => {
     expect(body.ok).toBe(true);
     expect(body.db.reachable).toBe(true);
     expect(body.cron.ok).toBe(true);
-    expect(body.cron.jobs).toHaveLength(5);
+    expect(body.cron.jobs).toHaveLength(7);
     expect(body.cron.neverRan).toEqual([]);
     expect(body.cron.missing).toEqual([]);
     expect(adminState.cronRpcCalls).toBe(1);
@@ -240,7 +242,7 @@ describe("GET /api/health — authenticated lecturer (gate S6)", () => {
     // "Cannot read properties of undefined (reading 'rest')", which
     // collectCronHealth swallows into `{ok:false, degraded:true}` — so the
     // endpoint answers 200/ok:true with a permanently degraded cron section and
-    // the runbook's `cron.jobs[5]` check can never pass. The FakeAdminClient
+    // the runbook's `cron.jobs[7]` check can never pass. The FakeAdminClient
     // above is a method-on-an-object precisely so this test can see it; a mock
     // returning a free function passes whether or not the route is detached.
     sessionHolder.current.setUser(LECTURER_ID, "lecturer");
@@ -252,7 +254,7 @@ describe("GET /api/health — authenticated lecturer (gate S6)", () => {
     // receiver produces.
     expect(body.cron.degraded).toBe(false);
     expect(body.cron.ok).toBe(true);
-    expect(body.cron.jobs).toHaveLength(5);
+    expect(body.cron.jobs).toHaveLength(7);
   });
 
   it("degrades the cron section (not the probe) when cron_health errors", async () => {

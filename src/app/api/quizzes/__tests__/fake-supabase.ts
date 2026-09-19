@@ -293,6 +293,11 @@ const SEAM_ONLY_RPCS = new Set([
   "mark_notifications_read_before",
   "reorder_questions",
   "student_results",
+  // 0058 §1: the adjudication RPC's semantics (ownership through the quiz's
+  // class, the 0/0.5/1 ladder vs max_score, the re-publish GUC) are SQL-only
+  // and pinned by the live-DB verify harness — the route test drives the
+  // payload mapping through the `rpcResult` seam.
+  "override_answer_mark",
   // Modeled by StudentFakeSupabase, seam-only against the BASE fake.
   "answer_student_question",
   "append_student_question",
@@ -312,6 +317,13 @@ export class FakeSupabase {
     data: null,
     error: null,
   };
+  /**
+   * Every `rpc()` invocation this fake served, in order. Added for audit-4
+   * M13: the override replay guard's core claim ("no second RPC on a replay")
+   * was untestable because the seam could not count calls — a deleted guard
+   * still returned 200 twice. Tests now assert `rpcCalls` directly.
+   */
+  rpcCalls: Array<{ name: string; args?: Record<string, unknown> }> = [];
   /** Fake storage files keyed by object path. */
   storageFiles: Record<string, Uint8Array> = {};
   /** resolve_question_image stub decisions (media routes). */
@@ -365,6 +377,9 @@ export class FakeSupabase {
       student_answers_view: "session_answers",
       lecturer_answers_view: "session_answers",
       student_quiz_view: "quizzes",
+      // 0060: every lecturer read of questions goes through the
+      // owner-predicated view (0054 revoked the base table's key columns).
+      lecturer_questions_view: "questions",
     };
     const resolved = VIEW_TO_BASE[table] ?? table;
     return new FakeQueryBuilder(this, resolved);
@@ -388,6 +403,9 @@ export class FakeSupabase {
   // instead of silently returning `{data:null,error:null}` and letting a route
   // test go green against an RPC that no longer exists.
   async rpc(name: string, args?: Record<string, unknown>) {
+    // Record EVERY call (audit-4 M13): tests assert call counts for guards
+    // whose observable surface is "did a second RPC happen".
+    this.rpcCalls.push({ name, args });
     if (name === "start_quiz_session") {
       return this._startQuizSession(args);
     }
@@ -438,6 +456,31 @@ export class FakeSupabase {
     }
     if (name === "reject_face_enrollment") {
       return this._rejectFaceEnrollment(args);
+    }
+    if (name === "student_pending_count") {
+      // 0057 semantics at the level the route branches on: an OWN session
+      // yields the counts + the reveal flag; a foreign/missing one yields
+      // `not_found` (no-oracle). The counts read the same in-memory answers
+      // the rest of the fake serves, so a seeded pending row is visible.
+      const sessionId = String(args?.p_session_id);
+      const studentId = this.user?.id ?? "";
+      const session = (this.tables["quiz_sessions"] ?? []).find(
+        (s) => s.id === sessionId && s.student_id === studentId,
+      );
+      if (!session) return { data: { error: "not_found" }, error: null };
+      const answers = (this.tables["session_answers"] ?? []).filter(
+        (a) => a.session_id === sessionId,
+      );
+      const quiz = (this.tables["quizzes"] ?? []).find((q) => q.id === session.quiz_id);
+      return {
+        data: {
+          pending_count: answers.filter((a) => a.mark_status === "pending").length,
+          failed_count: answers.filter((a) => a.mark_status === "failed").length,
+          revealed:
+            session.mode !== "assessment" || quiz?.results_revealed_at != null,
+        },
+        error: null,
+      };
     }
     if (name === "is_lecturer_of_quiz") {
       // Mirror the SQL helper (0004): gate on the quiz's CLASS ownership, not
@@ -805,6 +848,8 @@ export class FakeSupabase {
     const questionId = String(args?.p_question_id);
     const selectedIndex = args?.p_selected_index as number | undefined;
     const selectedIndices = args?.p_selected_indices as number[] | undefined;
+    const answerText = args?.p_answer_text as string | undefined;
+    const skipped = args?.p_skipped === true;
     const answers = (this.tables["session_answers"] ??= []);
 
     // Resolve correctness against the seeded question's correct_index.
@@ -816,6 +861,103 @@ export class FakeSupabase {
     }
     const options = (question.options as string[]) ?? [];
     const isMultiQuestion = question.type === "multi_select";
+
+    // ── Skip (R13/S11) ───────────────────────────────────────────────
+    // Shape exclusivity first (a skip carries no answer payload), then the
+    // graded 0 row. Terminal in assessment via the `existing` check below.
+    if (skipped) {
+      if (
+        selectedIndex !== undefined ||
+        selectedIndices !== undefined ||
+        answerText !== undefined
+      ) {
+        return { data: { error: "invalid_selected_index" }, error: null };
+      }
+      const mode = session.mode as string;
+      const prior = answers.find(
+        (a) => a.session_id === sessionId && a.question_id === questionId,
+      );
+      if (mode === "assessment" && prior) {
+        return { data: { error: "already_answered" }, error: null };
+      }
+      if (prior) {
+        prior.selected_index = null;
+        prior.selected_indices = null;
+        prior.answer_text = null;
+        prior.skipped = true;
+        prior.is_correct = false;
+        prior.mark_status = "marked";
+        prior.mark_score = 0;
+      } else {
+        answers.push({
+          id: randomUuid(),
+          session_id: sessionId,
+          question_id: questionId,
+          selected_index: null,
+          selected_indices: null,
+          answer_text: null,
+          skipped: true,
+          is_correct: false,
+          mark_status: "marked",
+          mark_score: 0,
+          attempt_version: 1,
+          answered_at: "2026-01-01T00:01:00Z",
+        });
+      }
+      return {
+        data: mode === "assessment" ? { recorded: true } : { is_correct: false, correct_index: null },
+        error: null,
+      };
+    }
+
+    // ── short_text (B5-1/C5-1) ───────────────────────────────────────
+    // The row lands PENDING in assessment (queued for the AI marker) and
+    // needs_review in practice (no spend budget — D12).
+    if (question.type === "short_text") {
+      if (selectedIndex !== undefined || selectedIndices !== undefined) {
+        return { data: { error: "invalid_selected_index" }, error: null };
+      }
+      const trimmed = (answerText ?? "").trim();
+      if (trimmed.length < 1 || trimmed.length > 500) {
+        return { data: { error: "invalid_answer_text" }, error: null };
+      }
+      const mode = session.mode as string;
+      const prior = answers.find(
+        (a) => a.session_id === sessionId && a.question_id === questionId,
+      );
+      if (mode === "assessment" && prior) {
+        return { data: { error: "already_answered" }, error: null };
+      }
+      const markStatus = mode === "assessment" ? "pending" : "needs_review";
+      if (prior) {
+        prior.selected_index = null;
+        prior.selected_indices = null;
+        prior.answer_text = trimmed;
+        prior.skipped = false;
+        prior.is_correct = false;
+        prior.mark_status = markStatus;
+        prior.mark_score = null;
+      } else {
+        answers.push({
+          id: randomUuid(),
+          session_id: sessionId,
+          question_id: questionId,
+          selected_index: null,
+          selected_indices: null,
+          answer_text: trimmed,
+          skipped: false,
+          is_correct: false,
+          mark_status: markStatus,
+          mark_score: null,
+          attempt_version: 1,
+          answered_at: "2026-01-01T00:01:00Z",
+        });
+      }
+      return {
+        data: mode === "assessment" ? { recorded: true } : { is_correct: false, correct_index: null },
+        error: null,
+      };
+    }
 
     // QT-1: multi questions answer with the SET (the scalar must be absent);
     // single-answer questions reject the set. Mirrors the 0037 RPC branches,

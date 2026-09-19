@@ -9,7 +9,8 @@ import type OpenAI from "openai";
  */
 
 type CreateFn = (opts: unknown, reqOpts?: { signal?: AbortSignal }) => Promise<{
-  choices?: { message?: { content?: string } }[];
+  choices?: { message?: { content?: string }; finish_reason?: string }[];
+  usage?: unknown;
 }>;
 
 function makeClient(create: CreateFn): OpenAI {
@@ -39,7 +40,78 @@ describe("chatCompletions", () => {
       model: "m",
       messages: [{ role: "user", content: "hi" }],
     });
-    expect(res).toEqual({ ok: true, text: "hello" });
+    expect(res).toEqual({ ok: true, text: "hello", usage: { totalTokens: 0, usagePresent: false } });
+  });
+
+  // audit-4 M1: the marking worker books tokens/usd from this field, so the
+  // success arm must carry the provider's usage (numeric strings included).
+  it("carries provider usage on the success arm (numeric strings accepted)", async () => {
+    const client = makeClient(async () => ({
+      choices: [{ message: { content: "hello" } }],
+      usage: { prompt_tokens: "100", completion_tokens: 50, total_tokens: "150" },
+    }));
+    const res = await chatCompletions({
+      client,
+      model: "m",
+      messages: [{ role: "user", content: "hi" }],
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.usage).toEqual({ totalTokens: 150, usagePresent: true });
+  });
+
+  it("derives total from prompt+completion when only they are present, never NaN", async () => {
+    const client = makeClient(async () => ({
+      choices: [{ message: { content: "hello" } }],
+      usage: { prompt_tokens: 10, completion_tokens: 20 },
+    }));
+    const res = await chatCompletions({
+      client,
+      model: "m",
+      messages: [{ role: "user", content: "hi" }],
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.usage.totalTokens).toBe(30);
+      expect(Number.isFinite(res.usage.totalTokens)).toBe(true);
+    }
+  });
+
+  it("collapses garbage usage to zeros with usagePresent:false (never NaN)", async () => {
+    for (const bad of [null, 7, "x", [], { total_tokens: "abc" }, { total_tokens: {} }]) {
+      const client = makeClient(async () => ({
+        choices: [{ message: { content: "hello" } }],
+        usage: bad,
+      }));
+      const res = await chatCompletions({
+        client,
+        model: "m",
+        messages: [{ role: "user", content: "hi" }],
+      });
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.usage).toEqual({ totalTokens: 0, usagePresent: false });
+        expect(Number.isFinite(res.usage.totalTokens)).toBe(true);
+      }
+    }
+  });
+
+  it("carries usage on a truncated (length) failure — the call was billed", async () => {
+    const client = makeClient(async () => ({
+      choices: [
+        {
+          finish_reason: "length" as unknown as undefined,
+          message: { content: "partial" },
+        },
+      ],
+      usage: { total_tokens: 999 },
+    }));
+    const res = await chatCompletions({
+      client,
+      model: "m",
+      messages: [{ role: "user", content: "hi" }],
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.usage).toEqual({ totalTokens: 999, usagePresent: true });
   });
 
   it("returns ai_error on an empty model response", async () => {

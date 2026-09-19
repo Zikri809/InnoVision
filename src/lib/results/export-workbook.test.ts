@@ -49,6 +49,7 @@ const labels: WorkbookLabels = {
   classLabel: "Class",
   modeLabel: "Mode",
   truncatedWarning: "Truncated export — showing the first {count} rows only.",
+  pendingLabel: "Pending mark",
 };
 
 function input(): BuildExportInput {
@@ -97,6 +98,28 @@ function input(): BuildExportInput {
 }
 
 describe("buildWorkbook (smoke)", () => {
+  // audit-4 round-3 (M10 residual): a session with unresolved AI marks has a
+  // provisional resolved-percent; the artifact must print the neutral pending
+  // label instead of a number that contradicts the on-screen gradebook chip.
+  it("writes the pending label (not a provisional percent) when marks are unresolved", async () => {
+    const raw = input();
+    raw.sessions = [{ ...raw.sessions[0], score: 5, pending_count: 5 }];
+    const buffer = await buildWorkbook(buildExportModel(raw), labels);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buffer as unknown as ArrayBuffer);
+    const results = wb.getWorksheet("Results")!;
+    // Row 5 = first student; col 7 = Percent.
+    expect(results.getCell(5, 7).value).toBe("Pending mark");
+    expect(results.getCell(5, 7).numFmt).not.toBe("0%");
+    // A fully-resolved session still writes the numeric fraction + numFmt.
+    const resolved = await buildWorkbook(buildExportModel(input()), labels);
+    const wb2 = new ExcelJS.Workbook();
+    await wb2.xlsx.load(resolved as unknown as ArrayBuffer);
+    const results2 = wb2.getWorksheet("Results")!;
+    expect(results2.getCell(5, 7).value).toBe(1);
+    expect(results2.getCell(5, 7).numFmt).toBe("0%");
+  });
+
   it("produces a non-empty buffer with the three expected sheets", async () => {
     const model = buildExportModel(input());
     const buffer = await buildWorkbook(model, labels);

@@ -371,3 +371,105 @@ describe("QT-1 — multi-select question shape", () => {
     expect(result.success).toBe(false);
   });
 });
+
+/**
+ * v4.9 — short_text authoring shape (U-60).
+ *
+ * The type is only REACHABLE if the schema accepts it, and the plan's critic
+ * rounds kept finding that the schema-level `options` bounds (min 2 / max 5)
+ * rejected short_text BEFORE any per-type arm could run. These assertions pin
+ * the per-type cardinality that replaced those global bounds.
+ */
+describe("U-60 — short_text authoring shape", () => {
+  const validShortText = {
+    type: "short_text",
+    prompt: "Explain photosynthesis.",
+    options: [] as string[],
+    answerKey: "Mentions light energy and chlorophyll.",
+  };
+
+  it("U-60-1 accepts short_text with ZERO options and a rubric", () => {
+    expect(QuestionInputSchema.safeParse(validShortText).success).toBe(true);
+  });
+
+  it("U-60-2 rejects short_text WITH options (the DB convention is the empty array)", () => {
+    expect(
+      QuestionInputSchema.safeParse({
+        ...validShortText,
+        options: ["a", "b"],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("U-60-3 requires a non-blank rubric", () => {
+    for (const answerKey of [undefined, "", "   "]) {
+      expect(
+        QuestionInputSchema.safeParse({ ...validShortText, answerKey }).success,
+        `answerKey=${JSON.stringify(answerKey)} must be rejected`,
+      ).toBe(false);
+    }
+  });
+
+  it("U-60-4 caps the rubric at 500 chars (mirrors questions_answer_key_shape)", () => {
+    expect(
+      QuestionInputSchema.safeParse({
+        ...validShortText,
+        answerKey: "x".repeat(500),
+      }).success,
+    ).toBe(true);
+    expect(
+      QuestionInputSchema.safeParse({
+        ...validShortText,
+        answerKey: "x".repeat(501),
+      }).success,
+    ).toBe(false);
+  });
+
+  it("U-60-5 rejects an index key on short_text (it is graded against a rubric)", () => {
+    expect(
+      QuestionInputSchema.safeParse({ ...validShortText, correctIndex: 0 }).success,
+    ).toBe(false);
+    expect(
+      QuestionInputSchema.safeParse({ ...validShortText, correctIndices: [0] }).success,
+    ).toBe(false);
+  });
+
+  it("U-60-6 rejects answerKey on every OTHER type", () => {
+    for (const base of [validMcq, validTrueFalse, validMulti]) {
+      expect(
+        QuestionInputSchema.safeParse({
+          ...base,
+          answerKey: "not valid here",
+        }).success,
+        `${base.type} must reject answerKey`,
+      ).toBe(false);
+    }
+  });
+
+  it("U-60-7 keeps the legacy per-type option bounds (mcq 5 OK / 6 rejected, TF exactly 2)", () => {
+    expect(
+      QuestionInputSchema.safeParse({
+        ...validMcq,
+        options: ["1", "2", "3", "4", "5"],
+        correctIndex: 4,
+      }).success,
+    ).toBe(true);
+    expect(
+      QuestionInputSchema.safeParse({
+        ...validMcq,
+        options: ["1", "2", "3", "4", "5", "6"],
+        correctIndex: 5,
+      }).success,
+    ).toBe(false);
+    expect(
+      QuestionInputSchema.safeParse({
+        ...validTrueFalse,
+        options: ["True", "False", "Maybe"],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("U-60-8 student strict schema rejects short_text (D12: practice keeps scalar types)", () => {
+    expect(StudentQuestionInputSchema.safeParse(validShortText).success).toBe(false);
+  });
+});

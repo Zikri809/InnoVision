@@ -89,6 +89,8 @@ export type QuizInfo = {
   allow_retake: boolean | null;
   max_attempts: number | null;
   shuffle_questions: boolean | null;
+  /** v4.9: quiz-level gesture kill switch (draft-frozen). */
+  gestures_enabled: boolean | null;
   created_at: string;
   source_file_url: string | null;
   source_text: string | null;
@@ -98,23 +100,27 @@ export type QuestionRow = {
   id: string;
   quiz_id: string;
   order_index: number;
-  type: "mcq" | "true_false" | "multi_select";
+  type: "mcq" | "true_false" | "multi_select" | "short_text";
   prompt: string;
   options: string[];
   correct_index: number | null;
   correct_indices?: number[] | null;
+  /** v4.9: the short_text rubric. */
+  answer_key?: string | null;
   explanation: string | null;
   image_path?: string | null;
 };
 
 type QuestionDraft = {
-  type: "mcq" | "true_false" | "multi_select";
+  type: "mcq" | "true_false" | "multi_select" | "short_text";
   prompt: string;
   options: string[];
   /** Single-answer key (mcq / true_false). Absent on multi drafts. */
   correctIndex?: number;
   /** QT-1: sorted+distinct multi answer key. Absent on single-answer drafts. */
   correctIndices?: number[];
+  /** v4.9: the rubric an AI marker grades a short_text answer against. */
+  answerKey?: string;
   explanation: string;
 };
 
@@ -435,8 +441,14 @@ export function QuizBuilderClient({
       options: draft.options,
       // QT-1: strictly one-of by type — multi carries the sorted set and no
       // scalar, singles the reverse (QuestionInputSchema enforces both ways).
-      correctIndex: draft.type === "multi_select" ? undefined : draft.correctIndex,
+      correctIndex:
+        draft.type === "multi_select" || draft.type === "short_text"
+          ? undefined
+          : draft.correctIndex,
       correctIndices: draft.type === "multi_select" ? draft.correctIndices : undefined,
+      // v4.9: a short_text question's key IS the rubric; every other type
+      // must omit it (QuestionInputSchema rejects the mismatch both ways).
+      answerKey: draft.type === "short_text" ? draft.answerKey : undefined,
       explanation: draft.explanation,
     };
 
@@ -663,8 +675,24 @@ export function QuizBuilderClient({
             <Select
               value={draft.type}
               onValueChange={(v) => {
-                const type = v as "mcq" | "true_false" | "multi_select";
+                const type = v as "mcq" | "true_false" | "multi_select" | "short_text";
                 setDraft((d) => {
+                  if (type === "short_text") {
+                    // v4.9: a rubric question has NO options — the DB
+                    // convention is the EMPTY array (0052). Leaving the
+                    // draft's placeholder entries in place would send
+                    // `options: [""]`, which the per-element OPTION_MIN
+                    // check rejects as "Options must not be empty" and the
+                    // insert never happens.
+                    return {
+                      ...d,
+                      type,
+                      options: [],
+                      correctIndex: undefined,
+                      correctIndices: undefined,
+                      answerKey: d.answerKey ?? "",
+                    };
+                  }
                   if (type === "true_false") {
                     return {
                       ...d,
@@ -700,6 +728,10 @@ export function QuizBuilderClient({
                     options: d.options.length >= 2 ? d.options : ["", ""],
                     correctIndex: d.correctIndices?.[0] ?? 0,
                     correctIndices: undefined,
+                    // Leaving short_text drops the rubric: a stale answerKey
+                    // on an mcq draft fails the schema's "answerKey is only
+                    // valid for short-text" arm.
+                    answerKey: undefined,
                   };
                 });
               }}
@@ -711,7 +743,9 @@ export function QuizBuilderClient({
                       ? tCommon("trueFalse")
                       : v === "multi_select"
                         ? tCommon("multiSelect")
-                        : tCommon("mcq")
+                        : v === "short_text"
+                          ? t("shortTextLabel")
+                          : tCommon("mcq")
                   }
                 </SelectValue>
               </SelectTrigger>
@@ -719,10 +753,11 @@ export function QuizBuilderClient({
                 <SelectItem value="mcq">{tCommon("mcq")}</SelectItem>
                 <SelectItem value="true_false">{tCommon("trueFalse")}</SelectItem>
                 <SelectItem value="multi_select">{tCommon("multiSelect")}</SelectItem>
+                <SelectItem value="short_text">{t("shortTextLabel")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
-          {draft.type === "multi_select" ? (
+          {draft.type === "short_text" ? null : draft.type === "multi_select" ? (
             // QT-1: a dropdown cannot multi-select — the correct ANSWERS
             // are a toggle-button group (aria-pressed per option).
             <div className="space-y-1" role="group" aria-label={t("correctAnswersLabel")}>
@@ -814,6 +849,26 @@ export function QuizBuilderClient({
           disabled={saving}
         />
 
+        {/* v4.9: short_text is graded against a RUBRIC, not an option list,
+            so it renders neither the options editor nor the correct-answer
+            control. The card is mutually exclusive with the block below. */}
+        {draft.type === "short_text" ? (
+          <div className="space-y-1.5">
+            <Label htmlFor={`${idPrefix}q-answer-key`} className="font-extrabold">
+              {t("answerKeyLabel")}
+            </Label>
+            <Textarea
+              id={`${idPrefix}q-answer-key`}
+              value={draft.answerKey ?? ""}
+              onChange={(e) => setDraft((d) => ({ ...d, answerKey: e.target.value }))}
+              maxLength={500}
+              rows={3}
+              placeholder={t("answerKeyPlaceholder")}
+              disabled={saving}
+            />
+            <p className="text-xs font-bold text-muted-foreground">{t("answerKeyHint")}</p>
+          </div>
+        ) : (
         <div className="space-y-2">
           <Label className="font-extrabold">{t("optionsLabel")}</Label>
           {draft.options.map((opt, i) => {
@@ -922,6 +977,7 @@ export function QuizBuilderClient({
             </Button>
           )}
         </div>
+        )}
 
         <div className="space-y-1">
           <Label htmlFor={`${idPrefix}q-explanation`} className="font-extrabold">{t("explanationLabel")}</Label>
@@ -1302,6 +1358,11 @@ export function QuizBuilderClient({
       <QuizSourcesCard sources={sources} text={quiz.source_text} />
 
       <EditQuizDialog
+        // Remount keyed on the frozen-metadata fields the dialog seeds from
+        // useState initializers: `router.refresh()` delivers new props to a
+        // MOUNTED component, and an initializer only runs on mount — so a
+        // saved toggle would keep rendering its pre-save value on reopen.
+        key={`${quiz.title}|${quiz.mode}|${quiz.time_limit_sec}|${quiz.shuffle_questions}|${quiz.gestures_enabled}`}
         open={settingsOpen}
         onOpenChange={handleDialogClose}
         quiz={quiz}

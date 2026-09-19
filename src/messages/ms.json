@@ -61,7 +61,8 @@
     "aria": {
       "yourCorrectChoice": "Pilihan anda — betul",
       "yourWrongChoice": "Pilihan anda — salah",
-      "missedCorrectAnswer": "Jawapan betul (bukan pilihan anda)"
+      "missedCorrectAnswer": "Jawapan betul (bukan pilihan anda)",
+      "yourAnswer": "Jawapan anda"
     }
   },
   "authErrors": {
@@ -576,7 +577,13 @@
         "problemMultiTooManyOptions": "Baris {line}: soalan pelbagai pilihan menyokong paling banyak {max} pilihan."
       },
       "correctAnswersLabel": "Jawapan betul",
-      "multiOptionCap": "Soalan pelbagai pilihan menyokong paling banyak 4 pilihan. Buang satu pilihan dahulu."
+      "multiOptionCap": "Soalan pelbagai pilihan menyokong paling banyak 4 pilihan. Buang satu pilihan dahulu.",
+      "gesturesToggle": "Isyarat tangan",
+      "gesturesHint": "Pelajar menjawab kuiz ini dengan isyarat tangan. Mematikannya menjadikannya papan kekunci/sentuh sahaja. Tidak boleh diubah selepas kuiz bermula.",
+      "shortTextLabel": "Jawapan pendek (ditanda AI)",
+      "answerKeyLabel": "Kunci jawapan / rubrik",
+      "answerKeyPlaceholder": "Terangkan apa yang perlu ada dalam jawapan betul…",
+      "answerKeyHint": "Penanda AI menilai jawapan pelajar berdasarkan ini. Nyatakan dengan jelas apa yang mendapat markah."
     },
     "dialogs": {
       "editQuizTitle": "Sunting tetapan kuiz",
@@ -695,7 +702,32 @@
       "attemptChip": "Percubaan #{count}",
       "filterAll": "Semua",
       "quizMenu": "Tindakan kuiz",
-      "actionsMenu": "Tindakan sesi"
+      "actionsMenu": "Tindakan sesi",
+      "override": {
+        "title": "Ubah markah ini",
+        "reason": "Sebab (wajib)",
+        "reasonPlaceholder": "Mengapa anda mengubah markah ini?",
+        "saved": "Markah dikemas kini",
+        "republish": "Keputusan sudah dilepaskan. Lepaskan semula untuk menunjukkan markah yang diperbetulkan kepada pelajar.",
+        "pendingChip": "Belum siap",
+        "needsReviewChip": "Perlu semakan",
+        "aiRationale": "Rasional AI",
+        "openBtn": "Ubah markah",
+        "invalidMark": "Pilih 0, 0.5 atau 1.",
+        "reasonTooShort": "Beri sebab sekurang-kurangnya 5 aksara.",
+        "markLabel": "Markah baharu",
+        "markExceedsMax": "Markah itu melebihi maksimum soalan ini.",
+        "notFound": "Jawapan ini tidak dapat ditemui.",
+        "rateLimited": "Terlalu banyak pengubahan. Cuba lagi sebentar."
+      },
+      "pendingChip": "Belum siap",
+      "needsReviewChip": "Perlu semakan",
+      "correctChip": "Betul",
+      "wrongChip": "Salah",
+      "skippedChip": "Dilangkau",
+      "failedChip": "Penandaan gagal",
+      "rubricLabel": "Rubrik",
+      "explanationLabel": "Penerangan:"
     }
   },
   "student": {
@@ -853,7 +885,8 @@
       "milestoneM1": "1 minit lagi",
       "milestoneS30": "Kurang daripada 30 saat — kuiz akan dihantar secara automatik",
       "answerConfirmed": "Jawapan {label} disahkan",
-      "answerSetConfirmed": "{count} jawapan disahkan"
+      "answerSetConfirmed": "{count} jawapan disahkan",
+      "answerRecorded": "Jawapan direkodkan"
     },
     "feedback": {
       "correct": "Betul! ✓",
@@ -882,7 +915,14 @@
       "explanation": "Penerangan:",
       "backToQuizzes": "Kembali ke senarai kuiz",
       "tryAgain": "Cuba lagi",
-      "tryAgainStarting": "Sedang memulakan…"
+      "tryAgainStarting": "Sedang memulakan…",
+      "pendingResolved": "Markah dimuktamadkan — menunggu pensyarah melepaskan keputusan.",
+      "pendingBanner": "Sebahagian jawapan anda masih ditanda. Biasanya kurang daripada satu minit.",
+      "pendingCount": "{count, plural, one {# jawapan masih} other {# jawapan masih}} ditanda.",
+      "needsReviewRow": "Menunggu semakan pensyarah",
+      "failedRow": "Penandaan gagal — akan dicuba semula",
+      "skippedRow": "Dilangkau — dikira 0",
+      "pendingCell": "Belum siap"
     },
     "toast": {
       "timeUp": "Masa telah tamat — menghantar jawapan anda.",
@@ -903,7 +943,24 @@
     "multiHint": "Pelbagai pilihan: pilih semua jawapan yang betul, kemudian sahkan.",
     "multiSelectedCount": "{count, plural, one {# pilihan dipilih} other {# pilihan dipilih}}",
     "multiPalmCommitHint": "atau tahan ✋ untuk sahkan",
-    "multiSelectFirst": "Pilih sekurang-kurangnya satu pilihan sebelum mengesahkan."
+    "multiSelectFirst": "Pilih sekurang-kurangnya satu pilihan sebelum mengesahkan.",
+    "shortText": {
+      "label": "Jawapan pendek",
+      "placeholder": "Taip jawapan anda di sini…",
+      "pendingNote": "Jawapan anda akan ditanda secara automatik — anda akan nampak hasilnya sebaik pensyarah melepaskannya.",
+      "confirm": "Hantar jawapan",
+      "pending": "Sedang ditanda",
+      "needsReview": "Perlu semakan",
+      "failed": "Penandaan gagal"
+    },
+    "skip": {
+      "action": "Langkau soalan ini",
+      "skipped": "Dilangkau"
+    },
+    "oracle": {
+      "warning": "Modus latihan mendedahkan ketepatan — jangan guna untuk kerja bergred.",
+      "limit": "Anda sudah menyemak jawapan ini {count} kali. Cuba selesaikan dahulu sebelum mendedahkannya lagi."
+    }
   },
   "vision": {
     "keepHandVisible": "Pastikan tangan anda kelihatan untuk menjawab",

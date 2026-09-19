@@ -80,6 +80,9 @@ function workbookLabels(locale: SupportedLocale): WorkbookLabels {
     classLabel: t("workbook.classLabel"),
     modeLabel: t("workbook.modeLabel"),
     truncatedWarning: t("workbook.truncatedWarning"),
+    // audit-4 round-3: the neutral percent cell for sessions with unresolved
+    // AI marks (gradebook-export parity — same play.shortText.pending copy).
+    pendingLabel: t("play.shortText.pending"),
   };
 }
 
@@ -88,7 +91,6 @@ export async function GET(_request: Request, { params }: Params) {
   const { id } = await params;
 
   if (!isUuid(id)) return notFound();
-
   const owner = await requireQuizOwner(supabase, id);
   if (!owner.ok) return owner.response;
 
@@ -106,6 +108,7 @@ export async function GET(_request: Request, { params }: Params) {
     supabase.from("classes").select("title").eq("id", owner.quiz.class_id).maybeSingle(),
   ]);
   const locale: SupportedLocale = profile?.locale === "ms" ? "ms" : "en";
+  const t = tFor(locale);
 
   const [
     { data: sessions, error: sessionsError },
@@ -115,7 +118,7 @@ export async function GET(_request: Request, { params }: Params) {
     supabase
       .from("lecturer_session_view")
       .select(
-        "id, student_id, status, score, started_at, submitted_at, last_activity_at, face_fail_streak, focus_pause_count, fullscreen_pause_count, hand_pause_count, face_fail_count, attempt",
+        "id, student_id, status, score, started_at, submitted_at, last_activity_at, face_fail_streak, focus_pause_count, fullscreen_pause_count, hand_pause_count, face_fail_count, attempt, pending_count",
       )
       .eq("quiz_id", id)
       // Newest-first, matching the results dashboard's read so both artifacts
@@ -125,8 +128,10 @@ export async function GET(_request: Request, { params }: Params) {
       .order("id", { ascending: false })
       .limit(RESULTS_SESSION_LIMIT),
     getClassRoster(supabase, owner.quiz.class_id),
+    // 0054 revoked the key columns from `authenticated`; the owner-predicated
+    // view is the only readable path.
     supabase
-      .from("questions")
+      .from("lecturer_questions_view")
       .select("id, order_index, type, prompt, options, correct_index, correct_indices, explanation")
       .eq("quiz_id", id)
       .order("order_index", { ascending: true }),
@@ -150,13 +155,18 @@ export async function GET(_request: Request, { params }: Params) {
     selected_index: number | null;
     selected_indices: number[] | null;
     is_correct: boolean;
+    answer_text: string | null;
+    skipped: boolean;
+    mark_status: string;
   };
   const { data: answerRows, error: answersError } =
     sessionIds.length === 0
       ? { data: [] as AnswerRow[], error: null as null }
       : await supabase
           .from("lecturer_answers_view")
-          .select("session_id, question_id, selected_index, selected_indices, is_correct")
+          .select(
+            "session_id, question_id, selected_index, selected_indices, is_correct, answer_text, skipped, mark_status",
+          )
           .in("session_id", sessionIds)
           .limit(ANSWERS_LIMIT);
 
@@ -176,7 +186,9 @@ export async function GET(_request: Request, { params }: Params) {
     },
     className: cls?.title ?? null,
     generatedAtISO: new Date().toISOString(),
-    questions: questionRows ?? [],
+    // View-generated types mark every column nullable; the underlying columns
+    // are NOT NULL (same narrowing as the sessions read above).
+    questions: (questionRows ?? []) as unknown as Parameters<typeof buildExportModel>[0]["questions"],
     roster: rosterResult.roster.map((r) => ({
       student_id: r.student_id,
       full_name: r.full_name,
@@ -185,6 +197,9 @@ export async function GET(_request: Request, { params }: Params) {
     sessions: sessionRows,
     answers: (answerRows ?? []) as import("@/lib/results/export").ExportAnswerInput[],
     answersTruncated,
+    // Absolute key form: this route's `t` is not namespaced (X2-9).
+    pendingLabel: t("play.shortText.pending"),
+    skippedLabel: t("play.skip.skipped"),
     nowMs: Date.now(),
   });
 

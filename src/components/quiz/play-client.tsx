@@ -7,6 +7,15 @@ import { useTranslations } from "next-intl";
 import { QuestionCard } from "@/components/quiz/question-card";
 import { ProgressHud } from "@/components/quiz/progress-hud";
 import { GestureLayer } from "@/components/vision/gesture-layer";
+import {
+  bumpPracticeAttempts,
+  readPracticeAttempts,
+  clearPracticeAttempts,
+} from "@/lib/sessions/practice-oracle";
+import {
+  TYPE_HAS_FINGER_INPUT as TYPE_HAS_FINGER_INPUT_SET,
+  isAnswerPadArmed,
+} from "@/lib/sessions/gesture-arming";
 import { Button } from "@/components/ui/button";
 import { MAX_ANSWER_FINGERS } from "@/lib/gestures/constants";
 import { optionScope, shufflePlan, toCanonical, toPresented } from "@/lib/sessions/shuffle";
@@ -37,7 +46,7 @@ import type { FaceStatus } from "@/lib/face/types";
 type Question = {
   id: string;
   order_index: number;
-  type: "mcq" | "true_false" | "multi_select";
+  type: "mcq" | "true_false" | "multi_select" | "short_text";
   prompt: string;
   options: string[];
   has_image?: boolean;
@@ -49,7 +58,24 @@ type Quiz = {
   title: string;
   mode: "practice" | "assessment";
   timeLimitSec: number | null;
+  /** v4.9 quiz-level gesture kill switch (quizzes.gestures_enabled). */
+  gesturesEnabled: boolean;
 };
+
+/**
+ * R6: the types the AnswerPad can actually answer. Everything else must
+ * leave the pad DISARMED — an armed pad on a question with no option to
+ * point at would latch nothing while still consuming the palm-next gesture,
+ * and (B6-8) it would misreport `isHandActive` to the integrity layer.
+ *
+ * This is an ALLOW-list, not a deny-list: a future type is disarmed by
+ * default, which is the safe direction (a missed affordance is visible; a
+ * phantom latch is not).
+ *
+ * audit-4 M4: extracted to `src/lib/sessions/gesture-arming.ts` so the
+ * matrix is unit-tested (U-65) without mounting this island.
+ */
+const TYPE_HAS_FINGER_INPUT: ReadonlySet<string> = TYPE_HAS_FINGER_INPUT_SET;
 
 type SeedAnswer = {
   question_id: string;
@@ -57,6 +83,13 @@ type SeedAnswer = {
   /** QT-1: multi-select rows carry the canonical selection set instead. */
   selected_indices: number[] | null;
   is_correct: boolean | null;
+  /** v4.9: a short_text row resumes its typed answer (the view exposes it
+   * UNGATED — it is the student's own answer, not an oracle). */
+  answer_text?: string | null;
+  /** v4.9: a skipped row must resume as SKIPPED, not as "Incorrect" — the
+   * seed would otherwise carry is_correct:false and render a red X for a
+   * question the student deliberately passed on. */
+  skipped?: boolean | null;
 };
 
 // ── audit-1 P1-12: unsent-answer stash ──────────────────────────────
@@ -69,6 +102,10 @@ type StashedDraft = {
   questionId: string;
   selectedIndex?: number;
   selectedIndices?: number[];
+  /** n28: a 401 mid-short_text must not lose the typed answer. */
+  answerText?: string;
+  /** n28: a 401 mid-Skip must not lose the skip. */
+  skipped?: boolean;
 };
 
 const DRAFT_STASH_PREFIX = "innovision:play-draft:";
@@ -104,6 +141,11 @@ export type AnswerState = {
   /** QT-1: the correct SET for multi feedback (presented space). */
   correctIndices?: number[];
   explanation?: string;
+  /** v4.9: the committed free-text answer (presented as typed). */
+  answerText?: string;
+  /** v4.9: the student chose Skip. Renders the Skipped chip instead of a
+   * Correct/Incorrect verdict — a skip is a deliberate non-answer. */
+  skipped?: boolean;
   /** True when feedback came from a resume seed (no key/explanation). */
   seeded?: boolean;
 };
@@ -215,9 +257,25 @@ export function PlayClient({
           : a.selected_index != null
             ? { selectedIndex: a.selected_index }
             : {}),
+        // v4.9 (B6-3/FC-11): a resumed short_text row must show the text the
+        // student typed, and a resumed SKIP must show the Skipped chip. Both
+        // are ungated in student_answers_view precisely so resume works
+        // pre-reveal. Without the skipped flag the seed's is_correct:false
+        // would render a red ✗ for a question the student deliberately
+        // passed on.
+        ...(a.answer_text ? { answerText: a.answer_text } : {}),
+        ...(a.skipped ? { skipped: true } : {}),
         isCorrect: a.is_correct === true,
         seeded: true,
       };
+    }
+    // n28: a stashed SKIP was never recorded (the 401 beat the RPC), but the
+    // student's intent is unambiguous and the post-skip UI is exactly what
+    // this renders (Skipped chip + Next). Unlike the old single-selection
+    // restore, this cannot strand the question — a skip has no Confirm step.
+    // Guarded so a genuinely recorded seed always wins.
+    if (stashedDraft?.skipped && !seed[stashedDraft.questionId]) {
+      seed[stashedDraft.questionId] = { skipped: true, isCorrect: false, seeded: true };
     }
     return seed;
   });
@@ -327,6 +385,64 @@ export function PlayClient({
       const value = typeof next === "function" ? next(cur) : next;
       return { ...prev, [question.id]: value };
     });
+  }
+
+  // v4.9 (E-58): the practice oracle counter, keyed by question id EXACTLY like
+  // `pendingByQuestion` — a committed practice answer bumps the entry, and the
+  // current question's value is derived at the read site below. Deriving beats
+  // mirroring in an effect: an effect that syncs storage into state would be a
+  // cascading render (React Compiler rejects it) for a value that only changes
+  // when THIS component writes it.
+  const [practiceAttemptsByQuestion, setPracticeAttemptsByQuestion] = useState<
+    Record<string, number>
+  >(() => {
+    // Lazy initializer: runs once, client-side, so SSR never touches storage.
+    // n30: seed EVERY question, not just the current one — a resumed session
+    // that lands mid-quiz must report an exhausted earlier question's count
+    // (the old current-question-only seed read 0 until the next bump, so
+    // "Try again" on a previously-limited question lost the limit line).
+    if (!isPractice) return {};
+    try {
+      const seed: Record<string, number> = {};
+      for (const q of questions) {
+        const n = readPracticeAttempts(window.localStorage, quiz.id, q.id);
+        if (n > 0) seed[q.id] = n;
+      }
+      return seed;
+    } catch {
+      return {}; // private mode / disabled storage — degrades to 0
+    }
+  });
+  const practiceAttempts = question
+    ? (practiceAttemptsByQuestion[question.id] ?? 0)
+    : 0;
+  function bumpPracticeAttemptsForCurrentQuestion() {
+    if (!isPractice || !question) return;
+    let next: number;
+    try {
+      next = bumpPracticeAttempts(window.localStorage, quiz.id, question.id);
+    } catch {
+      // Storage unavailable: still raise the in-page value so the limit can
+      // show within this visit. Advisory-only by design.
+      next = (practiceAttemptsByQuestion[question.id] ?? 0) + 1;
+    }
+    setPracticeAttemptsByQuestion((prev) => ({ ...prev, [question.id]: next }));
+  }
+
+  // v4.9: the in-progress free-text answer, keyed by question id exactly like
+  // pendingMulti — a fresh question simply has no entry, so navigating away
+  // and back preserves what the student typed without a reset effect.
+  const [pendingTextByQuestion, setPendingTextByQuestion] = useState<Record<string, string>>(() =>
+    // n28: a stashed short_text draft re-seeds the textarea for its question
+    // (same rationale as the multi stash — the server never recorded it).
+    stashedDraft?.answerText
+      ? { [stashedDraft.questionId]: stashedDraft.answerText }
+      : {},
+  );
+  const pendingText = answers[question?.id] ? "" : (pendingTextByQuestion[question?.id] ?? "");
+  function setPendingText(next: string) {
+    if (!question) return;
+    setPendingTextByQuestion((prev) => ({ ...prev, [question.id]: next }));
   }
 
   // QT-3: presented→canonical mapping for the current question's options.
@@ -620,15 +736,21 @@ export function PlayClient({
     void answer(optionIndex);
   }
 
-  async function answer(selection: number | number[]) {
+  // v4.9 overloads: a string is a short_text answer, the literal "skip" is
+  // the skip affordance. Both ride the SAME submit lock / phase machine as a
+  // selection so first-answer-wins and the error arms are shared, not forked.
+  async function answer(selection: number | number[] | string | "skip") {
     if (submitLock.current) return;
     submitLock.current = true;
     setPhaseAndRef("locked");
     setError(null);
 
+    const isSkip = selection === "skip";
+    const isText = typeof selection === "string" && !isSkip;
     const isMulti = Array.isArray(selection);
-    const scalar = isMulti ? undefined : (selection as number);
+    const scalar = isMulti || isSkip || isText ? undefined : (selection as number);
     const set = isMulti ? (selection as number[]) : undefined;
+    const text = isText ? (selection as string) : undefined;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -643,15 +765,23 @@ export function PlayClient({
         const plan = optionPlanFor(question);
         const wire = isMulti
           ? [...new Set(set!.map((i) => (plan ? (toCanonical(i, plan) ?? i) : i)))].sort((a, b) => a - b)
-          : (plan ? (toCanonical(scalar!, plan) ?? scalar!) : scalar!);
+          : isMulti || isSkip || isText
+            ? undefined
+            : (plan ? (toCanonical(scalar!, plan) ?? scalar!) : scalar!);
+        // Skip and short_text carry no option index at all — the AnswerSchema
+        // arm is shape-exclusivity, so sending a stray index alongside either
+        // would 400.
+        const reqBody: Record<string, unknown> = isSkip
+          ? { questionId: question.id, skipped: true }
+          : isText
+            ? { questionId: question.id, answerText: text }
+            : isMulti
+              ? { questionId: question.id, selectedIndices: wire }
+              : { questionId: question.id, selectedIndex: wire };
         const res = await fetch(`/api/sessions/${sessionId}/answer`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify(
-            isMulti
-              ? { questionId: question.id, selectedIndices: wire }
-              : { questionId: question.id, selectedIndex: wire },
-          ),
+          body: JSON.stringify(reqBody),
           signal: controller.signal,
         });
         // Strictly parse the body; a non-JSON 200 must NOT render "Incorrect"
@@ -680,7 +810,13 @@ export function PlayClient({
           setAnswers((prev) => ({
             ...prev,
             [question.id]: {
-              ...(isMulti ? { selectedIndices: set } : { selectedIndex: scalar }),
+              ...(isSkip
+                ? { skipped: true }
+                : isText
+                  ? { answerText: text }
+                  : isMulti
+                    ? { selectedIndices: set }
+                    : { selectedIndex: scalar }),
               isCorrect: isPractice ? Boolean(body.isCorrect) : false,
             },
           }));
@@ -808,9 +944,18 @@ export function PlayClient({
           // audit-1 P1-12: auth session expired mid-exam. Stash the unsent
           // selection, then bounce through login and BACK to this exact URL;
           // the remount re-seeds recorded answers + restores the draft.
+          // n28: carry the payload SHAPE — a multi set, a typed short_text, a
+          // skip, or the single scalar — so every answer type survives the
+          // login bounce (the old stash carried indices only).
           stashUnsentAnswer(sessionId, {
             questionId: question.id,
-            ...(isMulti ? { selectedIndices: set } : { selectedIndex: scalar }),
+            ...(isMulti
+              ? { selectedIndices: set }
+              : isSkip
+                ? { skipped: true }
+                : isText
+                  ? { answerText: text }
+                  : { selectedIndex: scalar }),
           });
           setError(tAuth("sessionExpired"));
           setTimeout(() => {
@@ -853,7 +998,17 @@ export function PlayClient({
         setAnswers((prev) => ({
           ...prev,
           [question.id]: {
-            ...(isMulti ? { selectedIndices: set } : { selectedIndex: scalar }),
+            // v4.9: the committed shape mirrors what was sent — a skipped row
+            // carries ONLY `skipped` (so the card renders the Skipped chip
+            // rather than a red X for is_correct:false), and a short_text row
+            // carries its text so a re-render/resume echoes it back.
+            ...(isSkip
+              ? { skipped: true }
+              : isText
+                ? { answerText: text }
+                : isMulti
+                  ? { selectedIndices: set }
+                  : { selectedIndex: scalar }),
             isCorrect: isPractice
               ? Boolean(body.isCorrect)
               : false, // assessment: keyless ack — neutral "answered" state
@@ -862,16 +1017,28 @@ export function PlayClient({
             ...(body.explanation !== undefined ? { explanation: body.explanation as string } : {}),
           },
         }));
+        setPendingTextByQuestion((prev) => {
+          if (!isText) return prev;
+          const next = { ...prev };
+          delete next[question.id];
+          return next;
+        });
         setPendingMulti([]);
+        bumpPracticeAttemptsForCurrentQuestion();
         setPhaseAndRef("feedback");
         // AX-3: confirm the commit by its VISIBLE label (on-screen option
         // numerals, presented space — same number the student clicked), via
         // the polite announcer. Multi commits read the count instead of a
-        // letter-per-option list.
+        // letter-per-option list. n21: skip/short_text answers carry NO scalar
+        // (`scalar` is undefined by construction) — reading `scalar! + 1`
+        // there announced "Answer NaN confirmed", so both use the label-free
+        // key instead.
         setAnswerAnnouncement(
           isMulti
             ? t("hud.answerSetConfirmed", { count: set!.length })
-            : t("hud.answerConfirmed", { label: scalar! + 1 }),
+            : isSkip || isText
+              ? t("hud.answerRecorded")
+              : t("hud.answerConfirmed", { label: scalar! + 1 }),
         );
         // Haptic (plan W3): practice commits only — no per-commit buzz in
         // recorded assessments.
@@ -1029,6 +1196,12 @@ export function PlayClient({
     if (retryLock.current) return;
     retryLock.current = true;
     setRetrying(true);
+    // A fresh practice attempt starts with a clean oracle slate.
+    try {
+      clearPracticeAttempts(window.localStorage, quiz.id);
+    } catch {
+      // Storage unavailable — the counters simply persist.
+    }
     try {
       const res = await fetch("/api/sessions", {
         method: "POST",
@@ -1165,8 +1338,18 @@ export function PlayClient({
   // True when any action-zone branch renders (multi confirm / feedback /
   // submitting / timeUp-or-failed retry / locked). State 1 (single
   // unanswered) renders nothing → the mobile bar's chrome collapses.
+  // R15: skip is offered in the QUESTION phase only — never in locked /
+  // feedback / submitting / terminal states, where the answer is already
+  // decided (a skip is itself an answer, so offering it after one would
+  // invite a 409).
+  const canSkip = phase === "question" && !answered;
   const hasActionButtons =
     (phase === "question" && question.type === "multi_select" && !answered) ||
+    // v4.9: a short_text question shows Confirm (disabled until non-blank),
+    // and every type shows Skip while unanswered — without these arms the
+    // buttons float outside the clay card on mobile and a previously-empty
+    // question state becomes non-empty without the chrome to hold it.
+    (phase === "question" && !answered && (question.type === "short_text" || canSkip)) ||
     phase === "feedback" ||
     phase === "submitting" ||
     phase === "timeUp" ||
@@ -1204,6 +1387,27 @@ export function PlayClient({
             {t("multiConfirm")}
           </Button>
         </>
+      )}
+      {phase === "question" && question.type === "short_text" && !answered && (
+        <>
+          <Button
+            size="lg"
+            disabled={pendingText.trim().length === 0}
+            onClick={() => void answer(pendingText.trim())}
+          >
+            {t("shortText.confirm")}
+          </Button>
+        </>
+      )}
+      {phase === "question" && !answered && canSkip && (
+        <Button
+          size="lg"
+          variant="outline"
+          data-testid="skip-question"
+          onClick={() => void answer("skip")}
+        >
+          {t("skip.action")}
+        </Button>
       )}
       {phase === "feedback" && (
         <div className={`gap-3 ${isWide ? "flex items-center" : "flex w-full flex-col items-stretch"}`}>
@@ -1299,10 +1503,21 @@ export function PlayClient({
         }}
       >
         <GestureLayer
+          // FC-1: the quiz-level flag (draft-frozen, so it cannot change
+          // mid-live). Quiz flag wins over the user setting by construction:
+          // it gates the layer itself rather than a preference.
+          enabled={quiz.gesturesEnabled}
+          // R6/B6-8: ordering/short_text must never ARM the AnswerPad. A
+          // short_text question has no option to point at, so a held finger
+          // would latch nothing while still suppressing the palm-next path.
+          // U-65 pins the predicate itself (src/lib/sessions/gesture-arming).
+          hasFingerInput={TYPE_HAS_FINGER_INPUT.has(question.type)}
           mode={quiz.mode}
           optionCount={question.options.length}
           questionId={question.id}
-          armed={phase === "question" && !answered}
+          // `answered` is the AnswerState record (or undefined) — the
+          // predicate takes the truthiness the old inline `!answered` used.
+          armed={isAnswerPadArmed({ phase, answered: Boolean(answered), type: question.type })}
           nextArmed={phase === "feedback"}
           answerMode={question.type === "multi_select" ? "multi" : "single"}
           hasMultiQuestions={hasMultiQuestions}
@@ -1502,6 +1717,9 @@ export function PlayClient({
               holdProgress={holdProgress}
               onSelect={selectOption}
               pendingMulti={pendingMulti}
+              pendingText={pendingText}
+              onTextChange={setPendingText}
+              practiceAttempts={practiceAttempts}
             />
 
             {/* AX-3: the action zone announces its phase swaps (Recording →

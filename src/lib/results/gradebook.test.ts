@@ -357,3 +357,131 @@ describe("buildGradebookModel — integrity sums (audit-1 P1-16)", () => {
     expect(model.rows[0].handPauses).toBe(3);
   });
 });
+
+/**
+ * X2-6/U-63 (PLAN_GESTURE_OFF_RICH_TYPES §4): the RESOLVED denominator.
+ *
+ * `quiz_sessions.score` became NUMERIC in 0053 (PostgREST serialises it as a
+ * STRING) and the D10 score SUM EXCLUDES answers still awaiting an AI mark.
+ * A cell that divided the coerced score by the FULL question count would read
+ * a partially-marked attempt as a low score — these pin the three arms that
+ * prevent it: coercion, the resolved denominator, and the pending state.
+ */
+describe("buildGradebookModel — NUMERIC score + resolved denominator", () => {
+  it("coerces a STRING score (PostgREST NUMERIC serialisation)", () => {
+    const model = buildGradebookModel(
+      baseInput({
+        sessionsByQuiz: new Map([
+          ["qz-1", [session({ id: "s1", student_id: "stu-1", score: "0.5" as unknown as number })]],
+        ]),
+      }),
+    );
+    expect(model.rows[0].cells[0]?.score).toBe(0.5);
+    expect(model.rows[0].cells[0]?.percent).toBe(5); // 0.5 / 10
+  });
+
+  it("divides by the RESOLVED count, not the full question count", () => {
+    const model = buildGradebookModel(
+      baseInput({
+        sessionsByQuiz: new Map([
+          [
+            "qz-1",
+            [session({ id: "s1", student_id: "stu-1", score: 5, pending_count: 5 })],
+          ],
+        ]),
+      }),
+    );
+    const cell = model.rows[0].cells[0];
+    expect(cell?.pendingCount).toBe(5);
+    expect(cell?.resolved).toBe(5);
+    // 5 / (10 - 5) = 100% — NOT 5/10 = 50%. The resolved arithmetic is the
+    // model contract (plan §4); the SURFACES gate on pendingCount and render
+    // the neutral chip instead (audit-4 M10).
+    expect(cell?.percent).toBe(100);
+  });
+
+  it("resolved = 0 (every answer pending) → percent null, never a divide-by-zero", () => {
+    const model = buildGradebookModel(
+      baseInput({
+        sessionsByQuiz: new Map([
+          [
+            "qz-1",
+            [session({ id: "s1", student_id: "stu-1", score: 0, pending_count: 10 })],
+          ],
+        ]),
+      }),
+    );
+    const cell = model.rows[0].cells[0];
+    expect(cell?.resolved).toBe(0);
+    expect(cell?.percent).toBeNull();
+    expect(cell?.pendingCount).toBe(10);
+  });
+
+  it("a stale pending_count above the question count never goes negative", () => {
+    const model = buildGradebookModel(
+      baseInput({
+        sessionsByQuiz: new Map([
+          ["qz-1", [session({ id: "s1", student_id: "stu-1", score: 5, pending_count: 99 })]],
+        ]),
+      }),
+    );
+    expect(model.rows[0].cells[0]?.resolved).toBe(0);
+  });
+
+  it("excludes a pending cell from the class average", () => {
+    const model = buildGradebookModel(
+      baseInput({
+        roster: [
+          { student_id: "stu-1", full_name: "Ali", matric_no: null },
+          { student_id: "stu-2", full_name: "Bee", matric_no: null },
+        ],
+        sessionsByQuiz: new Map([
+          [
+            "qz-1",
+            [
+              session({ id: "s1", student_id: "stu-1", score: 5, pending_count: 5 }),
+              session({ id: "s2", student_id: "stu-2", score: 5, pending_count: 0 }),
+            ],
+          ],
+        ]),
+      }),
+    );
+    // audit-4 M11: stu-1's percent is provisional (partial denominator), so it
+    // is excluded ENTIRELY — the footer must not leak what the cell hides.
+    // Only stu-2 (50%) counts.
+    expect(model.quizzes[0].averagePercent).toBe(50);
+  });
+
+  it("cumulative sums RESOLVED denominators and skips pending cells", () => {
+    const model = buildGradebookModel(
+      baseInput({
+        quizzes: [
+          quiz({ id: "qz-1", created_at: "2026-08-01T00:00:00Z" }),
+          quiz({ id: "qz-2", created_at: "2026-08-02T00:00:00Z" }),
+        ],
+        questionCounts: [
+          { quiz_id: "qz-1", count: 10 },
+          { quiz_id: "qz-2", count: 4 },
+        ],
+        sessionsByQuiz: new Map([
+          // qz-1 fully resolved: 5/10. qz-2 pending → excluded entirely.
+          ["qz-1", [session({ id: "s1", student_id: "stu-1", score: 5, pending_count: 0 })]],
+          ["qz-2", [session({ id: "s2", student_id: "stu-1", score: 2, pending_count: 2 })]],
+        ]),
+      }),
+    );
+    // 5 / 10 = 50% — the pending quiz contributes nothing.
+    expect(model.rows[0].cumulativePercent).toBe(50);
+  });
+
+  it("no score at all still reads as not-attempted (null cell)", () => {
+    const model = buildGradebookModel(
+      baseInput({
+        sessionsByQuiz: new Map([
+          ["qz-1", [session({ id: "s1", student_id: "stu-1", score: null, pending_count: 3 })]],
+        ]),
+      }),
+    );
+    expect(model.rows[0].cells[0]).toBeNull();
+  });
+});

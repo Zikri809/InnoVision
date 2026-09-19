@@ -36,13 +36,51 @@ export type ChatMessage = {
   content: string;
 };
 
+export type ChatUsage = {
+  /** Provider-reported total tokens, 0 when the body carried no usage. */
+  totalTokens: number;
+  /** True when the body actually carried recognisable usage numbers. */
+  usagePresent: boolean;
+};
+
+/** No usage was parsed (transport failure / absent field) — never a fake 0. */
+export const NO_CHAT_USAGE: ChatUsage = { totalTokens: 0, usagePresent: false };
+
+/**
+ * Normalise the SDK's `usage` object (snake_case, possibly absent or
+ * malformed). Coercion mirrors `http-compat.ts`'s parseUsage: a numeric
+ * STRING is accepted, anything non-finite collapses to 0 with
+ * `usagePresent:false` — a billed call must never be recorded as free, and a
+ * garbage value must never become NaN in the spend ledger.
+ */
+function parseChatUsage(raw: unknown): ChatUsage {
+  if (raw === null || typeof raw !== "object") return NO_CHAT_USAGE;
+  const rec = raw as Record<string, unknown>;
+  const num = (v: unknown): number | null => {
+    const n = typeof v === "string" ? Number(v) : typeof v === "number" ? v : NaN;
+    return Number.isFinite(n) ? n : null;
+  };
+  const prompt = num(rec.prompt_tokens);
+  const completion = num(rec.completion_tokens);
+  const total = num(rec.total_tokens);
+  const present = prompt !== null || completion !== null || total !== null;
+  if (!present) return NO_CHAT_USAGE;
+  return {
+    totalTokens: Math.max(0, total ?? (prompt ?? 0) + (completion ?? 0)),
+    usagePresent: true,
+  };
+}
+
 export type ChatResult =
-  | { ok: true; text: string }
+  // audit-4 M1: the ok arm carries the provider's usage so the marking
+  // worker can book tokens/usd into `ai_marking_ledger` — without it the
+  // sweep's spend caps summed zeros forever and never tripped.
+  | { ok: true; text: string; usage: ChatUsage }
   // audit-2 M-21: "cancelled" (caller aborted — navigate/close/client
   // timeout) is distinct from "timeout" (deadline). The legacy
   // chatCompletions path used to collapse both, so a user-cancel surfaced as
   // the retryable 503 timeout.
-  | { ok: false; error: "timeout" | "cancelled" | "ai_error"; message?: string };
+  | { ok: false; error: "timeout" | "cancelled" | "ai_error"; message?: string; usage: ChatUsage };
 
 /**
  * Salvage the last JSON object embedded in a reasoning trace (Kenari docs:
@@ -140,7 +178,7 @@ export async function chatCompletions(opts: {
   // request — the listener below only fires on a FUTURE abort, so a client
   // that disconnected while the prompt was being assembled still bought a
   // full-priced LLM round trip.
-  if (opts.signal?.aborted) return { ok: false, error: "cancelled" };
+  if (opts.signal?.aborted) return { ok: false, error: "cancelled", usage: NO_CHAT_USAGE };
   const controller = new AbortController();
   const perCallTimeout = opts.timeoutMs
     ? Math.min(AI_ROUND_TRIP_TIMEOUT_MS, opts.timeoutMs)
@@ -161,12 +199,16 @@ export async function chatCompletions(opts: {
       },
       { signal: controller.signal },
     );
+    // A billed call reports its usage on EVERY arm from here on (audit-4
+    // M1), including the truncated/reasoning-only failures.
+    const usage = parseChatUsage((completion as { usage?: unknown }).usage);
     const choice = completion.choices?.[0];
     if (choice?.finish_reason === "length") {
       return {
         ok: false,
         error: "ai_error",
         message: "Response truncated (token budget reached).",
+        usage,
       };
     }
     const text = choice?.message?.content ?? "";
@@ -175,10 +217,10 @@ export async function chatCompletions(opts: {
       // message.reasoning with content empty — salvage it instead of failing.
       const reasoning = (choice?.message as { reasoning?: string | null } | undefined)?.reasoning ?? "";
       const salvaged = reasoning ? salvageJsonFromReasoning(reasoning) : null;
-      if (salvaged) return { ok: true, text: salvaged };
-      return { ok: false, error: "ai_error", message: "Empty model response." };
+      if (salvaged) return { ok: true, text: salvaged, usage };
+      return { ok: false, error: "ai_error", message: "Empty model response.", usage };
     }
-    return { ok: true, text };
+    return { ok: true, text, usage };
   } catch (err) {
     const aborted =
       controller.signal.aborted ||
@@ -187,11 +229,11 @@ export async function chatCompletions(opts: {
       // audit-2 M-21: the outer (caller) abort and the deadline both abort
       // this controller — tell them apart so a cancel never reads as the
       // retryable timeout.
-      if (opts.signal?.aborted) return { ok: false, error: "cancelled" };
-      return { ok: false, error: "timeout" };
+      if (opts.signal?.aborted) return { ok: false, error: "cancelled", usage: NO_CHAT_USAGE };
+      return { ok: false, error: "timeout", usage: NO_CHAT_USAGE };
     }
     const msg = err instanceof Error ? err.message : "Unknown AI error";
-    return { ok: false, error: "ai_error", message: msg };
+    return { ok: false, error: "ai_error", message: msg, usage: NO_CHAT_USAGE };
   } finally {
     clearTimeout(timer);
     opts.signal?.removeEventListener("abort", onOuterAbort);

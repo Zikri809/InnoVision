@@ -621,3 +621,187 @@ describe("QT-1 — multi-select export cells + distribution", () => {
     expect(dist[2].chosenPercent).toBe(100);
   });
 });
+
+/**
+ * L11/L6 + §4 (PLAN_GESTURE_OFF_RICH_TYPES): the two NON-SCORING answer states
+ * and the NUMERIC score coercion.
+ *
+ * "Waiting for a mark" and "left blank" are different facts on a grade
+ * artifact, so a pending cell must never render as the unanswered dash — and a
+ * skipped row (an explicit 0) must be labelled rather than left blank.
+ */
+describe("buildExportModel — short_text / skip cells + NUMERIC score", () => {
+  function shortInput(overrides: Partial<BuildExportInput> = {}): BuildExportInput {
+    return {
+      quiz: { title: "Quiz 3", mode: "assessment", status: "closed" },
+      className: null,
+      generatedAtISO: new Date(NOW).toISOString(),
+      questions: [
+        {
+          id: "q1",
+          order_index: 0,
+          type: "short_text",
+          prompt: "Explain photosynthesis.",
+          options: [],
+          correct_index: null,
+          correct_indices: null,
+          explanation: null,
+        },
+      ],
+      roster: [{ student_id: "stu-1", full_name: "Ali", matric_no: null }],
+      sessions: [
+        {
+          id: "sess",
+          student_id: "stu-1",
+          status: "completed",
+          score: 0,
+          started_at: new Date(NOW - HOUR).toISOString(),
+          submitted_at: new Date(NOW).toISOString(),
+          last_activity_at: new Date(NOW).toISOString(),
+          face_fail_streak: 0,
+          focus_pause_count: 0,
+        },
+      ],
+      answers: [],
+      nowMs: NOW,
+      pendingLabel: "Pending mark",
+      skippedLabel: "Skipped",
+      ...overrides,
+    };
+  }
+
+  it("a pending answer renders the pending label, never the unanswered dash", () => {
+    const model = buildExportModel(
+      shortInput({
+        answers: [
+          {
+            session_id: "sess",
+            question_id: "q1",
+            selected_index: null,
+            is_correct: false,
+            answer_text: "plants make sugar",
+            skipped: false,
+            mark_status: "pending",
+          },
+        ],
+      }),
+    );
+    expect(model.students[0].answers[0]).toBe("Pending mark");
+    // Neutral: a pending row is NOT marked wrong (the RPC stores
+    // is_correct=false as a placeholder until the finalizer writes a mark).
+    expect(model.students[0].answerCorrect[0]).toBeNull();
+  });
+
+  it("a marked short_text renders its answer text and correctness", () => {
+    const model = buildExportModel(
+      shortInput({
+        answers: [
+          {
+            session_id: "sess",
+            question_id: "q1",
+            selected_index: null,
+            is_correct: true,
+            answer_text: "Light to chemical energy",
+            skipped: false,
+            mark_status: "marked",
+          },
+        ],
+      }),
+    );
+    expect(model.students[0].answers[0]).toBe("Light to chemical energy");
+    expect(model.students[0].answerCorrect[0]).toBe(true);
+  });
+
+  it("a skipped row renders the skip label and counts as wrong", () => {
+    const model = buildExportModel(
+      shortInput({
+        answers: [
+          {
+            session_id: "sess",
+            question_id: "q1",
+            selected_index: null,
+            is_correct: false,
+            answer_text: null,
+            skipped: true,
+            mark_status: "marked",
+          },
+        ],
+      }),
+    );
+    expect(model.students[0].answers[0]).toBe("Skipped");
+    expect(model.students[0].answerCorrect[0]).toBe(false);
+  });
+
+  it("an UNANSWERED short_text still renders null (not a label)", () => {
+    const model = buildExportModel(shortInput());
+    expect(model.students[0].answers[0]).toBeNull();
+    expect(model.students[0].answerCorrect[0]).toBeNull();
+  });
+
+  it("labels fall back to English for a pure-model caller (no locale)", () => {
+    const model = buildExportModel(
+      shortInput({
+        pendingLabel: undefined,
+        skippedLabel: undefined,
+        answers: [
+          {
+            session_id: "sess",
+            question_id: "q1",
+            selected_index: null,
+            is_correct: false,
+            answer_text: null,
+            skipped: true,
+            mark_status: "marked",
+          },
+        ],
+      }),
+    );
+    expect(model.students[0].answers[0]).toBe("Skipped");
+  });
+
+  it("coerces a STRING score and divides by the RESOLVED count", () => {
+    const model = buildExportModel(
+      shortInput({
+        sessions: [
+          {
+            id: "sess",
+            student_id: "stu-1",
+            status: "completed",
+            score: "1" as unknown as number,
+            started_at: new Date(NOW - HOUR).toISOString(),
+            submitted_at: new Date(NOW).toISOString(),
+            last_activity_at: new Date(NOW).toISOString(),
+            face_fail_streak: 0,
+            focus_pause_count: 0,
+          },
+        ],
+      }),
+    );
+    expect(model.students[0].score).toBe(1);
+    expect(model.students[0].percent).toBe(100);
+  });
+
+  it("a session with a pending answer divides by total − pending", () => {
+    const model = buildExportModel(
+      baseInput({
+        sessions: [
+          {
+            id: "sess",
+            student_id: "stu-1",
+            status: "completed",
+            score: 1,
+            started_at: new Date(NOW - HOUR).toISOString(),
+            submitted_at: new Date(NOW).toISOString(),
+            last_activity_at: new Date(NOW).toISOString(),
+            face_fail_streak: 0,
+            focus_pause_count: 0,
+            pending_count: 1,
+          },
+        ],
+      }),
+    );
+    const row = model.students.find((s) => s.studentId === "stu-1")!;
+    expect(row.resolved).toBe(1);
+    expect(row.percent).toBe(100); // 1 / (2 - 1)
+  });
+});

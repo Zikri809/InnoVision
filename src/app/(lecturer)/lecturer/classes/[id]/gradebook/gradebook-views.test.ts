@@ -20,6 +20,7 @@ function row(overrides: {
     matricNo: overrides.matricNo ?? null,
     cells: overrides.cells ?? [],
     cumulativePercent: overrides.cumulativePercent ?? null,
+    hasPending: false,
     faceFails: 0,
     fullscreenPauses: 0,
     handPauses: 0,
@@ -30,7 +31,9 @@ const CELL = (percent: number) => ({
   sessionId: `s-${percent}`,
   score: percent,
   total: 100,
+  resolved: 100,
   percent,
+  pendingCount: 0,
   attempt: 1,
 });
 

@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
 import type { ExportModel } from "./export";
 import { optionLetter, summarizeQuestionStats } from "./export";
+import { coerceScore } from "./derive";
 
 /**
  * Workbook ASSEMBLY for the lecturer Excel export (PLAN_MATRIC_EXCEL_EXPORT
@@ -52,6 +53,12 @@ export type WorkbookLabels = {
   classLabel: string;
   modeLabel: string;
   truncatedWarning: string;
+  /**
+   * audit-4 round-3: neutral cell label for a session whose AI marks are
+   * unresolved — the percent cell shows this instead of a provisional number.
+   * Optional so existing label dictionaries stay source-compatible.
+   */
+  pendingLabel?: string;
 };
 
 const HEADER_FILL = "FFF3EDE2"; // clay-warm neutral, matches the app palette
@@ -168,6 +175,13 @@ export async function buildWorkbook(
   model.students.forEach((s, i) => {
     const rowIndex = model.meta.truncated ? 6 + i : 5 + i;
     const row = results.getRow(rowIndex);
+    // audit-4 round-3 (M10 residual): a session with unresolved AI marks has
+    // a PROVISIONAL score/percent (the D10 SUM skips pending answers, so the
+    // resolved denominator is partial). The on-screen gradebook renders the
+    // neutral pending chip; the artifact must not contradict it by printing
+    // the partial number as final — the percent cell carries the pending
+    // label instead (the per-answer cells already say "Pending mark").
+    const pending = s.pendingCount > 0;
     const base = [
       i + 1,
       s.matricNo ?? "",
@@ -175,9 +189,11 @@ export async function buildWorkbook(
       // roster entries) never render as an empty cell on the grade artifact.
       s.fullName || labels.unknownStudent,
       statusLabel(s.status),
-      s.score,
+      // Coerced, never the raw value: `score` is NUMERIC and arrives as a
+      // STRING, which Excel would write as text (and no longer sum).
+      coerceScore(s.score),
       s.total,
-      s.percent === null ? null : s.percent / 100,
+      pending ? (labels.pendingLabel ?? "Pending mark") : s.percent === null ? null : s.percent / 100,
       s.startedAtISO ? formatDateTime(s.startedAtISO) : "",
       s.submittedAtISO ? formatDateTime(s.submittedAtISO) : "",
       formatDurationSec(s.durationSec),
@@ -189,9 +205,10 @@ export async function buildWorkbook(
     if (showAttempt) base.push(s.attempt != null ? `#${s.attempt}` : "");
     row.values = base;
 
-    // Percentage column: real numeric percent format (sortable).
+    // Percentage column: real numeric percent format (sortable) — only when a
+    // final number was written; the pending label must stay text.
     const percentCell = row.getCell(7);
-    percentCell.numFmt = "0%";
+    if (!pending) percentCell.numFmt = "0%";
 
     // Color the per-question cells by correctness. firstQCol mirrors the
     // header layout: 10 fixed columns + 4 integrity columns in assessment

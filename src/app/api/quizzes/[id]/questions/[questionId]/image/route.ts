@@ -48,9 +48,11 @@ export async function POST(request: Request, { params }: Params) {
   }
 
   // Question must belong to THIS quiz (RLS: lecturer-of-quiz only; students
-  // have zero access). Missing or foreign → same 404.
+  // have zero access). Missing or foreign → same 404. 0054 revoked
+  // `image_path` from `authenticated`, so the lookup reads the owner-predicated
+  // view; the write below stays on the base table (the view is read-only).
   const { data: question } = await supabase
-    .from("questions")
+    .from("lecturer_questions_view")
     .select("id, image_path")
     .eq("id", questionId)
     .eq("quiz_id", id)
@@ -71,7 +73,7 @@ export async function POST(request: Request, { params }: Params) {
     return internalError("Could not store the image right now.");
   }
 
-  const { error: updateError } = await supabase
+  const { error: updateError } = await createAdminClient()
     .from("questions")
     .update({ image_path: path })
     .eq("id", questionId)
@@ -128,14 +130,14 @@ export async function DELETE(request: Request, { params }: Params) {
   }
 
   const { data: question } = await supabase
-    .from("questions")
+    .from("lecturer_questions_view")
     .select("id, image_path")
     .eq("id", questionId)
     .eq("quiz_id", id)
     .maybeSingle();
   if (!question) return notFound();
 
-  const { error: updateError } = await supabase
+  const { error: updateError } = await createAdminClient()
     .from("questions")
     .update({ image_path: null })
     .eq("id", questionId)

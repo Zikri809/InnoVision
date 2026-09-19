@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildQuizUpdates, hasRetakeFields } from "./updates";
+import { buildQuizUpdates, hasRetakeFields, hasNonWindowFields } from "./updates";
 
 describe("buildQuizUpdates (U-M7..U-M13)", () => {
   it("U-M7 forces time_limit_sec to null when switching to practice mode", () => {
@@ -105,5 +105,58 @@ describe("buildQuizUpdates (U-M7..U-M13)", () => {
   it("U-M20 an explicit null resets shuffleQuestions to false", () => {
     const res = buildQuizUpdates({ shuffleQuestions: null }, "assessment");
     expect(res).toEqual({ shuffle_questions: false });
+  });
+});
+
+/**
+ * v4.9 — the gesture kill switch (U-61).
+ *
+ * `gestures_enabled` is DRAFT-FROZEN exactly like `shuffle_questions`: the
+ * route's `hasNonWindowFields` check turns a live PATCH into a 409 before the
+ * DB trigger has to reject it, so this predicate IS the enforcement point for
+ * every API caller. The default is `true` (not `false` like shuffle) because
+ * gestures have been ON for every quiz since the feature shipped — defaulting
+ * them off would silently strip the modality from every newly created quiz.
+ */
+describe("U-61 — gesturesEnabled plumbing", () => {
+  it("U-61-1 maps gesturesEnabled to the gestures_enabled column", () => {
+    expect(buildQuizUpdates({ gesturesEnabled: false }, "assessment")).toEqual({
+      gestures_enabled: false,
+    });
+  });
+
+  it("U-61-2 an explicit null resets to the column default TRUE (not false)", () => {
+    // The divergence from shuffleQuestions is deliberate and load-bearing:
+    // `?? true` preserves current behaviour for a legacy row.
+    expect(buildQuizUpdates({ gesturesEnabled: null }, "assessment")).toEqual({
+      gestures_enabled: true,
+    });
+  });
+
+  it("U-61-3 hasNonWindowFields counts gesturesEnabled as a FROZEN field", () => {
+    expect(hasNonWindowFields({ gesturesEnabled: false })).toBe(true);
+    expect(hasNonWindowFields({ gesturesEnabled: true })).toBe(true);
+    // n13: `undefined` is the OMIT sentinel, `null` is an explicit reset to
+    // the column default — both are PRESENT keys and both are draft-frozen
+    // (the predicate tests `!== undefined`, not truthiness).
+    expect(hasNonWindowFields({ gesturesEnabled: null })).toBe(true);
+    // A window-only patch must NOT be treated as frozen (live management).
+    expect(hasNonWindowFields({ opensAt: "2026-01-01T00:00:00Z" })).toBe(false);
+    expect(hasNonWindowFields({ allowRetake: true })).toBe(false);
+  });
+
+  it("U-61-4 omitting gesturesEnabled leaves the column untouched", () => {
+    expect(buildQuizUpdates({ title: "New title" }, "assessment")).toEqual({
+      title: "New title",
+    });
+  });
+
+  it("U-61-5 a gestures-only patch touches only gestures_enabled on an assessment", () => {
+    // Assessment, because a PRACTICE patch legitimately also emits
+    // `time_limit_sec: null` (the pre-existing untimed-practice invariant,
+    // U-M7) — that would mask what this assertion is checking.
+    expect(buildQuizUpdates({ gesturesEnabled: false }, "assessment")).toEqual({
+      gestures_enabled: false,
+    });
   });
 });

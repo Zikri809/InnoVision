@@ -16,6 +16,17 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: () => fakeHolder.current,
 }));
 
+// The AI routes read/write questions with the SERVICE-ROLE client (D2-19:
+// 0054 revoked the base `questions` table from `authenticated`). The fake
+// models ONE in-memory DB, so the admin client resolves to the same holder —
+// a route's user-scoped and service-role reads then observe identical rows.
+// Lazy (`() => fakeHolder.current`) because the vi.mock factory is hoisted
+// above the holder's declaration.
+vi.mock("@/lib/supabase/admin", () => ({
+  createAdminClient: () => fakeHolder.current,
+  tryCreateAdminClient: () => fakeHolder.current ?? null,
+}));
+
 const generate = generateRoute;
 const regenerate = regenerateRoute;
 

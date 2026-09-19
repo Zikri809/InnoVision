@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { isUuid } from "@/lib/classes/roster";
 import { rateLimit } from "@/lib/classes/rate-limit";
+import { coerceScore } from "@/lib/results/derive";
 import { internalError, notFound, rateLimited, unauthorized } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
@@ -35,7 +36,9 @@ const OWN_COLS = `${ENVELOPE_COLS}, verify_nonce`;
  * face_exempt, face_fail_streak, face_unavailable_at, last_activity_at }` +
  * `verify_nonce` for the own student ONLY (the lecturer SELECT never fetches
  * the nonce) + `remainingMs` for the own student's ACTIVE timed session
- * (D-F2 — the countdown re-sync seed).
+ * (D-F2 — the countdown re-sync seed) + `pending_count`/`failed_count`/
+ * `revealed` for the own student (FS-4: the play client's pending banner must
+ * work PRE-reveal, where `student_results` is unreachable).
  */
 export async function GET(_request: Request, { params }: Params) {
   const supabase = await createClient();
@@ -126,12 +129,41 @@ export async function GET(_request: Request, { params }: Params) {
  * flagged poll observes status='active' here after a lecturer unlock, so the
  * client can re-sync its countdown instead of resuming from the frozen
  * pre-pause reading.
+ *
+ * FS-4: the envelope also carries `pending_count`/`failed_count`/`revealed`
+ * from `student_pending_count` — an OWN-session count that is deliberately NOT
+ * reveal-gated, because the pending banner must render while `student_results`
+ * still answers `not_revealed`.
  */
 async function studentEnvelope(
   supabase: Awaited<ReturnType<typeof createClient>>,
   s: Record<string, unknown>,
 ) {
   const row = envelope(s);
+  // The pending count is read BEFORE the quiz-metadata short-circuit below:
+  // the banner is needed pre-reveal, when neither the score nor the deadline
+  // arm applies. `not_found` is unreachable here (the caller already matched
+  // this session to the caller), and a transport error degrades to nulls so
+  // the status poll's primary contract survives an auxiliary read.
+  const pending = await supabase.rpc("student_pending_count", { p_session_id: String(s.id) });
+  if (pending.error) {
+    console.error("student_pending_count error:", pending.error);
+  } else {
+    const p = pending.data as {
+      pending_count?: unknown;
+      failed_count?: unknown;
+      revealed?: unknown;
+      error?: unknown;
+    } | null;
+    // `{error: 'not_found'}` is a payload, not a transport failure — a
+    // session the caller can see here can never legitimately produce it, so
+    // leaving the fields absent is the honest read.
+    if (p && p.error === undefined) {
+      row.pending_count = p.pending_count ?? 0;
+      row.failed_count = p.failed_count ?? 0;
+      row.revealed = p.revealed === true;
+    }
+  }
   if (typeof row.quiz_id !== "string") return row;
   // Quiz metadata is needed for the reveal gate (score non-null) and/or the
   // active-session deadline (D-F2). One read serves both.
@@ -175,11 +207,13 @@ function envelope(s: Record<string, unknown>) {
     mode: s.mode,
     started_at: s.started_at,
     submitted_at: s.submitted_at,
-    score: s.score,
+    // D8: NUMERIC crosses PostgREST as a string — coerce at the envelope
+    // boundary so both the student and lecturer paths emit a number or null.
+    score: coerceScore(s.score),
     face_exempt: s.face_exempt,
     face_fail_streak: s.face_fail_streak,
     face_unavailable_at: s.face_unavailable_at,
     last_activity_at: s.last_activity_at,
     ...(s.verify_nonce !== undefined ? { verify_nonce: s.verify_nonce } : {}),
-  };
+  } as Record<string, unknown>;
 }

@@ -20,6 +20,15 @@ const adminState = vi.hoisted(() => ({
 
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => ({
+    // Table access delegates to the in-memory fake (0054 revoked `questions`
+    // from `authenticated`, so the duplicate route's image-phase writes now
+    // run on the admin client — a stub would make the "clone repointed"
+    // assertions vacuous). `storage` stays a boundary mock.
+    from: (table: string) => {
+      const db = fakeHolder.current;
+      if (!db) throw new Error(`admin client .from(${table}) with no fake DB installed`);
+      return db.from(table);
+    },
     storage: {
       from: (bucket: string) => ({
         copy: async (src: string, dst: string) => {

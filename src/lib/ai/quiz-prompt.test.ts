@@ -12,7 +12,7 @@ import {
   generateQuiz,
   regenerateQuestion,
 } from "@/lib/ai/quiz-prompt";
-import type { ChatMessage, ChatResult } from "@/lib/ai/client";
+import { NO_CHAT_USAGE, type ChatMessage, type ChatResult } from "@/lib/ai/client";
 import type { AiQuestion } from "@/lib/ai/quiz-schema";
 
 const validQuizJson = JSON.stringify({
@@ -24,7 +24,7 @@ const validQuizJson = JSON.stringify({
   ],
 });
 
-const okChat = (text: string) => async (): Promise<ChatResult> => ({ ok: true, text });
+const okChat = (text: string) => async (): Promise<ChatResult> => ({ ok: true, text, usage: NO_CHAT_USAGE });
 
 const sampleQuestion: AiQuestion = {
   type: "mcq",
@@ -67,8 +67,8 @@ describe("U-A5/U-A6 — one retry, then fail closed", () => {
   it("retries once with validation feedback after malformed JSON", async () => {
     const chat = vi
       .fn<(messages: ChatMessage[]) => Promise<ChatResult>>()
-      .mockResolvedValueOnce({ ok: true, text: "not json at all" })
-      .mockResolvedValueOnce({ ok: true, text: validQuizJson });
+      .mockResolvedValueOnce({ ok: true, text: "not json at all", usage: NO_CHAT_USAGE })
+      .mockResolvedValueOnce({ ok: true, text: validQuizJson, usage: NO_CHAT_USAGE });
 
     const res = await generateQuiz({ chat, text: "chapter", questionCount: 10 });
     expect(res.ok).toBe(true);
@@ -83,7 +83,7 @@ describe("U-A5/U-A6 — one retry, then fail closed", () => {
   it("second failure returns invalid_ai_output with no partial result", async () => {
     const chat = vi
       .fn<(messages: ChatMessage[]) => Promise<ChatResult>>()
-      .mockResolvedValue({ ok: true, text: "still not json" });
+      .mockResolvedValue({ ok: true, text: "still not json", usage: NO_CHAT_USAGE });
 
     const res = await generateQuiz({ chat, text: "chapter", questionCount: 10 });
     expect(res.ok).toBe(false);
@@ -94,7 +94,7 @@ describe("U-A5/U-A6 — one retry, then fail closed", () => {
   it("transport errors are NOT retried", async () => {
     const chat = vi
       .fn<(messages: ChatMessage[]) => Promise<ChatResult>>()
-      .mockResolvedValue({ ok: false, error: "timeout" });
+      .mockResolvedValue({ ok: false, error: "timeout", usage: NO_CHAT_USAGE });
 
     const res = await generateQuiz({ chat, text: "chapter", questionCount: 10 });
     expect(res.ok).toBe(false);
@@ -229,7 +229,7 @@ describe("generateQuiz — self-containment retry integration", () => {
     const calls: string[] = [];
     const chat = async (messages: ChatMessage[]): Promise<ChatResult> => {
       calls.push(messages[messages.length - 1].content);
-      return { ok: true, text: calls.length === 1 ? bad : good };
+      return { ok: true, text: calls.length === 1 ? bad : good, usage: NO_CHAT_USAGE };
     };
     const res = await generateQuiz({ chat, text: "chapter", questionCount: 3 });
     expect(res.ok).toBe(true);
@@ -240,7 +240,7 @@ describe("generateQuiz — self-containment retry integration", () => {
   });
 
   it("fails invalid_ai_output when BOTH attempts violate self-containment", async () => {
-    const chat = async (): Promise<ChatResult> => ({ ok: true, text: bad });
+    const chat = async (): Promise<ChatResult> => ({ ok: true, text: bad, usage: NO_CHAT_USAGE });
     const res = await generateQuiz({ chat, text: "chapter", questionCount: 3 });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toBe("invalid_ai_output");
@@ -462,6 +462,7 @@ describe("difficulty & format distribution prompt generation", () => {
       .fn<(messages: ChatMessage[]) => Promise<ChatResult>>()
       .mockResolvedValueOnce({
         ok: true,
+        usage: NO_CHAT_USAGE,
         text: JSON.stringify({
           title: "Title",
           questions: [
@@ -473,6 +474,7 @@ describe("difficulty & format distribution prompt generation", () => {
       })
       .mockResolvedValueOnce({
         ok: true,
+        usage: NO_CHAT_USAGE,
         text: JSON.stringify({
           title: "Title",
           questions: [
@@ -499,6 +501,7 @@ describe("difficulty & format distribution prompt generation", () => {
       .fn<(messages: ChatMessage[]) => Promise<ChatResult>>()
       .mockResolvedValue({
         ok: true,
+        usage: NO_CHAT_USAGE,
         text: JSON.stringify({
           type: "true_false", // original was mcq
           prompt: "TF question",
@@ -606,7 +609,7 @@ describe("QT-1 — allowMultiSelect gating", () => {
 describe("U-AE1 — onEvent mirror (byte-identical default path)", () => {
   const okChatWithCapture = (content: string, captured: ChatMessage[][]) => async (messages: ChatMessage[]) => {
     captured.push(messages);
-    return { ok: true, text: content } as ChatResult;
+    return { ok: true, text: content, usage: NO_CHAT_USAGE } as ChatResult;
   };
 
   it("identical prompts + outcome with and without onEvent (success path)", async () => {
@@ -627,11 +630,11 @@ describe("U-AE1 — onEvent mirror (byte-identical default path)", () => {
 
   it("identical retry prompts + outcome with and without onEvent (retry path)", async () => {
     const chatA = vi.fn<(messages: ChatMessage[]) => Promise<ChatResult>>()
-      .mockResolvedValueOnce({ ok: true, text: "not json" })
-      .mockResolvedValueOnce({ ok: true, text: validQuizJson });
+      .mockResolvedValueOnce({ ok: true, text: "not json", usage: NO_CHAT_USAGE })
+      .mockResolvedValueOnce({ ok: true, text: validQuizJson, usage: NO_CHAT_USAGE });
     const chatB = vi.fn<(messages: ChatMessage[]) => Promise<ChatResult>>()
-      .mockResolvedValueOnce({ ok: true, text: "not json" })
-      .mockResolvedValueOnce({ ok: true, text: validQuizJson });
+      .mockResolvedValueOnce({ ok: true, text: "not json", usage: NO_CHAT_USAGE })
+      .mockResolvedValueOnce({ ok: true, text: validQuizJson, usage: NO_CHAT_USAGE });
     const events: unknown[] = [];
     // Freeze the clock: remainingBudgetMs derives the per-call timeout from
     // Date.now() at CALL time, so two back-to-back runs with a shared

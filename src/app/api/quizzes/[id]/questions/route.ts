@@ -20,8 +20,11 @@ export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ id: string }> };
 
-// Per-lecturer authoring budget (student-surface parity; abuse bound).
-const AUTHOR_RATE = { limit: 120, windowMs: 60 * 60 * 1000 };
+// Per-lecturer authoring budget. audit-4 M7: the spec pins AUTHOR at 30/min
+// (the pre-v4.9 120/hour was a spec-letter deviation — 15× stricter
+// sustained, but 4× burst-looser). 30/min still lets a lecturer paste a
+// full 30-question quiz in one sitting.
+const AUTHOR_RATE = { limit: 30, windowMs: 60 * 1000 };
 
 /**
  * POST /api/quizzes/[id]/questions — add a question to a DRAFT quiz.
@@ -56,7 +59,8 @@ export async function POST(request: Request, { params }: Params) {
     return invalidBody(firstIssueMessage(parsed.error.issues, "Invalid question data."));
   }
 
-  const { type, prompt, options, correctIndex, correctIndices, explanation } = parsed.data;
+  const { type, prompt, options, correctIndex, correctIndices, answerKey, explanation } =
+    parsed.data;
 
   const { data: question, error } = await supabase.rpc("append_question", {
     p_quiz_id: id,
@@ -69,6 +73,12 @@ export async function POST(request: Request, { params }: Params) {
     // dropped by supabase-js and the RPC's default-null params apply.
     p_correct_index: correctIndex,
     p_correct_indices: correctIndices,
+    // short_text (v4.9): the rubric the AI marker grades against. The RPC
+    // stores it verbatim and the DB CHECK requires it non-null for the type.
+    p_answer_key: answerKey,
+    // D7: the per-question scale factor is structure-only — questions_max_score
+    // locks it at 1, so the authoring surface deliberately has no knob for it.
+    p_max_score: 1,
     // The RPC normalizes "" → NULL (NULLIF), so passing a non-null string keeps
     // the generated RPC arg type happy and the DB semantics identical.
     p_explanation: explanation ?? "",

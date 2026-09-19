@@ -1,4 +1,4 @@
-import { deriveSessionDisplayStatus, toEpochMs } from "./derive";
+import { coerceScore, deriveSessionDisplayStatus, toEpochMs } from "./derive";
 import { RESULTS_SESSION_LIMIT } from "./constants";
 import type { DisplayStatus } from "./types";
 import type { QuizStatus } from "@/lib/types/aliases";
@@ -84,6 +84,13 @@ export type ExportSessionInput = {
   face_fail_count?: number | null;
   /** 0032 retake attempt number — optional; gradebook cells surface it. */
   attempt?: number | null;
+  /**
+   * 0060 `lecturer_session_view.pending_count` — answers still awaiting an AI
+   * mark. The D10 score SUM excludes pending rows, so every consumer that
+   * divides by a question count must subtract this (resolved denominator)
+   * rather than read a partially-marked attempt as a low score.
+   */
+  pending_count?: number | null;
 };
 
 export type ExportAnswerInput = {
@@ -93,6 +100,17 @@ export type ExportAnswerInput = {
   /** QT-1: multi-select rows carry the canonical selection set instead. */
   selected_indices?: number[] | null;
   is_correct: boolean;
+  /** v4.9 short_text: the free-text answer (lecturer view exposes it). */
+  answer_text?: string | null;
+  /** R13: the student pressed Skip — an explicit zero, not a blank. */
+  skipped?: boolean | null;
+  /**
+   * AI marking state. 'pending' means no score exists yet (the D10 SUM skips
+   * the row), so the cell renders a neutral pending label rather than the
+   * unanswered dash — the two are different facts and the workbook must not
+   * conflate them.
+   */
+  mark_status?: string | null;
 };
 
 export type ExportRosterInput = {
@@ -108,6 +126,13 @@ export type ExportStudentRow = {
   status: DisplayStatus | "not_started";
   score: number | null;
   total: number;
+  /**
+   * Denominator the percent divided by: `total − pendingCount` (the D10 SUM
+   * excludes pending answers, so the two travel together).
+   */
+  resolved: number;
+  /** Answers still awaiting an AI mark; drives the pending cell state. */
+  pendingCount: number;
   percent: number | null;
   startedAtISO: string | null;
   submittedAtISO: string | null;
@@ -305,6 +330,15 @@ export type BuildExportInput = {
   nowMs: number;
   /** True when the route's answer fetch hit its hard row cap. */
   answersTruncated?: boolean;
+  /**
+   * Cell text for the two non-scoring answer states. Injected by the route
+   * from `tFor(locale)` (this module is pure and has no locale), with English
+   * fallbacks so a pure-model caller — and the unit suite — stays readable.
+   * Pending must never render as the unanswered dash: "waiting for a mark" and
+   * "left blank" are different facts on a grade artifact.
+   */
+  pendingLabel?: string;
+  skippedLabel?: string;
 };
 
 export function buildExportModel(input: BuildExportInput): ExportModel {
@@ -312,6 +346,12 @@ export function buildExportModel(input: BuildExportInput): ExportModel {
   const questions = normalizeExportQuestions(input.questions);
 
   const total = questions.length;
+
+  // Cell text for the non-scoring states. The route injects the localized
+  // forms; the English fallbacks keep pure-model callers (and the unit suite)
+  // readable without a locale.
+  const pendingLabel = input.pendingLabel ?? "Pending mark";
+  const skippedLabel = input.skippedLabel ?? "Skipped";
 
   // Answers keyed by session+question for O(1) row assembly.
   const answersByKey = new Map<string, ExportAnswerInput>();
@@ -340,6 +380,8 @@ export function buildExportModel(input: BuildExportInput): ExportModel {
         status: "not_started",
         score: null,
         total,
+        resolved: total,
+        pendingCount: 0,
         percent: null,
         startedAtISO: null,
         submittedAtISO: null,
@@ -370,6 +412,26 @@ export function buildExportModel(input: BuildExportInput): ExportModel {
     const answerCorrect: (boolean | null)[] = [];
     for (const q of questions) {
       const a = answersByKey.get(`${session.id}:${q.id}`);
+      // short_text (v4.9): the answer IS the text — there are no options to
+      // index. A row still awaiting its AI mark renders the neutral pending
+      // label (never the unanswered dash, and never a red ✗ from the
+      // placeholder is_correct=false the RPC stores while pending).
+      if (q.type === "short_text") {
+        if (!a || a.skipped) {
+          // A skip is an explicit zero, not a blank — label it.
+          answers.push(a?.skipped ? skippedLabel : null);
+          answerCorrect.push(a?.skipped ? false : null);
+          continue;
+        }
+        if (a.mark_status === "pending") {
+          answers.push(pendingLabel);
+          answerCorrect.push(null);
+          continue;
+        }
+        answers.push(a.answer_text != null ? safeText(a.answer_text) : null);
+        answerCorrect.push(a.is_correct);
+        continue;
+      }
       // QT-1: multi rows are "answered" when the selection SET is present —
       // their selected_index is ALWAYS null. Cell contract: joined letters +
       // " — " + selected texts joined " / " (e.g. "A,C — X / Y"). The set is
@@ -381,8 +443,8 @@ export function buildExportModel(input: BuildExportInput): ExportModel {
           : null;
       const isMultiAnswered = multiSelected != null && multiSelected.length > 0;
       if (!a || (!isMultiAnswered && a.selected_index === null)) {
-        answers.push(null);
-        answerCorrect.push(null);
+        answers.push(a?.skipped ? skippedLabel : null);
+        answerCorrect.push(a?.skipped ? false : null);
         continue;
       }
       if (isMultiAnswered) {
@@ -404,17 +466,30 @@ export function buildExportModel(input: BuildExportInput): ExportModel {
       answerCorrect.push(a.is_correct);
     }
 
+    // NUMERIC over the wire (0053): PostgREST serialises `score` as a STRING,
+    // so a bare `!== null` check would divide a string and render NaN%.
+    const score = coerceScore(session.score);
+    // Resolved denominator: the D10 score SUM excludes answers still awaiting
+    // an AI mark, so dividing by the full count would understate a partially
+    // marked attempt. `resolved = 0` (every answer pending) → percent null.
+    const resolved = Math.max(0, total - Math.max(0, Math.floor(session.pending_count ?? 0)));
+    const pendingCount = Math.max(0, Math.floor(session.pending_count ?? 0));
+
     return {
       studentId,
       matricNo,
       fullName,
       status: displayStatus,
-      score: session.score,
+      score,
       total,
-      percent:
-        session.score !== null && total > 0
-          ? Math.round((session.score / total) * 100)
-          : null,
+      resolved,
+      pendingCount,
+      // Plan §4 / L9: the percent divides by the RESOLVED denominator; the
+      // neutral "pending" label for a still-marking attempt is written by the
+      // workbook writer (audit-4 round-3: `pendingLabel` gated on
+      // `pendingCount`) and by the gradebook surfaces — the model keeps the
+      // resolved arithmetic.
+      percent: score !== null && resolved > 0 ? Math.round((score / resolved) * 100) : null,
       startedAtISO: session.started_at,
       submittedAtISO: session.submitted_at,
       durationSec,

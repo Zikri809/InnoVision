@@ -9,6 +9,8 @@ export interface QuizMetadataPatch {
   allowRetake?: boolean | null;
   maxAttempts?: number | null;
   shuffleQuestions?: boolean | null;
+  /** v4.9: the gesture switch (draft-frozen like shuffleQuestions). */
+  gesturesEnabled?: boolean | null;
 }
 
 export interface QuizUpdateColumns {
@@ -20,6 +22,7 @@ export interface QuizUpdateColumns {
   allow_retake?: boolean;
   max_attempts?: number;
   shuffle_questions?: boolean;
+  gestures_enabled?: boolean;
 }
 
 /**
@@ -37,6 +40,10 @@ export const QUIZ_FIELD_DEFAULTS = {
   allow_retake: false,
   max_attempts: 1,
   shuffle_questions: false,
+  // v4.9: the gesture switch defaults ON, preserving the behaviour every
+  // existing quiz had before the column existed (D9). A null in a PATCH
+  // therefore resets to ENABLED, not disabled.
+  gestures_enabled: true,
 } as const;
 
 /** The window fields a PATCH may carry while bypassing the draft-only lock. */
@@ -58,7 +65,12 @@ export function hasNonWindowFields(input: QuizMetadataPatch): boolean {
     input.title !== undefined ||
     input.mode !== undefined ||
     input.timeLimitSec !== undefined ||
-    input.shuffleQuestions !== undefined
+    input.shuffleQuestions !== undefined ||
+    // v4.9 (D9): gestures_enabled is draft-frozen exactly like
+    // shuffle_questions. Flipping the modality under in-flight students
+    // would leave some answering by gesture and some by keyboard against a
+    // single quiz row, with no per-student migration path.
+    input.gesturesEnabled !== undefined
   );
 }
 
@@ -96,6 +108,9 @@ export function buildQuizUpdates(
   }
   if (input.shuffleQuestions !== undefined) {
     updates.shuffle_questions = input.shuffleQuestions ?? QUIZ_FIELD_DEFAULTS.shuffle_questions;
+  }
+  if (input.gesturesEnabled !== undefined) {
+    updates.gestures_enabled = input.gesturesEnabled ?? QUIZ_FIELD_DEFAULTS.gestures_enabled;
   }
 
   const effectiveMode = input.mode ?? currentMode;

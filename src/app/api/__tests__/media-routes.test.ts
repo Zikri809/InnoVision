@@ -21,14 +21,34 @@ const storageMock = {
     .fn()
     .mockResolvedValue({ data: { signedUrl: "https://storage.test/signed?token=x" }, error: null }),
 };
+/**
+ * Tables the in-memory fake models. Anything else (service-only bookkeeping
+ * like `ai_generation_usage`) keeps a permissive stub, because the fake has no
+ * rows for it and a delegating call would throw "unknown table".
+ */
+const FAKE_MODELS_TABLE = (table: string): boolean =>
+  ["questions", "quizzes", "quiz_sessions", "session_answers",
+   "student_quiz_questions", "student_quizzes", "profiles", "classes",
+   "class_enrollments"].includes(table);
+
 const adminMock = {
   storage: { from: vi.fn(() => storageMock) },
-  from: vi.fn(() => ({
-    select: vi.fn().mockReturnThis(),
-    eq: vi.fn().mockReturnThis(),
-    maybeSingle: vi.fn().mockResolvedValue({ data: null }),
-    upsert: vi.fn().mockResolvedValue({ error: null }),
-  })),
+  // Table access delegates to the SAME in-memory fake DB the user client
+  // uses. 0054 revoked `questions` from `authenticated`, so the question
+  // routes' writes now run on the admin client — a stub here would make
+  // every assertion about the persisted column vacuous (the write would
+  // "succeed" against nothing). Only `storage` stays a boundary mock: it is
+  // a real external service, not a table.
+  from: vi.fn((table: string) => {
+    const db = fakeHolder.current;
+    if (db && FAKE_MODELS_TABLE(table)) return db.from(table);
+    return {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: null }),
+      upsert: vi.fn().mockResolvedValue({ error: null }),
+    };
+  }),
 };
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => adminMock,
@@ -133,14 +153,23 @@ beforeEach(() => {
     error: null,
   });
   // Reset IMPLEMENTATIONS (not just calls) so a mockReturnValue installed by
-  // one test can't leak into the next.
+  // one test can't leak into the next — then restore the delegating impl.
   adminMock.from.mockReset();
-  adminMock.from.mockImplementation(() => ({
-    select: vi.fn().mockReturnThis(),
-    eq: vi.fn().mockReturnThis(),
-    maybeSingle: vi.fn().mockResolvedValue({ data: null }),
-    upsert: vi.fn().mockResolvedValue({ error: null }),
-  }));
+  adminMock.from.mockImplementation((table: string) => {
+    const db = fakeHolder.current;
+    // Delegate to the in-memory fake for the tables it MODELS — 0054 revoked
+    // `questions` from `authenticated`, so the question routes' writes now run
+    // on the admin client, and a stub would make the "column updated"
+    // assertions vacuous. Service-only tables (ai_generation_usage) have no
+    // fake model, so they keep a permissive stub.
+    if (db && FAKE_MODELS_TABLE(table)) return db.from(table);
+    return {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: null }),
+      upsert: vi.fn().mockResolvedValue({ error: null }),
+    };
+  });
   generateQuizMock.mockReset();
   fakeHolder.current = undefined;
   _resetRateLimiter();

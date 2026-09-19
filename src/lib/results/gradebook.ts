@@ -2,6 +2,7 @@ import {
   selectRepresentativeSessions,
   type ExportSessionInput,
 } from "./export";
+import { coerceScore } from "./derive";
 import { ROSTER_LIMIT } from "@/lib/classes/roster";
 
 /**
@@ -24,10 +25,15 @@ import { ROSTER_LIMIT } from "@/lib/classes/roster";
  *    feed sessions started_at DESC, id DESC (see that function's order
  *    contract). Flagged sessions ARE score-bearing (intentional divergence
  *    from the student card, documented in both roadmap plans).
- *  - Percent = round(score / questionCount * 100); null (em dash) when no
+ *  - Percent = round(score / RESOLVED questions * 100), where resolved =
+ *    questionCount − the session's pending AI-marked answers. A cell whose
+ *    session still holds pending answers renders as pending (never as a 0):
+ *    the D10 score SUM excludes pending rows, so dividing by the FULL count
+ *    would read a partially-marked attempt as a low score. `resolved = 0`
+ *    (every answer pending) → percent null. Null (em dash) when no
  *    representative session or a 0-question quiz. Cumulative % per student =
- *    round(sum(score) / sum(questionCount) * 100) over attempted quizzes
- *    only; hidden (null) when the student attempted nothing.
+ *    round(sum(score) / sum(resolved) * 100) over attempted quizzes only;
+ *    hidden (null) when the student attempted nothing.
  *  - Footer = per-quiz class average over attempted cells only.
  */
 
@@ -59,7 +65,19 @@ export type GradebookCell = {
   sessionId: string | null;
   score: number | null;
   total: number;
+  /**
+   * Denominator the percent was computed over: `total − pendingCount`. The
+   * D10 score SUM excludes pending rows, so the two must travel together or
+   * a partially-marked cell reads as a low score.
+   */
+  resolved: number;
   percent: number | null;
+  /**
+   * Answers still awaiting an AI mark. A non-zero count renders the cell as
+   * PENDING (neutral chip) rather than a number — the score is provisional
+   * and a percentage would understate the student.
+   */
+  pendingCount: number;
   /** 0032 attempt number, surfaced so retake cells are auditable. */
   attempt: number | null;
 };
@@ -71,6 +89,14 @@ export type GradebookRow = {
   cells: (GradebookCell | null)[];
   /** Cumulative % over attempted quizzes; null = attempted nothing. */
   cumulativePercent: number | null;
+  /**
+   * audit-4 M7: true when ANY of the row's cells carries an unresolved mark.
+   * The cumulative percent excludes pending cells, so a student who attempted
+   * everything but awaits marks would otherwise render as `notAttempted` — the
+   * exact mislabel the per-cell chips avoid. Surfaces render the pending
+   * label instead.
+   */
+  hasPending: boolean;
   /**
    * Integrity sums over the row's REPRESENTATIVE sessions (audit-1 P1-16:
    * fullscreen/hand farming used to be invisible in the cross-quiz
@@ -125,6 +151,17 @@ export type BuildGradebookInput = {
   rosterTruncated?: boolean;
 };
 
+/**
+ * The denominator a session's percent divides by: the quiz's question count
+ * minus the answers still awaiting an AI mark. Never negative — a stale
+ * `pending_count` (a mark that resolved between the session read and the
+ * count) must degrade to the full count, not to a nonsense negative one.
+ */
+function resolvedCount(total: number, session: ExportSessionInput): number {
+  const pending = Math.max(0, Math.floor(session.pending_count ?? 0));
+  return Math.max(0, total - pending);
+}
+
 export function buildGradebookModel(input: BuildGradebookInput): GradebookModel {
   const quizzes = [...input.quizzes]
     .sort((a, b) => a.created_at.localeCompare(b.created_at))
@@ -143,7 +180,18 @@ export function buildGradebookModel(input: BuildGradebookInput): GradebookModel 
 
     const percents: number[] = [];
     for (const s of repByStudent.values()) {
-      if (s.score !== null && total > 0) percents.push(Math.round((s.score / total) * 100));
+      const score = coerceScore(s.score);
+      // audit-4 M11: a session with ANY pending answer is EXCLUDED from the
+      // average entirely — its percent would be provisional (computed over a
+      // partial denominator), and the per-cell UI already refuses to show it
+      // as a number. Averaging what the cell hides would leak the provisional
+      // grade through the footer. Pending answers are also excluded from the
+      // denominator, so a fully-pending session contributes nothing.
+      const resolved = resolvedCount(total, s);
+      const pendingCount = Math.max(0, Math.floor(s.pending_count ?? 0));
+      if (score !== null && resolved > 0 && pendingCount === 0) {
+        percents.push(Math.round((score / resolved) * 100));
+      }
     }
     const averagePercent =
       percents.length > 0
@@ -172,26 +220,41 @@ export function buildGradebookModel(input: BuildGradebookInput): GradebookModel 
   ): GradebookRow => {
     const cells = columns.map((col) => {
       const s = col.repByStudent.get(studentId);
-      if (!s || s.score === null || col.questionCount === 0) return null;
+      if (!s) return null;
+      const score = coerceScore(s.score);
+      const resolved = resolvedCount(col.questionCount, s);
+      // Pending answers carry no score yet (the D10 SUM skips them), so the
+      // cell's percent is a RESOLVED-denominator number that EVERY surface
+      // must gate on `pendingCount > 0` before rendering — audit-4 M10: the
+      // mobile per-quiz sheet read this field straight out and leaked a
+      // provisional "100%" as a final grade. The model keeps the resolved
+      // arithmetic (plan §4); the surfaces own the neutral chip.
+      const pendingCount = Math.max(0, Math.floor(s.pending_count ?? 0));
+      if (score === null || col.questionCount === 0) return null;
       return {
         sessionId: s.id,
-        score: s.score,
+        score,
         total: col.questionCount,
-        percent: Math.round((s.score / col.questionCount) * 100),
+        resolved,
+        percent: resolved > 0 ? Math.round((score / resolved) * 100) : null,
+        pendingCount,
         attempt: s.attempt ?? null,
       } satisfies GradebookCell;
     });
 
     let sumScore = 0;
-    let sumTotal = 0;
+    let sumResolved = 0;
+    let hasPending = false;
     for (const cell of cells) {
-      if (cell) {
-        sumScore += cell.score;
-        sumTotal += cell.total;
+      if (cell && cell.pendingCount === 0) {
+        sumScore += cell.score ?? 0;
+        sumResolved += cell.resolved;
+      } else if (cell) {
+        hasPending = true;
       }
     }
     const cumulativePercent =
-      sumTotal > 0 ? Math.round((sumScore / sumTotal) * 100) : null;
+      sumResolved > 0 ? Math.round((sumScore / sumResolved) * 100) : null;
 
     // Integrity sums run over the representative sessions THEMSELVES —
     // not the score-bearing cells — so a flagged/0-score session's
@@ -213,6 +276,7 @@ export function buildGradebookModel(input: BuildGradebookInput): GradebookModel 
       matricNo,
       cells,
       cumulativePercent,
+      hasPending,
       faceFails,
       fullscreenPauses,
       handPauses,

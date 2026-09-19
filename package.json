@@ -17,6 +17,7 @@
     "explore:prod": "node scripts/explore-prod.mjs",
     "explore:deep": "node scripts/explore-deep.mjs",
     "check:i18n": "node scripts/check-i18n.mjs",
+    "check:sealed": "node scripts/check-sealed-tables.mjs",
     "db:reset": "supabase db reset",
     "db:push": "supabase db push",
     "db:reset:remote": "node scripts/db-reset-remote.mjs --remote",

@@ -1,17 +1,19 @@
 import { redirect, notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getClassRoster } from "@/lib/classes/roster";
-import { deriveSessionDisplayStatus } from "@/lib/results/derive";
+import { coerceScore, deriveSessionDisplayStatus } from "@/lib/results/derive";
 import type { SessionStatus } from "@/lib/types/aliases";
-import { SessionDetailClient } from "./session-detail-client";
+import { SessionDetailClient, type AnswerRow, type QuestionRow } from "./session-detail-client";
 import { ProfilePendingPanel, LoadErrorPanel } from "@/components/layout/load-state";
 
 type SessionInfo = {
   id: string;
   quiz_id: string;
   student_id: string;
+  /** Assessment vs practice — the override dialog's copy differs slightly. */
   mode: string;
   status: SessionStatus;
+  /** coerceScore'd NUMERIC (PostgREST returns NUMERIC as a string). */
   score: number | null;
   started_at: string | null;
   submitted_at: string | null;
@@ -21,21 +23,23 @@ type SessionInfo = {
   face_fail_streak: number;
 };
 
-type AnswerRow = {
-  question_id: string;
-  selected_index: number | null;
-  /** QT-1: multi-select rows carry the canonical selection set instead. */
-  selected_indices: number[] | null;
-  is_correct: boolean;
-  answered_at: string | null;
-};
-
 export const dynamic = "force-dynamic";
 
 /**
- * Lecturer per-session answer breakdown — each question a student answered,
- * with the option they picked and correct/wrong. NOT the correct answer
- * (D10): questions are projected WITHOUT correct_index/explanation.
+ * Lecturer per-session answer breakdown — the dispute-resolution surface.
+ *
+ * Questions and answers are read through the owner-predicated barrier views
+ * (0054 revoked the key columns from `authenticated`). M2 migration: the
+ * question projection now carries `answer_key`/`explanation`/`image_path`/
+ * `max_score` so short_text rows can show their rubric and the override
+ * dialog can enforce the per-question ceiling; the answer projection carries
+ * the full marking state (`answer_text`, `skipped`, `mark_status`,
+ * `mark_score`, `mark_metadata`, `marked_at`, `attempt_version`) so pending /
+ * needs_review / failed rows are visible and adjudicable from the UI.
+ *
+ * `mark_metadata` is lecturer-only by construction: the view's predicate is
+ * `is_lecturer_of_quiz` (0060), the same gate that lets the override RPC
+ * write. The AI rationale is rendered as PLAIN TEXT in the client.
  */
 export default async function SessionDetailPage({
   params,
@@ -64,7 +68,7 @@ export default async function SessionDetailPage({
   // Owner-filtered quiz fetch (no oracle: not-found folds 404).
   const { data: quiz, error: quizError } = await supabase
     .from("quizzes")
-    .select("id, class_id, title, mode, status, time_limit_sec")
+    .select("id, class_id, title, mode, status, time_limit_sec, results_revealed_at")
     .eq("id", id)
     .maybeSingle();
   if (quizError) {
@@ -97,13 +101,20 @@ export default async function SessionDetailPage({
     );
   }
   if (!session) notFound();
-  const sessionInfo = session as unknown as SessionInfo;
+  // D8: NUMERIC crosses PostgREST as a string — coerce at the boundary so the
+  // client's ring arithmetic and `!= null` score check read a number or null.
+  const sessionInfo = {
+    ...(session as unknown as SessionInfo),
+    score: coerceScore(session.score),
+  };
 
   const [{ data: questions, error: questionsError }, rosterResult] = await Promise.all([
+    // 0054 revoked the key columns from `authenticated`; the owner-predicated
+    // view is the only readable path. The projection now carries the rubric /
+    // explanation / image / max_score the migrated breakdown needs (M2).
     supabase
-      .from("questions")
-      // Per-question breakdown columns — never correct_index (D10).
-      .select("id, type, prompt, options, order_index")
+      .from("lecturer_questions_view")
+      .select("id, type, prompt, options, order_index, answer_key, explanation, image_path, max_score")
       .eq("quiz_id", id)
       .order("order_index", { ascending: true }),
     getClassRoster(supabase, quiz.class_id),
@@ -124,7 +135,7 @@ export default async function SessionDetailPage({
 
   const { data: answers, error: answersError } = await supabase
     .from("lecturer_answers_view")
-    .select("question_id, selected_index, selected_indices, is_correct, answered_at")
+    .select("question_id, selected_index, selected_indices, is_correct, answered_at, answer_text, skipped, mark_status, mark_score, mark_metadata, marked_at, attempt_version")
     .eq("session_id", sessionId);
   if (answersError) {
     console.error("Session answers fetch error:", answersError);
@@ -151,8 +162,11 @@ export default async function SessionDetailPage({
       quizTitle={quiz.title}
       session={sessionInfo}
       displayStatus={displayStatus}
-      questions={questions ?? []}
+      // View-generated types mark every column nullable; the underlying
+      // columns are NOT NULL (same narrowing as the results RSC).
+      questions={(questions ?? []) as unknown as QuestionRow[]}
       answers={answerRows}
+      resultsRevealed={quiz.results_revealed_at != null}
       studentName={
         rosterResult.roster.find((r) => r.student_id === sessionInfo.student_id)?.full_name ??
         null

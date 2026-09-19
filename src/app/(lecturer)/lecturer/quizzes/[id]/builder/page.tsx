@@ -3,7 +3,7 @@ import { getTranslations } from "next-intl/server";
 import { createClient } from "@/lib/supabase/server";
 import { isWebSearchEnabled } from "@/lib/ai/tinyfish";
 import { parseQuizSources } from "@/lib/quizzes/sources";
-import { QuizBuilderClient } from "./quiz-builder-client";
+import { QuizBuilderClient, type QuestionRow } from "./quiz-builder-client";
 import { ProfilePendingPanel } from "@/components/layout/load-state";
 
 export const dynamic = "force-dynamic";
@@ -48,7 +48,7 @@ export default async function QuizBuilderPage({
   // the explicit eq() on lecturer_id makes the not-found case unambiguous.
   const { data: quiz, error: quizError } = await supabase
     .from("quizzes")
-    .select("id, class_id, title, mode, status, time_limit_sec, opens_at, closes_at, allow_retake, max_attempts, shuffle_questions, results_revealed_at, created_at, source_file_url, source_text, sources")
+    .select("id, class_id, title, mode, status, time_limit_sec, opens_at, closes_at, allow_retake, max_attempts, shuffle_questions, gestures_enabled, results_revealed_at, created_at, source_file_url, source_text, sources")
     .eq("id", id)
     .maybeSingle();
 
@@ -80,9 +80,11 @@ export default async function QuizBuilderPage({
       .eq("id", quiz.class_id)
       .eq("lecturer_id", user.id)
       .maybeSingle(),
+    // 0054 revoked the key columns from `authenticated`, so every lecturer
+    // read of questions goes through the owner-predicated view.
     supabase
-      .from("questions")
-      .select("id, quiz_id, order_index, type, prompt, options, correct_index, correct_indices, explanation, image_path")
+      .from("lecturer_questions_view")
+      .select("id, quiz_id, order_index, type, prompt, options, correct_index, correct_indices, answer_key, explanation, image_path")
       .eq("quiz_id", id)
       .order("order_index", { ascending: true })
       .order("created_at", { ascending: true }),
@@ -156,13 +158,16 @@ export default async function QuizBuilderPage({
         allow_retake: quiz.allow_retake,
         max_attempts: quiz.max_attempts,
         shuffle_questions: quiz.shuffle_questions,
+        gestures_enabled: quiz.gestures_enabled,
         created_at: quiz.created_at,
         source_file_url: quiz.source_file_url,
         source_text: quiz.source_text,
       }}
       sources={parseQuizSources(quiz.sources)}
       hasWebSearch={isWebSearchEnabled()}
-      questions={questions ?? []}
+      // View-generated types mark every column nullable; the underlying
+      // columns are NOT NULL (same narrowing as the results RSC).
+      questions={(questions ?? []) as unknown as QuestionRow[]}
       userId={user.id}
       classes={ownedClasses ?? []}
       // Origin-aware back link: entered from the cross-class quizzes hub goes

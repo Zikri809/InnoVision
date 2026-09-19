@@ -37,6 +37,27 @@ function toSortValue(value: string | number | null | undefined): number {
 }
 
 /**
+ * Coerce a PostgREST score payload to a finite number, or null.
+ *
+ * `quiz_sessions.score` became NUMERIC in 0053 (the 0/0.5/1 half-mark ladder
+ * needs a non-integer total), and PostgREST serialises NUMERIC as a STRING —
+ * so a bare `typeof v === "number"` check silently reads every score as null.
+ * Every consumer of a score crossing the wire goes through this helper.
+ *
+ * `null`/`undefined` → null; a non-finite or unparseable value → null (never
+ * NaN, which would propagate into a percent and render "NaN%").
+ */
+export function coerceScore(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  // audit-4 D12 hardening: `Number("")` and `Number("   ")` are 0, so a bare
+  // Number() would render an absent score as a real "0". A blank string is
+  // unparseable in spirit — treat it as null like any other garbage.
+  if (typeof v === "string" && v.trim() === "") return null;
+  const n = typeof v === "string" ? Number(v) : (v as number);
+  return typeof n === "number" && Number.isFinite(n) ? n : null;
+}
+
+/**
  * D5 — derive the four-member display status for a session.
  *
  * Truth table (unit-pinned in derive.test.ts, U-T4; no dead members):
@@ -341,7 +362,9 @@ export function assembleResultsRows({
       student_id: s.student_id,
       mode: s.mode,
       status: s.status,
-      score: s.score,
+      // NUMERIC over the wire → string (see coerceScore); the dashboard's
+      // score column renders a number or an em dash, never "0.5" quoted.
+      score: coerceScore(s.score),
       total: totalQuestions,
       started_at: s.started_at,
       submitted_at: s.submitted_at,

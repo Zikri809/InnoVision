@@ -101,9 +101,12 @@ export async function POST(request: Request, { params }: Params) {
   // Head-count for a friendly remaining-capacity message. The RPC's own cap
   // check (behind its advisory lock) stays authoritative — this pre-check
   // just avoids the generic RPC error for the common over-paste case.
+  // `select("id")`, not `select("*")`: 0054 revoked the base table from
+  // `authenticated`, so the count reads the owner-predicated view and asks
+  // for one column the caller is actually granted.
   const { count: existingCount, error: countError } = await supabase
-    .from("questions")
-    .select("*", { count: "exact", head: true })
+    .from("lecturer_questions_view")
+    .select("id", { count: "exact", head: true })
     .eq("quiz_id", id);
   if (countError) {
     console.error("Import head-count error:", countError);

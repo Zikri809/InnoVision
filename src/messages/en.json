@@ -61,7 +61,8 @@
     "aria": {
       "yourCorrectChoice": "Your choice — correct",
       "yourWrongChoice": "Your choice — incorrect",
-      "missedCorrectAnswer": "Correct answer (not your choice)"
+      "missedCorrectAnswer": "Correct answer (not your choice)",
+      "yourAnswer": "Your answer"
     }
   },
   "authErrors": {
@@ -576,7 +577,13 @@
         "problemMultiTooManyOptions": "Line {line}: multi-select questions support at most {max} options."
       },
       "correctAnswersLabel": "Correct answers",
-      "multiOptionCap": "Multi-select questions support at most 4 options. Remove one option first."
+      "multiOptionCap": "Multi-select questions support at most 4 options. Remove one option first.",
+      "gesturesToggle": "Hand gestures",
+      "gesturesHint": "Students answer this quiz with hand gestures. Turning this off makes it keyboard/tap only. Cannot be changed once the quiz is live.",
+      "shortTextLabel": "Short answer (AI-marked)",
+      "answerKeyLabel": "Answer key / rubric",
+      "answerKeyPlaceholder": "Describe what a correct answer must contain…",
+      "answerKeyHint": "The AI marker grades student answers against this. Be specific about what earns credit."
     },
     "dialogs": {
       "editQuizTitle": "Edit quiz settings",
@@ -695,7 +702,32 @@
       "attemptChip": "Attempt #{count}",
       "filterAll": "All",
       "quizMenu": "Quiz actions",
-      "actionsMenu": "Session actions"
+      "actionsMenu": "Session actions",
+      "override": {
+        "title": "Adjust this mark",
+        "reason": "Reason (required)",
+        "reasonPlaceholder": "Why are you changing this mark?",
+        "saved": "Mark updated",
+        "republish": "Results were already released. Re-publish them to show students the corrected mark.",
+        "pendingChip": "Pending",
+        "needsReviewChip": "Needs review",
+        "aiRationale": "AI rationale",
+        "openBtn": "Adjust mark",
+        "invalidMark": "Choose 0, 0.5 or 1.",
+        "reasonTooShort": "Give a reason of at least 5 characters.",
+        "markLabel": "New mark",
+        "markExceedsMax": "That mark is higher than this question's maximum.",
+        "notFound": "This answer could not be found.",
+        "rateLimited": "Too many adjustments. Try again in a minute."
+      },
+      "pendingChip": "Pending",
+      "needsReviewChip": "Needs review",
+      "correctChip": "Correct",
+      "wrongChip": "Wrong",
+      "skippedChip": "Skipped",
+      "failedChip": "Marking failed",
+      "rubricLabel": "Rubric",
+      "explanationLabel": "Explanation:"
     }
   },
   "student": {
@@ -853,7 +885,8 @@
       "milestoneM1": "1 minute remaining",
       "milestoneS30": "Less than 30 seconds remaining — the quiz will submit automatically",
       "answerConfirmed": "Answer {label} confirmed",
-      "answerSetConfirmed": "{count} answers confirmed"
+      "answerSetConfirmed": "{count} answers confirmed",
+      "answerRecorded": "Answer recorded"
     },
     "feedback": {
       "correct": "Correct! ✓",
@@ -882,7 +915,14 @@
       "explanation": "Explanation:",
       "backToQuizzes": "Back to quizzes",
       "tryAgain": "Try again",
-      "tryAgainStarting": "Starting…"
+      "tryAgainStarting": "Starting…",
+      "pendingResolved": "Marks finalised — waiting for your lecturer to release the results.",
+      "pendingBanner": "Some of your answers are still being marked. This usually takes under a minute.",
+      "pendingCount": "{count, plural, one {# answer is} other {# answers are}} still being marked.",
+      "needsReviewRow": "Awaiting lecturer review",
+      "failedRow": "Marking failed — will retry",
+      "skippedRow": "Skipped — counted as 0",
+      "pendingCell": "Pending"
     },
     "toast": {
       "timeUp": "Time's up — submitting your answers.",
@@ -903,7 +943,24 @@
     "multiHint": "Multi-select: select every correct option, then confirm.",
     "multiSelectedCount": "{count, plural, one {# option selected} other {# options selected}}",
     "multiPalmCommitHint": "or hold ✋ to confirm",
-    "multiSelectFirst": "Select at least one option before confirming."
+    "multiSelectFirst": "Select at least one option before confirming.",
+    "shortText": {
+      "label": "Short answer",
+      "placeholder": "Type your answer here…",
+      "pendingNote": "Your answer will be marked automatically — you'll see the result once your lecturer releases it.",
+      "confirm": "Submit answer",
+      "pending": "Being marked",
+      "needsReview": "Needs review",
+      "failed": "Marking failed"
+    },
+    "skip": {
+      "action": "Skip this question",
+      "skipped": "Skipped"
+    },
+    "oracle": {
+      "warning": "Practice reveals correctness — don't use practice for graded work.",
+      "limit": "You've checked this answer {count} times. Try working it out before revealing again."
+    }
   },
   "vision": {
     "keepHandVisible": "Keep your hand visible to answer",
