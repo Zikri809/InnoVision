@@ -19,6 +19,27 @@ type Params = { params: Promise<{ id: string }> };
 // Per-user rate limit on pauses (coalesced per episode — 20/min is generous).
 const PAUSE_RATE = { limit: 20, windowMs: 60 * 1000 };
 
+// audit-4 P2-2 replay suppression: a retried POST after a dropped response,
+// or two tabs mirroring the same blur, double-fires the strike counter — the
+// RPC counts on already-paused sessions too, so ONE real focus loss could
+// register 2 strikes and flag the student at their 2nd genuine loss. A short
+// per-(user, session, reason) window coalesces the duplicates; a genuinely
+// new episode (recover → pause again) falls outside it.
+const PAUSE_REPLAY_WINDOW_MS = 10_000;
+const recentPauseAt = new Map<string, number>();
+
+function isPauseReplay(key: string, now: number): boolean {
+  const last = recentPauseAt.get(key);
+  recentPauseAt.set(key, now);
+  // Bounded growth: sweep the map when it gets large.
+  if (recentPauseAt.size > 1024) {
+    for (const [k, ts] of recentPauseAt) {
+      if (now - ts > PAUSE_REPLAY_WINDOW_MS * 10) recentPauseAt.delete(k);
+    }
+  }
+  return last !== undefined && now - last < PAUSE_REPLAY_WINDOW_MS;
+}
+
 // D-F5: the Zod enum MUST mirror the pause_session RPC enum verbatim
 // (0046:665 accepts 'focus_lost' | 'hard_blur' | 'fullscreen_exit' |
 // 'hand_loss'). It used to omit 'hard_blur', so the route rejected a value
@@ -96,6 +117,28 @@ export async function POST(request: Request, { params }: Params) {
       );
     }
     reason = parsed.data.reason;
+  }
+
+  // Replay suppression (audit-4 P2-2) BEFORE the RPC: mirrors the override
+  // route's recentHitCount pattern. A duplicate POST inside the window
+  // returns the last known-good shape without re-striking — but ONLY while
+  // the session is STILL paused: a self-recovery between two pauses is a
+  // genuine new episode (the 3-strike escalation test recovers between
+  // strikes), so an active session always re-enters the RPC.
+  const statusProbe = await supabase
+    .from("quiz_sessions")
+    .select("status")
+    .eq("id", id)
+    .maybeSingle();
+  const currentStatus = (statusProbe.data as { status?: string } | null)?.status;
+  if (
+    currentStatus === "paused" &&
+    isPauseReplay(`pause:${auth.userId}:${id}:${reason}`, Date.now())
+  ) {
+    return Response.json(
+      { sessionStatus: "paused" },
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
   }
 
   const { data, error } = await supabase.rpc("pause_session", {

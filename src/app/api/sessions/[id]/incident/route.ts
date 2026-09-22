@@ -21,6 +21,33 @@ export const maxDuration = 60;
 const INCIDENT_RATE = { limit: 6, windowMs: 60 * 1000 };
 
 /**
+ * Per-session clip ceiling (audit-4 P1-1): the 6/min per-USER rate limit
+ * bounds request frequency but not per-session volume — a buggy retry loop
+ * (or a tampered client) could otherwise push ~10 GB/hr into the bucket for
+ * ONE session, each insert minting a fresh notification (the clip_id dedupe
+ * key never repeats). 40 clips × ~9 MB ≈ 360 MB covers any legitimate
+ * multi-incident attempt (pauses flag at 3 strikes; even adversarial
+ * pause/recover cycling stays an order of magnitude below this) while capping
+ * the worst-case storage and notification flood.
+ */
+const INCIDENT_SESSION_CLIP_CAP = 40;
+
+async function sessionClipCount(
+  admin: ReturnType<typeof createAdminClient>,
+  sessionId: string,
+): Promise<number | null> {
+  const { count, error } = await admin
+    .from("incident_clips")
+    .select("id", { count: "exact", head: true })
+    .eq("session_id", sessionId);
+  if (error) {
+    console.error("incident clip count error:", error);
+    return null;
+  }
+  return count ?? 0;
+}
+
+/**
  * POST /api/sessions/[id]/incident — upload a ring-buffer clip (video+audio
  * WebM) captured BEFORE an integrity incident (paused / flagged /
  * unavailable).
@@ -34,7 +61,6 @@ const INCIDENT_RATE = { limit: 6, windowMs: 60 * 1000 };
 export async function POST(request: Request, { params }: Params) {
   const supabase = await createClient();
   const { id } = await params;
-
   if (!isUuid(id)) return notFound();
 
   const auth = await requireStudent(supabase);
@@ -65,6 +91,18 @@ export async function POST(request: Request, { params }: Params) {
   }
   if (!["active", "paused", "flagged"].includes(session.status as string)) {
     return invalidBody("This session no longer accepts incident clips.");
+  }
+
+  // Per-session cap (audit-4 P1-1): checked BEFORE the slow upload so a
+  // saturated session is refused cheaply. A null count (count query failed)
+  // fails OPEN — an outage must not block an integrity clip.
+  const adminEarly = createAdminClient();
+  const clipCount = await sessionClipCount(adminEarly, id);
+  if (clipCount !== null && clipCount >= INCIDENT_SESSION_CLIP_CAP) {
+    return Response.json(
+      { error: "clip_cap_reached" },
+      { status: 429, headers: { "content-type": "application/json" } },
+    );
   }
 
   // audit-1 P1-5: STREAM-SAFE cap. formData() buffers the whole multipart
@@ -121,6 +159,18 @@ export async function POST(request: Request, { params }: Params) {
   // both forensic clips.
   const path = `${id}/${Date.now()}-${crypto.randomUUID()}.${ext}`;
   const admin = createAdminClient();
+
+  // Per-session cap re-check (audit-4 P1-1): concurrent uploads can pass the
+  // pre-upload count together — re-check after the buffer, before the storage
+  // write, so the cap bounds steady-state volume (the window is narrow; a
+  // final exact race is bounded by the 6/min rate limit and is benign).
+  const clipCountLate = await sessionClipCount(admin, id);
+  if (clipCountLate !== null && clipCountLate >= INCIDENT_SESSION_CLIP_CAP) {
+    return Response.json(
+      { error: "clip_cap_reached" },
+      { status: 429, headers: { "content-type": "application/json" } },
+    );
+  }
 
   const { error: uploadError } = await admin.storage
     .from("incident-footage")

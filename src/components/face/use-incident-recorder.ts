@@ -396,6 +396,11 @@ export function useIncidentRecorder(opts: {
     m.stopping = true;
     const rec = m.recorder;
     if (rec && rec.state !== "inactive") {
+      // Null the data handler BEFORE the forced stop: the terminal chunk
+      // delivery fires after stop() returns, and without this it would push
+      // into m.chunks after the lines below clear them — repopulating the
+      // ring with a chunk no recorder/flush will ever drain.
+      rec.ondataavailable = null;
       try {
         rec.stop();
       } catch {
@@ -419,6 +424,7 @@ export function useIncidentRecorder(opts: {
   useEffect(() => {
     return () => {
       machine.stopping = true;
+      if (machine.recorder) machine.recorder.ondataavailable = null;
       try {
         if (machine.recorder && machine.recorder.state !== "inactive") machine.recorder.stop();
       } catch {

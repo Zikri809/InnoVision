@@ -408,6 +408,12 @@ begin
   -- Digest tier: clips are recorded by the client only around pause/flag
   -- transitions (rate-limited route), so volume is a handful per problematic
   -- session and zero for clean ones.
+  --
+  -- Dedupe key is SESSION+HOUR-bucketed (not clip-id): a fresh clip_id every
+  -- insert made the key never repeat, so a saturated/retried session minted
+  -- one lecturer notification per clip (audit-4 P1-1). An hour bucket keeps
+  -- one digest per hour per session — a sustained incident still re-notifies
+  -- hourly without flooding.
   insert into public.notifications (recipient_id, type, payload, dedupe_key)
   select c.lecturer_id,
          'incident_clip_recorded',
@@ -417,11 +423,12 @@ begin
            'session_id', s.id,
            'clip_id', new.id
          ),
-         'incident_clip_recorded:' || new.id::text
-    from public.quiz_sessions s
-    join public.quizzes q on q.id = s.quiz_id
-    join public.classes c on c.id = q.class_id
-   where s.id = new.session_id
+         'incident_clip_recorded:' || new.session_id::text || ':'
+           || to_char(date_trunc('hour', coalesce(new.recorded_from, now())), 'YYYYMMDDHH24MI')
+     from public.quiz_sessions s
+     join public.quizzes q on q.id = s.quiz_id
+     join public.classes c on c.id = q.class_id
+    where s.id = new.session_id
   on conflict (recipient_id, dedupe_key) do nothing;
   return null;
 end;

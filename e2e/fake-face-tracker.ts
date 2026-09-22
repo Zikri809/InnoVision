@@ -38,11 +38,12 @@ export function fakeFaceInit(): void {
     start(): void;
     stop(): void;
     captureFrame(): Promise<string | null>;
-    captureBestFrame?(): Promise<string | null>;
+    captureBestFrame?(opts?: { angle?: "front" | "left" | "right" }): Promise<string | null>;
     waitForBlink(timeoutMs: number): Promise<"passed" | "failed">;
     waitForHeadTurn?(timeoutMs: number, side: "left" | "right"): Promise<"passed" | "failed">;
     onPoseChange?(cb: (pose: FakePose) => void): () => void;
     getFaceHealth?(): { aligned: boolean; lightingOk: boolean; faceDetected: boolean };
+    readonly lastAcceptedPose?: { angle: "front" | "left" | "right"; yaw: number } | null;
   };
 
   let verifyMode: "match" | "mismatch" = "match";
@@ -72,6 +73,10 @@ export function fakeFaceInit(): void {
   };
   const poseListeners = new Set<(p: FakePose) => void>();
   let poseTimer: ReturnType<typeof setInterval> | null = null;
+  // The pose the last `captureBestFrame({ angle })` accepted — mirrors the
+  // real tracker's `lastAcceptedPose` so the enroll client ships the same
+  // `yawReadings` payload (prod incident 2026-09-21).
+  let acceptedPose: { angle: "front" | "left" | "right"; yaw: number } | null = null;
 
   function ensurePoseLoop(): void {
     if (poseTimer !== null || poseListeners.size === 0) return;
@@ -111,8 +116,19 @@ export function fakeFaceInit(): void {
     async captureFrame(): Promise<string | null> {
       return verifyMode === "match" ? MATCH_MARKER : MISMATCH_MARKER;
     },
-    async captureBestFrame(): Promise<string | null> {
+    async captureBestFrame(opts?: { angle?: "front" | "left" | "right" }): Promise<string | null> {
+      // The real tracker enforces the per-angle yaw band here (prod incident
+      // 2026-09-21) and records the pose it accepted. The fake mirrors that
+      // contract so E2E exercises the same wire payload: the pose currently
+      // scripted via setFacePose is the accepted reading for the requested
+      // angle. Without an angle the call is angle-agnostic (verify path).
+      if (opts?.angle) {
+        acceptedPose = { angle: opts.angle, yaw: pose.yaw };
+      }
       return verifyMode === "match" ? MATCH_MARKER : MISMATCH_MARKER;
+    },
+    get lastAcceptedPose(): { angle: "front" | "left" | "right"; yaw: number } | null {
+      return acceptedPose;
     },
     async waitForBlink(timeoutMs: number): Promise<"passed" | "failed"> {
       return new Promise((resolve) => {

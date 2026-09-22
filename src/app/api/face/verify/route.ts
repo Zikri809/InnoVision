@@ -153,6 +153,14 @@ export async function POST(request: Request) {
     .eq("id", parsed.data.sessionId)
     .eq("student_id", auth.userId)
     .maybeSingle();
+  // audit-4 P3-3: a DB blip here must not silently degrade to the
+  // non-exempt path — an exempted student with no stored samples would then
+  // surface a misleading 403 not_enrolled (client `gate`) instead of an
+  // outage. Fail closed as a 503 degradation (lecturer-visible).
+  if (sessionRow.error) {
+    console.error("verify session probe error:", sessionRow.error);
+    return mapFaceError({ error: "insightface_unavailable" }) ?? internalError("Something went wrong.");
+  }
   const faceExempt = sessionRow.data?.face_exempt === true;
 
   // audit-3 E-F2-ORDER: corroborate that a verify ATTEMPT reached a VERDICT

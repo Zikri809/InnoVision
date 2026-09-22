@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Hand, Lightbulb, Moon, ShieldCheck, Sun, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -162,15 +162,24 @@ export function GestureCalibration({
   // Toggling OFF is taught by the copy (hold again after changing your hand —
   // the real latch re-arms on a pose change); a streaming frame cannot
   // distinguish a fresh hold from a sustained one, so frames only ever ADD.
-  if (multiPractice && handDetected && fingerCount >= 1 && fingerCount <= 4) {
-    const index = fingerCount - 1;
-    setPracticeSet((prev) => (prev.includes(index) ? prev : [...prev, index].sort((a, b) => a - b)));
-    setPracticeCommitted(false);
-  } else if (multiPractice && handDetected && fingerCount === 5 && practiceSet.length > 0) {
-    setPracticeCommitted(true);
-  } else if (multiPractice && !handDetected && practiceSet.length > 0) {
-    setPracticeCleared(true);
-  }
+  // Effect (not render scope) + microtask-deferred setState (cascading-render
+  // rule, same idiom as FlaggedWaitTicker): the render-phase version converged
+  // only through idempotent bail-outs — any non-idempotent edit would have
+  // become an infinite render loop.
+  useEffect(() => {
+    if (!multiPractice) return;
+    void Promise.resolve().then(() => {
+      if (handDetected && fingerCount >= 1 && fingerCount <= 4) {
+        const index = fingerCount - 1;
+        setPracticeSet((prev) => (prev.includes(index) ? prev : [...prev, index].sort((a, b) => a - b)));
+        setPracticeCommitted(false);
+      } else if (handDetected && fingerCount === 5 && practiceSet.length > 0) {
+        setPracticeCommitted(true);
+      } else if (!handDetected && practiceSet.length > 0) {
+        setPracticeCleared(true);
+      }
+    });
+  }, [multiPractice, handDetected, fingerCount, practiceSet.length]);
 
   const getLightingText = (l?: "good" | "too_dark" | "too_bright") => {
     try {

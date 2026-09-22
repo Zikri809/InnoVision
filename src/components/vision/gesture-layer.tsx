@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
@@ -45,26 +45,26 @@ const CALIBRATION_READOUT_INTERVAL_MS = 200;
 const HOLD_DROPOUT_FRAME_TOLERANCE = 2;
 
 /**
- * GestureLayer — the Phase 6 wrapper that owns ALL gesture state/UI:
+ * GestureLayer â€” the Phase 6 wrapper that owns ALL gesture state/UI:
  * tracker lifecycle, calibration gate, hold-to-confirm (answer + palm-next),
  * hand-loss (warn/pause), scan countdown, and overlays.
  *
  * Degradation contract (hard requirement):
- *  - Unavailable/skipped → pure passthrough (children as-is + an "off" chip).
- *  - `booting` renders children as-is — the quiz is clickable from first paint.
- *  - The real boot (camera → bundle → WASM → model) is raced against
- *    `BOOT_TIMEOUT_MS`; any failure/timeout → `off`.
+ *  - Unavailable/skipped â†’ pure passthrough (children as-is + an "off" chip).
+ *  - `booting` renders children as-is â€” the quiz is clickable from first paint.
+ *  - The real boot (camera â†’ bundle â†’ WASM â†’ model) is raced against
+ *    `BOOT_TIMEOUT_MS`; any failure/timeout â†’ `off`.
  *
  * Latest-ref dispatch (stale-closure fix): the frame handler reads ONLY
  * `stateRef.current.*` and calls callback refs, all reassigned every render.
  * Finger input is gated at the TOP of the handler on `status === "active"`
- * (single enforcement point — during `calibrating` the tracker runs but no
+ * (single enforcement point â€” during `calibrating` the tracker runs but no
  * answer/next can fire before Continue).
  *
  * Persistent video/canvas: ONE `<video>`/`<canvas>` pair is always mounted
  * (positioned by CSS as the calibration panel or the bottom-right PIP), so
  * React never remounts the video node and kills the stream on the
- * calibration→PIP transition.
+ * calibrationâ†’PIP transition.
  */
 export function GestureLayer({
   enabled = true,
@@ -93,10 +93,10 @@ export function GestureLayer({
    * layer renders its children UNWRAPPED: no boot effect, no tracker, no
    * camera permission prompt, no bundle fetch. The flag is a QUIZ property
    * (draft-frozen, so it cannot change mid-live) and wins over any user
-   * setting — the lecturer chose the modality for this assessment. */
+   * setting â€” the lecturer chose the modality for this assessment. */
   enabled?: boolean;
   /** Whether the CURRENT question can be answered by fingers. False for
-   * short_text (0 options, typed answer) — the AnswerPad never arms for it,
+   * short_text (0 options, typed answer) â€” the AnswerPad never arms for it,
    * so the `< MAX_ANSWER_FINGERS` guard on palm-next is meaningless there
    * and would wrongly deny "next" on a question with few options. */
   hasFingerInput?: boolean;
@@ -105,13 +105,13 @@ export function GestureLayer({
   questionId: string;
   armed: boolean;
   nextArmed: boolean;
-  /** QT-1: "multi" on multi-select questions — holding N fingers (1..4)
+  /** QT-1: "multi" on multi-select questions â€” holding N fingers (1..4)
    * LATCHES a toggle of presented option N (onToggleSelect) and an open palm
    * COMMITS the pending set (onCommit). Multi questions are capped at 4
    * options (0037 questions_multi_option_cap) so five fingers is never an
    * option pose. "single" (default) is the unchanged scalar latch. */
   answerMode?: "single" | "multi";
-  /** QT-1: the quiz contains at least one multi-select question — the
+  /** QT-1: the quiz contains at least one multi-select question â€” the
    * calibration panel renders an interactive toggle/commit practice module
    * so students meet the new vocabulary BEFORE the first multi question. */
   hasMultiQuestions?: boolean;
@@ -124,7 +124,7 @@ export function GestureLayer({
   onPause?: () => void;
   /** Polish round (W2 C4): mirrors the warn state upward so the play screen
    * can render the "keep your hand visible" chip INSIDE the fixed action bar
-   * instead of a fourth sticky floating layer. Fires on warn↔cleared only. */
+   * instead of a fourth sticky floating layer. Fires on warnâ†”cleared only. */
   onWarnChange?: (warning: boolean) => void;
   onSelect: (index: number) => void;
   /** QT-1 multi mode: a latch TOGGLES presented option `index` in the
@@ -138,7 +138,7 @@ export function GestureLayer({
   children: ReactNode;
 }) {
   const t = useTranslations("vision");
-  // R1: the init MUST key on `enabled` — an unconditional "booting" leaves
+  // R1: the init MUST key on `enabled` â€” an unconditional "booting" leaves
   // the layer stuck in a status whose branch renders the camera shell even
   // though the boot effect below deliberately never runs.
   const [status, setStatus] = useState<GestureStatus>(enabled ? "booting" : "off");
@@ -163,7 +163,7 @@ export function GestureLayer({
   const nextDropCountRef = useRef(0);
   // QT-1 re-arm gate: the finger count of the last latch (null = armed).
   // A latch re-arms only after the pose CHANGES (hand lost or different
-  // count) — a sustained hold must never re-fire (a 2.4s hold would toggle
+  // count) â€” a sustained hold must never re-fire (a 2.4s hold would toggle
   // an option straight back off).
   const rearmCountRef = useRef<number | null>(null);
   const lossRef = useRef(
@@ -200,7 +200,7 @@ export function GestureLayer({
   // P7: server-pause mirror (reassigned in the latest-ref effect below).
   const sessionPausedRef = useRef(Boolean(sessionPaused));
   // audit-2 M-23: `blockInput` (submit/timeUp takeover suppression) was also
-  // dead in the frame handler — mirrored now so holds reset behind it too.
+  // dead in the frame handler â€” mirrored now so holds reset behind it too.
   const blockInputRef = useRef(Boolean(blockInput));
   const onPauseRef = useRef(onPause);
   const frameHandlerRef = useRef<(frame: HandFrame) => void>(() => {});
@@ -210,6 +210,13 @@ export function GestureLayer({
   const onNextRef = useRef(onNext);
   const onHoldRef = useRef(onHoldProgress);
   const onStatusChangeRef = useRef(onStatusChange);
+  // Polish round (W2 C4): warnâ†”cleared mirrors to the parent (play screen
+  // renders the warn chip inside its action bar). Fires on transitions only.
+  // Declared BEFORE setHandLostState so the closure can never race a
+  // render-scope call (TDZ safety â€” every current caller is post-render, but
+  // the ordering makes that invariant structural rather than lucky).
+  const onWarnChangeRef = useRef(onWarnChange);
+  const warnMirroredRef = useRef(false);
 
   /** Set `handLost` state AND the ref synchronously (single source of truth). */
   function setHandLostState(v: HandLost) {
@@ -222,12 +229,7 @@ export function GestureLayer({
     }
   }
 
-  // Polish round (W2 C4): warn↔cleared mirrors to the parent (play screen
-  // renders the warn chip inside its action bar). Fires on transitions only.
-  const onWarnChangeRef = useRef(onWarnChange);
-  const warnMirroredRef = useRef(false);
-
-  /** Quantized hold-progress emission (5% steps — no per-frame render storm). */
+  /** Quantized hold-progress emission (5% steps â€” no per-frame render storm). */
   function emitHold(p: HoldProgress | null) {
     if (p === null) {
       if (lastEmittedHoldRef.current !== null) {
@@ -263,11 +265,11 @@ export function GestureLayer({
     // concurrently and the GPU delegate usually falls back to WASM). Phase-
     // gated on what can CONSUME input frames: FULL while a question is
     // answerable or the scan countdown runs, FEEDBACK during feedback dwell
-    // (palm-next hold stays live — 66ms keeps the 1.2s hold smooth), IDLE
+    // (palm-next hold stays live â€” 66ms keeps the 1.2s hold smooth), IDLE
     // when nothing can fire (reading/locked states). Calibration stays FULL:
-    // it is the teaching moment — the finger tray must feel live — and it is
+    // it is the teaching moment â€” the finger tray must feel live â€” and it is
     // brief. Frame-count downstream semantics (stabilizer run lengths,
-    // dropout tolerance) are preserved — only fps changes, and only when no
+    // dropout tolerance) are preserved â€” only fps changes, and only when no
     // hold is possible.
     const tier = armed || scanning || status === "calibrating"
       ? HAND_TRACK_FULL_INTERVAL_MS
@@ -291,6 +293,13 @@ export function GestureLayer({
         return;
       }
 
+      // The doc contract gates finger input at the TOP of the handler on
+      // `status === "active"`. Only `calibrating` is read out above; every other
+      // non-active status (`booting`, `off`) must not run the answer/palm-next
+      // paths — a frame delivered before the status flip would otherwise
+      // exercise the full input machinery behind the calibration card.
+      if (s.status !== "active") return;
+
       if (frame.lighting) {
         setActiveLighting(frame.lighting);
       }
@@ -309,7 +318,11 @@ export function GestureLayer({
         }
       } else {
         lossRef.current.reset();
-        if (handLostRef.current !== null) {
+        // Clear only the WARN state here — a client `paused` must not be
+        // wiped by a phase flip (armed→false) without the PAUSE_CLEAR_MS
+        // stabilization window; only a sustained hand-present frame (or the
+        // explicit onContinue/onSkip reset) may clear it.
+        if (handLostRef.current === "warn") {
           setHandLostState(null);
         }
       }
@@ -327,11 +340,15 @@ export function GestureLayer({
         } else {
           handPresentSinceRef.current = 0;
         }
-        // Block ALL finger input while paused.
+        // Block ALL finger input while paused. ALL hold accumulators reset —
+        // omitting commitHoldRef let a pre-pause open-palm accumulator latch
+        // the instant input unblocked (E9b violation: a hold started before
+        // the pause fires on the first post-resume frame with zero fresh hold).
         answerDropCountRef.current = 0;
         commitDropCountRef.current = 0;
         nextDropCountRef.current = 0;
         answerHoldRef.current.reset();
+        commitHoldRef.current.reset();
         nextHoldRef.current.reset();
         emitHold(null);
         return;
@@ -491,12 +508,18 @@ export function GestureLayer({
         return;
       }
       if (mapFingersToOption(frame.fingerCount, s.optionCount) === null) {
+        // Dropout tolerance for an ACTIVE hold. On a 5-option question the
+        // open palm IS a valid answer pose and palm-next is gate-disabled
+        // (isPalmNextAllowed false), so palm gets the same tolerance as the
+        // 1–4 fingers — the `finger !== MAX` exclusion exists to keep the two
+        // palm semantics (answer vs palm-next) unambiguous on <5-option
+        // questions only.
+        const palmIsAnswer = s.optionCount >= MAX_ANSWER_FINGERS;
         if (
           lastEmittedHoldRef.current !== null &&
-          lastEmittedHoldRef.current.finger !== MAX_ANSWER_FINGERS &&
+          (lastEmittedHoldRef.current.finger !== MAX_ANSWER_FINGERS || palmIsAnswer) &&
           answerDropCountRef.current < HOLD_DROPOUT_FRAME_TOLERANCE
         ) {
-          // Dropout tolerance for active answer hold
           answerDropCountRef.current++;
           return;
         }
@@ -519,7 +542,6 @@ export function GestureLayer({
       }
     };
   });
-
   // Boot effect (mount only): fake-tracker seam first (non-prod), else the real
   // MediaPipe boot raced against BOOT_TIMEOUT_MS. Every post-await continuation
   // checks the boot id + disposed/timed-out so a late success can never
@@ -554,7 +576,7 @@ export function GestureLayer({
       }
       // Defer the state flip out of the synchronous effect body (React Compiler
       // lint: no setState synchronously in an effect). The tracker runs in
-      // `booting` status meanwhile — the frame handler gates on `active`, so
+      // `booting` status meanwhile â€” the frame handler gates on `active`, so
       // no answer/next can fire before the calibration Continue.
       queueMicrotask(() => {
         if (bootId !== bootIdRef.current || disposedRef.current) return;
@@ -572,14 +594,14 @@ export function GestureLayer({
         trackerRef.current = tracker;
         // Runtime detection errors (after boot resolves) are surfaced here so
         // a MediaPipe failure mid-quiz degrades to click-first instead of
-        // silently freezing the camera (hand-tracker no longer rethrows — a
+        // silently freezing the camera (hand-tracker no longer rethrows â€” a
         // throw would become an unhandled window.onerror the boot race can't
         // catch).
         await tracker.start(
           (frame) => frameHandlerRef.current(frame),
           (err) => {
             console.error("Hand tracking loop failed:", err);
-            // Release the shared camera token — a dead loop must not keep the
+            // Release the shared camera token â€” a dead loop must not keep the
             // webcam light on for the rest of the quiz (stop() is idempotent).
             tracker.stop();
             if (bootId === bootIdRef.current && !disposedRef.current) {
@@ -598,7 +620,7 @@ export function GestureLayer({
         bootTimerRef.current = setTimeout(() => {
           timedOutRef.current = true;
           // Stop any in-flight tracker (also stops a late-resolving getUserMedia
-          // stream via the tracker's disposed check — camera light never stays on).
+          // stream via the tracker's disposed check â€” camera light never stays on).
           trackerRef.current?.stop();
           reject(new Error("MediaPipe boot timed out"));
         }, BOOT_TIMEOUT_MS);
@@ -613,7 +635,7 @@ export function GestureLayer({
         })
         .catch(() => {
           // start() rejected (e.g. MediaPipe model failed to load AFTER the
-          // camera token was acquired) — release the token, same as the
+          // camera token was acquired) â€” release the token, same as the
           // timeout path above.
           trackerRef.current?.stop();
           if (bootId === bootIdRef.current && !disposedRef.current) {
@@ -649,6 +671,7 @@ export function GestureLayer({
     if (stateRef.current.status === "active") {
       setScanning(true);
       answerHoldRef.current.reset();
+      commitHoldRef.current.reset();
       nextHoldRef.current.reset();
       emitHold(null);
       if (scanTimerRef.current) clearTimeout(scanTimerRef.current);
@@ -694,15 +717,15 @@ export function GestureLayer({
     prevStatusRef.current = status;
   }, [status]);
 
-  // Wide gate (plan W2 §2): one media query, comma-OR. Below it the camera
+  // Wide gate (plan W2 Â§2): one media query, comma-OR. Below it the camera
   // becomes a picture-in-picture overlay instead of a full-width block that
   // pushes the question below the fold. Lives INSIDE GestureLayer (the state
   // owner) per the component-swap boundary rule.
   const isWide = useMediaQuery("(min-width: 1024px), (orientation: landscape) and (min-width: 640px)");
-  // PIP expansion: manual toggle ONLY when not armed — while a pose is held,
+  // PIP expansion: manual toggle ONLY when not armed â€” while a pose is held,
   // a tap would need a second hand in frame, which finger-count reads as
   // input. While armed the PIP is glance-only (mirror + status ring).
-  // Polish round (C1): the DEFAULT is the collapsed ~24px status dot — the
+  // Polish round (C1): the DEFAULT is the collapsed ~24px status dot â€” the
   // always-open 84px self-view was a floating layer that never earned its
   // pixels; the ring color carries live face status at a glance and a tap
   // expands the full self-check card (44px hit target via the -8px inset).
@@ -743,7 +766,7 @@ export function GestureLayer({
     : "border-[#fed7aa] ring-[3.5px] ring-orange-200/50";
 
   // Collapsed-PIP dot ring (polish C1): live status + lighting semantics, scaled to
-  // a 24px element — solid border color + soft halo instead of the fat ring.
+  // a 24px element â€” solid border color + soft halo instead of the fat ring.
   const pipDotRingClass = isFlagged
     ? "border-rose-400 shadow-[0_0_0_3px_rgba(251,113,133,0.35)]"
     : isVerifying
@@ -754,7 +777,7 @@ export function GestureLayer({
     ? "border-emerald-400 shadow-[0_0_0_3px_rgba(52,211,153,0.3)]"
     : "border-orange-300 shadow-[0_0_0_3px_rgba(253,186,116,0.35)]";
 
-  // ── Persistent video/canvas container (always mounted) ─────────────
+  // â”€â”€ Persistent video/canvas container (always mounted) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   let videoContainerClass = "hidden";
   if (status === "calibrating" || status === "booting") {
     videoContainerClass = isWide
@@ -794,7 +817,7 @@ export function GestureLayer({
 
   return (
     <div className="relative w-full min-h-full">
-      {/* ── Quiz flag OFF (FC-4) ──
+      {/* â”€â”€ Quiz flag OFF (FC-4) â”€â”€
           Rendered BEFORE the status branches and as a bare pass-through: no
           camera shell, no calibration, no status chip, no hidden video node.
           The boot effect above never ran, so there is no tracker to stop and
@@ -805,12 +828,12 @@ export function GestureLayer({
           still renders the hidden video node + the "gestures unavailable"
           chip that e9c-calibration-skip and m2-mobile-play-chrome assert.
           Replacing that branch outright would break both specs and lose the
-          skip affordance — so the flag gets its own branch instead. */}
+          skip affordance â€” so the flag gets its own branch instead. */}
       {!enabled ? (
         <div className="mx-auto flex w-full max-w-3xl flex-col">{children}</div>
       ) : (
         <>
-      {/* ── Calibration & Booting Mode: Centered single-column calibration guide ── */}
+      {/* â”€â”€ Calibration & Booting Mode: Centered single-column calibration guide â”€â”€ */}
       {(status === "calibrating" || status === "booting") && (
         <div className="mx-auto flex w-full max-w-2xl flex-col gap-4">
           <div className={videoContainerClass} data-testid="gesture-video-container">
@@ -828,7 +851,7 @@ export function GestureLayer({
                   Simulated hand tracking (test mode)
                 </div>
               )}
-              {/* Mobile-only game HUD: status + lighting chips and the 1–5
+              {/* Mobile-only game HUD: status + lighting chips and the 1â€“5
                   finger tray live ON the viewfinder (design 2026-09). Wide
                   keeps the card-based readout in GestureCalibration. */}
               {!isWide && (
@@ -849,7 +872,7 @@ export function GestureLayer({
             </div>
           </div>
 
-          {/* Mobile-first redesign (2026-09): no outer sticky wrapper — the
+          {/* Mobile-first redesign (2026-09): no outer sticky wrapper â€” the
               action dock inside GestureCalibration is sticky itself, and the
               status/lighting readout lives ON the camera (CalibrationHud).
               The practice mock card is omitted <sm - the live finger tray
@@ -867,6 +890,13 @@ export function GestureLayer({
               setStatus("active");
             }}
             onSkip={() => {
+              // Invalidate any in-flight real boot BEFORE stopping: the boot's
+              // post-await continuations check `bootId === bootIdRef.current`,
+              // and without this bump a `start()` resolving after Skip passes
+              // that check and re-enters `calibrating` with a disposed tracker
+              // (Continue then yields a gesture-dead "active" with no camera).
+              bootIdRef.current++;
+              timedOutRef.current = true;
               trackerRef.current?.stop();
               trackerRef.current = null;
               setHandLostState(null);
@@ -878,7 +908,7 @@ export function GestureLayer({
         </div>
       )}
 
-      {/* ── Active Quiz Mode ──
+      {/* â”€â”€ Active Quiz Mode â”€â”€
           Wide (>=lg or landscape phones): 40/60 split - sticky camera column,
           quiz right. Phones: camera PIP (fixed, classes on the container
           above), quiz full-width. Two sub-branches = separate JSX; the
@@ -888,7 +918,7 @@ export function GestureLayer({
         <div className="mx-auto flex w-full max-w-2xl min-w-0 flex-col">
           {/* Not-armed PIP is a real button (R3-A S2): keyboard users get
               the same self-check affordance; Escape collapses the expanded
-              card. Collapsed (polish C1) it is a ~24px status dot — the
+              card. Collapsed (polish C1) it is a ~24px status dot â€” the
               video/canvas stay mounted inside and are merely clipped. The
               aria-hidden video/canvas remain decorative children. */}
           <button
@@ -1014,7 +1044,7 @@ export function GestureLayer({
         </div>
       )}
 
-      {/* ── Offline Mode fallback: Centered single-column ── */}
+      {/* â”€â”€ Offline Mode fallback: Centered single-column â”€â”€ */}
       {status === "off" && (
         <div className="mx-auto flex w-full max-w-3xl flex-col">
           {/* Hidden persistent video node */}

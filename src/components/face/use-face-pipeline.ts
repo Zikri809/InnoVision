@@ -190,6 +190,15 @@ export function useFacePipeline(props: FacePipelineProps) {
    * escape hatch for a camera that genuinely can't see a turn).
    */
   const [challengeFailed, setChallengeFailed] = useState(false);
+  /**
+   * What failed on the LAST gate attempt — drives the gate's liveness-card
+   * copy. Without it a blink timeout (or a transport-failed `'start'` verify)
+   * lands back on the idle card with no error text: an 8s scan that appears
+   * to do nothing, retried blind. Reset at the top of every beginGate.
+   */
+  const [gateAttempt, setGateAttempt] = useState<"idle" | "blink_failed" | "verify_failed">(
+    "idle",
+  );
 
   // Latest-ref mirrors (synced in an effect — React Compiler-safe).
   const statusRef = useRef(status);
@@ -225,6 +234,12 @@ export function useFacePipeline(props: FacePipelineProps) {
   // successful POST; at VERIFY_TRANSPORT_FAIL_LIMIT the pipeline degrades to
   // `unavailable` (verify-silence backstop, see the catch in postVerifyInternal).
   const transportFailStreakRef = useRef(0);
+  // Consecutive 429s (limiter rejections) — the same silence-backstop shape:
+  // N in a row means the client is producing no face_checks rows while the
+  // limiter stays saturated, so the honest degradation (outage claim) must
+  // fire before the verify-silence cron flags on silence. Reset on any
+  // non-429 response (see postVerifyInternal's transport-recovered line).
+  const transport429StreakRef = useRef(0);
   const cadenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hadStartVerifyRef = useRef(false);
@@ -281,7 +296,7 @@ export function useFacePipeline(props: FacePipelineProps) {
     const tick = async () => {
       if (disposedRef.current || isTerminalRef.current) return;
       try {
-        const res = await fetch(`/api/sessions/${sessionId}`, { method: "GET" });
+        const res = await fetch(`/api/sessions/${sessionId}`, { method: "GET", cache: "no-store" });
         if (res.status === 404) {
           // D13 — the flagged session was RESET by a lecturer (the row is
           // gone). Terminal dead screen, never an infinite poll against a
@@ -308,7 +323,27 @@ export function useFacePipeline(props: FacePipelineProps) {
             return;
           }
           // Fire the re-verify BEFORE clearing the overlay (a failing
-          // re-verify re-pauses/re-flags — E7 pins this).
+          // re-verify re-pauses/re-flags — E7 pins this). A hidden tab must
+          // not capture: the frame would be null and the sentinel would land
+          // a FAIL row for a lecturer unlock that happened while the student
+          // was backgrounded — stay `flagged` and let the poll re-check
+          // when the tab is visible again.
+          if (hiddenRef.current) {
+            setStatusBoth("flagged");
+            pollTimerRef.current = setTimeout(() => void tick(), FLAGGED_POLL_MS);
+            return;
+          }
+          // A runVerify capture may be in flight (a Q-transition or catch-up
+          // verify that started before the unlock). Two concurrent POSTs with
+          // the same nonce guarantee a nonce_mismatch for one and can re-pause
+          // the student with a stale pre-unlock frame set — skip this tick
+          // and let the poll re-check; the in-flight run's own outcome
+          // machinery handles the session's new state (409 mirror).
+          if (verifyLock.current) {
+            setStatusBoth("flagged");
+            pollTimerRef.current = setTimeout(() => void tick(), FLAGGED_POLL_MS);
+            return;
+          }
           setStatusBoth("recovering");
           const pollFrame = await captureOrNull();
           const outcome = await postVerifyInternal(
@@ -342,6 +377,18 @@ export function useFacePipeline(props: FacePipelineProps) {
         }
         if (body.status === "completed") {
           onPhaseChangeRef.current("submitted");
+          return;
+        }
+        if (body.status === "paused") {
+          // The lecturer (or the flagged-poll 409 path) PAUSED the flagged
+          // session — this state has its own interactive flow (blink
+          // recovery), so keep the student on the paused overlay instead of
+          // the "waiting for lecturer decision" copy that has no action.
+          nonceRef.current = body.verify_nonce ?? nonceRef.current;
+          if (typeof body.remainingMs === "number" && body.remainingMs >= 0) {
+            onRecoveredRemainingRef.current?.(body.remainingMs);
+          }
+          setStatusBoth("paused");
           return;
         }
         // Non-404, no status: this is NOT proof the session is gone. The GET
@@ -403,14 +450,23 @@ export function useFacePipeline(props: FacePipelineProps) {
       unavailableRetryTimerRef.current = null;
     }
   }
-  /**
-   * Probe the verify path once while `unavailable`, with linear backoff.
-   * `force` bypasses runVerify's shouldScheduleFaceCheck gate (which requires
-   * `ready`) but keeps every other guard, and the outcome machinery moves the
-   * status off `unavailable` on success — which clears this timer via the
-   * effect above. A genuine outage exhausts the budget and leaves the
-   * degraded banner + the 6-min claim re-arm doing their job.
-   */
+   /**
+    * Probe the verify path once while `unavailable`, with linear backoff.
+    * `force` bypasses runVerify's shouldScheduleFaceCheck gate (which requires
+    * `ready`) but keeps every other guard, and the outcome machinery moves the
+    * status off `unavailable` on success — which clears this timer via the
+    * effect above. A genuine outage exhausts the budget and leaves the
+    * degraded banner + the 6-min claim re-arm doing their job.
+    *
+    * A probe that was DEFERRED by the bounded precheck (bad lighting /
+    * occlusion) must not consume an attempt: the deferral re-enters
+    * runVerify from lightingRetryTimerRef with the probe's `force` intent
+    * dropped, sees `statusRef !== 'ready'`, and silently drops — five of
+    * those would exhaust the budget for an honest student who is merely
+    * off-center. The precheck deferral arms `lightingRetryTimerRef`, so a
+    * pending deferral marks the attempt as NOT spent (the retry budget is
+    * for real failures, not for desk framing).
+    */
   function scheduleUnavailableRetry() {
     if (unavailableRetryAttemptsRef.current >= UNAVAILABLE_RETRY_MAX_ATTEMPTS) return;
     if (unavailableRetryTimerRef.current) return;
@@ -436,7 +492,15 @@ export function useFacePipeline(props: FacePipelineProps) {
       }
       unavailableRetryAttemptsRef.current = attempt + 1;
       void runVerify("periodic", 0, true).finally(() => {
-        if (statusRef.current === "unavailable") scheduleUnavailableRetry();
+        if (statusRef.current === "unavailable") {
+          // A precheck DEFERRAL re-armed lightingRetryTimerRef and will drop
+          // the retry (it re-checks `ready`) — refund the attempt so ~20s of
+          // bad desk framing cannot exhaust the self-heal budget.
+          if (lightingRetryTimerRef.current !== null) {
+            unavailableRetryAttemptsRef.current = attempt;
+          }
+          scheduleUnavailableRetry();
+        }
       });
     }, UNAVAILABLE_RETRY_BASE_MS * (attempt + 1));
   }
@@ -580,20 +644,24 @@ export function useFacePipeline(props: FacePipelineProps) {
     // The request REACHED the server (any HTTP status) — transport recovered;
     // a 429, for instance, still means connectivity is intact.
     transportFailStreakRef.current = 0;
+    if (res.status !== 429) transport429StreakRef.current = 0;
     let body: Record<string, unknown> = {};
-    if (res.ok || res.status === 409 || res.status === 403 || res.status === 400 || res.status === 503) {
+    if (res.ok || res.status === 409 || res.status === 403 || res.status === 400 || res.status === 503 || res.status === 413) {
       body = await res.json().catch(() => ({}));
     }
 
     // A 4xx/5xx verify is NEVER a clean pass — without this, an unparsed body
     // would fall through `resolveVerifyOutcome({})` to the `default` branch
     // and silently map to `ready` (a pass with no recorded row):
-    //  400  → a rejected/invalid frame (camera could not produce a usable
-    //         frame) → fail signal (`paused`), integrity-conservative.
-    //  5xx  (503 CompreFace down / 504 platform timeout / 500) → fail-open
+    //  400/413 → a rejected/invalid/oversized frame (the camera produced a
+    //         frame the route refuses) → fail signal (`paused`),
+    //         integrity-conservative. 413 joining 400: an honest tracker
+    //         hovering at the cap must not masquerade as a sidecar outage
+    //         (unavailable) — a frame problem is a capture problem.
+    //  5xx  (503 sidecar down / 504 platform timeout / 500) → fail-open
     //        `unavailable` (lecturer-visible via face_unavailable_at) — the
     //        documented L14 contract, NOT a pass.
-    if (res.status === 400) {
+    if (res.status === 400 || res.status === 413) {
       setStatusBoth("paused");
       return "paused";
     }
@@ -602,7 +670,27 @@ export function useFacePipeline(props: FacePipelineProps) {
     // the cadence is correct: a busy server is not an outage, and mapping to
     // `unavailable` would brick proctoring for the rest of the attempt with
     // NO recovery path (nothing leaves 'unavailable' automatically).
+    //
+    // Sustained-429 honesty backstop: a 429 records NO face_checks row, so a
+    // fast quiz-taker can sit in committed-check silence long enough for the
+    // verify-silence cron to flag them with no outage claim to exempt it. The
+    // verify route stamps `face_verify_attempted_at` BEFORE its limiter's
+    // window matters (the attempt is consumed), so after a bounded streak of
+    // 429s we surface the honest "proctoring degraded" path (reportUnavailable
+    // writes face_unavailable_at) instead of silent silence — the corroboration
+    // predicate then holds and the cron honors the outage claim.
     if (res.status === 429) {
+      transport429StreakRef.current += 1;
+      if (
+        trigger !== "start" &&
+        transport429StreakRef.current >= VERIFY_TRANSPORT_FAIL_LIMIT &&
+        statusRef.current === "ready"
+      ) {
+        transport429StreakRef.current = 0;
+        setStatusBoth("unavailable");
+        reportUnavailable();
+        return "unavailable";
+      }
       scheduleCadence();
       return null;
     }
@@ -630,7 +718,7 @@ export function useFacePipeline(props: FacePipelineProps) {
     if (body.error === "nonce_mismatch" && allowNonceRetry && !nonceRetriedRef.current) {
       nonceRetriedRef.current = true;
       try {
-        const getRes = await fetch(`/api/sessions/${sessionId}`, { method: "GET" });
+        const getRes = await fetch(`/api/sessions/${sessionId}`, { method: "GET", cache: "no-store" });
         const getBody = await getRes.json().catch(() => ({}));
         if (typeof getBody.verify_nonce === "string") {
           nonceRef.current = getBody.verify_nonce;
@@ -666,10 +754,10 @@ export function useFacePipeline(props: FacePipelineProps) {
     //  - paused    → 'paused' (blink-recoverable)
     //  - flagged   → 'flagged' + poll (lecturer decision)
     //  - completed → dead (terminal)
-    if (res.status === 409 && body.error === "session_not_active") {
-      let realStatus: string | undefined;
-      try {
-        const statusRes = await fetch(`/api/sessions/${sessionId}`, { method: "GET" });
+      if (res.status === 409 && body.error === "session_not_active") {
+        let realStatus: string | undefined;
+        try {
+          const statusRes = await fetch(`/api/sessions/${sessionId}`, { method: "GET", cache: "no-store" });
         realStatus = (await statusRes.json().catch(() => ({}))).status;
       } catch {
         // network — fall through to the conservative branch below
@@ -749,6 +837,15 @@ export function useFacePipeline(props: FacePipelineProps) {
     }
     const tracker = trackerRef.current;
     if (!tracker) return;
+    // Hidden-tab guard: a hidden tab cannot produce a real frame (the detect
+    // loop pauses and captureFrame returns null), so a verify that proceeds
+    // would POST the `[""]` no-face sentinel and land an honest tab-switcher
+    // with a fabricated FAIL row (→ pause; three inside the streak window →
+    // flagged). The visibility handler owns the tab-switch contract: it
+    // cancels the cadence on hide and fires the catch-up verify on return.
+    // The forced `unavailable` self-heal probe skips this too — scheduleUnavailableRetry
+    // already defers its own probes while hidden without consuming an attempt.
+    if (!force && hiddenRef.current) return;
 
     const s = statusRef.current;
     const phaseNow = questionVisibleRef.current ? "question" : "feedback";
@@ -872,6 +969,11 @@ export function useFacePipeline(props: FacePipelineProps) {
       }
       if (disposedRef.current || trackerRef.current !== tracker) return;
       if (!primary) {
+        // The tab may have been hidden mid-capture (captureBestFrame's poll
+        // window can straddle the hide). A sentinel FAIL row for a hidden
+        // tab is a fabrication — bail and let the visibility handler's
+        // catch-up verify run when the student returns.
+        if (hiddenRef.current) return;
         await new Promise((r) => setTimeout(r, 400));
         if (disposedRef.current || trackerRef.current !== tracker) return;
         primary = await tracker.captureFrame();
@@ -944,8 +1046,15 @@ export function useFacePipeline(props: FacePipelineProps) {
     // neutral). Without this, one challenge direction can auto-pass with no
     // turn (halving the anti-replay guarantee) and the pitch advisory
     // straddles its threshold for honest students. The student is necessarily
-    // facing the screen here — blink just passed.
-    await tracker.calibrateNeutral?.(900);
+    // facing the screen here — blink just passed. A failed calibration
+    // (too few samples — tracking loss, camera settling) retries once with a
+    // longer window; still failing, the challenge runs anyway — the verify
+    // remains the authority and skipping the whole recovery would strand the
+    // student on a retry loop for a soft cosmetic gate.
+    let calibrated = await tracker.calibrateNeutral?.(900);
+    if (calibrated === false) {
+      calibrated = await tracker.calibrateNeutral?.(1800);
+    }
     setChallengeSide(side);
     const passed = (await tracker.waitForHeadTurn(HEAD_TURN_TIMEOUT_MS, side)) === "passed";
     setChallengeSide(null);
@@ -955,7 +1064,18 @@ export function useFacePipeline(props: FacePipelineProps) {
 
   async function runRecovery() {
     const tracker = trackerRef.current;
-    if (!tracker || disposedRef.current || isTerminalRef.current) return;
+    // A dead/null tracker can no longer run blink or turn challenges — a
+    // silent return here strands the student behind the paused overlay with a
+    // dead Recover button (their only escape is a reload the overlay never
+    // suggests). Degrade honestly to `unavailable` (the degraded-proctoring
+    // banner + the face-unavailable claim) instead of swallowing the click.
+    if (!tracker || disposedRef.current || isTerminalRef.current) {
+      if (!disposedRef.current && !isTerminalRef.current) {
+        setStatusBoth("unavailable");
+        reportUnavailable();
+      }
+      return;
+    }
     // Re-entrancy guard: a fast double-click on Recover must not run two
     // blink/turn challenges concurrently — the second wait would overwrite
     // the first's tracker challenge and the interleaved landings can bounce
@@ -998,18 +1118,44 @@ export function useFacePipeline(props: FacePipelineProps) {
           // flagged-poll path): without it the next face verify is a full
           // 30–45s cadence away, and whoever is at the desk can answer
           // unverified. Safe to call here — cadence is clear-then-set (no
-          // stacking) and runVerify's min-gap deferral absorbs a POST <2s
-          // old. During feedback dwell shouldScheduleFaceCheck no-ops it
-          // (I22: feedback answers are locked, so no verification is owed
-          // until the next Q-transition fires one). On success the ready
-          // branch re-arms cadence itself; on any early return this arm
-          // stands as the safety net.
+          // stacking) and runVerify's min-gap deferral absorbs a POST <8s
+          // old (the production gap — the E2E seam's 2s mirror does not
+          // apply here; the deferral is bounded and the cadence stands as
+          // the safety net if the deferred run never fires).
           void runVerify("periodic");
           scheduleCadence();
         }
       } else if (body.error === "flagged") {
         setStatusBoth("flagged");
         startFlaggedPoll();
+      } else if (res.ok || res.status === 409) {
+        // The recover REFUSED (session flagged above, or it moved state
+        // server-side while the student sat on the paused overlay — quiz
+        // auto-close sealed it, a lecturer completed it, another tab's
+        // timer hit zero). A blanket re-pause here strands the student on
+        // the paused overlay forever (paused has no poll): mirror the REAL
+        // state — completed → terminal dead; paused → stay paused; flagged
+        // (409 shape) → flagged poll.
+        try {
+          const statusRes = await fetch(`/api/sessions/${sessionId}`, {
+            method: "GET",
+            cache: "no-store",
+          });
+          const realBody = await statusRes.json().catch(() => ({}));
+          if (realBody.status === "completed") {
+            setStatusBoth("unavailable");
+            onPhaseChangeRef.current("dead");
+            return;
+          }
+          if (realBody.status === "flagged") {
+            setStatusBoth("flagged");
+            startFlaggedPoll();
+            return;
+          }
+        } catch {
+          // network — fall through to the conservative re-pause
+        }
+        setStatusBoth("paused");
       } else {
         setStatusBoth("paused");
       }
@@ -1145,6 +1291,13 @@ export function useFacePipeline(props: FacePipelineProps) {
       if (minGapTimerRef.current) clearTimeout(minGapTimerRef.current);
       if (lightingRetryTimerRef.current) clearTimeout(lightingRetryTimerRef.current);
       clearUnavailableRetry();
+      // The `[status]` effect below only re-runs on a status CHANGE — a
+      // session that ends while `unavailable` would otherwise keep the 6-min
+      // re-arm interval alive until unmount. Clear it here too.
+      if (unavailableRearmTimerRef.current) {
+        clearInterval(unavailableRearmTimerRef.current);
+        unavailableRearmTimerRef.current = null;
+      }
       pendingVerifyRef.current = null;
     }
   }, [isTerminal]);
@@ -1230,12 +1383,22 @@ export function useFacePipeline(props: FacePipelineProps) {
   // Gate Begin: run blink liveness, then the anti-replay head-turn
   // challenge, then the `'start'` verify (the authority).
   async function beginGate() {
+    // Re-entrancy guard (mirrors runRecovery): a fast double-click on Begin
+    // must not run two concurrent liveness pipelines — the second wait would
+    // overwrite the first's tracker challenge (a NEW random side mid-turn)
+    // and the student fails a challenge whose direction changed under them.
+    // setStatusBoth updates statusRef synchronously, so this closes the
+    // same-frame race.
+    if (statusRef.current === "recovering") return;
+    setChallengeFailed(false);
+    setGateAttempt("idle");
     const tracker = trackerRef.current;
     if (!tracker || disposedRef.current || isTerminalRef.current) return;
     setStatusBoth("recovering");
     const blink = await tracker.waitForBlink(LIVENESS_TIMEOUT_MS);
     if (disposedRef.current || isTerminalRef.current) return;
     if (blink !== "passed") {
+      setGateAttempt("blink_failed");
       setStatusBoth("gate");
       return;
     }
@@ -1249,7 +1412,15 @@ export function useFacePipeline(props: FacePipelineProps) {
     // `postVerifyInternal` (trigger === 'start'). Setting it here would let a
     // FAILED gate verify recover to `ready` via `recoveryLanding(true)` —
     // bypassing the gate's authority (the blink alone is not a verify).
-    await runVerify("start");
+    const startOutcome = await runVerify("start");
+    if (disposedRef.current || isTerminalRef.current) return;
+    // The gate's authority is the 'start' verify: a transport failure (or any
+    // non-ready landing) must be VISIBLE, or the student retries blind against
+    // an unexplained failure. The success path lands `ready`/`paused`/`flagged`
+    // — none of which render the gate — so only a back-to-gate landing needs
+    // the copy.
+    if (statusRef.current === "gate") setGateAttempt("verify_failed");
+    void startOutcome;
   }
 
   function checkAgain() {
@@ -1282,6 +1453,7 @@ export function useFacePipeline(props: FacePipelineProps) {
     pausedReason,
     challengeSide,
     challengeFailed,
+    gateAttempt,
     beginGate,
     checkAgain,
     runRecovery,

@@ -158,7 +158,7 @@ export function uidMockEmbedding(uid: string): number[] {
  * The canned `/extract` response for a MATCH marker: exactly one centered
  * face, det_score above the selection floor, yaw 0 (the route skips pose
  * validation in mock mode — the E2E side angles carry the same marker and
- * would otherwise fail the 10–75° side gate).
+ * would otherwise fail the side yaw band in `lib/face/pose-gate.ts`).
  */
 function mockExtractMatch(uid: string): InsightFaceExtractResult {
   const w = 640;

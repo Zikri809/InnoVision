@@ -16,9 +16,34 @@ export const frameSchema = z
 // 413 (payloadTooLarge), not a 400 Zod error. A Zod max would fire first and
 // the explicit 413 check (L21 DoS guard) would be unreachable.
 
+/**
+ * Per-frame yaw the CLIENT's capture gate accepted, in tracker units
+ * (neutral-relative — see `lib/face/pose-gate.ts`). `null` for a frame whose
+ * tracker exposed no reading.
+ *
+ * WHY THIS IS ON THE WIRE (prod incident 2026-09-21): the client guides the
+ * student in NEUTRAL-RELATIVE yaw while the sidecar measures ABSOLUTE yaw, so
+ * the server previously rejected captures the student's own UI had approved
+ * (4 rejections in one sitting, raw `pose_invalid`, no actionable copy). The
+ * route now judges the SAME reading the student was guided by and uses the
+ * sidecar's absolute value only as an anti-tamper sanity bound.
+ *
+ * Bound: |yaw| ≤ 150 tracker units — the proxy saturates well below this, so a
+ * larger value is garbage rather than a pose. Optional and nullable so legacy
+ * clients keep working (the route falls back to the strict absolute bands).
+ */
+export const yawReadingSchema = z
+  .number()
+  .finite("yawReading must be a finite number.")
+  .min(-150, "yawReading is out of range.")
+  .max(150, "yawReading is out of range.")
+  .nullable();
+
 /** Enrollment: exactly one frame per guided angle (front/left/right). */
 export const EnrollSchema = z.object({
   frames: z.array(frameSchema).length(3, "Enrollment requires exactly 3 frames (front, left, right)."),
+  // Parallel to `frames`; absent = legacy client, per-entry null = no reading.
+  yawReadings: z.array(yawReadingSchema).length(3).optional(),
 });
 
 export type EnrollInput = z.infer<typeof EnrollSchema>;

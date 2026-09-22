@@ -626,19 +626,31 @@ was never scheduled — now daily pg_cron (`innovision-incident-prune`).
 consent checkbox → POST /api/face/consent {consent:true} → grant_face_consent()
 camera starts ONLY after consent (privacy invariant)
 3 angles (front/left/right), each frame:
-  waitForBlink(liveness) → captureBestFrame(centered, open eyes, lit)
-POST /api/face/enroll {frames:[front,left,right]}  (route: api/face/enroll/route.ts)
+  waitForBlink(liveness) → captureBestFrame(centered, open eyes, lit, angle)
+    — `angle` gates on the SHARED per-angle yaw band (lib/face/pose-gate.ts):
+      front |yaw|≤15, sides 10–45 (neutral-relative). The blended quality
+      score alone cannot fail on yaw (0 points past 45°, 95/120 clears ≥90),
+      so without this the capture gate is decorative (prod 2026-09-21).
+POST /api/face/enroll {frames:[...], yawReadings:[...]}  (route: api/face/enroll/route.ts)
   1. consent pre-check (frames must NEVER leave server w/o consent)
-  2. if face_deletion_pending → deleteSubject() first (orphan hygiene)
-  3. per-frame CompreFace /detect → pose validation (front |yaw|≤30°,
-     sides 10–75°) → 400 pose_invalid otherwise
-  4. per-frame /recognize → duplicate-identity scan (best NON-self match
+  2. per-frame sidecar /extract → pose validation via
+     `checkEnrollPoseServer`: the client's accepted yawReading is judged
+     against the SAME band (the student was guided by it), while the
+     sidecar's ABSOLUTE yaw is an anti-tamper sanity bound (≤75°). Missing
+     reading → strict absolute bands (front ≤30, sides 10–120).
+     Reject → 400 pose_invalid + `pose_<reason>` message (both dev and prod)
+  3. per-frame duplicate-identity scan (best NON-self match
      ≥0.45 passed to RPC)
-  5. addSubjectExample(uid, frame) ×3
-  6. RPC enroll_face(dup_subject, dup_similarity) → status 'enrolled'
+  4. RPC enroll_face(dup_subject, dup_similarity) → status 'enrolled'
      or 'pending_review' (lecturer clears via audit view)
-  any failure → best-effort deleteSubject rollback (no orphan samples)
+  any failure → no samples written (the RPC is one transaction)
 ```
+
+**Yaw-space contract (do not relitigate).** The tracker reports yaw RELATIVE to
+a per-user calibrated neutral (nose-offset proxy, positive = user's left); the
+sidecar reports ABSOLUTE 3D-68 degrees. The client ships its accepted reading
+so both sides judge one space — the server never re-derives yaw in a different
+space than the student was guided by. See `src/lib/face/pose-gate.ts`.
 
 **Verification (during an assessment)** — driven by `use-face-pipeline.ts`:
 

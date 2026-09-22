@@ -325,6 +325,8 @@ suites are order-independent and rerunnable against a persistent local DB.
 | I4b | verify | **empty-framed no-face sentinel** | fail row (paused), CompreFace NOT called, never a pass |
 | I-sidecar-down | verify/enroll | sidecar `insightface_unavailable` / HTTP `insightface_error` | 503 with distinct error keys |
 | I-pose | enroll | out-of-range yaw | 400 `pose_invalid` |
+| I-pose-recon | enroll | client-guided pose with an off-axis absolute yaw (prod 2026-09-21), tampered/absent `yawReadings`, the 46° "Right" frame, near-profile sanity veto | 200 when both spaces agree; 400 `pose_invalid` + `pose_<reason>` otherwise — `face-routes.test.ts` "enroll pose gate" block |
+| U-pose-gate | `lib/face/pose-gate.ts` | shared per-angle bands, failure-reason classification, client/server reconciliation, anti-tamper bounds | 28 cases in `pose-gate.test.ts` |
 | I-health | GET `/api/face/health` | CompreFace up / down | `{ available: true/false }` |
 | I-exempt | verify | `face_exempt=true` | `{matched:true, distance:null}`, no nonce rotation |
 | I7 | `POST /api/sessions/[id]/answer` | assessment, correct answer | `{isCorrect:true}`, **no `correctIndex` in body** |

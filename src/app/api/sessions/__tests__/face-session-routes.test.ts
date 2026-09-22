@@ -26,6 +26,13 @@ const adminMock = {
 };
 function incidentInsertBuilder() {
   return {
+    // The per-session clip-cap count probe (head:true count) runs before
+    // insert; default to zero clips so the cap never blocks these specs.
+    select: vi.fn(() => ({
+      count: "exact",
+      head: true,
+      eq: vi.fn().mockResolvedValue({ count: 0, error: null }),
+    })),
     insert: vi.fn().mockResolvedValue({ error: null }),
   };
 }
@@ -463,6 +470,11 @@ describe("incident upload � ring-buffer clip route", () => {
     // Metadata row write fails AFTER the object landed in the bucket —
     // the route must not leave an unlisted object behind (dead weight).
     adminMock.from = vi.fn(() => ({
+      select: vi.fn(() => ({
+        count: "exact",
+        head: true,
+        eq: vi.fn().mockResolvedValue({ count: 0, error: null }),
+      })),
       insert: vi.fn().mockResolvedValue({ error: { message: "row write failed" } }),
     }));
     const res = await incident.POST(incidentReq(), { params: Promise.resolve({ id: SESSION_ID }) });
@@ -480,6 +492,11 @@ describe("incident upload � ring-buffer clip route", () => {
       remove: vi.fn().mockRejectedValue(new Error("storage api gone")),
     }));
     adminMock.from = vi.fn(() => ({
+      select: vi.fn(() => ({
+        count: "exact",
+        head: true,
+        eq: vi.fn().mockResolvedValue({ count: 0, error: null }),
+      })),
       insert: vi.fn().mockResolvedValue({ error: { message: "row write failed" } }),
     }));
     const res = await incident.POST(incidentReq(), { params: Promise.resolve({ id: SESSION_ID }) });

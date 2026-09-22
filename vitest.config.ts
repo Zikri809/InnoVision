@@ -143,6 +143,11 @@ export default defineConfig({
         "src/lib/face/cadence.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/lib/face/outcome.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/lib/face/rpc-mapping.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
+        // Prod incident 2026-09-21 (enrollment pose gate): the shared yaw
+        // bands + the client/server reconciliation are pure and pinned by
+        // pose-gate.test.ts (28 cases, both incident bugs). The floor sits at
+        // the sibling lib bar so deleting those assertions fails the run.
+        "src/lib/face/pose-gate.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/lib/face/fake-seam.ts": { lines: 80, statements: 80, functions: 80, branches: 70 },
         "src/lib/face/face-tracker.ts": { lines: 0, statements: 0, functions: 0, branches: 0 },
                 // audit-1 §5.4: its unmocked boundary contract (URL wiring, token

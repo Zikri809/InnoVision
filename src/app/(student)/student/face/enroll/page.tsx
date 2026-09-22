@@ -37,6 +37,7 @@ export default async function FaceEnrollPage() {
     <FaceEnrollClient
       consentGiven={Boolean(profile.consent_given_at)}
       enrolled={profile.face_enrollment_status === "enrolled"}
+      pendingReview={profile.face_enrollment_status === "pending_review"}
     />
   );
 }

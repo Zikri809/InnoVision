@@ -151,6 +151,7 @@ export function FaceVerifier({
   pausedReason = "face",
   challengeSide = null,
   challengeFailed = false,
+  gateAttempt = "idle",
   stream = null,
   quizTitle,
   resume,
@@ -174,6 +175,8 @@ export function FaceVerifier({
   challengeSide?: "left" | "right" | null;
   /** True after a turn-challenge failure — the gate shows the retry copy. */
   challengeFailed?: boolean;
+  /** What failed on the last gate attempt — drives the gate's liveness copy. */
+  gateAttempt?: "idle" | "blink_failed" | "verify_failed";
   /** Shared camera stream (FaceTracker.stream) — powers the recovery self-view. */
   stream?: MediaStream | null;
   /** Quiz title (mobile plan W3): shown once, in the gate — never on the question flow. */
@@ -233,6 +236,7 @@ export function FaceVerifier({
         status={status}
         challengeSide={challengeSide}
         challengeFailed={challengeFailed}
+        gateAttempt={gateAttempt}
         quizTitle={quizTitle}
         resume={resume}
         onBegin={onBegin}

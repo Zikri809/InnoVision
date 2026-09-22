@@ -177,6 +177,15 @@ export function useFaceTracker(opts?: {
         for (let attempt = 0; attempt < 5; attempt++) {
           try {
             const res = await fetch("/api/face/health", { method: "GET", cache: "no-store" });
+            // 429 (limiter) is UNKNOWN, not down: the boot probe's 5 fetches
+            // per load can trip the 10/min health limit (reload storms, two
+            // devices) — treating that as `available:false` degrades an
+            // honest boot while the sidecar is perfectly healthy. Skip the
+            // attempt (it doesn't count as a probe result) and retry.
+            if (res.status === 429) {
+              if (attempt < 4) await new Promise((r) => setTimeout(r, 500));
+              continue;
+            }
             const data = (res.ok ? await res.json() : { available: false }) as { available?: boolean };
             if (data.available === true) return true;
           } catch {

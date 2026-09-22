@@ -802,6 +802,8 @@
       "pendingTitle": "Sent for review",
       "pendingBody": "We spotted a possible duplicate. Your lecturer will review your enrollment shortly.",
       "statusFailed": "Capture failed — please try again.",
+      "captureTimeout": "We ran out of time getting all three angles. Find your best lighting, get your whole face in the oval, and try again.",
+      "captureAttempts": "Too many capture attempts. Hold each pose steady in the oval before blinking, then try again.",
       "statusUnavailable": "Face verification is unavailable right now. Please try again later.",
       "cameraFailure": {
         "permission": {
@@ -848,7 +850,13 @@
       "lightingGood": "Lighting: Good ✓",
       "lightingTooDark": "Too dark — increase lighting",
       "lightingTooBright": "Too bright — avoid backlight glare",
-      "lightingTip": "Ensure your face is evenly lit with no heavy shadows for highest accuracy."
+      "lightingTip": "Ensure your face is evenly lit with no heavy shadows for highest accuracy.",
+      "poseNoFace": "We couldn't see your face — retake with better light and less movement.",
+      "poseNotStraight": "Look straight at the camera, then retake.",
+      "poseWrongWay": "Turn your head the way the prompt shows, then retake.",
+      "poseTurnMore": "Turn a little further, then retake.",
+      "poseTurnLess": "That's too far — ease back toward the camera, then retake.",
+      "poseSpoof": "The capture looked like a photo or a screen. Use a live camera and retake."
     }
   },
   "builder": {
@@ -1016,6 +1024,8 @@
     "challengeTurnLeft": "Almost there — now turn your head to the LEFT and hold it briefly.",
     "challengeTurnRight": "Almost there — now turn your head to the RIGHT and hold it briefly.",
     "challengeFailedRetry": "We didn't detect the head turn — click Begin and turn your head when prompted.",
+    "blinkRetry": "We didn't detect a blink in time — make sure your whole face is in frame and click Begin.",
+    "verifyRetry": "The face check didn't go through — check your connection and click Begin to try again.",
     "pausedBody": "A face mismatch paused the check. Blink to continue.",
     "handLostTitle": "Hands left the camera",
     "handLostBody": "Your exam was paused because your hand left the camera view. Show your hand, then blink to continue.",

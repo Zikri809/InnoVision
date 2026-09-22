@@ -457,7 +457,15 @@ export function PlayClient({
   // Availability is evaluated BEFORE enrollment/consent (boot failure →
   // 'unavailable' → passthrough regardless of enrolled/consentGiven).
   const faceTracker = useFaceTracker({
-    enabled: quiz.mode === "assessment" && Boolean(face),
+    // Terminal phases must tear the tracker down (mirrors useIntegrityAdvisories
+    // and useIncidentRecorder below): on submit success / death the RSC swap
+    // replaces PlayClient, and if router.refresh() stalls the webcam light +
+    // MediaPipe landmarker would stay hot indefinitely with no pipeline.
+    enabled:
+      quiz.mode === "assessment" &&
+      Boolean(face) &&
+      phase !== "submitted" &&
+      phase !== "dead",
     onUnavailable: () => setFaceUnavailable(true),
   });
 
@@ -492,14 +500,23 @@ export function PlayClient({
       // event — exits during the gate or while already paused are ignored
       // (deterrence-only; no redundant server round-trip).
       if (faceStatusRef.current !== "ready") return;
-      sharedPauseStampRef.current = Date.now();
+      // Stamp BEFORE the POST: the debounced blur may fire while this fetch
+      // is still in flight (slow network), and the blur path must dedupe
+      // against the SAME app switch. If the POST provably fails below, the
+      // stamp is cleared again so a genuine focus-loss pause can still
+      // reach the server.
+      const stampedAt = Date.now();
+      sharedPauseStampRef.current = stampedAt;
       void fetch(`/api/sessions/${sessionId}/pause`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ reason: "fullscreen_exit" }),
       })
-        .then((r) => r.json().catch(() => ({})))
-        .then((body: Record<string, unknown>) => {
+        .then((r) => {
+          if (!r.ok) throw new Error("pause failed");
+          return r.json().catch(() => ({}));
+        })
+        .then((body: Record<string, unknown> | undefined) => {
           // The RPC is authoritative (plain pause today; flagged only if the
           // reason is ever promoted to the focus-loss counter).
           if (body?.sessionStatus === "flagged") {
@@ -510,7 +527,10 @@ export function PlayClient({
           pipeline.pauseLocally("fullscreen_exit");
         })
         .catch(() => {
-          // network — block input locally until the cadence re-checks
+          // network/HTTP failure — the session is NOT paused server-side, so
+          // retract our stamp (only if unchanged) and let the blur path own
+          // the real pause record; block input locally meanwhile.
+          if (sharedPauseStampRef.current === stampedAt) sharedPauseStampRef.current = 0;
           pipeline.pauseLocally("fullscreen_exit");
         });
     },
@@ -1466,6 +1486,7 @@ export function PlayClient({
         pausedReason={pipeline.pausedReason}
         challengeSide={pipeline.challengeSide}
         challengeFailed={pipeline.challengeFailed}
+        gateAttempt={pipeline.gateAttempt}
         stream={faceTracker.stream ?? null}
         quizTitle={quiz.title}
         resume={
@@ -1488,9 +1509,20 @@ export function PlayClient({
             body: JSON.stringify({ consent: true }),
           })
             .then((r) => {
-              if (r.ok) pipeline.markConsentGiven();
+              if (r.ok) {
+                pipeline.markConsentGiven();
+              } else {
+                // A failed consent POST used to leave the gate's local
+                // checkbox checked with Begin enabled — clicking it then
+                // bounced off the server's consent_required with no visible
+                // reason. Un-check so the student sees the consent panel
+                // again and can retry deliberately.
+                setError(t("toast.consentFailed"));
+              }
             })
-            .catch(() => {});
+            .catch(() => {
+              setError(t("toast.consentFailed"));
+            });
         }}
         onRecover={() => {
           // Recovery click is a valid user gesture: re-enter fullscreen (the

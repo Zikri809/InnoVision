@@ -5,6 +5,7 @@ import { EnrollSchema } from "@/lib/face/schemas";
 import { MAX_FRAME_BASE64_CHARS } from "@/lib/face/constants";
 import { mapFaceError } from "@/lib/face/rpc-mapping";
 import { selectPrimaryFace } from "@/lib/face/embedding";
+import { checkEnrollPoseServer, ENROLL_YAW_BANDS, ENROLL_YAW_SERVER_TOLERANCE, type EnrollAngle } from "@/lib/face/pose-gate";
 import { spoofGateDecision, type SpoofFrameVerdict } from "@/lib/face/spoof";
 import * as insightface from "@/lib/face/server/insightface-client";
 import {
@@ -40,11 +41,16 @@ const ENROLL_RATE = { limit: 5, windowMs: 60 * 1000 };
  *     RPC re-checks consent authoritatively inside the locked transaction).
  *  3. Per frame: sidecar `/extract` (ONE call yields pose + embedding) →
  *     pick the primary face (largest bbox, det_score ≥ floor) → validate
- *     pose (front |yaw| ≤ 30°, sides 10° ≤ |yaw| ≤ 75°). Reject → 400
- *     pose_invalid. NO face → 400 pose_invalid. The frame-level spoof
- *     verdicts are collected and judged with the same majority policy as the
- *     verify route — a majority-spoofed capture → 400 spoof_detected (audit-3
- *     E-F7: a poisoned baseline would otherwise be planted unchecked).
+ *     pose against the SHARED per-angle bands (`lib/face/pose-gate.ts`:
+ *     front |yaw| ≤ 15, sides 10–45, widened by ENROLL_YAW_SERVER_TOLERANCE).
+ *     The client's per-frame `yawReadings` entry decides when present — it is
+ *     the reading the student's on-screen guidance used — and the sidecar's
+ *     absolute yaw stays as an anti-tamper sanity bound. Reject → 400
+ *     `pose_invalid` with a `pose_<reason>` message. NO face → 400
+ *     `pose_invalid`/`pose_no_face`. The frame-level spoof verdicts are
+ *     collected and judged with the same majority policy as the verify route —
+ *     a majority-spoofed capture → 400 spoof_detected (audit-3 E-F7: a poisoned
+ *     baseline would otherwise be planted unchecked).
  *  4. RPC `enroll_face(p_samples jsonb)` — the RPC validates the samples,
  *     runs the INTERNAL duplicate check (max cosine vs other students'
  *     samples ≥ 0.45 → 'pending_review' else 'enrolled'), stores the 3
@@ -96,11 +102,16 @@ export async function POST(request: Request) {
   }
 
   const [front, left, right] = parsed.data.frames;
-  // Pose validation below enforces: front |yaw| ≤ 30°; sides 10° ≤ |yaw| ≤ 75°.
-  const angles: { frame: string; name: string }[] = [
-    { frame: front, name: "front" },
-    { frame: left, name: "left" },
-    { frame: right, name: "right" },
+  const yawReadings = parsed.data.yawReadings;
+  // Pose validation below enforces the SHARED per-angle yaw bands from
+  // `lib/face/pose-gate.ts`: front |yaw| ≤ 15, sides 10–45, each widened by
+  // ENROLL_YAW_SERVER_TOLERANCE. The client's per-frame reading is authoritative
+  // when present (it is the one the student's on-screen guidance used); the
+  // sidecar's absolute yaw is an anti-tamper sanity bound.
+  const angles: { frame: string; name: EnrollAngle; yawReading: number | null }[] = [
+    { frame: front, name: "front", yawReading: yawReadings?.[0] ?? null },
+    { frame: left, name: "left", yawReading: yawReadings?.[1] ?? null },
+    { frame: right, name: "right", yawReading: yawReadings?.[2] ?? null },
   ];
 
   // Privacy gate: a NON-CONSENTED student's frames must never leave the
@@ -148,6 +159,7 @@ export async function POST(request: Request) {
   for (let i = 0; i < extracts.length; i++) {
     const ex = extracts[i];
     const angleName = angles[i].name;
+    const angleYawReading = angles[i].yawReading;
     if ("error" in ex) {
       return mapFaceError(ex) ?? internalError("Something went wrong.");
     }
@@ -157,34 +169,35 @@ export async function POST(request: Request) {
       console.error(`[enroll-timing] ${angleName}: NO FACE DETECTED after ${timings.extractBatchMs}ms batch`);
       return jsonError(
         "pose_invalid",
-        process.env.NODE_ENV !== "production"
-          ? `No face detected in the ${angleName} frame — retake with better light/less motion.`
-          : undefined,
+        // Reason code in BOTH modes: the student needs to know a retake with
+        // better light/less motion is the fix, and it leaks nothing.
+        "pose_no_face",
         400,
       );
     }
     yaws.push(`${angleName}=${primary.yaw}°`);
 
-    // Pose gate on the sidecar's pose regression (front centered, sides
-    // turned). In mock mode the marker frames carry yaw 0 for all angles —
-    // skipping keeps E2E enrollment possible (sides need 10–75°).
+    // Pose gate on the SHARED bands (lib/face/pose-gate.ts). Prod incident
+    // 2026-09-21: this used to compare the sidecar's ABSOLUTE yaw against
+    // hardcoded bounds while the client guided the student in NEUTRAL-RELATIVE
+    // yaw, so an off-axis webcam produced four `pose_invalid` rejections with no
+    // actionable message. `checkEnrollPoseServer` judges the client's accepted
+    // reading (widened by the server tolerance) and keeps the sidecar's
+    // absolute value as an anti-tamper sanity bound. In mock mode the marker
+    // frames carry yaw 0 for all angles — skipping keeps E2E enrollment
+    // possible (sides need a real turn).
     if (!insightface.isMockModeEnabled()) {
-      const yaw = primary.yaw;
-      if (angleName === "front" && Math.abs(yaw) > 30) {
-        console.error(`[enroll-pose] FRONT out of range: ${angleName}=${yaw}°`);
-        return jsonError(
-          "pose_invalid",
-          process.env.NODE_ENV !== "production" ? `Front frame too turned: front=${yaw}°` : undefined,
-          400,
+      const verdict = checkEnrollPoseServer(angleName, primary.yaw, angleYawReading);
+      if (!verdict.ok) {
+        console.error(
+          `[enroll-pose] ${angleName} rejected (${verdict.reason}): client=${angleYawReading ?? "n/a"} absolute=${primary.yaw}°`,
         );
-      }
-      if (angleName !== "front" && (Math.abs(yaw) < 10 || Math.abs(yaw) > 75)) {
-        console.error(`[enroll-pose] SIDE out of range: ${angleName}=${yaw}°`);
         return jsonError(
           "pose_invalid",
-          process.env.NODE_ENV !== "production"
-            ? `Side frames need a clearer turn: ${angleName}=${yaw}°`
-            : undefined,
+          // The reason code is safe in production (no biometrics, no server
+          // internals) and it is what makes the failure actionable — the raw
+          // `pose_invalid` code left the student with no idea what to change.
+          `pose_${verdict.reason}`,
           400,
         );
       }
@@ -193,7 +206,9 @@ export async function POST(request: Request) {
     samples.push({ angle: angleName, embedding: primary.embedding });
   }
   console.info(
-    `[enroll-timing] extract x3 ${timings.extractBatchMs}ms — ${yaws.join(" ")} (server needs |front|≤30, sides within 10–75)`,
+    `[enroll-timing] extract x3 ${timings.extractBatchMs}ms — ${yaws.join(" ")} ` +
+      `(server bands: front |yaw|≤${ENROLL_YAW_BANDS.front.max}+${ENROLL_YAW_SERVER_TOLERANCE}, ` +
+      `sides ${ENROLL_YAW_BANDS.left.min}–${ENROLL_YAW_BANDS.left.max}+${ENROLL_YAW_SERVER_TOLERANCE}, neutral-relative)`,
   );
 
   // audit-3 E-F7: reject a spoofed enrollment using the SAME majority policy

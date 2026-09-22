@@ -802,6 +802,8 @@
       "pendingTitle": "Dihantar untuk semakan",
       "pendingBody": "Kami mengesan kemungkinan wajah pendua. Pensyarah anda akan menyemak pendaftaran tidak lama lagi.",
       "statusFailed": "Pemeriksaan gagal — sila cuba lagi.",
+      "captureTimeout": "Masa tidak cukup untuk mendapatkan ketiga-tiga sudut. Cari pencahayaan terbaik, pastikan seluruh wajah dalam bujur, dan cuba lagi.",
+      "captureAttempts": "Terlalu banyak percubaan. Tahan setiap pose dengan stabil dalam bujur sebelum kelip, kemudian cuba lagi.",
       "statusUnavailable": "Pengesahan wajah tidak tersedia buat masa ini. Sila cuba lagi nanti.",
       "cameraFailure": {
         "permission": {
@@ -848,7 +850,13 @@
       "lightingGood": "Pencahayaan: Baik ✓",
       "lightingTooDark": "Terlalu gelap — tambah pencahayaan",
       "lightingTooBright": "Terlalu terang — elakkan silau belakang",
-      "lightingTip": "Pastikan wajah anda diterangi sekata tanpa bayang tebal untuk ketepatan tertinggi."
+      "lightingTip": "Pastikan wajah anda diterangi sekata tanpa bayang tebal untuk ketepatan tertinggi.",
+      "poseNoFace": "Kami tidak dapat melihat wajah anda — rakam semula dengan pencahayaan lebih baik dan kurang pergerakan.",
+      "poseNotStraight": "Pandang tepat ke arah kamera, kemudian rakam semula.",
+      "poseWrongWay": "Pusing kepala mengikut arah yang ditunjukkan, kemudian rakam semula.",
+      "poseTurnMore": "Pusing sedikit lagi, kemudian rakam semula.",
+      "poseTurnLess": "Terlalu jauh — dekatkan semula ke arah kamera, kemudian rakam semula.",
+      "poseSpoof": "Rakaman kelihatan seperti gambar atau skrin. Gunakan kamera langsung dan rakam semula."
     }
   },
   "builder": {
@@ -1016,6 +1024,8 @@
     "challengeTurnLeft": "Hampir siap — pusingkan kepala anda ke KIRI dan tahan seketika.",
     "challengeTurnRight": "Hampir siap — pusingkan kepala anda ke KANAN dan tahan seketika.",
     "challengeFailedRetry": "Kami tidak mengesan pusingan kepala — klik Mula dan pusingkan kepala anda apabila diarahkan.",
+    "blinkRetry": "Kami tidak mengesan kelipan dalam masa — pastikan seluruh wajah anda dalam bingkai dan klik Mula.",
+    "verifyRetry": "Pemeriksaan wajah tidak berjaya — semak sambungan anda dan klik Mula untuk mencuba lagi.",
     "pausedBody": "Pengecaman wajah tidak sepadan menjeda pemeriksaan. Kelipkan mata untuk meneruskan.",
     "handLostTitle": "Tangan keluar dari kamera",
     "handLostBody": "Peperiksaan anda dijeda kerana tangan anda keluar dari pandangan kamera. Tunjukkan tangan anda, kemudian kelipkan mata untuk meneruskan.",

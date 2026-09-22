@@ -277,6 +277,168 @@ describe("I3 — enroll rejects invalid frames / poses", () => {
   });
 });
 
+/**
+ * Prod incident 2026-09-21 (session cfb12aef) — enrollment pose gate.
+ *
+ * The student's calibrated neutral sat ~40° off the sidecar's absolute zero
+ * (off-axis webcam). The client guided them in NEUTRAL-RELATIVE yaw while the
+ * route gated on ABSOLUTE yaw, producing four `pose_invalid` rejections
+ * (`FRONT out of range: front=-49.09°`, `SIDE out of range: left=-1.52°`, …)
+ * with no actionable message. These tests pin the reconciliation and the
+ * anti-tamper bounds that replace it.
+ */
+describe("enroll pose gate — client/server yaw reconciliation (prod 2026-09-21)", () => {
+  /** Run a real-mode (non-mock) enroll with scripted sidecar yaws per angle. */
+  async function enrollWithYaws(
+    absoluteYaws: [number, number, number],
+    yawReadings?: (number | null)[],
+  ) {
+    faceContext({ seedSession: false, withBaseline: false });
+    const prevFlag = process.env.FACE_MOCK_ENABLED;
+    delete process.env.FACE_MOCK_ENABLED;
+    try {
+      let call = 0;
+      insightfaceMock.extractFace.mockImplementation(async () => {
+        const yaw = absoluteYaws[call] ?? 0;
+        call++;
+        return { faces: [{ ...mockFace(), yaw }] };
+      });
+      const body: Record<string, unknown> = {
+        frames: [
+          "data:image/jpeg;base64,PLAIN_F",
+          "data:image/jpeg;base64,PLAIN_L",
+          "data:image/jpeg;base64,PLAIN_R",
+        ],
+      };
+      if (yawReadings) body.yawReadings = yawReadings;
+      return await enroll.POST(req(body));
+    } finally {
+      if (prevFlag === undefined) delete process.env.FACE_MOCK_ENABLED;
+      else process.env.FACE_MOCK_ENABLED = prevFlag;
+    }
+  }
+
+  it("ACCEPTS the prod capture: client-guided pose while absolute yaw is off-axis", async () => {
+    // Client readings are in band (front 0, left +30, right -30); the sidecar
+    // sees the SAME physical poses shifted by the student's ~-40° neutral.
+    const res = await enrollWithYaws([-40, -1.5, -70], [0, 30, -30]);
+    expect(res.status).toBe(200);
+    expect((await res.json()).status).toBe("enrolled");
+  });
+
+  it("REJECTS the prod capture when the client sends no reading (legacy strict path)", async () => {
+    // Without the client reading the route falls back to the absolute bands,
+    // which is exactly how the incident manifested — kept as a regression pin
+    // so the fallback cannot silently become permissive.
+    const res = await enrollWithYaws([-40, -1.5, -70]);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("pose_invalid");
+  });
+
+  it("REJECTS the 46° 'Right' frame the client gate used to accept (BUG A)", async () => {
+    // The wizard captured this frame and the OLD route accepted it because the
+    // blended score cleared ≥90 with zero yaw points. Both gates must refuse.
+    const res = await enrollWithYaws([0, 30, -46], [0, 30, -46]);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("pose_invalid");
+    expect(body.message).toBe("pose_turn_less");
+  });
+
+  it("REJECTS a client that lies about its pose (in-band reading, near-profile absolute)", async () => {
+    // A tampered client claims "straight" while the sidecar measures a
+    // near-profile — the estimator gap exceeds the trust bound, so the strict
+    // absolute band decides and the frame is refused.
+    const res = await enrollWithYaws([0, 30, 80], [0, 30, 0]);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("pose_invalid");
+  });
+
+  it("REJECTS an in-band, mutually-consistent reading at a near-profile angle (sanity veto)", async () => {
+    // Both estimators agree, but the pose is past the sanity ceiling — a
+    // profile view is not a usable enrollment sample whatever the client says.
+    const res = await enrollWithYaws([80, 80, 80], [80, 80, 80]);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("pose_invalid");
+  });
+
+  it("REJECTS a wrong-way side turn reported by both estimators", async () => {
+    // Left angle but the student turned to their right (negative) — the
+    // actionable 'wrong_way' case, not an over-rotation.
+    const res = await enrollWithYaws([0, -30, -30], [0, -30, -30]);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("pose_invalid");
+    expect(body.message).toBe("pose_wrong_way");
+  });
+
+  it("returns an actionable reason code in BOTH dev and production", async () => {
+    // The incident's real sting: production returned a bare `pose_invalid` with
+    // no message, so the student had nothing to act on. The reason must ship in
+    // production too (it carries no biometrics or server internals).
+    const prevEnv = process.env.NODE_ENV;
+    try {
+      // NODE_ENV is readonly in Next's types but writable at runtime in tests.
+      (process.env as Record<string, string>).NODE_ENV = "production";
+      const res = await enrollWithYaws([0, 30, -46], [0, 30, -46]);
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toBe("pose_invalid");
+      expect(body.message).toBe("pose_turn_less");
+    } finally {
+      (process.env as Record<string, string>).NODE_ENV = prevEnv ?? "test";
+    }
+  });
+
+  it("reports pose_no_face when no face is detected", async () => {
+    faceContext({ seedSession: false, withBaseline: false });
+    const prevFlag = process.env.FACE_MOCK_ENABLED;
+    delete process.env.FACE_MOCK_ENABLED;
+    try {
+      insightfaceMock.extractFace.mockResolvedValue({ faces: [] });
+      const res = await enroll.POST(
+        req({
+          frames: [
+            "data:image/jpeg;base64,PLAIN_F",
+            "data:image/jpeg;base64,PLAIN_L",
+            "data:image/jpeg;base64,PLAIN_R",
+          ],
+        }),
+      );
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toBe("pose_invalid");
+      expect(body.message).toBe("pose_no_face");
+    } finally {
+      if (prevFlag === undefined) delete process.env.FACE_MOCK_ENABLED;
+      else process.env.FACE_MOCK_ENABLED = prevFlag;
+    }
+  });
+
+  it("rejects a malformed yawReadings payload at the schema boundary", async () => {
+    faceContext({ seedSession: false, withBaseline: false });
+    // Two entries instead of three, and an out-of-range value — both must be
+    // refused before any sidecar work (the array is parallel to `frames`).
+    const short = await enroll.POST(
+      req({ frames: [FRONT_FRAME, LEFT_FRAME, RIGHT_FRAME], yawReadings: [0, 30] }),
+    );
+    expect(short.status).toBe(400);
+
+    const outOfRange = await enroll.POST(
+      req({ frames: [FRONT_FRAME, LEFT_FRAME, RIGHT_FRAME], yawReadings: [0, 30, 9999] }),
+    );
+    expect(outOfRange.status).toBe(400);
+  });
+
+  it("accepts a legacy payload with no yawReadings when the pose is on-axis", async () => {
+    // Backward compatibility: an old client that omits the field entirely still
+    // enrolls when the sidecar's absolute yaw satisfies the absolute bands.
+    const res = await enrollWithYaws([0, 30, -30]);
+    expect(res.status).toBe(200);
+    expect((await res.json()).status).toBe("enrolled");
+  });
+});
+
 describe("I-dup — duplicate identity detected at enroll → pending_review", () => {
   it("flags pending_review when a DIFFERENT student's stored sample matches ≥ 0.45", async () => {
     const ctx = faceContext({ seedSession: false, withBaseline: false });

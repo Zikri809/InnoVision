@@ -9,6 +9,7 @@
  * re-declared (repo rule: `types.ts` re-exports DB-derived enums).
  */
 import type { FaceCheckTrigger, SessionStatus } from "@/lib/types/aliases";
+import type { EnrollAngle } from "./pose-gate";
 
 export type { FaceCheckTrigger };
 
@@ -56,7 +57,21 @@ export interface IFaceTracker {
     requireOpenEyes?: boolean;
     requireGoodLighting?: boolean;
     requireIdealLighting?: boolean;
+    /**
+     * Guided enrollment angle whose yaw band must be satisfied for a frame to
+     * be accepted (see `lib/face/pose-gate.ts`). The blended quality score
+     * cannot fail on yaw, so without this the capture gate is decorative.
+     */
+    angle?: EnrollAngle;
   }): Promise<string | null>;
+  /**
+   * The pose a `captureBestFrame({ angle })` call ACCEPTED (read immediately
+   * after a successful capture). The enroll route forwards it so the server
+   * judges the SAME reading the student was guided by, instead of re-deriving
+   * yaw in a different space (absolute vs neutral-relative) and rejecting an
+   * honest capture. Optional: fakes/legacy trackers may omit it.
+   */
+  readonly lastAcceptedPose?: { angle: EnrollAngle; yaw: number } | null;
   /** Wait for a blink within `timeoutMs`; resolves 'passed' or 'failed'. */
   waitForBlink(timeoutMs: number): Promise<"passed" | "failed">;
   /**
@@ -90,8 +105,13 @@ export interface IFaceTracker {
    * anatomy + webcam placement, so "straight" is not a universal zero).
    * Call while the user looks straight ahead — e.g. at the top of the guided
    * enrollment flow. Optional: trackers without it keep absolute yaw.
+   * Resolves TRUE when a baseline was actually captured; FALSE when too few
+   * samples landed (no face tracked during the window) — the baseline is
+   * left UNSET and yaw stays in absolute mode, so callers should retry once
+   * with a longer window rather than run the flow against a possibly-biased
+   * geometric midpoint.
    */
-  calibrateNeutral?(sampleMs?: number): Promise<void>;
+  calibrateNeutral?(sampleMs?: number): Promise<boolean>;
   stop(): void;
 }
 

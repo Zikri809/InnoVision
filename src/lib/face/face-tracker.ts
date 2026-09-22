@@ -19,6 +19,7 @@ import {
   scoreFrameQuality,
 } from "./quality";
 import { isLiveFeed as isLiveFeedGate } from "./live-feed";
+import { isPoseInBand, type EnrollAngle } from "./pose-gate";
 
 /**
  * Browser-only MediaPipe face tracker (Phase 7 — CompreFace migration).
@@ -121,6 +122,22 @@ export class FaceTracker implements IFaceTracker {
   get stream(): MediaStream | null {
     return this.sharedStream;
   }
+
+  /**
+   * The pose a `captureBestFrame({ angle })` call ACCEPTED, or null when no
+   * frame has been accepted yet.
+   *
+   * The enrollment route needs this (prod incident 2026-09-21): the tracker
+   * reports yaw RELATIVE to the user's calibrated neutral while the sidecar
+   * reports it ABSOLUTE, so the server cannot judge a submitted frame against
+   * the same band the student was guided by unless the client ships the
+   * reading that passed the capture gate. Read it IMMEDIATELY after a
+   * successful capture — the next accepted capture overwrites it.
+   */
+  get lastAcceptedPose(): { angle: EnrollAngle; yaw: number } | null {
+    return this.lastAcceptedPoseValue;
+  }
+  private lastAcceptedPoseValue: { angle: EnrollAngle; yaw: number } | null = null;
   private rafId: number | null = null;
   private disposed = false;
   /**
@@ -134,6 +151,8 @@ export class FaceTracker implements IFaceTracker {
   private loadedMetadataHandler: (() => void) | null = null;
   private loadedMetadataTimer: ReturnType<typeof setTimeout> | null = null;
   private waitForBlinkResolvers: ((outcome: "passed" | "failed") => void)[] = [];
+  /** Pending liveness timeout ids (blink + turn) — cleared in stop(). */
+  private livenessTimers: Set<ReturnType<typeof setTimeout>> = new Set();
   /**
    * Head-turn challenge state (anti-replay liveness). The pose loop feeds the
    * active challenge; `waitForHeadTurn` mirrors `waitForBlink`'s resolver
@@ -178,8 +197,8 @@ export class FaceTracker implements IFaceTracker {
    * (top of the guided enrollment). Falls back silently when the loop is not
    * producing landmarks — the baseline simply stays unset (absolute mode).
    */
-  async calibrateNeutral(sampleMs: number = 900): Promise<void> {
-    if (this.disposed) return;
+  async calibrateNeutral(sampleMs: number = 900): Promise<boolean> {
+    if (this.disposed) return false;
     const samples: number[] = [];
     const pitchSamples: number[] = [];
     const deadline = Date.now() + sampleMs;
@@ -201,6 +220,13 @@ export class FaceTracker implements IFaceTracker {
       const kept = pitchSamples.slice(Math.floor(pitchSamples.length * 0.2), Math.ceil(pitchSamples.length * 0.8));
       this.pitchBaseline = kept.reduce((s, v) => s + v, 0) / kept.length;
     }
+    // Tell the caller whether calibration actually happened: a silent null
+    // baseline falls back to the geometric midpoint, which can sit 15–20
+    // units off per-anatomy/webcam offset — enough to make the front band
+    // (±15) unreachable or one turn direction auto-pass. The callers (enroll
+    // wizard, turn challenge) retry with a longer window on false instead of
+    // running the flow half-broken.
+    return samples.length >= 5;
   }
 
   constructor(video: HTMLVideoElement) {
@@ -478,6 +504,17 @@ export class FaceTracker implements IFaceTracker {
    * Capture a high-quality frame where face is present, centered, facing camera,
    * eyes are open, and lighting is optimal. Polling over a brief window prevents
    * transient blink/motion/lighting misfires.
+   *
+   * `angle` (prod incident 2026-09-21) turns the blended quality score into a
+   * NECESSARY-but-not-sufficient check: the blended score cannot fail on yaw
+   * (it awards 0 points beyond 45° and 95 of 120 still clears the ≥90 bar), so
+   * the per-angle band from `lib/face/pose-gate.ts` is evaluated EXPLICITLY and
+   * gates acceptance. Without it a "Right" capture at 46° advanced the wizard.
+   *
+   * When `angle` is set the loop NEVER falls back to a best-effort frame: a
+   * wrong-angle frame is worse than no frame, because the wizard would submit
+   * it and the server would reject the whole enrollment. It returns null and
+   * lets the caller keep polling (the wizard's attempt budget bounds it).
    */
   async captureBestFrame(opts?: {
     maxWaitMs?: number;
@@ -485,6 +522,8 @@ export class FaceTracker implements IFaceTracker {
     requireOpenEyes?: boolean;
     requireGoodLighting?: boolean;
     requireIdealLighting?: boolean;
+    /** Guided angle whose yaw band must be satisfied before a frame is accepted. */
+    angle?: EnrollAngle;
   }): Promise<string | null> {
     if (this.disposed || !this.video) return null;
     if (typeof document !== "undefined" && document.hidden) return null;
@@ -495,6 +534,7 @@ export class FaceTracker implements IFaceTracker {
     const requireOpenEyes = opts?.requireOpenEyes ?? true;
     const requireGoodLighting = opts?.requireGoodLighting ?? true;
     const requireIdealLighting = opts?.requireIdealLighting ?? false;
+    const angle = opts?.angle;
     const startTime = Date.now();
 
     let bestFrame: string | null = null;
@@ -510,6 +550,10 @@ export class FaceTracker implements IFaceTracker {
           Math.min(this.currentBlendshapes.left, this.currentBlendshapes.right) < 0.38;
         const isCentered = !requireCentered || this.currentPose.centered;
         const allowTurned = Math.abs(this.currentPose.yaw) >= 10;
+        // The angle band is a HARD gate: the blended score below can never
+        // reject a frame for yaw alone, so this is the only thing standing
+        // between a mid-turn frame and the server's pose check.
+        const angleOk = !angle || isPoseInBand(angle, this.currentPose.yaw);
 
         const baseScore = scoreFrameQuality({
           faceDetected: this.currentPose.faceDetected,
@@ -521,7 +565,7 @@ export class FaceTracker implements IFaceTracker {
         });
 
         // If geometric quality is strong, verify lighting on canvas
-        if (baseScore >= 70) {
+        if (angleOk && baseScore >= 70) {
           const frame = await this.captureFrame();
           if (frame && this.canvas) {
             const ctx = this.canvas.getContext("2d");
@@ -537,7 +581,23 @@ export class FaceTracker implements IFaceTracker {
                 allowTurned,
               });
 
-              if (totalScore >= 90) return frame;
+              // Lighting is a HARD gate when the caller asked for it (enroll's
+              // `requireIdealLighting`, the verify path's `requireGoodLighting`):
+              // the blended score awards only 20/120 for lighting, so a dark
+              // frame (`goodLum=false`) otherwise still clears the ≥90 bar via
+              // its other axes — the same class of hole as the yaw incident
+              // (prod 2026-09-21). A poisoned dark baseline would fail every
+              // later verify for an honest student; a dim verify frame lands a
+              // false FAIL. Re-run the band explicitly, mirroring the angle gate.
+              const lightingHardOk =
+                (!requireGoodLighting && !requireIdealLighting) || goodLum;
+
+              if (totalScore >= 90 && lightingHardOk) {
+                if (angle) {
+                  this.lastAcceptedPoseValue = { angle, yaw: this.currentPose.yaw };
+                }
+                return frame;
+              }
               if (totalScore > bestScore) {
                 bestScore = totalScore;
                 bestFrame = frame;
@@ -549,6 +609,11 @@ export class FaceTracker implements IFaceTracker {
       await new Promise((r) => setTimeout(r, 60));
     }
 
+    // With an angle gate, a best-effort fallback would hand the wizard a frame
+    // it already knows is out of band — the server would then reject the WHOLE
+    // enrollment and the student would see nothing actionable. Return null and
+    // let the caller's retry/attempt budget own the outcome.
+    if (angle) return null;
     return bestFrame ?? this.captureFrame();
   }
 
@@ -565,6 +630,7 @@ export class FaceTracker implements IFaceTracker {
       // student blink on cue just before triggering verification.
       const waiter = (outcome: "passed" | "failed") => {
         clearTimeout(timer);
+        this.livenessTimers.delete(timer);
         this.removeBlinkListener(waiter);
         if (outcome === "passed") {
           this.lastBlinkAt = 0;
@@ -573,10 +639,12 @@ export class FaceTracker implements IFaceTracker {
         resolve(outcome);
       };
       const timer = setTimeout(() => {
+        this.livenessTimers.delete(timer);
         this.removeBlinkListener(waiter);
         this.blinkDetector.reset();
         resolve("failed");
       }, timeoutMs);
+      this.livenessTimers.add(timer);
       this.waitForBlinkResolvers.push(waiter);
     });
   }
@@ -615,15 +683,18 @@ export class FaceTracker implements IFaceTracker {
     return new Promise<"passed" | "failed">((resolve) => {
       const waiter = (outcome: "passed" | "failed") => {
         clearTimeout(timer);
+        this.livenessTimers.delete(timer);
         this.removeTurnListener(waiter);
         this.turnChallenge = null;
         resolve(outcome);
       };
       const timer = setTimeout(() => {
+        this.livenessTimers.delete(timer);
         this.removeTurnListener(waiter);
         this.turnChallenge = null;
         resolve("failed");
       }, timeoutMs);
+      this.livenessTimers.add(timer);
       this.waitForTurnResolvers.push(waiter);
     });
   }
@@ -654,6 +725,11 @@ export class FaceTracker implements IFaceTracker {
       cancelAnimationFrame(this.rafId);
       this.rafId = null;
     }
+    // Pending liveness timers must not outlive the tracker: the waiters are
+    // failed below, but without clearing the timers the 8s/10s ids fire later
+    // (no-ops on already-resolved promises) keeping the instance reachable.
+    for (const timer of this.livenessTimers) clearTimeout(timer);
+    this.livenessTimers.clear();
     if (this.visibilityHandler) {
       document.removeEventListener("visibilitychange", this.visibilityHandler);
       this.visibilityHandler = null;

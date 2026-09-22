@@ -24,6 +24,7 @@ export function FaceGate({
   status,
   challengeSide = null,
   challengeFailed = false,
+  gateAttempt = "idle",
   quizTitle,
   resume = null,
   onBegin,
@@ -38,6 +39,8 @@ export function FaceGate({
   challengeSide?: "left" | "right" | null;
   /** True after a turn-challenge failure — shows the retry copy, not silence. */
   challengeFailed?: boolean;
+  /** What failed on the last gate attempt — blink timeout or 'start' verify. */
+  gateAttempt?: "idle" | "blink_failed" | "verify_failed";
   /** Mobile plan W3: the quiz title lives HERE (shown once, before the flow
       starts) instead of eating vertical space above every question. */
   quizTitle?: string;
@@ -145,6 +148,11 @@ export function FaceGate({
                 liveness state — without this line the student who cannot
                 produce the turn retries against silent silence. */}
             {challengeFailed && livenessState === "idle" && t("challengeFailedRetry")}
+            {/* A blink timeout or a failed 'start' verify also lands back on
+                the gate silently otherwise — name the failure so the retry
+                is informed, not blind. */}
+            {!challengeFailed && gateAttempt === "blink_failed" && livenessState === "idle" && t("blinkRetry")}
+            {!challengeFailed && gateAttempt === "verify_failed" && livenessState === "idle" && t("verifyRetry")}
           </p>
           {/* Anti-replay challenge: names the RANDOM direction — a blink
               recording can't contain it. Only while the challenge is live. */}
