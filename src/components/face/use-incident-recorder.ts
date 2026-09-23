@@ -35,6 +35,23 @@ import {
  * dev. This is dev-only (production builds don't double-mount); smoke-testing
  * the upload path requires a production build.
  */
+/**
+ * Stop the recorder-owned mic clones and clear the list. Only EVER the
+ * clones (see startRecording) — the originals belong to the advisories hook.
+ * Every teardown path (stopTracksOnly, session switch, disable, unmount)
+ * must call this or the mic indicator outlives the exam (privacy).
+ */
+function stopMicClones(machine: { micClones: MediaStreamTrack[] }): void {
+  for (const t of machine.micClones) {
+    try {
+      t.stop();
+    } catch {
+      /* already stopped */
+    }
+  }
+  machine.micClones = [];
+}
+
 export function useIncidentRecorder(opts: {
   sessionId: string;
   enabled: boolean;
@@ -74,9 +91,18 @@ export function useIncidentRecorder(opts: {
     stopping: boolean;
     /** Last observed face status — lives ON the machine so the effect
      * cleanup cannot null it (a status change tears the effect down and
-     * re-runs it; the PREVIOUS status must survive that cycle or the
-     * ready→paused flush edge is unreachable). */
+     * re-runs it mid-session — the flush edge depends on the previous
+     * status surviving). */
     prevStatus: FaceStatus | null;
+    /** Session the machine currently holds capture for. SPA navigation
+     * /play/A → /play/B reuses this hook instance — without this the second
+     * session inherits stopping:true / a stale prevStatus and records
+     * nothing (or uploads A's buffer under B's id). */
+    sessionId: string;
+    /** Recorder-owned CLONES of the advisories mic tracks (see
+     * startRecording). Stopped + cleared on every teardown path — never the
+     * originals, which the advisories hook owns. */
+    micClones: MediaStreamTrack[];
   }>({
     recorder: null,
     stream: null,
@@ -87,6 +113,8 @@ export function useIncidentRecorder(opts: {
     flushing: false,
     stopping: false,
     prevStatus: null,
+    sessionId,
+    micClones: [],
   });
 
   useEffect(() => {
@@ -126,8 +154,20 @@ export function useIncidentRecorder(opts: {
           return;
         }
         const tracks: MediaStreamTrack[] = [videoTrack];
+        // The advisories hook OWNS the mic stream (it stops those tracks on
+        // ITS teardown) — pushing the same track objects here meant an
+        // advisories re-run/unmount silently muted the recorder's audio
+        // mid-session (video kept flowing, clips went silent). Clone so each
+        // hook owns its lifecycle; clones are stopped in stopTracksOnly and
+        // every other teardown path. Falls back to the shared ref only when
+        // clone() is unavailable (old engines) — the pre-existing behavior.
         const mic = micStreamRef?.current ?? null;
-        for (const t of mic?.getAudioTracks() ?? []) tracks.push(t);
+        m.micClones = [];
+        for (const t of mic?.getAudioTracks() ?? []) {
+          const owned = typeof t.clone === "function" ? t.clone() : t;
+          tracks.push(owned);
+          if (owned !== t) m.micClones.push(owned);
+        }
         m.stream = new MediaStream(tracks);
         m.chunks = [];
         m.totalMs = 0;
@@ -184,6 +224,7 @@ export function useIncidentRecorder(opts: {
 
     function stopTracksOnly(): void {
       const m = machineRef.current;
+      stopMicClones(m);
       if (m.cameraToken !== null) {
         releaseCameraStream(m.cameraToken);
         m.cameraToken = null;
@@ -337,6 +378,38 @@ export function useIncidentRecorder(opts: {
     // change made `prev` always null at effect entry, so the flush branch was
     // dead code and NO incident clip was ever uploaded. The predicate itself
     // is pure (`incident-transition.ts`) and unit-pinned.
+    //
+    // SPA session switch (/play/A → /play/B reuses this hook instance): the
+    // machine must not leak across sessions — B would inherit stopping:true /
+    // a stale prevStatus and record nothing, or worse, upload A's buffer
+    // under B's id (uploadClip reads sessionIdRef, which already tracks B).
+    // Tear the previous capture down fully (a mid-flush clip from A is
+    // dropped — privacy-safe beats misattributed) and let the driver below
+    // start B fresh. Keyed on sessionId in the dep array so the switch
+    // re-runs this effect even when status/phase are unchanged.
+    const machine = machineRef.current;
+    if (machine.sessionId !== sessionId) {
+      if (machine.recorder) machine.recorder.ondataavailable = null;
+      try {
+        if (machine.recorder && machine.recorder.state !== "inactive") machine.recorder.stop();
+      } catch {
+        /* already inactive */
+      }
+      if (machine.cameraToken !== null) {
+        releaseCameraStream(machine.cameraToken);
+        machine.cameraToken = null;
+      }
+      stopMicClones(machine);
+      machine.recorder = null;
+      machine.stream = null;
+      machine.chunks = [];
+      machine.totalMs = 0;
+      machine.startedAt = 0;
+      machine.flushing = false;
+      machine.stopping = false;
+      machine.prevStatus = null;
+      machine.sessionId = sessionId;
+    }
     const prev = machineRef.current.prevStatus as IncidentFlushStatus | null;
     const next = status as IncidentFlushStatus;
     if (next === "ready") {
@@ -372,7 +445,7 @@ export function useIncidentRecorder(opts: {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, status, phase]);
+  }, [enabled, status, phase, sessionId]);
 
   // audit-3 R2-INC-F2: the effect cleanup above deliberately does NOT stop the
   // recorder (a status change tears it down and re-runs it mid-session, and the
@@ -410,6 +483,7 @@ export function useIncidentRecorder(opts: {
     m.recorder = null;
     m.chunks = [];
     m.totalMs = 0;
+    stopMicClones(m);
     if (m.cameraToken !== null) {
       releaseCameraStream(m.cameraToken);
       m.cameraToken = null;
@@ -434,6 +508,7 @@ export function useIncidentRecorder(opts: {
         releaseCameraStream(machine.cameraToken);
         machine.cameraToken = null;
       }
+      stopMicClones(machine);
       machine.stream = null;
       machine.chunks = [];
     };

@@ -15,6 +15,7 @@ import {
   readCappedJson,
   unauthorized,
 } from "@/lib/http";
+import { logError } from "@/lib/log";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,11 @@ const START_RATE = { limit: 10, windowMs: 60 * 1000 };
  *  - `not_student` → 403 (defensive; requireStudent already runs first)
  *  - `quiz_not_live` / `not_enrolled` → 404 (single no-oracle error — a
  *    draft/closed/nonexistent quiz is indistinguishable to a student)
+ *  - `consent_required` / `face_enrollment_pending` → 403 (audit-5 M2: the
+ *    assessment face-eligibility gate now lives in the RPC — a direct
+ *    caller can no longer start unverified. `consent_required` mirrors the
+ *    face routes' 403; `face_enrollment_pending` is a pending_review
+ *    enrollment, not a missing one)
  *  - `already_attempted` → 409 `{ error, session_id }` (E5 clean message)
  *  - transport error → 503
  *  - success → 201 `{ session }` (for practice this may be an existing
@@ -63,7 +69,11 @@ export async function POST(request: Request) {
   });
 
   if (error) {
-    console.error("start_quiz_session error:", error);
+    logError("sessions.start_quiz_session", error, {
+      subsystem: "quiz-play",
+      errorCode: "start_failed",
+      quizId: parsed.data.quizId,
+    });
     return internalError("Could not start the quiz right now.");
   }
 
@@ -71,6 +81,14 @@ export async function POST(request: Request) {
 
   if (payload?.error === "not_student") return forbidden();
   if (payload?.error === "not_authenticated") return unauthorized();
+  // audit-5 M2: assessment face-eligibility (RPC-authoritative). Both are
+  // client errors, not outages — a raw 503 would read as "try again".
+  if (payload?.error === "consent_required") {
+    return jsonError("consent_required", undefined, 403);
+  }
+  if (payload?.error === "face_enrollment_pending") {
+    return jsonError("face_enrollment_pending", undefined, 403);
+  }
   if (payload?.error === "quiz_not_live" || payload?.error === "not_enrolled") {
     return notFound();
   }
@@ -95,6 +113,11 @@ export async function POST(request: Request) {
   }
 
   // Unknown RPC payload → treat as an internal failure (never a raw message).
-  console.error("start_quiz_session unexpected payload:", payload);
+  logError("sessions.start_quiz_session_unexpected", undefined, {
+    subsystem: "quiz-play",
+    errorCode: "unexpected_payload",
+    quizId: parsed.data.quizId,
+    payload,
+  });
   return internalError("Could not start the quiz right now.");
 }

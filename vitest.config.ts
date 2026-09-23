@@ -43,6 +43,8 @@ export default defineConfig({
         "src/app/api/classes/**",
         "src/lib/auth/**",
         "src/lib/http.ts",
+        // audit-5 O3: structured cross-subsystem error logging.
+        "src/lib/log.ts",
         "src/lib/supabase/middleware.ts",
         "src/lib/vision/camera.ts",
         "src/app/api/ai/**",
@@ -183,6 +185,7 @@ export default defineConfig({
         "src/lib/classes/guards.ts": { lines: 100 },
         "src/lib/quizzes/guards.ts": { lines: 100 },
         "src/lib/http.ts": { lines: 95 },
+        "src/lib/log.ts": { lines: 100 },
         "src/lib/supabase/middleware.ts": { lines: 77 },
         // H3-INFRA-F5/F6 (audit 2026-09): tested-but-untracked modules — each
         // had a test file but was absent from coverage.include (so deleting the

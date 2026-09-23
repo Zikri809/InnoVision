@@ -101,6 +101,26 @@ export async function POST(request: Request) {
     }
   }
 
+  // Same-photo-x3 tripwire: two genuinely different captures are never
+  // byte-identical (sensor noise alone guarantees divergence), so identical
+  // frame bytes across angles prove the frames were replayed — the exact
+  // shape of a forged-yawReadings baseline plant (one frontal photo claimed
+  // as front/left/right). Skipped in E2E mock mode, where marker frames are
+  // test scaffolding rather than camera captures.
+  if (!insightface.isMockModeEnabled()) {
+    const seenFrames = new Set<string>();
+    for (const frame of parsed.data.frames) {
+      if (seenFrames.has(frame)) {
+        return jsonError(
+          "duplicate_frames",
+          "Each angle needs its own photo — retake the duplicated angle.",
+          400,
+        );
+      }
+      seenFrames.add(frame);
+    }
+  }
+
   const [front, left, right] = parsed.data.frames;
   const yawReadings = parsed.data.yawReadings;
   // Pose validation below enforces the SHARED per-angle yaw bands from
@@ -116,12 +136,18 @@ export async function POST(request: Request) {
 
   // Privacy gate: a NON-CONSENTED student's frames must never leave the
   // server — reject BEFORE any sidecar call (the RPC re-checks consent
-  // authoritatively inside the locked transaction).
-  const { data: profileRow } = await supabase
+  // authoritatively inside the locked transaction). A DB error here fails
+  // CLOSED as 503: treating it as "no consent" would mislabel an outage as
+  // a consent refusal and mislead the student into the consent flow.
+  const { data: profileRow, error: profileError } = await supabase
     .from("profiles")
     .select("consent_given_at")
     .eq("id", auth.userId)
     .maybeSingle();
+  if (profileError) {
+    console.error("enroll consent probe error:", profileError);
+    return internalError("Could not enroll right now.");
+  }
   if (!profileRow || !profileRow.consent_given_at) {
     return (
       mapFaceError({ error: "consent_required" }, { consent_required: { status: 403 } }) ??
@@ -143,9 +169,19 @@ export async function POST(request: Request) {
   //    webcam while the flag is on). Dev responses carry the measured yaws
   //    so a failing capture can be diagnosed from the UI error alone.
   const extractStart = Date.now();
-  const extracts = await Promise.all(
-    angles.map((a) => insightface.extractFace(a.frame, auth.userId)),
-  );
+  let extracts: Awaited<ReturnType<typeof insightface.extractFace>>[];
+  try {
+    extracts = await Promise.all(
+      angles.map((a) => insightface.extractFace(a.frame, auth.userId)),
+    );
+  } catch (err) {
+    // An unexpected fan-out throw (abort, OOM, sidecar client bug) must stay
+    // a typed JSON 503 — an uncaught throw becomes a Next HTML 500 and
+    // breaks the pipeline's unavailable-passthrough contract (mirrors the
+    // verify route's fan-out guard).
+    console.error("enroll extract fan-out error:", err);
+    return mapFaceError({ error: "insightface_unavailable" }) ?? internalError("Something went wrong.");
+  }
   timings.extractBatchMs = Date.now() - extractStart;
 
   const samples: { angle: string; embedding: number[] }[] = [];

@@ -23,6 +23,7 @@ import {
   Archive,
   Loader2,
   SquarePen,
+  ScanFace,
 } from "lucide-react";
 import {
   ResponsiveModal,
@@ -34,6 +35,7 @@ import {
   ResponsiveModalDescription,
 } from "@/components/ui/responsive-modal";
 import type { LecturerClassCard } from "@/lib/types/aliases";
+import type { PendingFaceEnrollment } from "@/lib/face/types";
 import { EmptyState } from "@/components/ui/empty-state";
 import { EmptyBoxIllustration } from "@/components/illustrations/empty-box";
 
@@ -49,9 +51,12 @@ import { EmptyBoxIllustration } from "@/components/illustrations/empty-box";
 export function ClassesPageClient({
   classes,
   archivedCount = 0,
+  pendingEnrollments = [],
 }: {
   classes: LecturerClassCard[];
   archivedCount?: number;
+  /** audit-5 M4: pending_review face enrollments awaiting adjudication. */
+  pendingEnrollments?: PendingFaceEnrollment[];
 }) {
   const router = useRouter();
   const t = useTranslations("lecturer.classes");
@@ -63,10 +68,47 @@ export function ClassesPageClient({
 
   const [mobileCreateOpen, setMobileCreateOpen] = useState(false);
 
+  // audit-5 M4: per-student review lock + error, keyed by student id so one
+  // row's in-flight decision cannot disable the others.
+  const [reviewingId, setReviewingId] = useState<string | null>(null);
+  const [reviewError, setReviewError] = useState<{ studentId: string; message: string } | null>(null);
+
   // Ref lock guards against a fast double-click before React re-renders.
   const submitLock = useRef(false);
 
   const activeClasses = classes.filter((c) => !c.archived_at);
+
+  /**
+   * audit-5 M4: approve/reject a pending_review enrollment. `reject` clears
+   * the status so the student re-enrolls (the dup scan re-flags a real
+   * duplicate); `approve` accepts the samples already stored. `router.refresh`
+   * re-reads the server list so the row disappears on success.
+   */
+  async function handleReview(studentId: string, decision: "approve" | "reject") {
+    if (reviewingId) return;
+    setReviewingId(studentId);
+    setReviewError(null);
+    try {
+      const res = await fetch("/api/face/enrollments/review", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ studentId, decision }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setReviewError({
+          studentId,
+          message: body.message ?? body.error ?? tCommon("errorGeneric"),
+        });
+        return;
+      }
+      router.refresh();
+    } catch {
+      setReviewError({ studentId, message: tCommon("errorGeneric") });
+    } finally {
+      setReviewingId(null);
+    }
+  }
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -224,6 +266,91 @@ export function ClassesPageClient({
           </div>
         </div>
       </section>
+
+      {/* ── audit-5 M4: pending face-enrollment reviews ─────────────────
+          A duplicate-detected (pending_review) enrollment cannot start an
+          assessment until a lecturer decides. The notification
+          (face_enrollment_held) links HERE; before this panel it linked to a
+          page with no review UI — the dead end audit-5 M4 closed. */}
+      {pendingEnrollments.length > 0 && (
+        <section
+          aria-labelledby="pending-enrollments-heading"
+          className="rounded-[24px] border-[3px] border-amber-300 bg-amber-50 p-5 shadow-[0_4px_0_rgba(217,119,6,0.15)] dark:border-amber-500/40 dark:bg-amber-500/10 dark:shadow-none"
+        >
+          <div className="flex items-start gap-3.5">
+            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-amber-100 text-amber-700 dark:border-[3px] dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300">
+              <ScanFace className="h-6 w-6" aria-hidden />
+            </span>
+            <div className="min-w-0">
+              <h2
+                id="pending-enrollments-heading"
+                className="font-heading text-base font-semibold text-amber-800 dark:text-amber-200"
+              >
+                {t("pendingEnrollTitle", { count: pendingEnrollments.length })}
+              </h2>
+              <p className="mt-0.5 text-sm font-semibold text-muted-foreground">
+                {t("pendingEnrollBody")}
+              </p>
+            </div>
+          </div>
+
+          <ul className="mt-4 space-y-3">
+            {pendingEnrollments.map((student) => {
+              const busy = reviewingId === student.student_id;
+              const rowError =
+                reviewError?.studentId === student.student_id ? reviewError.message : null;
+              return (
+                <li
+                  key={student.student_id}
+                  className="rounded-2xl border-[3px] border-border bg-card p-4 shadow-[var(--shadow-clay-sm)]"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-heading text-sm font-semibold">
+                        {student.full_name ?? t("pendingEnrollUnnamed")}
+                        {student.matric_no && (
+                          <span className="ml-2 text-xs font-bold text-muted-foreground">
+                            {student.matric_no}
+                          </span>
+                        )}
+                      </p>
+                      {student.classes.length > 0 && (
+                        <p className="mt-0.5 truncate text-xs font-semibold text-muted-foreground">
+                          {student.classes.join(", ")}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="accent"
+                        disabled={busy}
+                        onClick={() => void handleReview(student.student_id, "approve")}
+                      >
+                        {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
+                        {t("pendingEnrollApprove")}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => void handleReview(student.student_id, "reject")}
+                      >
+                        {t("pendingEnrollReject")}
+                      </Button>
+                    </div>
+                  </div>
+                  {rowError && (
+                    <p className="mt-2 text-xs font-bold text-destructive" role="alert">
+                      {rowError}
+                    </p>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
 
       {/* ── Create + list (bento: create card left, classes right ≥lg) ── */}
       <section className="grid items-start gap-6 lg:grid-cols-[340px_1fr]">

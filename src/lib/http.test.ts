@@ -103,6 +103,13 @@ describe("checkSameOrigin", () => {
     }
   });
 
+  it("rejects when the request URL itself is unparseable", () => {
+    // A non-URL `Request.url` makes `new URL(request.url)` throw — fail closed
+    // rather than treating the origin as trusted.
+    const bad = { headers: new Headers({ origin: "https://a.example" }), url: "::not-a-url" };
+    expect(checkSameOrigin(bad as unknown as Request)).not.toBeNull();
+  });
+
   it("skips malformed TRUSTED_ORIGINS entries instead of crashing", () => {
     const prev = process.env.TRUSTED_ORIGINS;
     process.env.TRUSTED_ORIGINS = "::bad, https://good.example.org";
@@ -212,6 +219,40 @@ describe("readCappedJson (audit-1 P1-5)", () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.response.status).toBe(400);
   });
+
+  it("400s a body stream that dies mid-read (never a 500)", async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"a":'));
+        controller.error(new Error("stream reset"));
+      },
+    });
+    const broken = new Request("http://localhost/api/x", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: stream,
+      duplex: "half",
+    } as RequestInit & { duplex: "half" });
+    const r = await readCappedJson(broken, 1024);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.response.status).toBe(400);
+  });
+
+  it("a pre-aborted signal with a buffered body still parses (route owns cancellation)", async () => {
+    // Contract pin: callers like regenerate map an aborted request to 409
+    // `cancelled` AFTER reading the body — the capped reader must not turn
+    // it into a 400 first.
+    const controller = new AbortController();
+    const aborted = new Request("http://localhost/api/x", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ questionId: "q" }),
+      signal: controller.signal,
+    });
+    controller.abort();
+    const r = await readCappedJson(aborted, 1024);
+    expect(r).toEqual({ ok: true, data: { questionId: "q" } });
+  });
 });
 
 describe("readCappedText (audit-1 P1-5)", () => {
@@ -267,5 +308,52 @@ describe("readCappedFormData (audit-1 P1-5)", () => {
     const r = await readCappedFormData(lying, 64 * 1024);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.response.status).toBe(413);
+  });
+
+  it("a pre-aborted signal with a buffered multipart body still parses", async () => {
+    const controller = new AbortController();
+    const form = new FormData();
+    form.append("reason", "focus_lost");
+    const aborted = new Request("http://localhost/api/x", {
+      method: "POST",
+      body: form,
+      signal: controller.signal,
+    });
+    controller.abort();
+    const r = await readCappedFormData(aborted, 64 * 1024);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.form.get("reason")).toBe("focus_lost");
+  });
+
+  it("400s a request with no body at all", async () => {
+    const r = await readCappedFormData(
+      new Request("http://localhost/api/x", { method: "POST" }),
+      64 * 1024,
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.response.status).toBe(400);
+      await expect(r.response.json()).resolves.toMatchObject({
+        error: "invalid_body",
+      });
+    }
+  });
+
+  it("400s a body whose stream dies mid-parse (non-size failure)", async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("--boundary-broken"));
+        controller.error(new Error("reset"));
+      },
+    });
+    const broken = new Request("http://localhost/api/x", {
+      method: "POST",
+      headers: { "content-type": "multipart/form-data; boundary=boundary-broken" },
+      body: stream,
+      duplex: "half",
+    } as RequestInit & { duplex: "half" });
+    const r = await readCappedFormData(broken, 64 * 1024);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.response.status).toBe(400);
   });
 });

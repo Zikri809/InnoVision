@@ -4,6 +4,7 @@ import { requireStudent } from "@/lib/classes/guards";
 import { isUuid } from "@/lib/classes/roster";
 import { rateLimit } from "@/lib/classes/rate-limit";
 import { AnswerSchema } from "@/lib/sessions/validation";
+import { logError } from "@/lib/log";
 import {
   checkSameOrigin,
   firstIssueMessage,
@@ -107,7 +108,11 @@ export async function POST(request: Request, { params }: Params) {
   });
 
   if (error) {
-    console.error("answer_question error:", error);
+    logError("answer.answer_question", error, {
+      subsystem: "quiz-play",
+      errorCode: "answer_question_failed",
+      sessionId: id,
+    });
     return internalError("Could not record the answer right now.");
   }
 
@@ -159,7 +164,12 @@ export async function POST(request: Request, { params }: Params) {
     });
   }
 
-  console.error("answer_question unexpected payload:", payload);
+  logError("answer.answer_question_unexpected", undefined, {
+    subsystem: "quiz-play",
+    errorCode: "unexpected_payload",
+    sessionId: id,
+    payload,
+  });
   return internalError("Could not record the answer right now.");
 }
 

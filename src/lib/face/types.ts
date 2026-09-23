@@ -167,6 +167,17 @@ export type FakeFaceControl = {
 export type FaceEnrollmentStatus = "enrolled" | "pending_review";
 
 /**
+ * audit-5 M4: one `pending_review` student on the lecturer's review list
+ * (`list_pending_face_enrollments`, migration 0062 §7).
+ */
+export type PendingFaceEnrollment = {
+  student_id: string;
+  full_name: string | null;
+  matric_no: string | null;
+  classes: string[];
+};
+
+/**
  * UI status of the face pipeline. `'off'` = practice/lecturer; `'unavailable'`
  * = camera/models offline (passthrough); `'exempt'` = lecturer exemption;
  * `'gate'` = initial assessment gate; `'ready'` = verified, continuous verify

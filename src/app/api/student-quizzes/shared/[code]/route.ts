@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { requireAnyUser } from "@/lib/student-quizzes/guards";
 import { normalizeShareCode } from "@/lib/student-quizzes/share-code";
 import { rateLimit } from "@/lib/classes/rate-limit";
+import { clientIpFromHeaders } from "@/lib/request-ip";
 import { internalError, notFound, rateLimited } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
@@ -40,8 +41,7 @@ export async function GET(request: Request, { params }: Params) {
   if (!rateLimit(`sq-resolve:${auth.userId}`, RESOLVE_RATE)) {
     return rateLimited("Too many lookups. Try again in a minute.");
   }
-  const ip =
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  const ip = clientIpFromHeaders(request.headers);
   if (!rateLimit(`sq-resolve-ip:${ip}`, RESOLVE_IP_RATE)) {
     return rateLimited("Too many lookups. Try again in a minute.");
   }

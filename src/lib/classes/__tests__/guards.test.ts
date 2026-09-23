@@ -12,13 +12,14 @@ type ProfileRow = { role: string };
  */
 function makeStub(opts: {
   user?: { id: string } | null;
+  authError?: { message: string } | null;
   profile?: ProfileRow | null;
   profileError?: boolean;
 }) {
   const calls: string[] = [];
   const stub = {
     auth: {
-      getUser: async () => ({ data: { user: opts.user ?? null }, error: null }),
+      getUser: async () => ({ data: { user: opts.user ?? null }, error: opts.authError ?? null }),
     },
     from(table: string) {
       calls.push(table);
@@ -95,6 +96,33 @@ describe("requireUser", () => {
     const result = await requireUser(stub, "lecturer");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.response.status).toBe(503);
+  });
+
+  it("Auth outage (getUser transport error, no user) → 503, not 401", async () => {
+    const { stub, calls } = makeStub({
+      user: null,
+      authError: { message: "fetch failed" },
+    });
+    const result = await requireUser(stub, "student");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(503);
+      await expect(result.response.json()).resolves.toMatchObject({
+        error: "profile_unavailable",
+      });
+    }
+    // Must not hit the profile read on the way out.
+    expect(calls).not.toContain("profiles");
+  });
+
+  it("missing session (Auth session missing) stays 401", async () => {
+    const { stub } = makeStub({
+      user: null,
+      authError: { message: "Auth session missing!" },
+    });
+    const result = await requireUser(stub, "student");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.response.status).toBe(401);
   });
 
   it("profile lookup filters by the authenticated user's id", async () => {

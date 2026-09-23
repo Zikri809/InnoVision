@@ -169,6 +169,23 @@ describe("I-S3 — start not-live / not-enrolled → 404 (no oracle)", () => {
     expect(res.status).toBe(404);
     expect((await res.json()).error).toBe("not_found");
   });
+
+  // audit-5 M2: the assessment face-eligibility gate (RPC-authoritative).
+  it("audit-5 M2: consent_required → 403 (not an outage)", async () => {
+    const ctx = playContext({ mode: "assessment" });
+    ctx.client.rpcResult = { data: { error: "consent_required" }, error: null };
+    const res = await start.POST(req({ quizId: QUIZ_C }));
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe("consent_required");
+  });
+
+  it("audit-5 M2: face_enrollment_pending → 403", async () => {
+    const ctx = playContext({ mode: "assessment" });
+    ctx.client.rpcResult = { data: { error: "face_enrollment_pending" }, error: null };
+    const res = await start.POST(req({ quizId: QUIZ_C }));
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe("face_enrollment_pending");
+  });
 });
 
 describe("QC-3 — availability window mappings", () => {

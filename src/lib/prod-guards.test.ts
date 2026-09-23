@@ -30,6 +30,7 @@ function cleanEnv(over: Record<string, string | undefined> = {}): NodeJS.Process
     NODE_ENV: "production",
     PROD_ENV_STRICT: "1",
     FACE_SIDECAR_TOKEN: "a-real-sidecar-token",
+    FACE_SPOOF_ENFORCE: "1",
     GLM_PROVIDER: "remote",
     ZAI_API_KEY: "a-real-zai-key",
     TRUSTED_PROXY_COUNT: "1",
@@ -209,6 +210,46 @@ describe("inspectProdEnv — empty tokens while the feature is real (S1)", () =>
     // ...and it is reported as an empty-token violation, never a value echo.
     const v = inspectProdEnv(cleanEnv({ GLM_PROVIDER: undefined, VLLM_API_KEY: undefined }))[0];
     expect(v.value).toBe("<empty>");
+  });
+});
+
+describe("inspectProdEnv — FACE_SPOOF_ENFORCE must be armed (audit-5 M6)", () => {
+  it("flags an unset / non-1 FACE_SPOOF_ENFORCE when the sidecar is real", () => {
+    for (const bad of [undefined, "", "0", "true"]) {
+      const violations = inspectProdEnv(cleanEnv({ FACE_SPOOF_ENFORCE: bad }));
+      expect(keys(violations), `expected ${JSON.stringify(bad)} to be flagged`).toEqual([
+        "FACE_SPOOF_ENFORCE",
+      ]);
+      expect(find(violations, "FACE_SPOOF_ENFORCE")?.why).toMatch(/anti-spoof/i);
+    }
+  });
+
+  it("accepts FACE_SPOOF_ENFORCE=1", () => {
+    expect(inspectProdEnv(cleanEnv({ FACE_SPOOF_ENFORCE: "1" }))).toEqual([]);
+  });
+
+  it("exempts the fully-mocked E2E seam (the mock produces no spoof verdicts)", () => {
+    const violations = inspectProdEnv(
+      cleanEnv({
+        FACE_SPOOF_ENFORCE: undefined,
+        NEXT_PUBLIC_E2E_FAKE_SEAM: "1",
+        FACE_MOCK_ENABLED: "1",
+      }),
+    );
+    expect(keys(violations)).not.toContain("FACE_SPOOF_ENFORCE");
+  });
+
+  it("still requires enforcement with only ONE of the two seam flags (fail-closed)", () => {
+    expect(
+      keys(inspectProdEnv(cleanEnv({ FACE_SPOOF_ENFORCE: undefined, FACE_MOCK_ENABLED: "1" }))),
+    ).toContain("FACE_SPOOF_ENFORCE");
+    expect(
+      keys(
+        inspectProdEnv(
+          cleanEnv({ FACE_SPOOF_ENFORCE: undefined, NEXT_PUBLIC_E2E_FAKE_SEAM: "1" }),
+        ),
+      ),
+    ).toContain("FACE_SPOOF_ENFORCE");
   });
 });
 

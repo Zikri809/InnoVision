@@ -65,6 +65,12 @@ describe("mapFaceError", () => {
     expect(res?.status).toBe(400);
   });
 
+  it("invalid_reason → 400 (lecturer note length is a client error, not an outage)", async () => {
+    const res = mapFaceError({ error: "invalid_reason" });
+    expect(res?.status).toBe(400);
+    expect((await res?.json())?.error).toBe("invalid_reason");
+  });
+
   it("unknown payload → 503 internal (never a raw message)", async () => {
     const res = mapFaceError({ error: "weird_thing" });
     expect(res?.status).toBe(503);

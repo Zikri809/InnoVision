@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ClassesPageClient } from "./classes-client";
 import { ProfilePendingPanel, LoadErrorPanel } from "@/components/layout/load-state";
+import type { PendingFaceEnrollment } from "@/lib/face/types";
 
 const CLASS_LIST_LIMIT = 200;
 
@@ -71,5 +72,27 @@ export default async function LecturerClassesPage() {
     quizCount: countByClass.get(c.id) ?? 0,
   }));
 
-  return <ClassesPageClient classes={cards} archivedCount={archivedCount ?? 0} />;
+  // audit-5 M4: pending_review face enrollments (duplicate-detected) in this
+  // lecturer's classes. The list RPC is lecturer-scoped in-body; the roster
+  // view deliberately omits face_enrollment_status, so this is the only
+  // lecturer surface that can adjudicate the flag. Non-critical: a failure
+  // degrades to no panel (the notification still points here).
+  let pendingEnrollments: PendingFaceEnrollment[] = [];
+  const { data: pendingData, error: pendingError } = await supabase.rpc(
+    "list_pending_face_enrollments",
+  );
+  if (pendingError) {
+    console.error("Pending face enrollment fetch error:", pendingError);
+  } else {
+    const payload = pendingData as { students?: PendingFaceEnrollment[] } | null;
+    pendingEnrollments = payload?.students ?? [];
+  }
+
+  return (
+    <ClassesPageClient
+      classes={cards}
+      archivedCount={archivedCount ?? 0}
+      pendingEnrollments={pendingEnrollments}
+    />
+  );
 }

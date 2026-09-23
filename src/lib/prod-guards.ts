@@ -84,6 +84,25 @@ const KILL_SWITCHES: readonly { key: string; why: string }[] = [
   },
 ];
 
+/**
+ * Feature-enforcement keys that must be ARMED in production. These are the
+ * inverse of the kill switches above: the safe value is `"1"`, and anything
+ * else means the control is silently OFF. audit-5 M6: `FACE_SPOOF_ENFORCE`
+ * lived only in a boot-time `console.warn`, so a deploy that dropped the key
+ * booted clean under `PROD_ENV_STRICT=1` while photo/replay verdicts were
+ * recorded but never enforced (a print held to the camera passes on
+ * similarity alone).
+ */
+const ENFORCEMENT_KEYS: readonly { key: string; why: string }[] = [
+  {
+    key: "FACE_SPOOF_ENFORCE",
+    why:
+      "anti-spoof enforcement is OFF: MiniFASNet verdicts are recorded but a photo/replay is never forced to a FAIL " +
+      "vote (src/app/api/face/verify/route.ts + enroll/route.ts). The deployment convention sets =1 " +
+      "(deploy/secrets/prod.env.example) but nothing failed closed when the key was dropped",
+  },
+];
+
 /** Token-shaped keys: their VALUE must never be captured in a violation. */
 const SECRET_KEYS: ReadonlySet<string> = new Set([
   "FACE_SIDECAR_TOKEN",
@@ -125,8 +144,20 @@ export function inspectProdEnv(env: NodeJS.ProcessEnv = process.env): ProdGuardV
     if (value === "1") violations.push({ key, value: safeValue(key, value), why });
   }
 
+  // Enforcement keys: the feature is REAL unless the mock seam is fully armed,
+  // and the control must be explicitly ON. Mirrors the kill-switch loop's
+  // exact-"1" comparison (anything else is inert in the consumers).
   const faceMocked =
     raw(env, "NEXT_PUBLIC_E2E_FAKE_SEAM") === "1" && raw(env, "FACE_MOCK_ENABLED") === "1";
+  for (const { key, why } of ENFORCEMENT_KEYS) {
+    // The E2E harness runs with the fake sidecar, where spoof enforcement is
+    // meaningless (the mock never produces a spoof verdict); exempt it the
+    // same way the token check exempts the fully-mocked seam.
+    if (key === "FACE_SPOOF_ENFORCE" && faceMocked) continue;
+    const value = raw(env, key);
+    if (value !== "1") violations.push({ key, value: safeValue(key, value), why });
+  }
+
   if (!faceMocked && raw(env, "FACE_SIDECAR_TOKEN").trim() === "") {
     violations.push({
       key: "FACE_SIDECAR_TOKEN",

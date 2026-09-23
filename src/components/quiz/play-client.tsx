@@ -668,7 +668,12 @@ export function PlayClient({
   useEffect(() => {
     if (remainingMs === null) return;
     if (phase === "submitted" || phase === "timeUp" || phase === "dead") return;
-    if (faceStatus === "flagged" || faceStatus === "paused") return;
+    // Frozen while input is blocked server-side (paused/flagged) AND while a
+    // blink/turn recovery owns the input (recovering): blockInput +
+    // sessionPaused both cover recovering, so ticking through it drained quiz
+    // time for challenges the student cannot answer through — and could fire
+    // timeUp mid-recovery. Success still reconciles via onRecoveredRemaining.
+    if (faceStatus === "flagged" || faceStatus === "paused" || faceStatus === "recovering") return;
     if (remainingMs <= 0) {
       void handleTimeUp();
       return;
@@ -978,6 +983,11 @@ export function PlayClient({
                   : { selectedIndex: scalar }),
           });
           setError(tAuth("sessionExpired"));
+          // Release the locked phase BEFORE the delayed redirect: if the push
+          // is blocked (offline / popup blocker) the UI must not stick on a
+          // disabled "Recording" state with no retry. The stash above preserves
+          // the draft across the bounce.
+          setPhaseAndRef("question");
           setTimeout(() => {
             // router.push (not location.assign): the login hand-off stays in
             // the SPA, and the play page remounts fresh on the way back.
@@ -1148,7 +1158,12 @@ export function PlayClient({
       if (res.status === 401) {
         // audit-1 P1-12: expired auth mid-submit — every recorded answer is
         // already server-side; re-auth and come straight back to the result.
+        // Keep the Retry-submit affordance armed: if the redirect is blocked
+        // the student must still be able to retry instead of sitting on a
+        // disabled "Submitting" state.
         setError(tAuth("sessionExpired"));
+        setLastSubmitFailed(true);
+        setPhaseAndRef(phaseRef.current === "timeUp" ? "timeUp" : "question");
         setTimeout(() => {
           // See the answer-path comment: SPA hand-off, fresh remount back.
           router.push(

@@ -229,7 +229,20 @@ class FakeQueryBuilder {
       !this.op &&
       !this.countExact
     ) {
-      return { rows: [], error: { message: this.client.selectError } };
+      if (this.client.selectErrorAfter > 0) {
+        // `private` is erased at compile time; the counter lives on the client.
+        const seen = ((this.client as unknown as { _selectErrorSeen?: number })
+          ._selectErrorSeen ??= 0);
+        (this.client as unknown as { _selectErrorSeen?: number })._selectErrorSeen =
+          seen + 1;
+        if (seen < this.client.selectErrorAfter) {
+          // Fall through to serve this read normally.
+        } else {
+          return { rows: [], error: { message: this.client.selectError } };
+        }
+      } else {
+        return { rows: [], error: { message: this.client.selectError } };
+      }
     }
     const tableRows = (this.client.tables[this.table] ??= []);
 
@@ -360,9 +373,26 @@ export class FakeSupabase {
    */
   selectError: string | null = null;
   selectErrorTable: string | null = null;
+  /**
+   * Test-only: how many matching SELECTs to let SUCCEED before `selectError`
+   * takes effect. Lets a route's earlier guard reads (e.g. `requireUser`'s
+   * profile/role lookup) succeed while a LATER read of the same table fails —
+   * otherwise a shared-table error seam makes role resolution 401 first.
+   */
+  selectErrorAfter: number = 0;
+  private _selectErrorSeen: number = 0;
+  /**
+   * Test-only: when set, `auth.getUser()` resolves `{user: null, error}` —
+   * used to exercise the outage-vs-anonymous distinction (a transport error is
+   * a 503, a session-missing error is a 401).
+   */
+  authError: { message: string } | null = null;
 
   auth = {
-    getUser: async () => ({ data: { user: this.user } }),
+    getUser: async () =>
+      this.authError
+        ? { data: { user: null }, error: this.authError }
+        : { data: { user: this.user } },
   };
 
   from(table: string): FakeQueryBuilder {
@@ -456,6 +486,9 @@ export class FakeSupabase {
     }
     if (name === "reject_face_enrollment") {
       return this._rejectFaceEnrollment(args);
+    }
+    if (name === "approve_face_enrollment") {
+      return this._approveFaceEnrollment(args);
     }
     if (name === "student_pending_count") {
       // 0057 semantics at the level the route branches on: an OWN session
@@ -1763,6 +1796,29 @@ export class FakeSupabase {
       created_at: "2026-01-01T00:00:00Z",
     });
     return { data: { ok: true }, error: null };
+  }
+
+  /** approve_face_enrollment (lecturer-only) — pending_review → enrolled. */
+  private async _approveFaceEnrollment(args?: Record<string, unknown>) {
+    if (this.rpcResult.data !== null || this.rpcResult.error !== null) return this.rpcResult;
+    if (this.profileRole !== "lecturer") return { data: { error: "not_lecturer" }, error: null };
+    const studentId = String(args?.p_student_id ?? "");
+    const profile = (this.tables["profiles"] ?? []).find((p) => p.id === studentId);
+    if (!profile) return { data: { error: "not_owner" }, error: null };
+    if (profile.face_enrollment_status !== "pending_review") {
+      return { data: { error: "not_pending" }, error: null };
+    }
+    profile.face_enrollment_status = "enrolled";
+    this.tables["audit_events"] ??= [];
+    this.tables["audit_events"].push({
+      id: randomUuid(),
+      actor_id: this.user?.id,
+      subject_id: studentId,
+      action: "face_enroll_approved",
+      metadata: null,
+      created_at: "2026-01-01T00:00:00Z",
+    });
+    return { data: { ok: true, status: "enrolled" }, error: null };
   }
 
   storage = {

@@ -324,7 +324,12 @@
       "restoreErrorGeneric": "Failed to restore the class. Please try again.",
       "viewAuditBtn": "View audit",
       "emptyArchived": "No archived classes.",
-      "cancelBtn": "Cancel"
+      "cancelBtn": "Cancel",
+      "pendingEnrollTitle": "{count, plural, =1 {1 face enrollment needs review} other {# face enrollments need review}}",
+      "pendingEnrollBody": "These students' face captures matched another enrolled student closely enough to need your decision. Until reviewed they cannot start assessments.",
+      "pendingEnrollApprove": "Approve",
+      "pendingEnrollReject": "Reject — ask to re-enroll",
+      "pendingEnrollUnnamed": "Unnamed student"
     },
     "archivedClasses": {
       "heroBadge": "Archive & Audit",
@@ -684,7 +689,12 @@
         "consent_revoked": "Consent revoked",
         "self_recover": "Self-recovered",
         "auto_flag_focus_loss": "Auto-flagged (repeated focus loss)",
-        "auto_flag_verify_silence": "Auto-flagged (verify silence)"
+        "auto_flag_verify_silence": "Auto-flagged (verify silence)",
+        "face_enroll_approved": "Face enrollment approved",
+        "face_enroll_rejected": "Face enrollment rejected",
+        "session_started": "Session started",
+        "session_submitted": "Session submitted",
+        "session_sealed": "Session sealed (window closed)"
       },
       "triggers": {
         "start": "Start",
@@ -767,6 +777,8 @@
       "startingBtn": "Starting…",
       "quizNotOpen": "This quiz isn't open yet — check the opening time.",
       "quizWindowClosed": "This quiz's window has closed — ask your lecturer about it.",
+      "consentRequiredStart": "Biometric consent is required before starting an assessment. Open Face Setup to give consent.",
+      "faceEnrollmentPending": "Your face enrollment is awaiting lecturer review. You can start once it's approved.",
       "cardAwaitingResults": "Awaiting results",
       "cardViewResults": "View results",
       "chipDue": "Due {due}",

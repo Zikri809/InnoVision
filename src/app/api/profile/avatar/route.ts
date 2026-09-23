@@ -8,7 +8,7 @@ import {
   MAX_AVATAR_BYTES,
   isValidAvatarPath,
 } from "@/lib/media/validation";
-import { checkSameOrigin, internalError, notFound, rateLimited } from "@/lib/http";
+import { checkSameOrigin, internalError, notFound, rateLimited, unauthorized } from "@/lib/http";
 import { removeStorageObjects } from "@/lib/media/cleanup";
 
 export const dynamic = "force-dynamic";
@@ -28,12 +28,17 @@ const AVATAR_TTL_SECONDS = 3600;
 
 async function currentAvatarPath(
   supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
 ): Promise<string | null> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("profiles")
     .select("avatar_path")
-    .eq("id", (await supabase.auth.getUser()).data.user?.id ?? "")
+    .eq("id", userId)
     .maybeSingle();
+  if (error) {
+    // A DB blip must not read as "no avatar" — throw so callers 503.
+    throw error;
+  }
   return (data as { avatar_path: string | null } | null)?.avatar_path ?? null;
 }
 
@@ -43,7 +48,7 @@ export async function POST(request: Request) {
 
   const supabase = await createClient();
   const userId = await resolveAnyRoleUser(supabase);
-  if (!userId) return notFound();
+  if (!userId) return unauthorized();
 
   if (!rateLimit(`avatar:${userId}`, AVATAR_RATE)) {
     return rateLimited("Too many avatar updates. Try again later.");
@@ -67,7 +72,13 @@ export async function POST(request: Request) {
   // restricted column (protect_profile_restricted_columns guards only role /
   // consent_given_at). The UPDATE is self-scoped by id; a concurrent avatar
   // change racing this write can only orphan an object (sweep covers it).
-  const previous = await currentAvatarPath(supabase);
+  let previous: string | null = null;
+  try {
+    previous = await currentAvatarPath(supabase, userId);
+  } catch (err) {
+    console.error("avatar previous-path fetch error:", err);
+    return internalError("Could not save the avatar right now.");
+  }
   const { error: updateError } = await supabase
     .from("profiles")
     .update({ avatar_path: path })
@@ -99,13 +110,19 @@ export async function DELETE(request: Request) {
 
   const supabase = await createClient();
   const userId = await resolveAnyRoleUser(supabase);
-  if (!userId) return notFound();
+  if (!userId) return unauthorized();
 
   if (!rateLimit(`avatar:${userId}`, AVATAR_RATE)) {
     return rateLimited("Too many avatar updates. Try again later.");
   }
 
-  const previous = await currentAvatarPath(supabase);
+  let previous: string | null = null;
+  try {
+    previous = await currentAvatarPath(supabase, userId);
+  } catch (err) {
+    console.error("avatar previous-path fetch error:", err);
+    return internalError("Could not remove the avatar right now.");
+  }
 
   const { error: updateError } = await supabase
     .from("profiles")
@@ -135,18 +152,37 @@ export async function GET() {
 
   const {
     data: { user },
+    error: authError,
   } = await supabase.auth.getUser();
-  if (!user) return notFound();
+  if (!user) {
+    // A transport/Auth outage is 503, not a silent 404 — callers must not
+    // cache "no avatar" across an outage.
+    if (authError) {
+      const msg = String(
+        (authError as { message?: unknown }).message ?? authError,
+      ).toLowerCase();
+      const sessionMissing =
+        msg.includes("session missing") ||
+        msg.includes("no session") ||
+        msg.includes("not authenticated");
+      if (!sessionMissing) return internalError("Could not load the avatar right now.");
+    }
+    return unauthorized();
+  }
 
   if (!rateLimit(`avatar-get:${user.id}`, AVATAR_GET_RATE)) {
     return rateLimited("Too many requests. Try again shortly.");
   }
 
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from("profiles")
     .select("avatar_path")
     .eq("id", user.id)
     .maybeSingle();
+  if (profileError) {
+    console.error("avatar profile fetch error:", profileError);
+    return internalError("Could not load the avatar right now.");
+  }
   const path = (profile as { avatar_path: string | null } | null)?.avatar_path;
   if (!path) return notFound();
 

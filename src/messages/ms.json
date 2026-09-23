@@ -324,7 +324,12 @@
       "restoreErrorGeneric": "Gagal memulihkan kelas. Sila cuba lagi.",
       "viewAuditBtn": "Lihat audit",
       "emptyArchived": "Tiada kelas yang diarkibkan.",
-      "cancelBtn": "Batal"
+      "cancelBtn": "Batal",
+      "pendingEnrollTitle": "{count} pendaftaran wajah perlu semakan",
+      "pendingEnrollBody": "Tangkapan wajah pelajar ini sepadan dengan pelajar lain yang sudah didaftarkan, jadi keputusan anda diperlukan. Sebelum disemak, mereka tidak boleh memulakan penilaian.",
+      "pendingEnrollApprove": "Luluskan",
+      "pendingEnrollReject": "Tolak — minta daftar semula",
+      "pendingEnrollUnnamed": "Pelajar tanpa nama"
     },
     "archivedClasses": {
       "heroBadge": "Arkib & Audit",
@@ -684,7 +689,12 @@
         "consent_revoked": "Kebenaran ditarik balik",
         "self_recover": "Pemulihan kendiri",
         "auto_flag_focus_loss": "Auto-tanda (kehilangan fokus berulang)",
-        "auto_flag_verify_silence": "Auto-tanda (pengesahan senyap)"
+        "auto_flag_verify_silence": "Auto-tanda (pengesahan senyap)",
+        "face_enroll_approved": "Pendaftaran wajah diluluskan",
+        "face_enroll_rejected": "Pendaftaran wajah ditolak",
+        "session_started": "Sesi dimulakan",
+        "session_submitted": "Sesi dihantar",
+        "session_sealed": "Sesi dimeterai (tetingkap ditutup)"
       },
       "triggers": {
         "start": "Mula",
@@ -767,6 +777,8 @@
       "startingBtn": "Sedang memulakan.",
       "quizNotOpen": "Kuiz ini belum dibuka — sila semak masa pembukaan.",
       "quizWindowClosed": "Tetingkap kuiz ini telah ditutup — hubungi pensyarah anda.",
+      "consentRequiredStart": "Persetujuan biometrik diperlukan sebelum memulakan penilaian. Buka Persediaan Wajah untuk memberi persetujuan.",
+      "faceEnrollmentPending": "Pendaftaran wajah anda sedang menunggu semakan pensyarah. Anda boleh mula selepas ia diluluskan.",
       "cardAwaitingResults": "Menunggu keputusan",
       "cardViewResults": "Lihat keputusan",
       "chipDue": "Tamat {due}",

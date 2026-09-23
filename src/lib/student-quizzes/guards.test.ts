@@ -14,6 +14,7 @@ type QuizRow = Record<string, unknown>;
  */
 function makeStub(opts: {
   user?: { id: string } | null;
+  authError?: { message: string } | null;
   profile?: ProfileRow | null;
   profileError?: boolean;
   quiz?: QuizRow | null;
@@ -22,7 +23,7 @@ function makeStub(opts: {
   const calls: string[] = [];
   const stub = {
     auth: {
-      getUser: async () => ({ data: { user: opts.user ?? null }, error: null }),
+      getUser: async () => ({ data: { user: opts.user ?? null }, error: opts.authError ?? null }),
     },
     from(table: string) {
       calls.push(table);
@@ -73,6 +74,20 @@ describe("requireAnyUser", () => {
 
   it("unauthenticated → 401 unauthorized", async () => {
     const { stub } = makeStub({ user: null });
+    const result = await requireAnyUser(stub);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.response.status).toBe(401);
+  });
+
+  it("Auth outage (getUser transport error, no user) → 503, not 401", async () => {
+    const { stub } = makeStub({ user: null, authError: { message: "fetch failed" } });
+    const result = await requireAnyUser(stub);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.response.status).toBe(503);
+  });
+
+  it("missing session (Auth session missing) stays 401", async () => {
+    const { stub } = makeStub({ user: null, authError: { message: "Auth session missing!" } });
     const result = await requireAnyUser(stub);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.response.status).toBe(401);

@@ -90,18 +90,38 @@ async function readCappedBytes(
   let total = 0;
   try {
     for (;;) {
+      // NOTE: no `request.signal.aborted` pre-check here. An already-aborted
+      // signal with a fully-buffered body must still parse — downstream
+      // routes own cancellation (e.g. regenerate returns 409 `cancelled`,
+      // pinned by the I-A4c test). An abort that actually interrupts the
+      // stream surfaces as a read() rejection below.
       const { done, value } = await reader.read();
       if (done) break;
       total += value.byteLength;
       if (total > maxBytes) {
-        await reader.cancel();
+        try {
+          await reader.cancel();
+        } catch {
+          /* cancel is best-effort */
+        }
         return { ok: false, response: payloadTooLarge("Request body too large.") };
       }
       chunks.push(value);
     }
   } catch {
     // Stream died mid-read (aborted / malformed framing) — never a 500.
+    try {
+      await reader.cancel();
+    } catch {
+      /* cancel is best-effort */
+    }
     return { ok: false, response: invalidJson() };
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      /* lock may already be released after cancel */
+    }
   }
   const bytes = new Uint8Array(total);
   let offset = 0;
@@ -186,12 +206,22 @@ export async function readCappedFormData(
     },
   });
   try {
-    const capped = new Request(request.url, {
+    const init: RequestInit & { duplex: "half" } = {
       method: request.method,
       headers: request.headers,
       body: stream.pipeThrough(counting),
       duplex: "half",
-    } as RequestInit & { duplex: "half" });
+    };
+    // Propagate a LIVE client abort signal so a disconnected client stops the
+    // multipart parse instead of leaving work running. A signal that is
+    // ALREADY aborted is deliberately NOT attached: `new Request` throws on
+    // it, which would turn a pre-aborted-but-buffered body into a 400 before
+    // route-level cancellation handling runs (same contract as
+    // readCappedBytes above).
+    if (request.signal && !request.signal.aborted) {
+      init.signal = request.signal as AbortSignal;
+    }
+    const capped = new Request(request.url, init);
     return { ok: true, form: await capped.formData() };
   } catch (err) {
     if (err instanceof Error && err.message === "body_too_large") {

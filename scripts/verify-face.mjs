@@ -8,13 +8,16 @@
 //   D10  — face_checks owner insert visible / other → not_owner; direct INSERT
 //          denied; student B SELECT of A's rows → 0 rows via RLS
 //   D11  — enroll for self; others unchanged; re-enroll audit; first-time
-//          mid-active allowed; revoke→re-enroll while live → live_assessment
+//          enroll WITHOUT a live session allowed; enroll while live →
+//          live_assessment (audit-5 M3, no first-time carve-out)
 //   D13  — audit rows for unlock / exempt / self-recover / consent_revoked
 //   D14  — verify nonce rotates; old-nonce replay → nonce_mismatch
 //   D-col-priv — direct PATCH profiles.face_enrollment_status → blocked
 //   Plus new pins: consent gate; direct face_enrollment_status UPDATE blocked;
-//   duplicate-detected enrollment → pending_review; pending_review verify →
-//   not_enrolled; lecturer reject_face_enrollment → status null + re-enroll;
+//   duplicate-detected enrollment → pending_review; pending_review start →
+//   face_enrollment_pending (audit-5 M2); lecturer reject_face_enrollment →
+//   status null + re-enroll; approve_face_enrollment of a non-pending →
+//   not_pending (audit-5 M4);
 //   multi-frame majority vote (2-of-3 pass / 1-of-3 fail / lookalike-top1
 //   still passes — the margin rule is GONE as of 0020); submit from flagged →
 //   session_not_active + status unchanged; unlock/exempt/self-recover of
@@ -323,20 +326,23 @@ async function main() {
     return data.verify_nonce;
   }
 
-  // ── D11a: enroll requires consent → consent_required ───────────
+  // ── D11a: consent gates enroll AND assessment start (audit-5 M2) ──
   {
-    const { sessionId } = await makeLiveAssessment("D11a No Consent");
+    // M2: the RPC now refuses an assessment start without consent (the gate
+    // used to live only in page props — a direct caller started unverified).
+    const quiz = await makeQuiz({ title: "D11a No Consent", mode: "assessment" });
+    await addQuestions(quiz.id);
+    await publish(quiz.id);
+    const { data: startNoConsent } = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
+    record("D11a start_quiz_session without consent → consent_required",
+      startNoConsent?.error === "consent_required", JSON.stringify(startNoConsent));
+
+    // Enroll without consent → consent_required (unchanged; no session needed).
     const { data } = await clientS1.rpc("enroll_face", { p_samples: enrollSamples(1) });
     record("D11a enroll without consent → consent_required",
       data?.error === "consent_required", JSON.stringify(data));
-    const { data: verifyData } = await clientS1.rpc("record_face_check", {
-      p_session_id: sessionId,
-      ...matchProbe(studentS1.id),
-      p_trigger: "start",
-      p_nonce: "00000000-0000-4000-8000-000000000000",
-    });
-    record("D14b verify without consent → consent_required",
-      verifyData?.error === "consent_required", JSON.stringify(verifyData));
+    // Verify without consent is pinned at the revoke block below (a session
+    // can no longer be created without consent, so this is the only path).
   }
 
   // ── Set consent for S1 (service-role, as register flow does) ───
@@ -378,25 +384,56 @@ async function main() {
       Boolean(svc.error) && svc.error.message?.includes("not_authorized"),
       svc.error?.message ?? JSON.stringify(svc.data));
 
-    // FIRST-TIME enrollment while a live assessment exists is ALLOWED (breaks
-    // the start-before-enrolling deadlock); ever-enrolled is still false here.
-    const enroll = await clientS1.rpc("enroll_face", { p_samples: enrollSamples(1) });
-    record("D11b first-time enroll_face (mid-active) → ok + enrolled",
-      enroll.data?.ok === true && enroll.data?.status === "enrolled",
-      JSON.stringify(enroll.data));
+    // audit-5 M3: enrollment is blocked while ANY live assessment session
+    // exists — the previous form allowed a never-enrolled student to bind an
+    // arbitrary face mid-quiz (start unverified via the pre-M2 hole → enroll
+    // a different person's face → verify as them). S3 has no enrollment yet
+    // and no live session, so a live session can be minted (M2 allows it:
+    // consent is set), and the enroll that follows must be refused.
+    const { sessionId: m3Session } = await makeLiveAssessment("D11b M3 Live", clientS3);
+    const blockedEnroll = await clientS3.rpc("enroll_face", { p_samples: enrollSamples(1) });
+    record("D11b never-enrolled + live assessment → live_assessment (audit-5 M3)",
+      blockedEnroll.data?.error === "live_assessment", JSON.stringify(blockedEnroll.data));
 
-    // A duplicate detected at enroll (internal check: the submitted samples
-    // are cosine 1.0 against S1's STORED samples) → pending_review.
-    const dupEnroll = await clientS3.rpc("enroll_face", { p_samples: enrollSamples(1) });
+    // Close S3's session → first-time enrollment is allowed (the honest path).
+    await clientS3.rpc("submit_session", { p_session_id: m3Session });
+    const enroll3 = await clientS3.rpc("enroll_face", { p_samples: enrollSamples(1) });
+    record("D11b first-time enroll (no live session) → ok + enrolled",
+      enroll3.data?.ok === true && enroll3.data?.status === "enrolled",
+      JSON.stringify(enroll3.data));
+
+    // A duplicate detected at enroll (S1 submits S3's stored samples → cosine
+    // 1.0 against another student) → pending_review. S1 has no live session.
+    const dupEnroll = await clientS1.rpc("enroll_face", { p_samples: enrollSamples(1) });
     record("D11b duplicate-detected enroll → pending_review",
       dupEnroll.data?.ok === true && dupEnroll.data?.status === "pending_review",
       JSON.stringify(dupEnroll.data) + " err=" + JSON.stringify(dupEnroll.error));
 
-    // RE-ENROLL while a live assessment exists → live_assessment (the
-    // ever-enrolled marker survives; a revoke→re-enroll face swap is blocked).
+    // audit-5 M2: a pending_review student cannot START an assessment at all
+    // (the gate now lives in the RPC; this replaces the old "verify on a
+    // pending_review session → not_enrolled" fixture, which M2 makes
+    // unreachable — no session can exist for a pending_review student).
+    const pendQuiz = await makeQuiz({ title: "D11b Pending Start", mode: "assessment" });
+    await addQuestions(pendQuiz.id);
+    await publish(pendQuiz.id);
+    const startPending = await clientS1.rpc("start_quiz_session", { p_quiz_id: pendQuiz.id });
+    record("D11b pending_review start → face_enrollment_pending (audit-5 M2)",
+      startPending.data?.error === "face_enrollment_pending", JSON.stringify(startPending.data));
+
+    // Lecturer rejects the pending_review → status null → student re-enrolls.
+    const reject = await clientA.rpc("reject_face_enrollment", { p_student_id: studentS1.id });
+    const s1Profile = (await clientS1.from("profiles").select("face_enrollment_status").eq("id", studentS1.id).single()).data;
     const reEnroll = await clientS1.rpc("enroll_face", { p_samples: enrollSamples(2) });
+    record("D11b lecturer rejects pending_review → null + re-enroll → enrolled",
+      reject.data?.ok === true && s1Profile.face_enrollment_status === null &&
+        reEnroll.data?.ok === true && reEnroll.data?.status === "enrolled",
+      `reject=${JSON.stringify(reject.data)} status=${s1Profile.face_enrollment_status} re-enroll=${JSON.stringify(reEnroll.data)}`);
+
+    // RE-ENROLL while a live assessment exists → live_assessment.
+    const { sessionId: liveSession } = await makeLiveAssessment("D11b Live");
+    const reEnrollLive = await clientS1.rpc("enroll_face", { p_samples: enrollSamples(3) });
     record("D11b re-enroll while live → live_assessment",
-      reEnroll.data?.error === "live_assessment", JSON.stringify(reEnroll.data));
+      reEnrollLive.data?.error === "live_assessment", JSON.stringify(reEnrollLive.data));
 
     // Self-recover of a COMPLETED session → session_not_active.
     const { sessionId: doneSession } = await makeLiveAssessment("D11b Done");
@@ -405,29 +442,14 @@ async function main() {
     record("D11b self-recover of completed → session_not_active",
       doneRecover.data?.error === "session_not_active", JSON.stringify(doneRecover.data));
 
-    // pending_review student verify → not_enrolled (they are not "enrolled").
-    const { sessionId: pendSession } = await makeLiveAssessment("PendingReview", clientS3);
-    const pendNonce = await currentNonce(clientS3, pendSession);
-    const pendVerify = await clientS3.rpc("record_face_check", {
-      p_session_id: pendSession,
-      ...matchProbe(studentS3.id),
-      p_trigger: "start",
-      p_nonce: pendNonce,
-    });
-    record("D11b pending_review student verify → not_enrolled",
-      pendVerify.data?.error === "not_enrolled", JSON.stringify(pendVerify.data));
+    // audit-5 M4: approve of a non-pending enrollment → not_pending (never a
+    // silent 'enrolled' write on a student who was already adjudicated).
+    const approveNotPending = await clientA.rpc("approve_face_enrollment", { p_student_id: studentS1.id });
+    record("M4 approve of a non-pending enrollment → not_pending",
+      approveNotPending.data?.error === "not_pending", JSON.stringify(approveNotPending.data));
 
-    // Lecturer rejects the pending_review → status null → student re-enrolls.
-    const reject = await clientA.rpc("reject_face_enrollment", { p_student_id: studentS3.id });
-    const s3Profile = (await clientS3.from("profiles").select("face_enrollment_status").eq("id", studentS3.id).single()).data;
-    // Close the pending-review session so the ever-enrolled gate doesn't block
-    // the clean re-enrollment (a live assessment blocks re-enroll by design).
-    await clientS3.rpc("submit_session", { p_session_id: pendSession });
-    const reEnroll3 = await clientS3.rpc("enroll_face", { p_samples: enrollSamples(3) });
-    record("D11b lecturer rejects pending_review → null + re-enroll → enrolled",
-      reject.data?.ok === true && s3Profile.face_enrollment_status === null &&
-        reEnroll3.data?.ok === true && reEnroll3.data?.status === "enrolled",
-      `reject=${JSON.stringify(reject.data)} status=${s3Profile.face_enrollment_status} re-enroll=${JSON.stringify(reEnroll3.data)}`);
+    // Close S1's live session so the rest of the run has a clean slate.
+    await clientS1.rpc("submit_session", { p_session_id: liveSession });
   }
 
   // ── D10: face_checks RLS + direct INSERT denied ─────────────────

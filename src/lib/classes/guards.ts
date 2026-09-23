@@ -23,9 +23,26 @@ export async function requireUser(
 ): Promise<AuthResult> {
   const {
     data: { user },
+    error: authError,
   } = await supabase.auth.getUser();
 
   if (!user) {
+    // Distinguish "no session" (401) from a backend outage (503). Supabase
+    // reports a missing session with an "Auth session missing"-shaped error;
+    // any other error with no user means Auth/Gotrue is unreachable — that
+    // must not read as unauthenticated, or outage retries look like logouts.
+    if (authError) {
+      const msg = String(
+        (authError as { message?: unknown }).message ?? authError,
+      ).toLowerCase();
+      const sessionMissing =
+        msg.includes("session missing") ||
+        msg.includes("no session") ||
+        msg.includes("not authenticated");
+      if (!sessionMissing) {
+        return { ok: false, response: profileUnavailable() };
+      }
+    }
     return { ok: false, response: unauthorized() };
   }
 

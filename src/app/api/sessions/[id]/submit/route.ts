@@ -12,6 +12,7 @@ import {
   rateLimited,
   unauthorized,
 } from "@/lib/http";
+import { logError } from "@/lib/log";
 
 export const dynamic = "force-dynamic";
 
@@ -60,7 +61,11 @@ export async function POST(_request: Request, { params }: Params) {
   });
 
   if (error) {
-    console.error("submit_session error:", error);
+    logError("submit.submit_session", error, {
+      subsystem: "quiz-play",
+      errorCode: "submit_failed",
+      sessionId: id,
+    });
     return internalError("Could not submit the quiz right now.");
   }
 
@@ -94,6 +99,11 @@ export async function POST(_request: Request, { params }: Params) {
     );
   }
 
-  console.error("submit_session unexpected payload:", payload);
+  logError("submit.submit_session_unexpected", undefined, {
+    subsystem: "quiz-play",
+    errorCode: "unexpected_payload",
+    sessionId: id,
+    payload,
+  });
   return internalError("Could not submit the quiz right now.");
 }

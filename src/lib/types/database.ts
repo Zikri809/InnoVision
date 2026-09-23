@@ -1727,6 +1727,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      approve_face_enrollment: { Args: { p_student_id: string }; Returns: Json }
       backfill_notification_state: { Args: never; Returns: Json }
       can_student_view_quiz: { Args: { p_quiz_id: string }; Returns: boolean }
       check_mark_spend: { Args: { p_quiz: string }; Returns: Json }
@@ -1747,6 +1748,7 @@ export type Database = {
       flag_verify_silent_sessions: { Args: never; Returns: number }
       get_verify_proof_secret: { Args: never; Returns: string }
       grant_face_consent: { Args: never; Returns: Json }
+      integrity_snapshot: { Args: { p_window_hours?: number }; Returns: Json }
       is_enrolled_in_class: { Args: { p_class_id: string }; Returns: boolean }
       is_lecturer: { Args: never; Returns: boolean }
       is_lecturer_of_class: { Args: { p_class_id: string }; Returns: boolean }
@@ -1763,6 +1765,7 @@ export type Database = {
         Returns: boolean
       }
       join_class: { Args: { code: string }; Returns: Json }
+      list_pending_face_enrollments: { Args: never; Returns: Json }
       mark_notifications_read: { Args: { p_ids: string[] }; Returns: Json }
       mark_notifications_read_before: { Args: { p_seq: number }; Returns: Json }
       override_answer_mark: {
@@ -1876,6 +1879,10 @@ export type Database = {
         }
       }
       self_recover_session: { Args: { p_session_id: string }; Returns: Json }
+      session_verify_silent: {
+        Args: { p_session_id: string }
+        Returns: boolean
+      }
       start_quiz_session: { Args: { p_quiz_id: string }; Returns: Json }
       student_pending_count: { Args: { p_session_id: string }; Returns: Json }
       student_quiz_share_action: {

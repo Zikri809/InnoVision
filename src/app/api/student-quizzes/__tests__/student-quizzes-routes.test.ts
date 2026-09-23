@@ -465,6 +465,23 @@ describe("play routes — any authenticated user (D-SQ6)", () => {
     expect((await res.json()).is_correct).toBe(true);
   });
 
+  it("answer: malformed RPC shape (truthy primitive) folds into 404, never a 200 echo", async () => {
+    const ctx = sharedContext();
+    fakeHolder.current = ctx.client;
+    asUser(ctx.client, OTHER_STUDENT, "student");
+    const { answer } = await importAll();
+
+    // A contract-violating RPC return must not be echoed as a success body.
+    ctx.client.rpcResult = { data: 42 as unknown as null, error: null };
+    try {
+      const res = await answer.POST(req({ questionId: ctx.q1, selectedIndex: 1 }));
+      expect(res.status).toBe(404);
+      expect((await res.json()).error).toBe("unavailable");
+    } finally {
+      ctx.client.rpcResult = { data: null, error: null };
+    }
+  });
+
   it("answer rate limit (60/min) trips on the 61st call", async () => {
     const ctx = sharedContext();
     fakeHolder.current = ctx.client;

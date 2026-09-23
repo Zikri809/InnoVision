@@ -51,6 +51,14 @@ describe("resolveNotificationLink", () => {
     });
   });
 
+  it("student_joined without class_id falls back to the class list (never a trailing-slash non-route)", () => {
+    // Defensive: the trigger always builds class_id, but a historical/manual
+    // row must never resolve to /lecturer/classes/.
+    expect(resolveNotificationLink("student_joined", {})).toEqual({
+      href: "/lecturer/classes",
+    });
+  });
+
   it("every notification type resolves to some link (exhaustiveness)", () => {
     for (const type of NOTIFICATION_TYPES) {
       const link = resolveNotificationLink(type, payload);

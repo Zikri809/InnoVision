@@ -30,6 +30,8 @@ const adminState: {
   throwOnClient: boolean;
   /** How many times the service-role cron_health() RPC was invoked. */
   cronRpcCalls: number;
+  /** audit-5 O2/O5: how many times integrity_snapshot() was invoked. */
+  integrityRpcCalls: number;
   /**
    * Set when `rpc` was invoked with the wrong receiver. The real postgrest
    * client stores its transport on `this`, so a detached call throws
@@ -37,6 +39,8 @@ const adminState: {
    * the equivalent condition instead of relying on a message match.
    */
   detachedRpcCalls: number;
+  /** audit-5 O2/O5: the integrity_snapshot payload (unknown name → cron). */
+  integrity: unknown;
 } = {
   dbError: null,
   cron: null,
@@ -44,6 +48,17 @@ const adminState: {
   throwOnClient: false,
   cronRpcCalls: 0,
   detachedRpcCalls: 0,
+  integrityRpcCalls: 0,
+  integrity: {
+    windowHours: 24,
+    flags24h: 0,
+    flagsByAction: {},
+    flaggedNow: 0,
+    sealed: 0,
+    submitted: 0,
+    started: 0,
+    pendingMarks: 0,
+  },
 };
 
 /**
@@ -55,8 +70,11 @@ class FakeAdminClient {
   /** Stands in for the postgrest transport the real client hangs off `this`. */
   private readonly rest = {
     rpc: (name: string) => {
+      if (name === "integrity_snapshot") {
+        adminState.integrityRpcCalls += 1;
+        return Promise.resolve({ data: adminState.integrity, error: null });
+      }
       adminState.cronRpcCalls += 1;
-      void name;
       return Promise.resolve({ data: adminState.cron, error: adminState.cronError });
     },
   };
@@ -99,6 +117,15 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: () => sessionHolder.current,
 }));
 
+/**
+ * audit-5 M7: the sidecar probe. Mocked so the route tests never touch the
+ * network; `faceHealth` is flipped per-test.
+ */
+const faceState: { available: boolean } = { available: true };
+vi.mock("@/lib/face/server/insightface-client", () => ({
+  health: () => Promise.resolve(faceState.available),
+}));
+
 import { GET } from "@/app/api/health/route";
 import { _resetRateLimiter } from "@/lib/classes/rate-limit";
 
@@ -134,6 +161,7 @@ beforeEach(() => {
   adminState.cronRpcCalls = 0;
   adminState.detachedRpcCalls = 0;
   adminState.cron = healthyCron();
+  faceState.available = true;
   sessionHolder.current = new FakeSupabase();
 });
 
@@ -150,8 +178,11 @@ describe("GET /api/health — anonymous caller (gate S6)", () => {
     // now authenticate as a lecturer.
     expect("cron" in body).toBe(false);
     expect(body.cron).toBeUndefined();
+    // audit-5 O2/O5: the integrity snapshot is lecturer-only too.
+    expect("integrity" in body).toBe(false);
     // The RPC is skipped entirely for anon (no service-role round trip).
     expect(adminState.cronRpcCalls).toBe(0);
+    expect(adminState.integrityRpcCalls).toBe(0);
     expect(adminState.detachedRpcCalls).toBe(0);
     // The liveness fields an uptime monitor needs are still present.
     expect(typeof body.uptimeSec).toBe("number");
@@ -169,7 +200,9 @@ describe("GET /api/health — anonymous caller (gate S6)", () => {
     expect(res.status).toBe(200);
     expect(body.ok).toBe(true);
     expect("cron" in body).toBe(false);
+    expect("integrity" in body).toBe(false);
     expect(adminState.cronRpcCalls).toBe(0);
+    expect(adminState.integrityRpcCalls).toBe(0);
   });
 
   it("degrades to no-cron (not a 500) when the profile read fails", async () => {
@@ -214,6 +247,10 @@ describe("GET /api/health — authenticated lecturer (gate S6)", () => {
     expect(body.cron.neverRan).toEqual([]);
     expect(body.cron.missing).toEqual([]);
     expect(adminState.cronRpcCalls).toBe(1);
+    // audit-5 O2/O5: the integrity snapshot rides the same lecturer-only gate.
+    expect(adminState.integrityRpcCalls).toBe(1);
+    expect(body.integrity.flaggedNow).toBe(0);
+    expect(body.integrity.flags24h).toBe(0);
     // Still no secrets in the lecturer payload.
     const raw = JSON.stringify(body);
     expect(raw).not.toMatch(/service_role|supabase\.co|eyJ/);
@@ -266,6 +303,27 @@ describe("GET /api/health — authenticated lecturer (gate S6)", () => {
     expect(body.ok).toBe(true);
     expect(body.cron.ok).toBe(false);
     expect(body.cron.degraded).toBe(true);
+  });
+});
+
+describe("GET /api/health — sidecar probe (audit-5 M7)", () => {
+  it("reports face.available for an ANONYMOUS caller (uptime-monitor reachable)", async () => {
+    faceState.available = true;
+    const res = await GET(req());
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.face).toEqual({ available: true });
+  });
+
+  it("reports face.available:false when the sidecar is down, without failing the probe", async () => {
+    faceState.available = false;
+    const res = await GET(req());
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.face.available).toBe(false);
+    // Still no cron topology for anon.
+    expect("cron" in body).toBe(false);
   });
 });
 

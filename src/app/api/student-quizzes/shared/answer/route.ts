@@ -72,10 +72,12 @@ export async function POST(request: Request) {
 
   if (
     !data ||
-    typeof data === "object" &&
-      "error" in (data as Record<string, unknown>)
+    typeof data !== "object" ||
+    "error" in (data as Record<string, unknown>)
   ) {
-    // Deleted / unshared / foreign / out-of-bounds — one indistinguishable shape.
+    // Deleted / unshared / foreign / out-of-bounds / malformed shape — one
+    // indistinguishable shape. The non-object arm mirrors the join route's
+    // hardening: a truthy primitive must never fall through to a 200 echo.
     return NextResponse.json(
       { error: "unavailable", message: "This practice quiz is no longer available." },
       { status: 404 },

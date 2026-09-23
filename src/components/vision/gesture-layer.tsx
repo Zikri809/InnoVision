@@ -657,7 +657,11 @@ export function GestureLayer({
       trackerRef.current?.stop();
       trackerRef.current = null;
     };
-  }, []);
+    // `enabled` flips (quiz flag off→on, or a re-arm) must re-boot: a mount-only
+    // [] left the layer stuck in `off` when the flag arrived late. The cleanup
+    // above stops the previous tracker, and bootId guards late resolutions, so
+    // re-running on flip is StrictMode-safe.
+  }, [enabled]);
 
   // "3-2-1-SCAN" countdown on question transitions (after the first question),
   // only while gestures are active. Keyed on `questionId` (not optionCount) so
@@ -918,12 +922,16 @@ export function GestureLayer({
         <div className="mx-auto flex w-full max-w-2xl min-w-0 flex-col">
           {/* Not-armed PIP is a real button (R3-A S2): keyboard users get
               the same self-check affordance; Escape collapses the expanded
-              card. Collapsed (polish C1) it is a ~24px status dot â€” the
+              card. Collapsed (polish C1) it is a ~24px status dot — the
               video/canvas stay mounted inside and are merely clipped. The
-              aria-hidden video/canvas remain decorative children. */}
+              aria-hidden video/canvas remain decorative children. While armed
+              the PIP is glance-only: `disabled` (not just pointer-events-none,
+              which blocks mouse only) so Tab+Enter cannot activate an
+              affordance togglePip would no-op anyway. */}
           <button
             type="button"
             onClick={togglePip}
+            disabled={armed}
             aria-label={pipExpanded ? t("pipCollapse") : t("pipExpand")}
             aria-expanded={pipExpanded}
             className={videoContainerClass}

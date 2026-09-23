@@ -82,11 +82,17 @@ export async function GET(_request: Request, { params }: Params) {
 
   // Lecturer path via lecturer_session_view (is_lecturer_of_quiz). The SELECT
   // omits verify_nonce entirely.
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from("profiles")
     .select("role")
     .eq("id", user.id)
     .maybeSingle();
+  if (profileError) {
+    // A DB blip here must not read as "not owned" (404) — surface 503 so the
+    // client retries instead of rendering a dead screen.
+    console.error("Session profile fetch error:", profileError);
+    return internalError("Could not load the session right now.");
+  }
   if (profile?.role === "lecturer") {
     const lect = await supabase
       .from("lecturer_session_view")

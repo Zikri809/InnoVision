@@ -441,6 +441,62 @@ describe("avatar route", () => {
     expect(client.tables["profiles"]![0].avatar_path).toBeNull();
     expect(storageMock.remove).toHaveBeenCalled();
   });
+
+  // ── WIP hardening: 503-vs-401/404 correctness (no silent "no avatar") ──
+  it("GET with a transport auth error → 503, not a cached 404", async () => {
+    const client = userCtx();
+    client.authError = { message: "network unreachable" };
+    const { avatar } = await importMediaRoutes();
+    const res = await avatar.GET();
+    expect(res.status).toBe(503);
+    await expect(res.json()).resolves.toMatchObject({ error: "internal" });
+  });
+
+  it("GET with a session-missing auth error → 401 (not an outage)", async () => {
+    const client = userCtx();
+    client.authError = { message: "Auth session missing!" };
+    const { avatar } = await importMediaRoutes();
+    const res = await avatar.GET();
+    expect(res.status).toBe(401);
+    await expect(res.json()).resolves.toMatchObject({ error: "unauthorized" });
+  });
+
+  it("GET when the profile read errors → 503", async () => {
+    userCtx();
+    const client = fakeHolder.current!;
+    client.selectError = "connection reset";
+    client.selectErrorTable = "profiles";
+    // GET reads the profile directly (it resolves auth via getUser, not
+    // requireUser), so its OWN read is the first profiles select.
+    client.selectErrorAfter = 0;
+    const { avatar } = await importMediaRoutes();
+    const res = await avatar.GET();
+    expect(res.status).toBe(503);
+  });
+
+  it("POST when the previous-path read errors → 503 (never a false success)", async () => {
+    userCtx();
+    const client = fakeHolder.current!;
+    client.selectError = "connection reset";
+    client.selectErrorTable = "profiles";
+    client.selectErrorAfter = 1;
+    const { avatar } = await importMediaRoutes();
+    const res = await avatar.POST(multipart(PNG));
+    expect(res.status).toBe(503);
+  });
+
+  it("DELETE when the previous-path read errors → 503 (column untouched)", async () => {
+    const client = userCtx();
+    (client.tables["profiles"]![0] as { avatar_path: string }).avatar_path =
+      `${STUDENT_ID}/avatar.png`;
+    client.selectError = "connection reset";
+    client.selectErrorTable = "profiles";
+    client.selectErrorAfter = 1;
+    const { avatar } = await importMediaRoutes();
+    const res = await avatar.DELETE(new Request("http://localhost/api/x", { method: "DELETE" }));
+    expect(res.status).toBe(503);
+    expect(client.tables["profiles"]![0].avatar_path).toBe(`${STUDENT_ID}/avatar.png`);
+  });
 });
 
 describe("student AI generate route", () => {

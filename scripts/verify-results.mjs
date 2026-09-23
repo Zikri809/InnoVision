@@ -113,6 +113,12 @@ async function createUser(email) {
   });
   if (error) throw error;
   createdUsers.push(data.user.id);
+  // audit-5 M2: start_quiz_session requires biometric consent for assessment
+  // mode (the register flow records it; harness users bypass register).
+  await admin
+    .from("profiles")
+    .update({ consent_given_at: new Date().toISOString() })
+    .eq("id", data.user.id);
   return data.user;
 }
 

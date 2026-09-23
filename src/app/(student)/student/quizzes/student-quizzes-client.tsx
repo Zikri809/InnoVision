@@ -114,6 +114,18 @@ export function StudentQuizzesClient({
         return;
       }
 
+      // audit-5 M2: the assessment face-eligibility gate. Both are 403 client
+      // errors, never an outage — show the actionable copy instead of the raw
+      // code the fallback would render.
+      if (res.status === 403 && body.error === "consent_required") {
+        setError(t("consentRequiredStart"));
+        return;
+      }
+      if (res.status === 403 && body.error === "face_enrollment_pending") {
+        setError(t("faceEnrollmentPending"));
+        return;
+      }
+
       setError(body.message ?? body.error ?? tCommon("errorGeneric"));
     } catch {
       setError(tCommon("errorGeneric"));

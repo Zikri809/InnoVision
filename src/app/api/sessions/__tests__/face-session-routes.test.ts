@@ -129,6 +129,36 @@ describe("pause — server-side hand-loss pause", () => {
     expect(res.status).toBe(200);
   });
 
+  it("already paused + duplicate focus signal → 200 WITHOUT a second strike (no double-count)", async () => {
+    // Two strikes recorded, session paused. A duplicate focus_lost for the
+    // SAME recorded episode (second tab / retry / cross-pod replay) must not
+    // bump the counter to 3 and flag the student.
+    const ctx = assessmentContext({ status: "paused" });
+    const session = ctx.client.tables["quiz_sessions"]!.find((s) => s.id === SESSION_ID)!;
+    session.focus_pause_count = 2;
+    const res = await pause.POST(req({ reason: "focus_lost" }), {
+      params: Promise.resolve({ id: SESSION_ID }),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).sessionStatus).toBe("paused");
+    expect(session.focus_pause_count).toBe(2);
+    expect(session.status).toBe("paused");
+  });
+
+  it("genuine new episode after recovery still strikes (recover → active → pause)", async () => {
+    // The coalesce above must not swallow real episodes: recovery returns the
+    // session to active, so the next pause re-enters the RPC and counts.
+    const ctx = assessmentContext({ status: "active" });
+    const session = ctx.client.tables["quiz_sessions"]!.find((s) => s.id === SESSION_ID)!;
+    session.focus_pause_count = 2;
+    const res = await pause.POST(req({ reason: "focus_lost" }), {
+      params: Promise.resolve({ id: SESSION_ID }),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).sessionStatus).toBe("flagged");
+    expect(session.focus_pause_count).toBe(3);
+  });
+
   it("flagged → 409 session_not_active", async () => {
     assessmentContext({ status: "flagged" });
     const res = await pause.POST(req(), { params: Promise.resolve({ id: SESSION_ID }) });
@@ -397,6 +427,20 @@ describe("incident upload � ring-buffer clip route", () => {
     fakeHolder.current!.setUser("00000000-0000-4000-8000-0000000000ee", "student");
     const res = await incident.POST(incidentReq(), { params: Promise.resolve({ id: SESSION_ID }) });
     expect(res.status).toBe(404);
+  });
+
+  it("session probe DB error → 503 (never a 404), no storage write", async () => {
+    const ctx = assessmentContext();
+    ctx.client.selectError = "connection reset";
+    ctx.client.selectErrorTable = "quiz_sessions";
+    try {
+      const res = await incident.POST(incidentReq(), { params: Promise.resolve({ id: SESSION_ID }) });
+      expect(res.status).toBe(503);
+      expect(adminMock.storage.from).not.toHaveBeenCalled();
+    } finally {
+      ctx.client.selectError = null;
+      ctx.client.selectErrorTable = null;
+    }
   });
 
   it("declared content-length over the cap ? 413 BEFORE buffering the body", async () => {

@@ -2,6 +2,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { rateLimit } from "@/lib/classes/rate-limit";
 import { clientIpFromHeaders } from "@/lib/request-ip";
+import * as insightface from "@/lib/face/server/insightface-client";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +12,15 @@ export const dynamic = "force-dynamic";
  * Reports, with NO secrets and no connection strings:
  *   - `ok`          process liveness (always true when the handler runs)
  *   - `db.reachable` + latency, from a cheap `select 1`-equivalent
+ *   - `face.available` — audit-5 M7: the InsightFace sidecar probe. Before
+ *                   this, the ONLY sidecar health surface was
+ *                   `/api/face/health`, which is student-authenticated and
+ *                   rate-limited (unpollable by an uptime monitor), so a
+ *                   silent sidecar death surfaced only through
+ *                   student-driven outage notifications. Anonymous by
+ *                   design, like the rest of this probe. NEVER fails the
+ *                   endpoint (the DB probe owns readiness); a monitor alerts
+ *                   on `face.available === false`.
  *   - `cron.*`      ONLY for an authenticated LECTURER: each pg_cron schedule
  *                   named `innovision-*`, its last status/start time, and
  *                   whether it has EVER run — the surface R2-FACE-F2 lacked
@@ -97,6 +107,48 @@ type CronSection = {
   missing: string[];
   degraded: boolean;
 };
+
+/**
+ * audit-5 O2/O5: a small integrity snapshot (flag rate, seals, submissions,
+ * pending AI marks) sourced from `integrity_snapshot` (0065). Lecturer-only —
+ * it rides the same service-role gate as the cron section. Any failure is
+ * NON-fatal: the field is simply omitted rather than degrading the probe.
+ */
+type IntegritySnapshot = {
+  windowHours: number;
+  flags24h: number;
+  flagsByAction: Record<string, number>;
+  flaggedNow: number;
+  sealed: number;
+  submitted: number;
+  started: number;
+  pendingMarks: number;
+};
+
+async function collectIntegritySnapshot(): Promise<IntegritySnapshot | undefined> {
+  try {
+    const admin = createAdminClient();
+    const { data, error } = await admin.rpc("integrity_snapshot", { p_window_hours: 24 });
+    if (error || !data || typeof data !== "object") {
+      if (error) console.warn("[api/health] integrity_snapshot unavailable:", error.message);
+      return undefined;
+    }
+    const d = data as Record<string, unknown>;
+    return {
+      windowHours: Number(d.windowHours ?? 24),
+      flags24h: Number(d.flags24h ?? 0),
+      flagsByAction: (d.flagsByAction ?? {}) as Record<string, number>,
+      flaggedNow: Number(d.flaggedNow ?? 0),
+      sealed: Number(d.sealed ?? 0),
+      submitted: Number(d.submitted ?? 0),
+      started: Number(d.started ?? 0),
+      pendingMarks: Number(d.pendingMarks ?? 0),
+    };
+  } catch (err) {
+    console.warn("[api/health] integrity_snapshot call failed:", err);
+    return undefined;
+  }
+}
 
 /**
  * Service-role RPC for cron state (0047 §8; typed as `cron_health` in the
@@ -238,13 +290,21 @@ export async function GET(request: Request) {
   // the DB probe above; see the header note on the exact request count).
   const isLecturer = await callerIsLecturer();
   const cron = isLecturer ? await collectCronHealth() : undefined;
+  const integrity = isLecturer ? await collectIntegritySnapshot() : undefined;
+
+  // audit-5 M7: sidecar liveness. `health()` has its own 5s timeout and never
+  // throws (false on any failure), so it cannot sink the probe. Runs for every
+  // caller — that is the point: an uptime monitor has no session.
+  const faceAvailable = await insightface.health();
 
   return Response.json(
     {
       ok: true,
       db: { reachable: dbReachable, latencyMs: dbLatencyMs },
+      face: { available: faceAvailable },
       // Absent — not `null`/`undefined`-but-present — for anyone but a lecturer.
       ...(cron ? { cron } : {}),
+      ...(integrity ? { integrity } : {}),
       uptimeSec: Math.round(process.uptime()),
       checkedAt: new Date().toISOString(),
       elapsedMs: Date.now() - startedAt,

@@ -28,8 +28,7 @@ const PAUSE_RATE = { limit: 20, windowMs: 60 * 1000 };
 const PAUSE_REPLAY_WINDOW_MS = 10_000;
 const recentPauseAt = new Map<string, number>();
 
-function isPauseReplay(key: string, now: number): boolean {
-  const last = recentPauseAt.get(key);
+function stampPauseReplay(key: string, now: number): void {
   recentPauseAt.set(key, now);
   // Bounded growth: sweep the map when it gets large.
   if (recentPauseAt.size > 1024) {
@@ -37,7 +36,6 @@ function isPauseReplay(key: string, now: number): boolean {
       if (now - ts > PAUSE_REPLAY_WINDOW_MS * 10) recentPauseAt.delete(k);
     }
   }
-  return last !== undefined && now - last < PAUSE_REPLAY_WINDOW_MS;
 }
 
 // D-F5: the Zod enum MUST mirror the pause_session RPC enum verbatim
@@ -124,17 +122,36 @@ export async function POST(request: Request, { params }: Params) {
   // returns the last known-good shape without re-striking — but ONLY while
   // the session is STILL paused: a self-recovery between two pauses is a
   // genuine new episode (the 3-strike escalation test recovers between
-  // strikes), so an active session always re-enters the RPC.
+  // strikes), so an active session always re-enters the RPC. The window is
+  // stamped ONLY after a durable paused/flagged write (override-route
+  // pattern) — stamping on entry turned a failed first attempt into a
+  // fabricated {sessionStatus:paused} on retry.
+  //
+  // Already-paused coalesce: pause_session counts strikes on ALREADY-PAUSED
+  // rows too (0046 else-branch), so a duplicate signal for an episode that
+  // is already recorded — second tab, retry after a dropped response,
+  // cross-pod replay (the Map above is per-process) — would increment the
+  // counters a second time and could flag a student on their 2nd genuine
+  // loss. While paused no NEW episode can exist (answering is blocked; only
+  // a recovery back to active opens one), so return the durable shape
+  // WITHOUT re-entering the RPC. flagged/completed still go through the RPC
+  // to preserve their exact 409 shapes.
+  const replayKey = `pause:${auth.userId}:${id}:${reason}`;
   const statusProbe = await supabase
     .from("quiz_sessions")
     .select("status")
     .eq("id", id)
     .maybeSingle();
+  if (statusProbe.error) {
+    // A probe blip must not fake a replay hit or a pass-through — the RPC is
+    // the authority on status; fall through to it.
+    console.error("pause status probe error:", statusProbe.error);
+  }
   const currentStatus = (statusProbe.data as { status?: string } | null)?.status;
-  if (
-    currentStatus === "paused" &&
-    isPauseReplay(`pause:${auth.userId}:${id}:${reason}`, Date.now())
-  ) {
+  if (currentStatus === "paused") {
+    // The paused state is already durable (either from the replay window or
+    // an earlier recorded episode) — coalesce without a strike.
+    stampPauseReplay(replayKey, Date.now());
     return Response.json(
       { sessionStatus: "paused" },
       { status: 200, headers: { "content-type": "application/json" } },
@@ -160,6 +177,7 @@ export async function POST(request: Request, { params }: Params) {
     payload?.sessionStatus === "paused" ||
     payload?.sessionStatus === "flagged"
   ) {
+    stampPauseReplay(replayKey, Date.now());
     return Response.json(
       { sessionStatus: payload.sessionStatus },
       { status: 200, headers: { "content-type": "application/json" } },

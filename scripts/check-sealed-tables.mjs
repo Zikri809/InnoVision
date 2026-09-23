@@ -73,8 +73,9 @@ const ALLOWLIST = [
   {
     file: "src/app/api/sessions/[id]/incident/route.ts",
     table: "quiz_sessions",
-    snippet: "recheck.student_id === auth.userId",
-    reason: "TOCTOU re-check of the same own-session ownership gate.",
+    snippet: "incident recheck error:",
+    reason:
+      "TOCTOU re-check of the same own-session ownership gate through the USER client (the ownership assertion follows in the stillCollectable expression); the admin client is never the authority.",
   },
   {
     file: "src/app/api/sessions/[id]/pause/route.ts",

@@ -58,9 +58,11 @@ export function resolveNotificationLink(
       return { href: "/student/classes" };
 
     // Lecturer class page — classes archive (never hard-delete via app), and
-    // the lecturer owns it; no probe.
+    // the lecturer owns it; no probe. A missing class_id falls back to the
+    // class list (same shape as the default branch) — never a trailing-slash
+    // non-route.
     case "student_joined":
-      return { href: `/lecturer/classes/${classId ?? ""}` };
+      return classId ? { href: `/lecturer/classes/${classId}` } : { href: "/lecturer/classes" };
     case "face_enrollment_held":
       return { href: "/lecturer/classes" };
 

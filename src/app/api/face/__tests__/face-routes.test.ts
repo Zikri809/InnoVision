@@ -14,6 +14,10 @@ import * as healthRoute from "@/app/api/face/health/route";
 import { EMBEDDING_DIMS } from "@/lib/face/embedding";
 
 const fakeHolder: { current: FakeSupabase | undefined } = { current: undefined };
+// Counts admin `from().update()` calls — the verify route's ONLY admin-table
+// write is the face_verify_attempted_at touch, so this pins exactly when the
+// outage-claim exemption stamp fires (stale-nonce replays must NOT stamp).
+const adminTouchCount: { current: number } = { current: 0 };
 vi.mock("@/lib/supabase/server", () => ({
   createClient: () => fakeHolder.current,
 }));
@@ -30,11 +34,14 @@ vi.mock("@/lib/supabase/admin", () => ({
       name === "get_verify_proof_secret"
         ? Promise.resolve({ data: "unit-test-verify-proof-secret", error: null })
         : Promise.resolve({ data: null, error: { message: `unexpected admin rpc: ${name}` } }),
-    from: () => ({
-      update: () => ({
-        eq: () => Promise.resolve({ data: null, error: null }),
-      }),
-    }),
+    from: () => {
+      adminTouchCount.current += 1;
+      return {
+        update: () => ({
+          eq: () => Promise.resolve({ data: null, error: null }),
+        }),
+      };
+    },
   }),
 }));
 
@@ -193,6 +200,7 @@ afterAll(() => {
 
 beforeEach(() => {
   fakeHolder.current = undefined;
+  adminTouchCount.current = 0;
   _resetRateLimiter();
   vi.clearAllMocks();
   // Default InsightFace behavior: match frame → one self face, health ok.
@@ -250,6 +258,32 @@ describe("I3 — enroll rejects invalid frames / poses", () => {
     const res = await enroll.POST(req({ frames: [FRONT_FRAME, LEFT_FRAME, RIGHT_FRAME] }));
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBe("pose_invalid");
+  });
+
+  it("a sidecar fan-out throw → typed JSON 503 (never an HTML 500)", async () => {
+    faceContext({ seedSession: false });
+    insightfaceMock.extractFace.mockRejectedValueOnce(new Error("sidecar exploded"));
+    const res = await enroll.POST(req({ frames: [FRONT_FRAME, LEFT_FRAME, RIGHT_FRAME] }));
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe("insightface_unavailable");
+  });
+
+  it("byte-identical frames across angles → 400 duplicate_frames (same-photo-x3 plant)", async () => {
+    faceContext({ seedSession: false });
+    // Real-mode only: in mock mode marker frames are test scaffolding.
+    const prevFlag = process.env.FACE_MOCK_ENABLED;
+    delete process.env.FACE_MOCK_ENABLED;
+    try {
+      const same = "data:image/jpeg;base64,PLAIN_SAME_PHOTO";
+      const res = await enroll.POST(req({ frames: [same, same, same] }));
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("duplicate_frames");
+      // Rejected before any biometric leaves the server.
+      expect(insightfaceMock.extractFace).not.toHaveBeenCalled();
+    } finally {
+      if (prevFlag === undefined) delete process.env.FACE_MOCK_ENABLED;
+      else process.env.FACE_MOCK_ENABLED = prevFlag;
+    }
   });
 
   it("returns 400 pose_invalid when the side yaw is out of range (real mode)", async () => {
@@ -805,6 +839,35 @@ describe("I5c — nonce_mismatch → 409", () => {
     const res = await verify.POST(verifyReq({ nonce: "22222222-2222-4222-8222-222222222222" }));
     expect(res.status).toBe(409);
     expect((await res.json()).error).toBe("nonce_mismatch");
+  });
+
+  it("a stale-nonce replay does NOT touch face_verify_attempted_at (no exemption sustain)", async () => {
+    // Silence-cron bypass pin: the replay burns no ledger row and commits no
+    // face_checks row, so stamping the attempt would keep the exemption fresh
+    // forever while verifying nothing.
+    faceContext();
+    const res = await verify.POST(verifyReq({ nonce: "22222222-2222-4222-8222-222222222222" }));
+    expect(res.status).toBe(409);
+    expect(adminTouchCount.current).toBe(0);
+  });
+
+  it("a genuine verify DOES touch face_verify_attempted_at (outage corroboration intact)", async () => {
+    faceContext();
+    const res = await verify.POST(verifyReq({ trigger: "start" }));
+    expect(res.status).toBe(200);
+    expect(adminTouchCount.current).toBeGreaterThan(0);
+  });
+
+  // audit-5 O4: the route-level 429 used to return before any stamp, so a
+  // client being throttled by the ROUTE (not the SQL throttle) produced no
+  // corroboration — asymmetric with the SQL-throttle 429, which stamps via the
+  // RPC path. A throttled client is demonstrably attempting verifies.
+  it("audit-5 O4: a route-level 429 DOES stamp face_verify_attempted_at", async () => {
+    faceContext();
+    _seedRateLimit(`face-verify:${STUDENT_ID}`, 10);
+    const res = await verify.POST(verifyReq({ trigger: "start" }));
+    expect(res.status).toBe(429);
+    expect(adminTouchCount.current).toBeGreaterThan(0);
   });
 });
 

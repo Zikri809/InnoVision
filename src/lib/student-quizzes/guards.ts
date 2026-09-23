@@ -45,8 +45,23 @@ export async function requireAnyUser(
 ): Promise<AuthResult> {
   const {
     data: { user },
+    error: authError,
   } = await supabase.auth.getUser();
-  if (!user) return { ok: false, response: unauthorized() };
+  if (!user) {
+    if (authError) {
+      const msg = String(
+        (authError as { message?: unknown }).message ?? authError,
+      ).toLowerCase();
+      const sessionMissing =
+        msg.includes("session missing") ||
+        msg.includes("no session") ||
+        msg.includes("not authenticated");
+      if (!sessionMissing) {
+        return { ok: false, response: internalError("Could not complete the request right now.") };
+      }
+    }
+    return { ok: false, response: unauthorized() };
+  }
   return { ok: true, userId: user.id };
 }
 

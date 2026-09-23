@@ -79,12 +79,18 @@ export async function POST(request: Request, { params }: Params) {
   // Owner + assessment + still-collectable status check through the USER
   // session (RLS-scoped) — the admin client below must never be the
   // ownership authority. Completed/closed quizzes stop accepting clips
-  // (post-submit storage-bloat channel).
-  const { data: session } = await supabase
+  // (post-submit storage-bloat channel). A DB error here is an outage, not
+  // a missing session — 503 so the client keeps (and retries) the footage
+  // instead of dropping it on a 404.
+  const { data: session, error: sessionError } = await supabase
     .from("quiz_sessions")
     .select("id, mode, student_id, status")
     .eq("id", id)
     .maybeSingle();
+  if (sessionError) {
+    console.error("incident session probe error:", sessionError);
+    return internalError("Could not store the incident clip right now.");
+  }
   if (!session || session.student_id !== auth.userId) return notFound();
   if (session.mode !== "assessment") {
     return invalidBody("Incident clips are only recorded for assessments.");
@@ -96,7 +102,15 @@ export async function POST(request: Request, { params }: Params) {
   // Per-session cap (audit-4 P1-1): checked BEFORE the slow upload so a
   // saturated session is refused cheaply. A null count (count query failed)
   // fails OPEN — an outage must not block an integrity clip.
-  const adminEarly = createAdminClient();
+  // createAdminClient() throws synchronously on misconfigured server env —
+  // that must stay a typed JSON 503, never a Next HTML 500.
+  let adminEarly: ReturnType<typeof createAdminClient>;
+  try {
+    adminEarly = createAdminClient();
+  } catch (err) {
+    console.error("incident admin client error:", err);
+    return internalError("Could not store the incident clip right now.");
+  }
   const clipCount = await sessionClipCount(adminEarly, id);
   if (clipCount !== null && clipCount >= INCIDENT_SESSION_CLIP_CAP) {
     return Response.json(
@@ -158,7 +172,13 @@ export async function POST(request: Request, { params }: Params) {
   // with upsert:false the loser used to 500 (clip lost) instead of storing
   // both forensic clips.
   const path = `${id}/${Date.now()}-${crypto.randomUUID()}.${ext}`;
-  const admin = createAdminClient();
+  let admin: ReturnType<typeof createAdminClient>;
+  try {
+    admin = createAdminClient();
+  } catch (err) {
+    console.error("incident admin client error:", err);
+    return internalError("Could not store the incident clip right now.");
+  }
 
   // Per-session cap re-check (audit-4 P1-1): concurrent uploads can pass the
   // pre-upload count together — re-check after the buffer, before the storage
@@ -185,11 +205,20 @@ export async function POST(request: Request, { params }: Params) {
   // 60). Re-select through the USER client now — if the session stopped
   // collecting in that window (submit / reset / removal), discard the
   // freshly-uploaded object and refuse; post-submit clips must not land.
-  const { data: recheck } = await supabase
+  // A recheck TRANSPORT error is an outage, not a refusal: discard the
+  // orphan like the not-collectable path but answer 503 so the client
+  // retries instead of deleting real footage as "rejected".
+  const { data: recheck, error: recheckError } = await supabase
     .from("quiz_sessions")
     .select("student_id, mode, status")
     .eq("id", id)
     .maybeSingle();
+  if (recheckError) {
+    console.error("incident recheck error:", recheckError);
+    const { error: discardError } = await admin.storage.from("incident-footage").remove([path]);
+    if (discardError) console.error("incident discard remove failed:", path, discardError);
+    return internalError("Could not store the incident clip right now.");
+  }
   const stillCollectable =
     recheck &&
     recheck.student_id === auth.userId &&

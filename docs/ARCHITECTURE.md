@@ -563,7 +563,7 @@ envelope + first question via `student_session_view` and hands off to
 | focus loss | visibility/blur advisories, debounced | 3rd strike auto-flags session |
 | hand loss | MediaPipe loses both hands mid-hold | transient `hand_loss` pause (auto-resumes) |
 | fullscreen exit | fullscreenchange exit while armed (integrity hardening) | plain `fullscreen_exit` pause (no counter increment — deferred one release; blur/fullscreen same-gesture duplicates dedupe via a shared 2s stamp) |
-| verify silence | pg_cron `flag_verify_silent_sessions` (migration 0042): active assessment, last face check >300s old, an answer within 90s, no reported camera outage | auto-flags (`auto_flag_verify_silence` audit) — closes the "client stopped sending verifies" bypass; honest clients verify every 30–45s while answering |
+| verify silence | pg_cron `flag_verify_silent_sessions` (migration 0042): active assessment, last face check >300s old, an answer within 90s, no reported camera outage | auto-flags (`auto_flag_verify_silence` audit) — closes the "client stopped sending verifies" bypass; honest clients verify every 30–45s while answering. audit-5 M1 (0062): `submit_session` and the `quiz_autoclose` seal arm evaluate the SAME predicate (`session_verify_silent`) at finalization, because a session that submits between cron ticks was otherwise never flagged by any writer |
 
 Recovery paths out of `paused`/`flagged`:
 
@@ -581,6 +581,25 @@ lecturer: POST /api/face/unlock       → unlock_session()   (resets counters,
 
 Every one of those writes an `audit_events` row surfaced in the lecturer's
 timeline (`lecturer_audit_view`).
+
+**Session lifecycle audit (audit-5 O1, migration 0066).** In addition to the
+adjudication actions above, the three lifecycle writers now emit audit rows:
+`session_started` (`start_quiz_session`), `session_submitted` (`submit_session`,
+carrying the score), and `session_sealed` (`quiz_autoclose`, set-based, taken
+before the seal UPDATE). These make start/submit/seal observable without
+inferring from `submitted_at` or notifications.
+
+**Structured error logging (audit-5 O3).** `src/lib/log.ts` (`logError`) emits
+ONE JSON line — `{level, msg, ts, error, subsystem, errorCode, sessionId}` — so
+a verify-503 → cron-flag → answer-409 incident shares a `sessionId` correlate.
+Adopted in the answer/verify/start/submit routes.
+
+**Integrity snapshot (audit-5 O2/O5, migration 0065).** `integrity_snapshot(
+window_hours)` (service-role only) returns `flags24h`/`flagsByAction`/
+`flaggedNow`/`sealed`/`submitted`/`started`/`pendingMarks`. `/api/health`
+surfaces it as `integrity` for a lecturer, so a mass false-flag deploy or a
+seal/abandonment spike is visible without reading day-bucketed mail. Enabling
+index: `audit_events(action, created_at desc)`.
 
 **Submit**: `POST /api/sessions/[id]/submit` → RPC `submit_session`
 (row-lock → compute score from `session_answers.is_correct` count → mark
@@ -642,8 +661,20 @@ POST /api/face/enroll {frames:[...], yawReadings:[...]}  (route: api/face/enroll
   3. per-frame duplicate-identity scan (best NON-self match
      ≥0.45 passed to RPC)
   4. RPC enroll_face(dup_subject, dup_similarity) → status 'enrolled'
-     or 'pending_review' (lecturer clears via audit view)
+     or 'pending_review' (lecturer decides via the classes-dashboard
+     review panel — audit-5 M4 added approve_face_enrollment +
+     list_pending_face_enrollments; before that reject had no caller)
   any failure → no samples written (the RPC is one transaction)
+
+Enrollment is refused while ANY live assessment session exists
+(`live_assessment`) — audit-5 M3, migration 0062: the previous "first-time
+mid-session enrollment allowed" carve-out let a never-enrolled student bind
+an arbitrary face mid-quiz. Assessment START now also requires consent
+(`consent_required`) and refuses `pending_review`
+(`face_enrollment_pending`) — audit-5 M2. A hard `enrolled` requirement was
+deliberately NOT adopted (camera-off / camera-death students complete
+click-first per PLAN risk 7; the pre-start UI gate remains the enrollment
+nudge).
 ```
 
 **Yaw-space contract (do not relitigate).** The tracker reports yaw RELATIVE to

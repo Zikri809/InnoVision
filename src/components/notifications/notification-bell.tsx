@@ -136,8 +136,11 @@ export function NotificationBell({
 
   const [open, setOpen] = React.useState(false);
   const [confirmClear, setConfirmClear] = React.useState(false);
+  const [clearing, setClearing] = React.useState(false);
   const [announce, setAnnounce] = React.useState("");
   const prevUnread = React.useRef(initialCount);
+  // Double-tap guard: a slow probe must not fire twice for the same row.
+  const openItemInFlight = React.useRef<string | null>(null);
 
   // Polish round (W3 A2): derive the surface from the same media query the
   // modal hoist uses, read in the render pass. The old `useState(true)` +
@@ -162,38 +165,69 @@ export function NotificationBell({
     // moved and the row re-rendered as a smaller group right after the tap.
     const ids = entryIds(entry);
     const item = entry.item ?? entry.group!.newest;
+    // Dedupe double-taps: a slow network probe must not fire twice. The key
+    // is the entry identity, released in the finally below.
+    const flightKey = ids.slice().sort().join(",");
+    if (openItemInFlight.current === flightKey) return;
+    openItemInFlight.current = flightKey;
     // Optimistic close BEFORE navigation (plan W1 sheet-close-on-navigate):
     // the sheet must never hang open over the destination.
     setOpen(false);
     const link = resolveNotificationLink(item.type, item.payload);
     let href = link.href;
 
-    if (link.resolveSessionQuizId) {
-      const { data } = await supabase
-        .from("quiz_sessions")
-        .select("id")
-        .eq("quiz_id", link.resolveSessionQuizId)
-        .eq("status", "completed")
-        .order("started_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (data?.id) href = `/play/${data.id}`;
-    } else if (link.probe) {
-      const { data } = await supabase
-        .from(link.probe.table)
-        .select("id")
-        .eq("id", link.probe.id)
-        .maybeSingle();
-      if (!data) {
-        // Dead target (deleted quiz): stop drawing attention, land somewhere safe.
-        void markRead(ids);
-        router.push(homeHref);
-        return;
+    // Bounded probe: an unbounded await left a closed sheet + lost navigation
+    // on slow networks. 8s then fall through to the best-effort href.
+    // Takes PromiseLike because supabase-js builders are thenables, not real
+    // Promises.
+    const withTimeout = async <T,>(p: PromiseLike<T>): Promise<T | null> => {
+      let timer: ReturnType<typeof setTimeout>;
+      try {
+        return await Promise.race([
+          Promise.resolve(p),
+          new Promise<null>((resolve) => {
+            timer = setTimeout(() => resolve(null), 8000);
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer!);
       }
-    }
+    };
 
-    void markRead(ids);
-    router.push(href);
+    try {
+      if (link.resolveSessionQuizId) {
+        const res = await withTimeout(
+          supabase
+            .from("quiz_sessions")
+            .select("id")
+            .eq("quiz_id", link.resolveSessionQuizId)
+            .eq("status", "completed")
+            .order("started_at", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+        );
+        const data = res?.data as { id?: string } | null | undefined;
+        if (data?.id) href = `/play/${data.id}`;
+      } else if (link.probe) {
+        const res = await withTimeout(
+          supabase.from(link.probe.table).select("id").eq("id", link.probe.id).maybeSingle(),
+        );
+        const data = res?.data as { id?: string } | null | undefined;
+        if (!res || !data) {
+          // Dead target (deleted quiz) or timed-out probe: stop drawing
+          // attention, land somewhere safe. On timeout the mark-read is still
+          // correct — the user did open the row.
+          void markRead(ids);
+          router.push(homeHref);
+          return;
+        }
+      }
+
+      void markRead(ids);
+      router.push(href);
+    } finally {
+      if (openItemInFlight.current === flightKey) openItemInFlight.current = null;
+    }
   }
 
   async function onMarkAll() {
@@ -201,7 +235,22 @@ export function NotificationBell({
       setConfirmClear(true);
       return;
     }
-    await markAllRead();
+    setClearing(true);
+    try {
+      await markAllRead();
+    } finally {
+      setClearing(false);
+    }
+  }
+
+  async function onConfirmClear() {
+    setClearing(true);
+    try {
+      await markAllRead();
+    } finally {
+      setClearing(false);
+      setConfirmClear(false);
+    }
   }
 
   const badgeDisplay =
@@ -358,7 +407,7 @@ export function NotificationBell({
                 size="xs"
                 className="ml-auto font-bold text-primary"
                 onClick={() => void onMarkAll()}
-                disabled={unreadCount === 0}
+                disabled={unreadCount === 0 || clearing}
               >
                 {t("panel.markAllRead")}
               </Button>
@@ -401,7 +450,7 @@ export function NotificationBell({
                   size="xs"
                   className="ml-auto font-bold text-primary"
                   onClick={() => void onMarkAll()}
-                  disabled={unreadCount === 0}
+                  disabled={unreadCount === 0 || clearing}
                 >
                   {t("panel.markAllRead")}
                 </Button>
@@ -424,10 +473,14 @@ export function NotificationBell({
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setConfirmClear(false)}>
+            <Button
+              variant="ghost"
+              onClick={() => setConfirmClear(false)}
+              disabled={clearing}
+            >
               {tc("cancel")}
             </Button>
-            <Button onClick={() => void markAllRead()}>
+            <Button onClick={() => void onConfirmClear()} disabled={clearing}>
               {t("panel.markAllRead")}
             </Button>
           </DialogFooter>

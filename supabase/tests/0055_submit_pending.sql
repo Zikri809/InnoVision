@@ -31,10 +31,12 @@ values ('1a111111-1111-1111-1111-111111111111', '00000000-0000-0000-0000-0000000
   'authenticated', 'authenticated', 'stu-i20@test.local', 'x', now(), '{}', '{}', now(), now())
 on conflict (id) do nothing;
 
-insert into public.profiles (id, role, full_name)
-values ('1a111111-1111-1111-1111-111111111111', 'lecturer', 'I20 Lecturer'),
-       ('2a222222-2222-2222-2222-222222222222', 'student', 'I20 Student')
-on conflict (id) do update set role = excluded.role;
+-- audit-5 M2: start_quiz_session requires biometric consent for assessment
+-- mode, so the fixture student carries it (the same state registration sets).
+insert into public.profiles (id, role, full_name, consent_given_at)
+values ('1a111111-1111-1111-1111-111111111111', 'lecturer', 'I20 Lecturer', null),
+       ('2a222222-2222-2222-2222-222222222222', 'student', 'I20 Student', now())
+on conflict (id) do update set role = excluded.role, consent_given_at = excluded.consent_given_at;
 
 insert into public.classes (id, lecturer_id, title, join_code)
 values ('3a333333-3333-3333-3333-333333333333',

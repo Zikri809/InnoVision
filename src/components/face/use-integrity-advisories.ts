@@ -49,6 +49,10 @@ export function useIntegrityAdvisories(opts: {
     voice_activity: 0,
     headset_active: 0,
   });
+  // In-flight dedupe: concurrent report() calls for the same type each pass
+  // the throttle check above (the stamp lands only after the first resolves),
+  // so a burst of monitor events would POST duplicates. One flight per type.
+  const inflightRef = useRef<Set<AdvisoryType>>(new Set());
 
   useEffect(() => {
     sessionIdRef.current = sessionId;
@@ -82,6 +86,8 @@ export function useIntegrityAdvisories(opts: {
     async function report(type: AdvisoryType): Promise<void> {
       const now = Date.now();
       if (now - (lastReportAtRef.current[type] ?? 0) < ADVISORY_THROTTLE_MS) return;
+      if (inflightRef.current.has(type)) return;
+      inflightRef.current.add(type);
       try {
         await fetch(`/api/sessions/${sessionIdRef.current}/advisory`, {
           method: "POST",
@@ -93,6 +99,8 @@ export function useIntegrityAdvisories(opts: {
         lastReportAtRef.current[type] = now;
       } catch {
         // network — a later occurrence re-reports; never surface.
+      } finally {
+        inflightRef.current.delete(type);
       }
     }
 

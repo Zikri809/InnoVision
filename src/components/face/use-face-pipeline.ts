@@ -423,7 +423,10 @@ export function useFacePipeline(props: FacePipelineProps) {
   async function captureSecondary(tracker: IFaceTracker): Promise<string | null> {
     const start = Date.now();
     let frame = await tracker.captureFrame();
-    while (!frame && Date.now() - start < VERIFY_SECONDARY_CAPTURE_TIMEOUT_MS && !disposedRef.current) {
+    // A hidden tab cannot produce a real frame (the detect loop pauses), so
+    // stop polling once hidden — the caller omits the vote rather than
+    // burning the whole secondary timeout on guaranteed-null captures.
+    while (!frame && Date.now() - start < VERIFY_SECONDARY_CAPTURE_TIMEOUT_MS && !disposedRef.current && !hiddenRef.current) {
       await new Promise((r) => setTimeout(r, 100));
       frame = await tracker.captureFrame();
     }
@@ -444,10 +447,28 @@ export function useFacePipeline(props: FacePipelineProps) {
   const unavailableRetryAttemptsRef = useRef(0);
   const UNAVAILABLE_RETRY_MAX_ATTEMPTS = 5;
   const UNAVAILABLE_RETRY_BASE_MS = 30 * 1000;
+  // audit-5 M5: after the bounded self-heal budget exhausts, a SUSTAINED
+  // outage must still corroborate the outage claim or the silence cron
+  // false-flags the honest student. The cron's exemption requires a fresh
+  // `face_unavailable_at` AND corroboration (a recent face_checks row OR a
+  // recent `face_verify_attempted_at` stamp — 0047:539-553). The client keeps
+  // re-arming the claim every 6 min, but once probes stop NOTHING stamps the
+  // attempt column, so ~10 min later corroboration expires and the next
+  // answering student is flagged. The heartbeat keeps ONE probe per interval
+  // while the outage lasts: during a genuine outage the route 503s and stamps
+  // the column (the honest evidence); if the sidecar recovered, the probe
+  // returns a real verdict and the status leaves `unavailable` (which clears
+  // this timer). Interval < the SQL 10-min corroboration bound with room for
+  // one dropped beat.
+  const UNAVAILABLE_HEARTBEAT_MS = 5 * 60 * 1000;
   function clearUnavailableRetry() {
     if (unavailableRetryTimerRef.current) {
       clearTimeout(unavailableRetryTimerRef.current);
       unavailableRetryTimerRef.current = null;
+    }
+    if (unavailableHeartbeatTimerRef.current) {
+      clearTimeout(unavailableHeartbeatTimerRef.current);
+      unavailableHeartbeatTimerRef.current = null;
     }
   }
    /**
@@ -455,8 +476,9 @@ export function useFacePipeline(props: FacePipelineProps) {
     * `force` bypasses runVerify's shouldScheduleFaceCheck gate (which requires
     * `ready`) but keeps every other guard, and the outcome machinery moves the
     * status off `unavailable` on success — which clears this timer via the
-    * effect above. A genuine outage exhausts the budget and leaves the
-    * degraded banner + the 6-min claim re-arm doing their job.
+    * effect above. A genuine outage exhausts the budget and hands over to the
+    * slow corroboration heartbeat (audit-5 M5) — the degraded banner + the
+    * 6-min claim re-arm keep doing their job in the meantime.
     *
     * A probe that was DEFERRED by the bounded precheck (bad lighting /
     * occlusion) must not consume an attempt: the deferral re-enters
@@ -468,7 +490,11 @@ export function useFacePipeline(props: FacePipelineProps) {
     * for real failures, not for desk framing).
     */
   function scheduleUnavailableRetry() {
-    if (unavailableRetryAttemptsRef.current >= UNAVAILABLE_RETRY_MAX_ATTEMPTS) return;
+    if (unavailableRetryAttemptsRef.current >= UNAVAILABLE_RETRY_MAX_ATTEMPTS) {
+      // Budget exhausted — a sustained outage. Keep corroborating slowly.
+      scheduleUnavailableHeartbeat();
+      return;
+    }
     if (unavailableRetryTimerRef.current) return;
     const attempt = unavailableRetryAttemptsRef.current;
     unavailableRetryTimerRef.current = setTimeout(() => {
@@ -504,6 +530,40 @@ export function useFacePipeline(props: FacePipelineProps) {
       });
     }, UNAVAILABLE_RETRY_BASE_MS * (attempt + 1));
   }
+
+  /**
+   * audit-5 M5: the sustained-outage corroboration heartbeat. One forced probe
+   * per UNAVAILABLE_HEARTBEAT_MS while the status stays `unavailable`, so the
+   * route keeps stamping `face_verify_attempted_at` (503 path) and the silence
+   * cron's fresh+corroborated exemption holds for the whole honest outage.
+   * Unlike the bounded self-heal budget, this does not consume attempts — it
+   * is a liveness signal, not a recovery loop — and it defers (never fires) on
+   * a hidden tab or a terminal state. Any status change clears it via the
+   * effect below; a successful probe leaves `unavailable`, which is exactly
+   * that status change.
+   */
+  function scheduleUnavailableHeartbeat() {
+    if (unavailableHeartbeatTimerRef.current) return;
+    unavailableHeartbeatTimerRef.current = setTimeout(() => {
+      unavailableHeartbeatTimerRef.current = null;
+      if (
+        disposedRef.current ||
+        isTerminalRef.current ||
+        statusRef.current !== "unavailable"
+      ) {
+        return;
+      }
+      if (hiddenRef.current) {
+        // A hidden tab cannot produce a frame; re-arm without probing (same
+        // fabrication guard as the bounded retry).
+        scheduleUnavailableHeartbeat();
+        return;
+      }
+      void runVerify("periodic", 0, true).finally(() => {
+        if (statusRef.current === "unavailable") scheduleUnavailableHeartbeat();
+      });
+    }, UNAVAILABLE_HEARTBEAT_MS);
+  }
   function reportUnavailable() {
     const now = Date.now();
     if (now - lastUnavailableReportAtRef.current < UNAVAILABLE_REARM_MS) return;
@@ -536,6 +596,7 @@ export function useFacePipeline(props: FacePipelineProps) {
   // (play/[sessionId]/page.tsx), so this only closes the in-page gap.
   const unavailableRearmTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const unavailableRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const unavailableHeartbeatTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (status === "unavailable" && !disposedRef.current && !isTerminalRef.current) {
       if (unavailableRearmTimerRef.current) return;
@@ -984,8 +1045,12 @@ export function useFacePipeline(props: FacePipelineProps) {
       // (integrity-conservative; exempt recovery). A DEAD tracker never
       // posts: trackerRef identity was re-checked above, so a mid-capture
       // loop death bails here instead of letting a stale 'ready' overwrite
-      // the 'unavailable' degradation.
+      // the 'unavailable' degradation. And a tab hidden during the 400ms
+      // re-try above bails the same way as the mid-capture check: a sentinel
+      // FAIL row for a hidden tab is a fabrication — the visibility
+      // handler's catch-up verify runs when the student returns.
       if (!primary) {
+        if (hiddenRef.current) return;
         await postVerifyInternal([""], trigger, nonceRef.current, true);
         return;
       }
@@ -999,8 +1064,13 @@ export function useFacePipeline(props: FacePipelineProps) {
       for (let i = 1; i < VERIFY_FRAMES_PER_CHECK && !disposedRef.current; i++) {
         await new Promise((r) => setTimeout(r, VERIFY_FRAME_SPACING_MS));
         if (disposedRef.current || trackerRef.current !== tracker) return;
+        // Hidden mid-check: the primary above is a genuine pre-hide capture,
+        // so submit it promptly instead of spacing out further secondaries
+        // the paused detect loop cannot produce.
+        if (hiddenRef.current) break;
         const secondary = await captureSecondary(tracker);
         if (trackerRef.current !== tracker) return;
+        if (hiddenRef.current) break;
         if (secondary) frames.push(secondary);
       }
       if (disposedRef.current) return;
@@ -1168,11 +1238,21 @@ export function useFacePipeline(props: FacePipelineProps) {
   async function handLossPause() {
     onHandLossPauseRef.current();
     try {
-      await fetch(`/api/sessions/${sessionId}/pause`, {
+      const res = await fetch(`/api/sessions/${sessionId}/pause`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: "{}",
       });
+      // The RPC is authoritative: it may have FLAGGED at the 3rd hand strike
+      // (mirrors focusLossPause below). Without this the student sits on the
+      // paused overlay with a Recover button whose self-recover 403s them
+      // into the flagged state one wasted click later.
+      const body = res.ok ? await res.json().catch(() => ({} as Record<string, unknown>)) : ({} as Record<string, unknown>);
+      if ((body as { sessionStatus?: string }).sessionStatus === "flagged") {
+        setStatusBoth("flagged");
+        startFlaggedPoll();
+        return;
+      }
     } catch {
       // network — the client overlay still shows; cadence re-checks.
     }

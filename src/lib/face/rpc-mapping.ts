@@ -48,6 +48,11 @@ export function mapFaceError(
     case "invalid_samples":
     case "pose_invalid":
       return jsonError(err, undefined, 400);
+    case "invalid_reason":
+      // Lecturer-supplied adjudication/exemption notes that fail the RPC's
+      // length check — a client error, never an outage. Without this the
+      // default arm masks it as a 503 `internal`.
+      return jsonError(err, undefined, 400);
     case "insightface_unavailable":
       return jsonError("insightface_unavailable", "Face recognition service is temporarily unavailable.", 503);
     case "insightface_error":

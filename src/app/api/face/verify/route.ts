@@ -22,6 +22,7 @@ import {
   readCappedJson,
 } from "@/lib/http";
 import type { FaceCheckResult } from "@/lib/face/types";
+import { logError } from "@/lib/log";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
@@ -44,6 +45,26 @@ if (process.env.NODE_ENV === "production" && process.env.FACE_SPOOF_ENFORCE !== 
 }
 
 type Db = Awaited<ReturnType<typeof createClient>>;
+
+/**
+ * Fire-and-forget, owner-scoped stamp of `face_verify_attempted_at` for the
+ * silence cron's outage-claim corroboration (audit-5 O4). Used by the
+ * route-level rate-limit 429 path, which fires BEFORE the owner probe that the
+ * in-handler `touchVerifyAttempt` relies on — so this variant scopes the write
+ * by BOTH id and student_id. Failures never surface.
+ */
+async function stampVerifyAttempt(sessionId: string, userId: string): Promise<void> {
+  try {
+    const { error } = await createAdminClient()
+      .from("quiz_sessions")
+      .update({ face_verify_attempted_at: new Date().toISOString() })
+      .eq("id", sessionId)
+      .eq("student_id", userId);
+    if (error) console.error("face_verify_attempted_at touch error:", error);
+  } catch (err) {
+    console.error("face_verify_attempted_at admin client error:", err);
+  }
+}
 
 /**
  * POST /api/face/verify — frames → InsightFace sidecar → compare_face_baseline
@@ -92,10 +113,6 @@ export async function POST(request: Request) {
   const originError = checkSameOrigin(request);
   if (originError) return originError;
 
-  if (!rateLimit(`face-verify:${auth.userId}`, VERIFY_RATE)) {
-    return mapFaceError({ error: "rate_limited" }) ?? internalError("Something went wrong.");
-  }
-
   // audit-1 P1-5: pre-parse body bound. The old flow parsed the WHOLE
   // body (unbounded on chunked requests) and only then 413'd per frame;
   // the streaming cap rejects an oversized body before it materializes.
@@ -118,6 +135,18 @@ export async function POST(request: Request) {
 
   if (!isUuid(parsed.data.sessionId)) return notFound();
 
+  // audit-5 O4: the per-user rate limiter is checked AFTER the body parses so
+  // a route-level 429 can still stamp `face_verify_attempted_at`. The silence
+  // cron's outage-claim exemption trusts that stamp; a client hitting the
+  // limiter is demonstrably sending verifies, so the asymmetry with the
+  // SQL-throttle 429 (which stamps via the RPC path) was a corroboration hole.
+  // The limiter still fires before ANY sidecar work, so a 429 costs nothing
+  // beyond the bounded body read.
+  if (!rateLimit(`face-verify:${auth.userId}`, VERIFY_RATE)) {
+    await stampVerifyAttempt(parsed.data.sessionId, auth.userId);
+    return mapFaceError({ error: "rate_limited" }) ?? internalError("Something went wrong.");
+  }
+
   // The RPC consumes EXACTLY this array (schema caps at 3, the slice is
   // defensive) — the proof below must cover the same bytes p_frames carries.
   const frames = parsed.data.frames.slice(0, VERIFY_FRAMES_PER_CHECK);
@@ -137,7 +166,11 @@ export async function POST(request: Request) {
     }
     proof = mintVerifyProof(secretData, parsed.data.sessionId, parsed.data.nonce, frames);
   } catch (secretError) {
-    console.error("get_verify_proof_secret error:", secretError);
+    logError("verify.proof_secret", secretError, {
+      subsystem: "verification",
+      errorCode: "proof_secret_unavailable",
+      sessionId: parsed.data.sessionId,
+    });
     return mapFaceError({ error: "proof_secret_unavailable" }) ?? internalError("Something went wrong.");
   }
 
@@ -158,7 +191,11 @@ export async function POST(request: Request) {
   // surface a misleading 403 not_enrolled (client `gate`) instead of an
   // outage. Fail closed as a 503 degradation (lecturer-visible).
   if (sessionRow.error) {
-    console.error("verify session probe error:", sessionRow.error);
+    logError("verify.session_probe", sessionRow.error, {
+      subsystem: "verification",
+      errorCode: "insightface_unavailable",
+      sessionId: parsed.data.sessionId,
+    });
     return mapFaceError({ error: "insightface_unavailable" }) ?? internalError("Something went wrong.");
   }
   const faceExempt = sessionRow.data?.face_exempt === true;
@@ -176,17 +213,23 @@ export async function POST(request: Request) {
     if (!sessionRow.data) return;
     // Fire-and-forget, owner-scoped (the row above proves the caller owns the
     // session); an admin write because RLS exposes no update policy and a
-    // failure must never fail the verify.
-    void Promise.resolve(
-      createAdminClient()
-        .from("quiz_sessions")
-        .update({ face_verify_attempted_at: new Date().toISOString() })
-        .eq("id", parsed.data.sessionId),
-    )
-      .then((r) => {
-        if (r.error) console.error("face_verify_attempted_at touch error:", r.error);
-      })
-      .catch(() => {});
+    // failure must never fail the verify. createAdminClient() throws
+    // synchronously when server env is misconfigured — catch that too, or a
+    // single touch sinks the whole verify with an HTML 500.
+    try {
+      void Promise.resolve(
+        createAdminClient()
+          .from("quiz_sessions")
+          .update({ face_verify_attempted_at: new Date().toISOString() })
+          .eq("id", parsed.data.sessionId),
+      )
+        .then((r) => {
+          if (r.error) console.error("face_verify_attempted_at touch error:", r.error);
+        })
+        .catch(() => {});
+    } catch (err) {
+      console.error("face_verify_attempted_at admin client error:", err);
+    }
   };
 
   // Cutover / integrity guard: the student must have a stored baseline
@@ -213,21 +256,36 @@ export async function POST(request: Request) {
     faces: insightface.InsightFaceExtractResult["faces"];
     spoof: insightface.SpoofVerdict | null;
   } | { error: string };
-  const results = await Promise.all(
-    frames.map(async (frame): Promise<FrameOutcome> => {
-      if (frame === "") return { similarity: 0, faces: [], spoof: null };
-      // MISMATCH marker → 0-vote WITHOUT a sidecar call or RPC compare (no
-      // sidecar exists in CI — a fetch would 503 instead of failing as a
-      // vote, which would kill the pause/streak specs).
-      if (insightface.isMockMismatchFrame(frame)) return { similarity: 0, faces: [], spoof: null };
-      const extracted = await insightface.extractFace(frame, auth.userId);
-      if ("error" in extracted) return { error: extracted.error };
-      const sim = await comparePrimaryFace(supabase, extracted.faces);
-      const spoof = extracted.spoof ?? null;
-      if (typeof sim === "number") return { similarity: sim, faces: extracted.faces, spoof };
-      return sim;
-    }),
-  );
+  let results: FrameOutcome[];
+  try {
+    results = await Promise.all(
+      frames.map(async (frame): Promise<FrameOutcome> => {
+        if (frame === "") return { similarity: 0, faces: [], spoof: null };
+        // MISMATCH marker → 0-vote WITHOUT a sidecar call or RPC compare (no
+        // sidecar exists in CI — a fetch would 503 instead of failing as a
+        // vote, which would kill the pause/streak specs).
+        if (insightface.isMockMismatchFrame(frame)) return { similarity: 0, faces: [], spoof: null };
+        const extracted = await insightface.extractFace(frame, auth.userId);
+        if ("error" in extracted) return { error: extracted.error };
+        const sim = await comparePrimaryFace(supabase, extracted.faces);
+        const spoof = extracted.spoof ?? null;
+        if (typeof sim === "number") return { similarity: sim, faces: extracted.faces, spoof };
+        return sim;
+      }),
+    );
+  } catch (err) {
+    // A fan-out throw (sidecar fetch abort, RPC transport) must stay a typed
+    // JSON 503 — an uncaught throw becomes a Next HTML 500 and breaks the
+    // pipeline's unavailable-passthrough contract.
+    logError("verify.frame_fanout", err, {
+      subsystem: "verification",
+      errorCode: "insightface_unavailable",
+      sessionId: parsed.data.sessionId,
+      trigger: parsed.data.trigger,
+    });
+    void touchVerifyAttempt();
+    return mapFaceError({ error: "insightface_unavailable" }) ?? internalError("Something went wrong.");
+  }
 
   // Any sidecar/compare failure fails the WHOLE check honestly (503 →
   // pipeline `unavailable` passthrough, never a partial verdict).
@@ -245,9 +303,13 @@ export async function POST(request: Request) {
     return mapFaceError(firstError) ?? internalError("Something went wrong.");
   }
 
-  // Sidecar work reached a verdict for every frame — this IS the attempt the
-  // outage-claim corroboration is about.
-  touchVerifyAttempt();
+  // Sidecar work reached a verdict for every frame — but the attempt is only
+  // corroborated (outage-claim exemption stamp) once the RPC has had its say
+  // below. A stale-nonce replay reaches this point with real sidecar work yet
+  // commits NO face_checks row and burns NO ledger row — stamping it would
+  // keep face_verify_attempted_at fresh forever while producing nothing,
+  // sustaining the silence-cron exemption without ever verifying. So the
+  // stamp moves to AFTER record_face_check, skipped ONLY for nonce_mismatch.
 
   let similarities = (results as Array<{ similarity: number }>).map((r) =>
     Math.min(1, Math.max(0, r.similarity)),
@@ -317,11 +379,38 @@ export async function POST(request: Request) {
   });
 
   if (error) {
-    console.error("record_face_check error:", error);
+    // RPC transport failure (DB outage): the sidecar verdict was genuine, so
+    // the attempt still corroborates an outage claim — stamp before the 503.
+    void touchVerifyAttempt();
+    logError("verify.record_face_check", error, {
+      subsystem: "verification",
+      errorCode: "record_face_check_failed",
+      sessionId: parsed.data.sessionId,
+    });
     return internalError("Could not verify right now.");
   }
 
   const payload = data as Record<string, unknown> | null;
+
+  if (payload?.error === "nonce_mismatch") {
+    // Stale-nonce replay: no verdict, no ledger row, no nonce rotation — it
+    // must NOT sustain the silence-cron exemption. Return WITHOUT stamping.
+    return (
+      mapFaceError(payload, {
+        nonce_mismatch: { status: 409 },
+        consent_required: { status: 403 },
+        not_enrolled: { status: 403 },
+        not_assessment: { status: 400 },
+        invalid_frame: { status: 400, error: "invalid_frame" },
+        invalid_trigger: { status: 400, error: "invalid_trigger" },
+      }) ?? internalError("Something went wrong.")
+    );
+  }
+
+  // The RPC processed a genuine (fresh-nonce) attempt — verdict or
+  // content-rejection alike, this IS the attempt the outage-claim
+  // corroboration is about.
+  touchVerifyAttempt();
 
   const mapped = mapFaceError(payload, {
     nonce_mismatch: { status: 409 },
@@ -342,16 +431,20 @@ export async function POST(request: Request) {
     // span displaced, det floor) live in second-face.ts; the RPC's own owner/
     // assessment/status gates + 55s throttle bound the write.
     if (shouldReportSecondFace(frameFaces)) {
-      void Promise.resolve(
-        supabase.rpc("report_session_advisory", {
-          p_session_id: parsed.data.sessionId,
-          p_type: "second_face",
-        }),
-      )
-        .then((r) => {
-          if (r.error) console.error("report_session_advisory error:", r.error);
-        })
-        .catch(() => {});
+      try {
+        void Promise.resolve(
+          supabase.rpc("report_session_advisory", {
+            p_session_id: parsed.data.sessionId,
+            p_type: "second_face",
+          }),
+        )
+          .then((r) => {
+            if (r.error) console.error("report_session_advisory error:", r.error);
+          })
+          .catch(() => {});
+      } catch (err) {
+        console.error("report_session_advisory dispatch error:", err);
+      }
     }
     const result: FaceCheckResult = {
       matched: payload.matched,
