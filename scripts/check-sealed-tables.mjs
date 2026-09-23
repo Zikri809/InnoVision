@@ -77,6 +77,13 @@ const ALLOWLIST = [
     reason: "TOCTOU re-check of the same own-session ownership gate.",
   },
   {
+    file: "src/app/api/sessions/[id]/pause/route.ts",
+    table: "quiz_sessions",
+    snippet: "statusProbe",
+    reason:
+      "Own-session RLS read of the pause status (select(\"status\") only) to coalesce replayed pause POSTs; a non-owned id returns null and falls through to the RPC's not_owner.",
+  },
+  {
     file: "src/app/api/quizzes/[id]/route.ts",
     table: "quiz_sessions",
     snippet: "countError",
