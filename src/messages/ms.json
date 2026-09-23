@@ -945,7 +945,8 @@
       "recordError": "Ralat rangkaian semasa merekodkan jawapan anda. Tekan sekali lagi.",
       "submitTimeout": "Permintaan penghantaran tamat masa. Sila hantar sekali lagi.",
       "submitError": "Ralat rangkaian semasa menghantar kuiz. Sila hantar sekali lagi.",
-      "noQuestions": "Kuiz ini belum mempunyai soalan lagi. Sila cuba lagi kemudian."
+      "noQuestions": "Kuiz ini belum mempunyai soalan lagi. Sila cuba lagi kemudian.",
+      "consentFailed": "Persetujuan tidak dapat direkodkan. Sila cuba lagi."
     },
     "multiConfirm": "Sahkan jawapan",
     "multiHint": "Pelbagai pilihan: pilih semua jawapan yang betul, kemudian sahkan.",

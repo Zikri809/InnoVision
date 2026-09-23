@@ -945,7 +945,8 @@
       "recordError": "Network error recording your answer. Tap again to retry.",
       "submitTimeout": "The submit request timed out. Please submit again.",
       "submitError": "Network error submitting the quiz. Please submit again.",
-      "noQuestions": "This quiz has no questions yet. Please try again later."
+      "noQuestions": "This quiz has no questions yet. Please try again later.",
+      "consentFailed": "Could not record your consent. Please try again."
     },
     "multiConfirm": "Confirm answer",
     "multiHint": "Multi-select: select every correct option, then confirm.",
