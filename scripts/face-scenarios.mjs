@@ -31,7 +31,7 @@
 //
 // NOT a unit test; run manually. Cleanup deletes everything it created.
 import { createClient } from "@supabase/supabase-js";
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -49,9 +49,11 @@ const env = fs
     return acc;
   }, {});
 
-const URL = env.NEXT_PUBLIC_SUPABASE_URL;
-const ANON = env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const SERVICE = env.SUPABASE_SERVICE_ROLE_KEY;
+// Shell overrides let the harness be pinned to Supabase CLI's localhost keys
+// even when .env.local belongs to a remote development project.
+const URL = process.env.NEXT_PUBLIC_SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL;
+const ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!URL || !ANON || !SERVICE) {
   console.error("Missing .env.local keys (NEXT_PUBLIC_SUPABASE_URL / ANON / SERVICE_ROLE).");
@@ -60,8 +62,8 @@ if (!URL || !ANON || !SERVICE) {
 
 assertLocalTarget(URL, "face-scenarios.mjs");
 
-const SIDECAR = (env.INSIGHTFACE_BASE_URL || "http://localhost:8000").replace(/\/$/, "");
-const SIDECAR_TOKEN = env.FACE_SIDECAR_TOKEN || "";
+const SIDECAR = (process.env.INSIGHTFACE_BASE_URL || env.INSIGHTFACE_BASE_URL || "http://localhost:8000").replace(/\/$/, "");
+const SIDECAR_TOKEN = process.env.FACE_SIDECAR_TOKEN || env.FACE_SIDECAR_TOKEN || "";
 const FACE_SIMILARITY_MIN = 0.5; // mirror of the SQL constant (0021)
 const FIXTURES = path.resolve(__dirname, "../e2e/fixtures/faces/scenarios");
 
@@ -85,9 +87,12 @@ function mintProof(sessionId, nonce, frames) {
 
 const stamp = Date.now();
 const results = [];
+const routeFrameTimings = [];
+const answerCheckTimings = [];
 const createdUsers = [];
 const createdClassIds = [];
 const createdQuizIds = [];
+let userOrdinal = 0;
 
 function record(name, pass, detail = "") {
   results.push({ name, pass, detail });
@@ -99,11 +104,15 @@ function assertNoError(step, { error }) {
 }
 
 async function createUser(email) {
+  userOrdinal += 1;
+  // join_class now requires a valid matric number for students. Keep scenario
+  // identities distinct and outside the reserved 99xxxx range.
+  const matricNo = String(100000 + ((stamp + userOrdinal) % 800000));
   const { data, error } = await admin.auth.admin.createUser({
     email,
     password: "hunter2!Secure",
     email_confirm: true,
-    user_metadata: { full_name: email.split("@")[0] },
+    user_metadata: { full_name: email.split("@")[0], matric_no: matricNo },
   });
   if (error) throw error;
   createdUsers.push(data.user.id);
@@ -221,20 +230,107 @@ async function routeEnrollSamples(paths) {
 
 /** Route-shaped verify vote for ONE frame: primary face → max self cosine. */
 async function routeFrameVote(jpegPath, baselineClient) {
+  const startedAt = performance.now();
   const faces = await extractFaces(jpegPath);
+  const extractedAt = performance.now();
   const primary = selectPrimaryFace(faces);
-  if (!primary) return { vote: 0, det: 0, selected: "none-below-floor" };
+  if (!primary) {
+    const timing = { extractMs: extractedAt - startedAt, checkMs: extractedAt - startedAt };
+    routeFrameTimings.push(timing);
+    return { vote: 0, det: 0, selected: "none-below-floor", ...timing };
+  }
   const { data, error } = await baselineClient.rpc("compare_face_baseline", {
     p_embedding: primary.embedding,
   });
   if (error) throw new Error(`compare_face_baseline: ${error.message}`);
+  const finishedAt = performance.now();
   const sim = data?.present ? Math.min(1, Math.max(0, data.similarity)) : 0;
+  const timing = { extractMs: extractedAt - startedAt, checkMs: finishedAt - startedAt };
+  routeFrameTimings.push(timing);
   return {
     vote: sim,
     det: +primary.det_score.toFixed(3),
     yaw: +primary.yaw.toFixed(1),
     selected: faces.length > 1 ? "primary-of-" + faces.length : "only",
+    ...timing,
   };
+}
+
+function percentile(values, fraction) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.ceil(fraction * sorted.length) - 1)];
+}
+
+async function commitRealFaceCheckedAnswer(client, sessionId) {
+  const { data: session, error: sessionError } = await admin
+    .from("quiz_sessions")
+    .select("quiz_id, verify_nonce")
+    .eq("id", sessionId)
+    .single();
+  assertNoError("answer timing session read", { error: sessionError });
+  const { data: question, error: questionError } = await admin
+    .from("questions")
+    .select("id")
+    .eq("quiz_id", session.quiz_id)
+    .order("order_index")
+    .limit(1)
+    .single();
+  assertNoError("answer timing question read", { error: questionError });
+
+  const framePaths = ["student-a.jpg", "student-a-small.jpg", "student-a-shift.jpg"];
+  const frames = framePaths.map((file) => `data:image/jpeg;base64,${fs.readFileSync(path.join(FIXTURES, file)).toString("base64")}`);
+  const startedAt = performance.now();
+  // Mirrors the answer route's parallel three-frame extraction and baseline
+  // comparisons. The separate script timings above report per-frame service
+  // latency; this records the full fresh verdict + atomic answer RPC path.
+  const frameResults = await Promise.all(frames.map(async (frame) => {
+    const headers = { "content-type": "application/json" };
+    if (SIDECAR_TOKEN) headers["x-sidecar-token"] = SIDECAR_TOKEN;
+    const response = await fetch(`${SIDECAR}/extract`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ frame }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!response.ok) throw new Error(`sidecar answer extract → HTTP ${response.status}`);
+    const result = await response.json();
+    const primary = selectPrimaryFace(result.faces ?? []);
+    if (!primary) return { similarity: 0, pose: { spoof: result.spoof?.score ?? null } };
+    const { data, error } = await client.rpc("compare_face_baseline", { p_embedding: primary.embedding });
+    if (error) throw new Error(`answer compare_face_baseline: ${error.message}`);
+    return {
+      similarity: data?.present ? Math.min(1, Math.max(0, data.similarity)) : 0,
+      pose: { yaw: primary.yaw, pitch: primary.pitch, roll: primary.roll, spoof: result.spoof?.score ?? null },
+    };
+  }));
+  const frameConcat = frames.reduce((acc, frame) => `${acc}|${frame}`, "");
+  const frameHash = createHash("sha256").update(frameConcat, "utf8").digest("hex");
+  const proof = createHmac("sha256", PROOF_SECRET)
+    .update(`${sessionId}:${session.verify_nonce}:${frameConcat}`, "utf8")
+    .digest("hex");
+  const part = (value) => value === null ? "-:" : `${Buffer.byteLength(value, "utf8")}:${value}`;
+  const canonicalAnswer = [part(question.id.toLowerCase()), part("0"), part(null), part(null), part("false")].join("");
+  const answerProof = createHmac("sha256", PROOF_SECRET)
+    .update(`answer:${sessionId.toLowerCase()}:${session.verify_nonce.toLowerCase()}:${frameHash}:${canonicalAnswer}`, "utf8")
+    .digest("hex");
+  const { data, error } = await client.rpc("commit_answer", {
+    p_session_id: sessionId,
+    p_question_id: question.id,
+    p_selected_index: 0,
+    p_selected_indices: null,
+    p_answer_text: null,
+    p_skipped: false,
+    p_nonce: session.verify_nonce,
+    p_frames: frames,
+    p_similarities: frameResults.map((result) => result.similarity),
+    p_proof: proof,
+    p_answer_proof: answerProof,
+    p_poses: frameResults.map((result) => result.pose),
+  });
+  const elapsedMs = performance.now() - startedAt;
+  if (error) throw new Error(`commit_answer: ${error.message}`);
+  return { data, elapsedMs, similarities: frameResults.map((result) => result.similarity) };
 }
 
 /** 3-frame majority verdict like the verify route + record_face_check. */
@@ -264,8 +360,20 @@ async function main() {
     .single();
   assertNoError("create class", { error: createErr });
   createdClassIds.push(cls.id);
-  assertNoError("A join", await clientA.rpc("join_class", { code: joinCode }));
-  assertNoError("B join", await clientB.rpc("join_class", { code: joinCode }));
+  const joinA = await clientA.rpc("join_class", { code: joinCode });
+  assertNoError("A join", joinA);
+  if (joinA.data?.error) throw new Error(`A join returned ${JSON.stringify(joinA.data)}`);
+  const joinB = await clientB.rpc("join_class", { code: joinCode });
+  assertNoError("B join", joinB);
+  if (joinB.data?.error) throw new Error(`B join returned ${JSON.stringify(joinB.data)}`);
+  const { data: joinedRoster, error: rosterError } = await admin
+    .from("class_enrollments")
+    .select("student_id")
+    .eq("class_id", cls.id);
+  assertNoError("read scenario roster", { error: rosterError });
+  if (!joinedRoster?.some((row) => row.student_id === studentA.id) || !joinedRoster?.some((row) => row.student_id === studentB.id)) {
+    throw new Error(`scenario join did not enroll both students: ${JSON.stringify(joinedRoster)}`);
+  }
 
   async function makeLiveAssessment(title, studentClient) {
     const { data: quiz, error } = await clientL
@@ -291,6 +399,9 @@ async function main() {
     assertNoError("publish quiz", { error: pubErr });
     const start = await studentClient.rpc("start_quiz_session", { p_quiz_id: quiz.id });
     assertNoError("start session", start);
+    if (!start.data?.session?.id) {
+      throw new Error(`start session returned no session: ${JSON.stringify(start.data)}`);
+    }
     return start.data.session.id;
   }
 
@@ -382,6 +493,21 @@ async function main() {
       rec.data?.matched === true && rec.data?.sessionStatus === "active" && row?.matched === true,
       `rpc=${JSON.stringify(rec.data)} row=${JSON.stringify(row)}`,
     );
+  }
+
+  // S2c exercises the answer-time contract with real frames and the atomic
+  // commit RPC, rather than only measuring a background face check.
+  {
+    for (let i = 1; i <= 5; i++) {
+      const sessionId = await makeLiveAssessment(`S2c Answer-Bound Fresh Check ${i}`, clientA);
+      const result = await commitRealFaceCheckedAnswer(clientA, sessionId);
+      answerCheckTimings.push(result.elapsedMs);
+      record(
+        `S2c.${i} answer commits only with a fresh real face verdict`,
+        result.data?.recorded === true && result.data?.faceCheck?.matched === true,
+        `sims=[${result.similarities.map((s) => s.toFixed(3)).join(", ")}] elapsed=${result.elapsedMs.toFixed(1)}ms`,
+      );
+    }
   }
 
   // ── S3: capture variation still verifies (single-frame margins) ───────
@@ -679,6 +805,21 @@ async function main() {
   console.log("\n" + "=".repeat(60));
   const passed = results.filter((r) => r.pass).length;
   console.log(`${passed}/${results.length} scenario checks passed`);
+  const frameExtracts = routeFrameTimings.map((t) => t.extractMs);
+  const frameChecks = routeFrameTimings.map((t) => t.checkMs);
+  if (frameExtracts.length) {
+    console.log(
+      `real single-frame extract ms: n=${frameExtracts.length} p50=${percentile(frameExtracts, 0.50).toFixed(1)} p95=${percentile(frameExtracts, 0.95).toFixed(1)} max=${Math.max(...frameExtracts).toFixed(1)}`,
+    );
+    console.log(
+      `real extract + baseline-check ms: n=${frameChecks.length} p50=${percentile(frameChecks, 0.50).toFixed(1)} p95=${percentile(frameChecks, 0.95).toFixed(1)} max=${Math.max(...frameChecks).toFixed(1)}`,
+    );
+  }
+  if (answerCheckTimings.length) {
+    console.log(
+      `real three-frame answer commit ms: n=${answerCheckTimings.length} p50=${percentile(answerCheckTimings, 0.50).toFixed(1)} p95=${percentile(answerCheckTimings, 0.95).toFixed(1)} max=${Math.max(...answerCheckTimings).toFixed(1)} (local fixture run; not a production load-test p95)`,
+    );
+  }
   return passed === results.length ? 0 : 1;
 }
 

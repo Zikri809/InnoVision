@@ -442,6 +442,29 @@ export class FakeSupabase {
     if (name === "answer_question") {
       return this._answerQuestion(args);
     }
+    if (name === "commit_answer") {
+      // Mirror the public policy branch so a route test cannot accidentally
+      // make an enforced assessment look like the legacy answer RPC.
+      const sessionId = String(args?.p_session_id);
+      const session = (this.tables["quiz_sessions"] ?? []).find(
+        (s) => s.id === sessionId && s.student_id === (this.user?.id ?? ""),
+      );
+      const quiz = (this.tables["quizzes"] ?? []).find((q) => q.id === session?.quiz_id);
+      if (session?.mode === "assessment" && quiz?.gestures_enabled === true && session.face_exempt !== true) {
+        const frames = args?.p_frames;
+        const similarities = args?.p_similarities;
+        if (!Array.isArray(frames) || frames.length !== 3 || !Array.isArray(similarities) || similarities.length !== 3) {
+          return { data: { error: "face_verification_required" }, error: null };
+        }
+        // The fake does not implement cryptography/verdict calculation. A
+        // route test must supply an explicit typed commit result for that
+        // branch; defaulting to success here would mask the enforcement.
+        if (this.rpcResult.data === null && this.rpcResult.error === null) {
+          return { data: { error: "proof_invalid" }, error: null };
+        }
+      }
+      return this._answerQuestion(args);
+    }
     if (name === "submit_session") {
       return this._submitSession(args);
     }

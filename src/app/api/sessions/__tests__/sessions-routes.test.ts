@@ -48,6 +48,9 @@ function playContext(opts?: { mode?: "practice" | "assessment"; timeLimitSec?: n
   const ctx = makeOwnerContext({ quizStatus: "live" });
   const quizRow = ctx.client.tables["quizzes"]![0];
   quizRow.mode = opts?.mode ?? "practice";
+  // Existing route tests pin grading behavior independently of face checks;
+  // enforcement-specific tests opt back in explicitly below.
+  quizRow.gestures_enabled = false;
   quizRow.time_limit_sec = opts?.timeLimitSec ?? null;
   ctx.client.setUser(STUDENT_ID, "student");
   // Seed 3 questions for the quiz.
@@ -502,6 +505,27 @@ describe("I7 — assessment answer happy path → keyless ack, no correctness", 
     expect("isCorrect" in body).toBe(false);
     expect("correctIndex" in body).toBe(false);
     expect("explanation" in body).toBe(false);
+  });
+});
+
+describe("0067 — fresh face evidence is required for gesture-enabled assessment answers", () => {
+  it("holds an answer without frames and writes no answer row", async () => {
+    const ctx = playContext({ mode: "assessment" });
+    ctx.client.tables["quizzes"]![0].gestures_enabled = true;
+    ctx.client.seedSession({
+      id: "00000000-0000-4000-8000-0000000000aa",
+      quiz_id: QUIZ_C,
+      student_id: STUDENT_ID,
+      mode: "assessment",
+      status: "active",
+    });
+    const res = await answer.POST(req({ questionId: QUESTION_D, selectedIndex: 0 }), {
+      params: Promise.resolve({ id: "00000000-0000-4000-8000-0000000000aa" }),
+    });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("face_verification_required");
+    expect(ctx.client.tables["session_answers"] ?? []).toHaveLength(0);
+    expect(ctx.client.rpcCalls.some((call) => call.name === "answer_question")).toBe(false);
   });
 });
 
@@ -1252,7 +1276,7 @@ describe("I-SHORT — short_text + skip answer paths", () => {
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBe("invalid_answer_text");
     // The schema did NOT reject it client-side — the RPC is the authority.
-    expect(ctx.client.rpcCalls.some((c) => c.name === "answer_question")).toBe(true);
+    expect(ctx.client.rpcCalls.some((c) => c.name === "commit_answer")).toBe(true);
     expect(ctx.client.rpcResult.error).toBeNull();
   });
 });

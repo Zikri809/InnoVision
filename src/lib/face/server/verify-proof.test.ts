@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createHash, createHmac } from "node:crypto";
-import { frameConcat, frameHash, mintVerifyProof, proofMessage } from "./verify-proof";
+import { canonicalAnswer, frameConcat, frameHash, mintAnswerProof, mintVerifyProof, proofMessage } from "./verify-proof";
 
 // The byte contract these tests pin is migration 0045 §9c: the RPC rebuilds
 // v_concat = '' || '|f1' || '|f2' … (coalescing NULLs to '') and verifies
@@ -33,6 +33,8 @@ describe("mintVerifyProof", () => {
   it("is deterministic for identical inputs", () => {
     expect(mintVerifyProof(secret, session, nonce, ["f1", "f2"]))
       .toBe(mintVerifyProof(secret, session, nonce, ["f1", "f2"]));
+    expect(mintVerifyProof(secret, session.toUpperCase(), nonce.toUpperCase(), ["f1", "f2"]))
+      .toBe(mintVerifyProof(secret, session, nonce, ["f1", "f2"]));
   });
 
   it("binds the session, the nonce AND the frame bytes", () => {
@@ -49,5 +51,30 @@ describe("mintVerifyProof", () => {
       .digest("hex");
     expect(mintVerifyProof(secret, session, nonce, ["f1", "f2"])).toBe(expected);
     expect(proofMessage(session, nonce, ["f1", "f2"])).toBe(`${session}:${nonce}:|f1|f2`);
+  });
+});
+
+describe("answer-bound face proof", () => {
+  const secret = "answer-secret";
+  const session = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
+  const nonce = "BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB";
+  const frames = ["front-🙂", "left-frame", "right-frame"];
+  const answer = { questionId: "CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC", selectedIndices: [2, 1, 2] };
+
+  it("uses stable UTF-8 length prefixes and canonical sorted unique multi-selection", () => {
+    expect(canonicalAnswer(answer)).toBe("36:cccccccc-cccc-4ccc-8ccc-cccccccccccc-:3:1,2-:5:false");
+    expect(canonicalAnswer({ questionId: answer.questionId, answerText: "café🙂" }))
+      .toBe("36:cccccccc-cccc-4ccc-8ccc-cccccccccccc-:-:9:café🙂5:false");
+    expect(canonicalAnswer({ questionId: answer.questionId }))
+      .toBe(canonicalAnswer({ questionId: answer.questionId, skipped: false }));
+  });
+
+  it("normalizes UUID case and binds the frames, question, and answer shape", () => {
+    const proof = mintAnswerProof(secret, session, nonce, frames, answer);
+    expect(mintAnswerProof(secret.toUpperCase(), session.toLowerCase(), nonce.toLowerCase(), frames, answer)).not.toBe(proof);
+    expect(mintAnswerProof(secret, session.toLowerCase(), nonce.toLowerCase(), frames, answer)).toBe(proof);
+    expect(mintAnswerProof(secret, session, nonce, ["changed", ...frames.slice(1)], answer)).not.toBe(proof);
+    expect(mintAnswerProof(secret, session, nonce, frames, { ...answer, questionId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" })).not.toBe(proof);
+    expect(mintAnswerProof(secret, session, nonce, frames, { ...answer, selectedIndices: [1, 2] })).toBe(proof);
   });
 });

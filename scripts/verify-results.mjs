@@ -193,7 +193,19 @@ async function main() {
   async function makeQuiz(lecturerClient, classId, lecturerId, title, { mode = "assessment", questions = ["a", "b", "c", "d"] } = {}) {
     const { data: quiz, error } = await lecturerClient
       .from("quizzes")
-      .insert({ class_id: classId, created_by: lecturerId, title, status: "draft", mode, time_limit_sec: null })
+      .insert({
+        class_id: classId,
+        created_by: lecturerId,
+        title,
+        status: "draft",
+        mode,
+        time_limit_sec: null,
+        // 0067: the answer-commit face gate keys on gestures_enabled. These
+        // probes exercise answer grading/races, not identity, and their
+        // harness students have no face enrollment — gesture-off bypasses the
+        // gate exactly like the lecturer's stored toggle would.
+        gestures_enabled: false,
+      })
       .select("id, class_id")
       .single();
     assertNoError("create quiz", { error });
@@ -249,7 +261,7 @@ async function main() {
     const session = await startSession(clientS1, quiz.id);
     // Seed an answer + a face check for the cascade assertion.
     const qid = await firstQuestionId(clientL, quiz.id);
-    const ans = await clientS1.rpc("answer_question", { p_session_id: session.id, p_question_id: qid, p_selected_index: 0 });
+    const ans = await clientS1.rpc("commit_answer", { p_session_id: session.id, p_question_id: qid, p_selected_index: 0 });
     assertNoError("answer q", { error: ans.error });
     await admin.from("face_checks").insert({ session_id: session.id, matched: true, trigger: "start" });
 
@@ -370,7 +382,7 @@ async function main() {
     const { quizId: raceQuiz, session: raceSession } = await makeLiveAssessment(clientL, clsA.id, lecturerL.id, "Race", clientS1);
     const raceQid = await firstQuestionId(clientL, raceQuiz);
     const [answerRes, resetRes] = await Promise.all([
-      clientS1.rpc("answer_question", { p_session_id: raceSession.id, p_question_id: raceQid, p_selected_index: 0 }),
+      clientS1.rpc("commit_answer", { p_session_id: raceSession.id, p_question_id: raceQid, p_selected_index: 0 }),
       clientL.rpc("reset_session", { p_session_id: raceSession.id }),
     ]);
     const answerPayload = answerRes.data ?? {};
@@ -487,6 +499,9 @@ async function main() {
         status: "draft",
         mode: "assessment",
         time_limit_sec: null,
+        // 0067: gesture-off quizzes bypass the answer-commit face gate
+        // (answer_question is no longer executable by authenticated).
+        gestures_enabled: false,
         allow_retake: true,
         max_attempts: 2,
         auto_reveal_on_complete: true,
@@ -508,7 +523,7 @@ async function main() {
     // S2 completes attempt 1 of 2 — budget REMAINS (the livelock shape).
     const sess = await startSession(clientS2, cfgQuiz.id);
     const qid = await firstQuestionId(clientL, cfgQuiz.id);
-    const ans = await clientS2.rpc("answer_question", { p_session_id: sess.id, p_question_id: qid, p_selected_index: 0 });
+    const ans = await clientS2.rpc("commit_answer", { p_session_id: sess.id, p_question_id: qid, p_selected_index: 0 });
     assertNoError("answer on retake quiz", { error: ans.error });
     await clientS2.rpc("submit_session", { p_session_id: sess.id });
 

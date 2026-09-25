@@ -218,7 +218,19 @@ async function main() {
   async function makeQuiz({ title, mode, time_limit_sec = null, class_id = clsA.id }) {
     const { data: quiz, error } = await clientA
       .from("quizzes")
-      .insert({ class_id, created_by: lecturerA.id, title, status: "draft", mode, time_limit_sec })
+      .insert({
+        class_id,
+        created_by: lecturerA.id,
+        title,
+        status: "draft",
+        mode,
+        time_limit_sec,
+        // 0067: this suite probes grading / RLS / lifecycle, not identity.
+        // The answer-commit face gate keys on gestures_enabled, so flipping it
+        // off keeps these probes on the legacy answer_question path (which
+        // commit_answer delegates to) with byte-identical payloads.
+        gestures_enabled: false,
+      })
       .select("id, mode, time_limit_sec")
       .single();
     assertNoError("create quiz", { error });
@@ -303,10 +315,10 @@ async function main() {
       .eq("quiz_id", assessmentQuiz.id).order("order_index")).data;
     const q1 = qs[0];
 
-    const first = await clientS1.rpc("answer_question", {
+    const first = await clientS1.rpc("commit_answer", {
       p_session_id: sessionId, p_question_id: q1.id, p_selected_index: q1.correct_index,
     });
-    const second = await clientS1.rpc("answer_question", {
+    const second = await clientS1.rpc("commit_answer", {
       p_session_id: sessionId, p_question_id: q1.id, p_selected_index: q1.correct_index === 0 ? 1 : 0,
     });
     const answers = await clientA.from("lecturer_answers_view").select("question_id, selected_index, is_correct")
@@ -410,10 +422,10 @@ async function main() {
     const sessionId = start.data.session.id;
     const q1 = qs[0];
 
-    const first = await clientS1.rpc("answer_question", {
+    const first = await clientS1.rpc("commit_answer", {
       p_session_id: sessionId, p_question_id: q1.id, p_selected_index: q1.correct_index,
     });
-    const second = await clientS1.rpc("answer_question", {
+    const second = await clientS1.rpc("commit_answer", {
       p_session_id: sessionId,
       p_question_id: q1.id,
       p_selected_index: q1.correct_index === 0 ? 1 : 0,
@@ -436,10 +448,10 @@ async function main() {
     const start = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
     const sessionId = start.data.session.id;
 
-    const r1 = await clientS1.rpc("answer_question", {
+    const r1 = await clientS1.rpc("commit_answer", {
       p_session_id: sessionId, p_question_id: qs[0].id, p_selected_index: qs[0].correct_index,
     });
-    const r2 = await clientS1.rpc("answer_question", {
+    const r2 = await clientS1.rpc("commit_answer", {
       p_session_id: sessionId,
       p_question_id: qs[1].id,
       p_selected_index: qs[1].correct_index === 0 ? 1 : 0,
@@ -483,7 +495,7 @@ async function main() {
     const pStart = await clientS1.rpc("start_quiz_session", { p_quiz_id: pQuiz.id });
     const pSession = pStart.data.session.id;
     const pQ = (await clientA.from("lecturer_questions_view").select("id, correct_index").eq("quiz_id", pQuiz.id).order("order_index")).data[0];
-    const pAns = await clientS1.rpc("answer_question", {
+    const pAns = await clientS1.rpc("commit_answer", {
       p_session_id: pSession, p_question_id: pQ.id, p_selected_index: pQ.correct_index,
     });
     record("D44 practice shape: {is_correct, correct_index, explanation}",
@@ -505,7 +517,7 @@ async function main() {
     const start = await clientS1.rpc("start_quiz_session", { p_quiz_id: quizA.id });
     const sessionId = start.data.session.id;
     const foreign = qsB[0]; // belongs to quizB, not quizA
-    const { data } = await clientS1.rpc("answer_question", {
+    const { data } = await clientS1.rpc("commit_answer", {
       p_session_id: sessionId, p_question_id: foreign.id, p_selected_index: 0,
     });
     record("D44b answer with foreign-question id → invalid_question",
@@ -520,10 +532,10 @@ async function main() {
     const start = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
     const sessionId = start.data.session.id;
     const q1 = qs[0]; // 2 options → index >= 2 invalid
-    const tooBig = await clientS1.rpc("answer_question", {
+    const tooBig = await clientS1.rpc("commit_answer", {
       p_session_id: sessionId, p_question_id: q1.id, p_selected_index: 2,
     });
-    const nullIdx = await clientS1.rpc("answer_question", {
+    const nullIdx = await clientS1.rpc("commit_answer", {
       p_session_id: sessionId, p_question_id: q1.id, p_selected_index: null,
     });
     record("D43 out-of-range + NULL selected_index → invalid_selected_index",
@@ -543,14 +555,14 @@ async function main() {
     const qs = (await clientA.from("lecturer_questions_view").select("id, correct_index").eq("quiz_id", quiz.id).order("order_index")).data;
 
     // Answer one question correctly while still in time.
-    await clientS1.rpc("answer_question", {
+    await clientS1.rpc("commit_answer", {
       p_session_id: sessionId, p_question_id: qs[0].id, p_selected_index: qs[0].correct_index,
     });
 
     // Sleep past deadline (limit 6 + grace 5 + 1 margin).
     await sleep(12_000);
 
-    const late = await clientS1.rpc("answer_question", {
+    const late = await clientS1.rpc("commit_answer", {
       p_session_id: sessionId, p_question_id: qs[1].id, p_selected_index: 0,
     });
     const lateAnswers = await clientS1.from("session_answers").select("question_id")
@@ -583,7 +595,7 @@ async function main() {
     const start = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
     const s1Session = start.data.session.id;
     const qs = (await clientA.from("lecturer_questions_view").select("id, correct_index").eq("quiz_id", quiz.id).order("order_index")).data;
-    await clientS1.rpc("answer_question", {
+    await clientS1.rpc("commit_answer", {
       p_session_id: s1Session, p_question_id: qs[0].id, p_selected_index: qs[0].correct_index,
     });
     await clientS1.rpc("submit_session", { p_session_id: s1Session });
@@ -599,7 +611,7 @@ async function main() {
     const lectAnswers = await clientA.from("session_answers").select("id").eq("session_id", s1Session);
 
     // Answer after submit → session_not_active.
-    const lateAnswer = await clientS1.rpc("answer_question", {
+    const lateAnswer = await clientS1.rpc("commit_answer", {
       p_session_id: s1Session, p_question_id: qs[1].id, p_selected_index: 0,
     });
 
@@ -623,7 +635,7 @@ async function main() {
     const s1 = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
     const s1Session = s1.data.session.id;
     const qs = (await clientA.from("lecturer_questions_view").select("id, correct_index").eq("quiz_id", quiz.id).order("order_index")).data;
-    await clientS1.rpc("answer_question", {
+    await clientS1.rpc("commit_answer", {
       p_session_id: s1Session, p_question_id: qs[0].id, p_selected_index: qs[0].correct_index,
     });
 
@@ -687,7 +699,7 @@ async function main() {
     // Enrolled student S1 answers + submits.
     const start = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
     const sessionId = start.data.session.id;
-    await clientS1.rpc("answer_question", {
+    await clientS1.rpc("commit_answer", {
       p_session_id: sessionId, p_question_id: qs[0].id, p_selected_index: qs[0].correct_index,
     });
     await clientS1.rpc("submit_session", { p_session_id: sessionId });
@@ -730,7 +742,7 @@ async function main() {
     await clientS1.rpc("submit_session", { p_session_id: sA.data.session.id });
     const sB = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
     const qs = (await clientA.from("lecturer_questions_view").select("id, correct_index").eq("quiz_id", quiz.id).order("order_index")).data;
-    await clientS1.rpc("answer_question", {
+    await clientS1.rpc("commit_answer", {
       p_session_id: sB.data.session.id, p_question_id: qs[0].id, p_selected_index: qs[0].correct_index,
     });
     await clientS1.rpc("submit_session", { p_session_id: sB.data.session.id });
@@ -788,7 +800,7 @@ async function main() {
     const s1 = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
     const s3 = await clientS3.rpc("start_quiz_session", { p_quiz_id: quiz.id });
     const q1 = qs[0];
-    await clientS1.rpc("answer_question", {
+    await clientS1.rpc("commit_answer", {
       p_session_id: s1.data.session.id, p_question_id: q1.id, p_selected_index: q1.correct_index,
     });
     const sub1 = await clientS1.rpc("submit_session", { p_session_id: s1.data.session.id });
@@ -798,7 +810,7 @@ async function main() {
       `score=${sub1.data?.score} revealed=${s1RevealState?.results_revealed_at ?? "null"}`);
 
     // S3 answers correctly too — score 1 is what the auto-reveal must surface.
-    await clientS3.rpc("answer_question", {
+    await clientS3.rpc("commit_answer", {
       p_session_id: s3.data.session.id, p_question_id: q1.id, p_selected_index: q1.correct_index,
     });
     const sub3 = await clientS3.rpc("submit_session", { p_session_id: s3.data.session.id });
@@ -817,7 +829,7 @@ async function main() {
     // S1 completes attempt 1.
     const s1a = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
     assertNoError("D52 start attempt 1", s1a);
-    await clientS1.rpc("answer_question", {
+    await clientS1.rpc("commit_answer", {
       p_session_id: s1a.data.session.id, p_question_id: qs[0].id, p_selected_index: qs[0].correct_index,
     });
     await clientS1.rpc("submit_session", { p_session_id: s1a.data.session.id });
@@ -1016,7 +1028,7 @@ async function main() {
     const s1 = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
     assertNoError("D56 start", s1);
     const sId = s1.data.session.id;
-    await clientS1.rpc("answer_question", {
+    await clientS1.rpc("commit_answer", {
       p_session_id: sId, p_question_id: qs[0].id, p_selected_index: 0,
     });
 
@@ -1138,7 +1150,7 @@ async function main() {
     const s1 = await clientS1.rpc("start_quiz_session", { p_quiz_id: quiz.id });
     assertNoError("D59 start", s1);
     const sId = s1.data.session.id;
-    await clientS1.rpc("answer_question", {
+    await clientS1.rpc("commit_answer", {
       p_session_id: sId, p_question_id: qs[0].id, p_selected_index: 0,
     });
 
@@ -1189,7 +1201,7 @@ async function main() {
     const qtSession = s1.data.session.id;
 
     const answer = (qid, set, extra = {}) =>
-      clientS1.rpc("answer_question", {
+      clientS1.rpc("commit_answer", {
         p_session_id: qtSession, p_question_id: qid, p_selected_indices: set, ...extra,
       });
 
@@ -1226,7 +1238,7 @@ async function main() {
     const eSession = es1.data.session.id;
     const mq = eqs[0].id;
     const scalarQ = eqs[1].id;
-    const tryAnswer = (args) => clientS1.rpc("answer_question", { p_session_id: eSession, ...args });
+    const tryAnswer = (args) => clientS1.rpc("commit_answer", { p_session_id: eSession, ...args });
 
     const oob = await tryAnswer({ p_question_id: mq, p_selected_indices: [0, 9] });
     const empty = await tryAnswer({ p_question_id: mq, p_selected_indices: [] });
@@ -1256,7 +1268,7 @@ async function main() {
     await publish(aQuiz.id);
     const as1 = await clientS1.rpc("start_quiz_session", { p_quiz_id: aQuiz.id });
     const aSession = as1.data.session.id;
-    const ack = await clientS1.rpc("answer_question", {
+    const ack = await clientS1.rpc("commit_answer", {
       p_session_id: aSession, p_question_id: aqs[0].id, p_selected_indices: [2, 0],
     });
     const lectRow = await clientA
@@ -1274,7 +1286,7 @@ async function main() {
     // QT1-D5b: re-answer of an assessment multi question → keyless
     // already_answered (no is_correct / correct_indices leak) and the
     // FIRST answer stays stored.
-    const replay = await clientS1.rpc("answer_question", {
+    const replay = await clientS1.rpc("commit_answer", {
       p_session_id: aSession, p_question_id: aqs[0].id, p_selected_indices: [1],
     });
     const lectRow2 = await clientA
@@ -1293,12 +1305,24 @@ async function main() {
     // QT1-D5c: a 6-element set (direct-RPC adversarial path — Zod cannot
     // be relied on) → invalid_selected_indices; a 3-named-arg call (the
     // historical call shape) still resolves through the new signature.
-    const six = await clientS1.rpc("answer_question", {
-      p_session_id: aSession, p_question_id: aqs[0].id,
+    // 0067: commit_answer short-circuits a replay to already_answered BEFORE
+    // the answer-shape branch (the answer is bound into the proof, so a
+    // replayed commit can never be a fresh verdict). Use a FRESH assessment
+    // quiz+session so the adversarial payloads reach answer_question's
+    // validator with no prior answer row.
+    const cQuiz = await makeQuiz({ title: "QT1 Multi Assessment Shape", mode: "assessment" });
+    const cqs = await addQuestions(cQuiz.id, [
+      { type: "multi_select", prompt: "shape multi", options: ["p", "q", "r"], correct_index: null, correct_indices: [0, 2] },
+    ]);
+    await publish(cQuiz.id);
+    const cs1 = await clientS1.rpc("start_quiz_session", { p_quiz_id: cQuiz.id });
+    const cSession = cs1.data.session.id;
+    const six = await clientS1.rpc("commit_answer", {
+      p_session_id: cSession, p_question_id: cqs[0].id,
       p_selected_indices: [0, 1, 2, 3, 4, 5],
     });
-    const legacyShape = await clientS1.rpc("answer_question", {
-      p_session_id: aSession, p_question_id: aqs[0].id, p_selected_index: 0,
+    const legacyShape = await clientS1.rpc("commit_answer", {
+      p_session_id: cSession, p_question_id: cqs[0].id, p_selected_index: 0,
     });
     record("QT1-D5c 6-element set rejected; legacy 3-arg call shape resolves (to the multi branch here)",
       six.data?.error === "invalid_selected_indices" &&
@@ -1306,10 +1330,10 @@ async function main() {
       `six=${JSON.stringify(six.data)} legacy=${JSON.stringify(legacyShape.data)}`);
 
     // QT1-D6: practice upsert overwrites BOTH key columns.
-    await clientS1.rpc("answer_question", {
+    await clientS1.rpc("commit_answer", {
       p_session_id: qtSession, p_question_id: qs[1].id, p_selected_indices: [0],
     });
-    const up2 = await clientS1.rpc("answer_question", {
+    const up2 = await clientS1.rpc("commit_answer", {
       p_session_id: qtSession, p_question_id: qs[1].id, p_selected_indices: [0, 1],
     });
     const upRow = await clientS1

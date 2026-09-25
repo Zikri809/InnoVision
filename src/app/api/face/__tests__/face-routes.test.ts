@@ -864,7 +864,7 @@ describe("I5c — nonce_mismatch → 409", () => {
   // RPC path. A throttled client is demonstrably attempting verifies.
   it("audit-5 O4: a route-level 429 DOES stamp face_verify_attempted_at", async () => {
     faceContext();
-    _seedRateLimit(`face-verify:${STUDENT_ID}`, 10);
+    _seedRateLimit(`face-verify:${STUDENT_ID}`, 60);
     const res = await verify.POST(verifyReq({ trigger: "start" }));
     expect(res.status).toBe(429);
     expect(adminTouchCount.current).toBeGreaterThan(0);

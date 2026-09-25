@@ -674,7 +674,7 @@ async function main() {
 
     // Answer after revocation → session_not_active (flagged).
     const q = (await clientA.from("questions").select("id").eq("quiz_id", (await clientS1.from("quiz_sessions").select("quiz_id").eq("id", sessionId).single()).data.quiz_id).limit(1)).data[0];
-    const answer = await clientS1.rpc("answer_question", { p_session_id: sessionId, p_question_id: q.id, p_selected_index: 0 });
+    const answer = await clientS1.rpc("commit_answer", { p_session_id: sessionId, p_question_id: q.id, p_selected_index: 0 });
     record("revoke → answer after → session_not_active",
       answer.data?.error === "session_not_active", JSON.stringify(answer.data));
 
@@ -1388,13 +1388,14 @@ async function main() {
       JSON.stringify(honest.data));
 
     // (e) Throttle: a tight forge loop burns the per-session budget
-    // (60 attempts / 10 min, counted BEFORE the proof check so proof-less
-    // forgeries pay too). Run on a FRESH session: attempts 1..60 →
-    // proof_required, the 61st → rate_limited.
+    // (0067 raised it to 600 attempts / 10 min from 60, per the answer-path
+    // budget change; counted BEFORE the proof check so proof-less forgeries
+    // pay too). Run on a FRESH session: attempts 1..600 → proof_required,
+    // the 601st → rate_limited.
     const { sessionId: sThrottle } = await makeLiveAssessment("P01 Throttle", clientS3);
     let throttleNonce = await currentNonce(clientS3, sThrottle);
     let lastAttempt = null;
-    for (let i = 0; i < 61; i++) {
+    for (let i = 0; i < 601; i++) {
       lastAttempt = await clientS3.rpc("record_face_check", {
         p_session_id: sThrottle,
         p_subject: studentS3.id,
