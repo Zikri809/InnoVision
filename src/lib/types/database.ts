@@ -1735,6 +1735,23 @@ export type Database = {
         Args: { p_dest_class_id: string; p_src_quiz_id: string }
         Returns: string
       }
+      commit_answer: {
+        Args: {
+          p_answer_proof?: string
+          p_answer_text?: string
+          p_frames?: string[]
+          p_nonce?: string
+          p_poses?: Json
+          p_proof?: string
+          p_question_id: string
+          p_selected_index?: number
+          p_selected_indices?: number[]
+          p_session_id: string
+          p_similarities?: number[]
+          p_skipped?: boolean
+        }
+        Returns: Json
+      }
       compare_face_baseline: { Args: { p_embedding: string }; Returns: Json }
       cron_health: { Args: never; Returns: Json }
       enroll_face: { Args: { p_samples: Json }; Returns: Json }

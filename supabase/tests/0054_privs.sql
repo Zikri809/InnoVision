@@ -25,7 +25,7 @@ begin;
 
 create extension if not exists pgtap;
 
-select plan(40);
+select plan(41);
 
 -- ── §1 session_answers: the S1 withheld columns ───────────────────────
 select ok(
@@ -209,8 +209,12 @@ select ok(
 
 -- ── §6 The student-facing RPCs remain callable ────────────────────────
 select ok(
-  has_function_privilege('authenticated', 'public.answer_question(uuid,uuid,int,int[],text,boolean)', 'EXECUTE'),
-  'the 6-arg answer_question is executable by authenticated');
+  not has_function_privilege('authenticated', 'public.answer_question(uuid,uuid,int,int[],text,boolean)', 'EXECUTE'),
+  'legacy answer_question is closed to authenticated callers');
+
+select ok(
+  has_function_privilege('authenticated', 'public.commit_answer(uuid,uuid,int,int[],text,boolean,uuid,text[],real[],text,text,jsonb)', 'EXECUTE'),
+  'commit_answer is executable by authenticated callers');
 
 select ok(
   has_function_privilege('authenticated', 'public.student_pending_count(uuid)', 'EXECUTE'),
