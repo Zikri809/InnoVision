@@ -76,6 +76,7 @@ describe("inspectProdEnv — kill switches (S5)", () => {
     "NEXT_PUBLIC_E2E_FAKE_SEAM",
     "FACE_MOCK_ENABLED",
     "NEXT_PUBLIC_INTEGRITY_HARDENING_OFF",
+    "NEXT_PUBLIC_DEMO_MODE",
   ])("flags %s=1", (key) => {
     const violations = inspectProdEnv(cleanEnv({ [key]: "1" }));
     expect(keys(violations)).toEqual([key]);
@@ -83,13 +84,14 @@ describe("inspectProdEnv — kill switches (S5)", () => {
     expect(find(violations, key)?.why).toMatch(/./);
   });
 
-  it("flags all four kill switches at once, and only those", () => {
+  it("flags all five kill switches at once, and only those", () => {
     const violations = inspectProdEnv(
       cleanEnv({
         E2E_RATE_LIMIT_DISABLED: "1",
         NEXT_PUBLIC_E2E_FAKE_SEAM: "1",
         FACE_MOCK_ENABLED: "1",
         NEXT_PUBLIC_INTEGRITY_HARDENING_OFF: "1",
+        NEXT_PUBLIC_DEMO_MODE: "1",
       }),
     );
     expect(keys(violations).sort()).toEqual(
@@ -98,6 +100,7 @@ describe("inspectProdEnv — kill switches (S5)", () => {
         "FACE_MOCK_ENABLED",
         "NEXT_PUBLIC_E2E_FAKE_SEAM",
         "NEXT_PUBLIC_INTEGRITY_HARDENING_OFF",
+        "NEXT_PUBLIC_DEMO_MODE",
       ].sort(),
     );
   });
@@ -111,6 +114,7 @@ describe("inspectProdEnv — kill switches (S5)", () => {
             NEXT_PUBLIC_E2E_FAKE_SEAM: off,
             FACE_MOCK_ENABLED: off,
             NEXT_PUBLIC_INTEGRITY_HARDENING_OFF: off,
+            NEXT_PUBLIC_DEMO_MODE: off,
           }),
         ),
       ).toEqual([]);
@@ -126,6 +130,7 @@ describe("inspectProdEnv — kill switches (S5)", () => {
           E2E_RATE_LIMIT_DISABLED: "true",
           FACE_MOCK_ENABLED: "yes",
           NEXT_PUBLIC_INTEGRITY_HARDENING_OFF: "on",
+          NEXT_PUBLIC_DEMO_MODE: "true",
         }),
       ),
     ).toEqual([]);

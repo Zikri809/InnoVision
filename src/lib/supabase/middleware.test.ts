@@ -114,6 +114,50 @@ describe("updateSession — middleware redirect matrix", () => {
     }
   });
 
+  it("DEMO: anonymous scanners of the demo join code are NOT bounced when the flag is on", async () => {
+    const original = process.env.NEXT_PUBLIC_DEMO_MODE;
+    process.env.NEXT_PUBLIC_DEMO_MODE = "1";
+    try {
+      mockGetUser.mockResolvedValue({ data: { user: null } });
+      for (const path of ["/join/SCAN23", "/join/scan23", "/join/SCAN-23"]) {
+        const res = await updateSession(nextReq(path));
+        expect(res.status, path).toBe(200);
+      }
+    } finally {
+      if (original === undefined) delete process.env.NEXT_PUBLIC_DEMO_MODE;
+      else process.env.NEXT_PUBLIC_DEMO_MODE = original;
+    }
+  });
+
+  it("DEMO: the skip is dead when the flag is off (ordinary login bounce)", async () => {
+    const original = process.env.NEXT_PUBLIC_DEMO_MODE;
+    delete process.env.NEXT_PUBLIC_DEMO_MODE;
+    try {
+      mockGetUser.mockResolvedValue({ data: { user: null } });
+      const res = await updateSession(nextReq("/join/SCAN23"));
+      expect(res.status).toBe(307);
+      expect(new URL(res.headers.get("location")!).pathname).toBe("/login");
+    } finally {
+      if (original !== undefined) process.env.NEXT_PUBLIC_DEMO_MODE = original;
+    }
+  });
+
+  it("DEMO: a NON-demo join code still bounces even with the flag on", async () => {
+    const original = process.env.NEXT_PUBLIC_DEMO_MODE;
+    process.env.NEXT_PUBLIC_DEMO_MODE = "1";
+    try {
+      mockGetUser.mockResolvedValue({ data: { user: null } });
+      for (const path of ["/join/DEMK42", "/join/ABCDEF", "/join/", "/join/%"]) {
+        const res = await updateSession(nextReq(path));
+        expect(res.status, path).toBe(307);
+        expect(new URL(res.headers.get("location")!).pathname).toMatch(/^\/login\/?$/);
+      }
+    } finally {
+      if (original === undefined) delete process.env.NEXT_PUBLIC_DEMO_MODE;
+      else process.env.NEXT_PUBLIC_DEMO_MODE = original;
+    }
+  });
+
   it("redirects authenticated users away from auth pages to /dashboard", async () => {
     mockGetUser.mockResolvedValue({ data: { user: { id: "u1" } } });
 

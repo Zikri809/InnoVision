@@ -1,0 +1,2 @@
+Markdown>=3.5,<4
+pypdf>=6,<7

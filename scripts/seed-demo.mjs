@@ -36,10 +36,19 @@ if (isRemote) await confirmRemote("SEED demo accounts and mock data");
 const PASSWORD = "Password123!";
 // Join codes: 6 chars, unambiguous alphabet (no 0/O/1/I/L).
 // Share codes: 10 chars from the SAME alphabet (CHECK-enforced).
+const JOIN_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // matches join_code CHECK
+function randomJoinCode() {
+  let s = "";
+  for (let i = 0; i < 6; i++) s += JOIN_ALPHABET[Math.floor(Math.random() * JOIN_ALPHABET.length)];
+  return s;
+}
 
 const PEOPLE = [
   { email: "lecturer@innovision.test", name: "Dr. Farah Omar", role: "lecturer" },
   { email: "lecturer2@innovision.test", name: "Dr. Rajesh Kumar", role: "lecturer" },
+  // Demo-mode presenter account (docs/plans/PLAN_DEMO_MODE.md): the SAME fixed
+  // password as every seeded user. Guests auto-join its demo class via the QR.
+  { email: "demo-lecturer@innovision.test", name: "Dr. Demo Presenter", role: "lecturer" },
   { email: "student1@innovision.test", name: "Muhammad Danish", role: "student", matric: "231201" },
   { email: "student2@innovision.test", name: "Nur Aisyah", role: "student", matric: "231202" },
   { email: "student3@innovision.test", name: "Lim Wei Jian", role: "student", matric: "231203" },
@@ -111,6 +120,22 @@ async function ensureUser({ email, name, role, matric }) {
 
 // ── Class + enrollments ─────────────────────────────────────────────
 async function ensureClass({ lecturerId, title, joinCode, archivedAt = null }) {
+  // Idempotency is by TITLE for classes that carry a random, never-printed join
+  // code (the demo showcase class): looking up by join_code alone would insert
+  // a fresh copy on every seed run. Two lookups — a random code must not be
+  // regenerated, and a fixed code must not accidentally match a foreign class.
+  const byTitle = await admin
+    .from("classes")
+    .select("id, join_code")
+    .eq("lecturer_id", lecturerId)
+    .eq("title", title)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (byTitle.data) {
+    log(`  = reusing class ${title} (${byTitle.data.join_code})`);
+    return byTitle.data.id;
+  }
   const { data: found } = await admin
     .from("classes")
     .select("id, join_code")
@@ -141,7 +166,7 @@ async function ensureEnrollment(classId, studentId) {
 // Note: quizzes must start 'draft' (trigger), get questions, THEN be
 // transitioned toward 'live'/'closed'. Questions only insert while 'draft'.
 // A 'closed' target walks draft→live→closed like a real past quiz.
-async function ensureQuiz({ classId, createdBy, title, mode, timeLimitSec, status, questions }) {
+async function ensureQuiz({ classId, createdBy, title, mode, timeLimitSec, status, questions, gesturesEnabled }) {
   let { data: quiz } = await admin
     .from("quizzes")
     .select("id, status")
@@ -152,7 +177,14 @@ async function ensureQuiz({ classId, createdBy, title, mode, timeLimitSec, statu
   if (!quiz) {
     const { data, error } = await admin
       .from("quizzes")
-      .insert({ class_id: classId, created_by: createdBy, title, mode, time_limit_sec: timeLimitSec })
+      .insert({
+        class_id: classId,
+        created_by: createdBy,
+        title,
+        mode,
+        time_limit_sec: timeLimitSec,
+        ...(gesturesEnabled === undefined ? {} : { gestures_enabled: gesturesEnabled }),
+      })
       .select("id, status")
       .single();
     if (error) throw error;
@@ -381,7 +413,7 @@ async function main() {
   log("Users:");
   const people = [];
   for (const p of PEOPLE) people.push(await ensureUser(p));
-  const [farah, rajesh] = people.filter((p) => p.role === "lecturer");
+  const [farah, rajesh, demoLecturer] = people.filter((p) => p.role === "lecturer");
   const [danish, aisyah, weijian, meimei, arjun, siti, firdaus, priya, kahmeng, nurul] =
     people.filter((p) => p.role === "student");
 
@@ -553,11 +585,63 @@ async function main() {
   });
   log("  (meimei/arjun/etc. haven't made any — realistic distribution)");
 
+  // ── Demo-mode classes (docs/plans/PLAN_DEMO_MODE.md D5) ─────────────────
+  // DEMO class: guests auto-join here; contains ONLY the walk-up practice quiz.
+  // Join code MUST equal DEMO_JOIN_CODE in src/lib/demo/gate.ts (SCAN23) — the
+  // middleware/page predicates compare against that constant. A drift guard is
+  // in src/lib/demo/gate.test.ts.
+  log("\nDemo-mode classes:");
+  const demoClass = await ensureClass({
+    lecturerId: demoLecturer.id,
+    title: "InnoVision Live Demo",
+    joinCode: "SCAN23",
+  });
+  await ensureQuiz({
+    classId: demoClass,
+    createdBy: demoLecturer.id,
+    title: "Try InnoVision — Live Demo",
+    mode: "practice",
+    timeLimitSec: null,
+    status: "live",
+    gesturesEnabled: false,
+    questions: [
+      { type: "mcq", prompt: "Which data structure serves the FIRST item that arrived (like a queue at a counter)?", options: ["Stack", "Queue", "Tree", "Graph"], correctIndex: 1, explanation: "A queue is FIFO — first in, first served." },
+      { type: "true_false", prompt: "A stack removes the most recently added item first.", options: ["True", "False"], correctIndex: 0, explanation: "Stacks are LIFO — last in, first out." },
+      { type: "mcq", prompt: "Binary search only works on a...", options: ["Random list", "Sorted list", "Linked list", "Tree"], correctIndex: 1, explanation: "Halving the range relies on sorted order." },
+      { type: "true_false", prompt: "Merge sort is generally faster than bubble sort on large lists.", options: ["True", "False"], correctIndex: 0, explanation: "O(n log n) beats O(n²) once lists grow." },
+      { type: "mcq", prompt: "Which structure processes the MOST urgent task first?", options: ["Queue", "Stack", "Priority queue", "Array"], correctIndex: 2, explanation: "A priority queue orders by importance, not arrival." },
+    ],
+  });
+
+  // SHOWCASE class: presenter-only (guests NEVER join). Gestures-ON assessment
+  // kept DRAFT until showtime; a random, never-printed join code so it cannot
+  // be self-enrolled even if guessed.
+  const demoShowcaseClass = await ensureClass({
+    lecturerId: demoLecturer.id,
+    title: "InnoVision Showcase (Presenter Only)",
+    joinCode: randomJoinCode(),
+  });
+  await ensureQuiz({
+    classId: demoShowcaseClass,
+    createdBy: demoLecturer.id,
+    title: "Showcase — Gesture & Face Verification",
+    mode: "assessment",
+    timeLimitSec: 600,
+    status: "draft",
+    gesturesEnabled: true,
+    questions: [
+      { type: "mcq", prompt: "Hold up fingers to answer. Which number is shown as ONE finger?", options: ["1", "2", "3", "4"], correctIndex: 0, explanation: "One finger selects the first option." },
+      { type: "true_false", prompt: "The camera verifies the same student answers each question.", options: ["True", "False"], correctIndex: 0, explanation: "Per-answer identity binding is the core control." },
+      { type: "mcq", prompt: "A second face in frame triggers a...", options: ["Score bonus", "Second-face advisory", "Skip", "Lockout"], correctIndex: 1, explanation: "The server records a second_face advisory for review." },
+    ],
+  });
+
   log("\n== Done ==\n");
   log("Sign in at http://localhost:3000/login  (password for all: " + PASSWORD + ")");
   log("  lecturers : lecturer@innovision.test, lecturer2@innovision.test");
+  log("  demo      : demo-lecturer@innovision.test (presenter)");
   log("  students  : student1@…test … student10@…test (see PEOPLE above)");
-  log(`\nJoin codes : CS101=${"DEMK42"}  CS205=DBSYS5`);
+  log(`\nJoin codes : CS101=DEMK42  CS205=DBSYS5  DEMO=SCAN23`);
   log("\nShared student quizzes:");
   log("  /s/STUDYHARD2  — Big-O Cheat Sheet Drill (Danish)");
   log("  /s/EXAMPREP24  — SQL Joins Practice (Aisyah)");

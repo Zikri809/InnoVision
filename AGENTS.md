@@ -64,3 +64,7 @@
   walkthroughs, i18n, testing map.
 - `docs/TESTING.md` — how to run unit/e2e suites; e2e specs are
   invite-gated (`LECTURER_INVITE_CODE`) and need a live Supabase seam.
+- `docs/plans/PLAN_DEMO_MODE.md` — flag-gated exhibition kiosk (walk-up guest
+  accounts + presenter control room). `NEXT_PUBLIC_DEMO_MODE=1` is a BUILD-time
+  kill switch (`prod-guards.ts`, CI, Dockerfile, `build-images.sh` all reject
+  it in prod); setup/ops notes in `docs/EXHIBITION_MANUAL.md` §6b.

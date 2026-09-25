@@ -102,6 +102,20 @@ const ALLOWLIST = [
     snippet: "liveIds",
     reason: "Existence count (head:true) of answers in the lecturer's own live sessions.",
   },
+  {
+    file: "src/lib/demo/walkup-reset.ts",
+    table: "questions",
+    snippet: "order_index, type, prompt, options",
+    reason:
+      "Booth-only demo reset reads the walk-up quiz's questions to CLONE them. The client is the service-role client (the `admin` parameter defaults to createAdminClient(); the injected seam exists only for unit tests) and is not recognized lexically because it is a default parameter, not a `const x = createAdminClient()` assignment. Route is flag+demo-lecturer gated and dead in production (NEXT_PUBLIC_DEMO_MODE).",
+  },
+  {
+    file: "src/lib/demo/walkup-reset.ts",
+    table: "questions",
+    snippet: "quiz_id: newQuizId",
+    reason:
+      "Booth-only demo reset WRITES the cloned questions of the recreated walk-up quiz (the `.from(\"questions\").insert` arm). Same service-role client as the clone read above; a write, not a user-scoped read. Flag+demo-lecturer gated, dead in production.",
+  },
 ];
 
 const REQUIRED_NOTIFY = ["0054", "0055", "0057", "0058", "0060"];

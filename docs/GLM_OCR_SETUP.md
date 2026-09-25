@@ -17,7 +17,8 @@
 
 ## 1. Prereqs
 
-- Docker Desktop running (already required for local Supabase + CompreFace).
+- Docker Desktop running (already required for local Supabase + the
+  InsightFace sidecar).
 - **GPU recommended** (NVIDIA + the Docker Desktop GPU support / NVIDIA
   Container Toolkit). GLM-OCR is a ~0.9B vision-language model — it runs on a
   6 GB GPU comfortably and is fast (<1s/page). Without a GPU it falls back to

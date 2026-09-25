@@ -202,7 +202,7 @@ jobs:
       - name: Assert kill switches are absent from the build env
         run: |
           fail=0
-          for key in E2E_RATE_LIMIT_DISABLED NEXT_PUBLIC_E2E_FAKE_SEAM FACE_MOCK_ENABLED NEXT_PUBLIC_INTEGRITY_HARDENING_OFF; do
+          for key in E2E_RATE_LIMIT_DISABLED NEXT_PUBLIC_E2E_FAKE_SEAM FACE_MOCK_ENABLED NEXT_PUBLIC_INTEGRITY_HARDENING_OFF NEXT_PUBLIC_DEMO_MODE; do
             raw="${!key:-}"
             # Normalize before comparing: trim surrounding whitespace, then
             # lowercase. Without this, "False" and "0 " were rejected only as a
@@ -224,7 +224,7 @@ jobs:
             echo "Refusing to build: a kill switch above would bake fake seams into the artifact."
             exit 1
           fi
-          echo "OK — in the JOB/BUILD env (not the Playwright webServer env, which arms two of them on purpose) E2E_RATE_LIMIT_DISABLED / NEXT_PUBLIC_E2E_FAKE_SEAM / FACE_MOCK_ENABLED / NEXT_PUBLIC_INTEGRITY_HARDENING_OFF are all absent or 0."
+          echo "OK — in the JOB/BUILD env (not the Playwright webServer env, which arms two of them on purpose) E2E_RATE_LIMIT_DISABLED / NEXT_PUBLIC_E2E_FAKE_SEAM / FACE_MOCK_ENABLED / NEXT_PUBLIC_INTEGRITY_HARDENING_OFF / NEXT_PUBLIC_DEMO_MODE are all absent or 0."
 
       - name: Build
         run: npm run build

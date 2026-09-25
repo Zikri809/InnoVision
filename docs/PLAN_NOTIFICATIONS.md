@@ -13,9 +13,6 @@ polling as the consistency backbone. No email/push in v1.
 
 **Non-goals (explicitly rejected / deferred)**:
 
-- `quiz_closed` — **CUT**: no route writes `status='closed'` (verified against
-  `0004` state machine + `publish/route.ts`); it is dead surface. Revisit only
-  if an auto-close feature ships.
 - Per-advisory notifications (`session_advisories`) — **rejected**: ambient
   review signals, already surfaced inline on the results dashboard
   (`focus_pause_count`, advisory counts). A notification per occurrence is
@@ -40,7 +37,9 @@ regular row, unread styling; **Digest** = grouped per entity in the UI
 | Type | Trigger (exact write path) | Urgency | Link target (client-derived) |
 |---|---|---|---|
 | `quiz_live` | `quizzes.status` → `live` (publish route or direct SQL; same-value no-ops can't fire) | Immediate | `/student/quizzes` |
-| `results_revealed` | `quizzes.results_revealed_at` NULL→set while `status='live'` (manual reveal route OR auto-reveal in `submit_session`) | Immediate | `/play/[sessionId]` if own completed session exists at render, else `/student/quizzes` |
+| `quiz_closed` | `quizzes.status` → `closed` (close route OR `quiz_autoclose()`; 0030) | Immediate | `/student/quizzes` |
+| `results_revealed` | `quizzes.results_revealed_at` NULL→set (manual reveal route OR auto-reveal in `submit_session`; 0024 F8a dropped the `status='live'` term — closed-before-reveal still notifies) | Immediate | `/play/[sessionId]` if own completed session exists at render, else `/student/quizzes` |
+| `session_unlocked` | inline insert in `unlock_session` RPC (0033 IO-1) | Pinned | `/play/[sessionId]` (existence probe §5.3) |
 | `session_reset` | inline insert in `reset_session` (after ownership + mode gates, after delete) | Pinned | `/student/quizzes` |
 | `removed_from_class` | `class_enrollments` DELETE, discriminator ladder §4.4 | Pinned | `/student/classes` |
 | `class_archived` | `classes.archived_at` NULL→set | Pinned | `/student/classes` |
@@ -65,7 +64,7 @@ do $$ begin
     'quiz_live','results_revealed','session_reset','removed_from_class',
     'class_archived','student_joined','session_submitted','session_flagged',
     'quiz_completed_all','incident_clip_recorded','face_unavailable_reported',
-    'face_enrollment_held'
+    'face_enrollment_held','quiz_closed','session_unlocked'
   );
 exception when duplicate_object then null; end $$;
 
@@ -169,6 +168,8 @@ live capability token for face-check replay), pre-reveal `score`, and on
 | Type | Allowed payload keys |
 |---|---|
 | `quiz_live` | `quiz_id`, `quiz_title`, `class_id`, `class_title`, `mode` |
+| `quiz_closed` | `quiz_id`, `quiz_title`, `class_id`, `class_title` (fan-out to non-archived enrollees, 0030) |
+| `session_unlocked` | `session_id`, `quiz_id`, `quiz_title` |
 | `results_revealed` | `quiz_id`, `quiz_title`, `class_id` — **never `score`** |
 | `session_reset` | `quiz_id`, `quiz_title`, `session_id` (deleted id, mirrors audit metadata) |
 | `removed_from_class` | `class_id`, `class_title` |
@@ -208,11 +209,14 @@ create trigger notify_quiz_live after update of status on public.quizzes
 -- notify students whose student_quiz_view hides the quiz.
 
 -- results_revealed (manual reveal route + submit_session auto-reveal both
--- land here; quiz_reveal_once already gates the direction, 0012 §3)
+-- land here; quiz_reveal_once already gates the direction, 0012 §3.
+-- NOTE 0058: results_revealed_at is no longer strictly one-way —
+-- override_answer_mark can un-publish (null) it via the app.mark_overridden
+-- GUC arm, then a re-reveal re-fires this trigger; the ≤1-per-quiz guarantee
+-- now rests on the dedupe key (ON CONFLICT), not column irreversibility.)
 create trigger notify_results_revealed after update of results_revealed_at
   on public.quizzes for each row
-  when (old.results_revealed_at is null and new.results_revealed_at is not null
-        and new.status = 'live')
+  when (old.results_revealed_at is null and new.results_revealed_at is not null)
   execute function public.notify_results_revealed();
 -- fan-out scoped to students with a COMPLETED session on this quiz:
 -- a zero-submission manual reveal (route allows it) must not tell every
@@ -222,7 +226,15 @@ create trigger notify_results_revealed after update of results_revealed_at
 -- Over-delivery ≠ data access: payload carries no score; result fetches
 -- re-check enrollment via is_student_reveal_allowed.
 
--- session_submitted + quiz_completed_all (one function, both duties)
+-- quiz_closed (0030: close route + quiz_autoclose() both write 'closed')
+create trigger notify_quiz_closed after update of status on public.quizzes
+  for each row
+  when (old.status is distinct from new.status and new.status = 'closed')
+  execute function public.notify_quiz_closed();
+-- fan-out: insert…select to non-archived enrollees (same archived guard as
+-- quiz_live); dedupe quiz_closed:{quiz_id}.
+
+-- session_submitted + quiz_completed_all (one function, both duties; 0048 body)
 create trigger notify_session_terminal after update of status
   on public.quiz_sessions for each row
   when (old.status is distinct from new.status
@@ -230,12 +242,18 @@ create trigger notify_session_terminal after update of status
         and new.mode = 'assessment')
   execute function public.notify_session_terminal();
 -- 'completed' → session_submitted, plus quiz_completed_all when the count of
--- COMPLETED ASSESSMENT sessions on the quiz >= CURRENT class_enrollments
--- count for the quiz's class (both counts pinned to assessment; practice is
--- excluded by the mode term);
+-- students with submitted_at is not null (DISTINCT students; seals excluded —
+-- a sealed session returns null before any mail, sealed ≠ submitted) reaches
+-- the CURRENT class_enrollments count for the quiz's class (both counts
+-- pinned to assessment; practice is excluded by the mode term);
 -- 'flagged'   → session_flagged. The mode='assessment' term is what keeps
 -- practice submits from spamming lecturers. Idempotent resubmit returns
 -- early before any UPDATE (0012) → no trigger → no duplicate.
+-- 0045 §8 seal-mail suppression: a sealed session (app.session_sealing GUC
+-- set by assign_seal_score) returns null — no session_submitted, no digest
+-- vote. 0048: a transaction-scoped advisory lock quiz_completed_all:{quiz_id}
+-- serializes the two-submit race; quiz_autoclose re-evaluates the digest
+-- set-based (R2-NOTIF-N1).
 
 -- student_joined
 create trigger notify_student_joined after insert on public.class_enrollments
@@ -266,16 +284,29 @@ create trigger notify_incident_clip after insert on public.incident_clips
 
 ### 3.3 Inline RPC inserts (never triggers)
 
-- **`reset_session`** (0011): insert `session_reset` **after** the
-  ownership lock, mode gate, and the `delete` — keyed on the deleted
-  session id. A DELETE trigger on `quiz_sessions` is wrong: it would fire on
+- **`reset_session`** (0011; rewritten by 0046 M-07): insert `session_reset`
+  **after** the ownership lock, mode gate, and the `delete` — keyed on the
+  deleted session id. A DELETE trigger on `quiz_sessions` is wrong: it would fire on
   quiz/class/profile delete cascades and practice prunes (0019), emitting
   fake resets. Double-reset race is already safe: the second caller's
   lock-and-ownership SELECT re-checks after the wait, finds nothing, returns
-  `not_owner` before any insert.
+  `not_owner` before any insert. 0046 M-07: refuses to delete COMPLETED
+  assessment sessions (terminal evidence is append-only) — only
+  flagged/active/paused are resettable, which narrows when session_reset
+  mail can exist.
+- **`unlock_session`** (0033 IO-1): inline insert of `session_unlocked`
+  keyed `session_unlocked:{session_id}:{rotated_nonce}` — every genuine
+  unlock rotates the nonce and re-notifies; a same-unlock double-fire is
+  deduped. **Sanctioned deviation from §3.0 rule 3** (see D3): 0033 wraps
+  the insert in `when others then raise warning` — unlock mail is
+  best-effort and must never fail the unlock itself.
 - **`report_face_unavailable`** (0009): insert `face_unavailable_reported`
   keyed `{session_id}` — the RPC is set-if-null but re-called on every camera
   retry; the dedupe key collapses retries to one notification per session.
+
+**Writers beyond triggers/RPCs**: `quiz_autoclose()` (0048 §5) inserts
+notifications directly (digest recovery path, R2-NOTIF-N1) in addition to
+closing quizzes.
 
 ### 3.4 Dedupe keys (type-prefixed — a type-less key lets a later event be
 silently swallowed by an earlier one for the same entity)
@@ -283,7 +314,8 @@ silently swallowed by an earlier one for the same entity)
 | Type | Key format | Rationale |
 |---|---|---|
 | `quiz_live` | `quiz_live:{quiz_id}` | state machine ⇒ ≤1 live-entry |
-| `results_revealed` | `results_revealed:{quiz_id}` | one-way column ⇒ ≤1 |
+| `quiz_closed` | `quiz_closed:{quiz_id}` | closed is terminal per quiz (0030) |
+| `results_revealed` | `results_revealed:{quiz_id}` | one-way column ⇒ ≤1 — superseded by 0058: the column can be un-published (override_answer_mark), so this key is now the sole ≤1 guarantee |
 | `session_reset` | `session_reset:{session_id}` | uuid unique per reset |
 | `removed_from_class` | `removed_from_class:{class_id}:{student_id}:{extract(epoch from old.enrolled_at)}` | join→remove→rejoin re-notifies; student_id prevents same-second collisions (epoch ::bigint truncates sub-second) |
 | `class_archived` | `class_archived:{class_id}:{extract(epoch from new.archived_at)}` | unarchive→re-archive re-notifies |
@@ -291,9 +323,10 @@ silently swallowed by an earlier one for the same entity)
 | `session_submitted` | `session_submitted:{session_id}` | completed is terminal |
 | `session_flagged` | `session_flagged:{session_id}:{to_char(now(),'YYYYMMDD')}` | flag→unlock→re-flag is a real repeat offense; day bucket tames same-day storms |
 | `quiz_completed_all` | `quiz_completed_all:{quiz_id}` | reset+retake re-reaching 100% is suppressed — accepted (D9) |
-| `incident_clip_recorded` | `incident_clip_recorded:{clip_id}` | each clip is a distinct event; UI groups per session |
+| `incident_clip_recorded` | `incident_clip_recorded:{session_id}:{to_char(date_trunc('hour', coalesce(recorded_from, now())),'YYYYMMDDHH24MI')}` | one digest per session per hour (audit-4 P1-1): sustained incident re-notifies hourly without flooding; UI groups per session |
 | `face_unavailable_reported` | `face_unavailable_reported:{session_id}` | retry storm collapse |
 | `face_enrollment_held` | `face_enrollment_held:{profile_id}:{extract(epoch from clock_timestamp())::bigint}` | per-transition key: every reject→retry cycle is a real event; volume is tiny (same-second double-transitions collapse — accepted) |
+| `session_unlocked` | `session_unlocked:{session_id}:{rotated_nonce}` | every genuine unlock rotates the nonce and re-notifies; same-unlock double-fire deduped (0033) |
 
 ### 3.5 `class_enrollments` DELETE — four causes, one trigger
 
@@ -488,16 +521,29 @@ delete from public.notifications
    and created_at < clock_timestamp() - interval '180 days'
    and type not in ('session_flagged','session_reset','removed_from_class',
                     'results_revealed','face_unavailable_reported',
-                    'face_enrollment_held');
+                    'face_enrollment_held','session_unlocked');
 -- second statement, same shape, '365 days', for the high-urgency list above
+-- (seven types: session_flagged, session_reset, removed_from_class,
+-- results_revealed, face_unavailable_reported, face_enrollment_held,
+-- session_unlocked — the last joined by 0046 M-22)
 
--- hard cap 500 READ rows per user (unread volume is bounded by real event
--- rate; scoping the cap to read rows means retention can NEVER destroy an
--- unseen integrity alert):
+-- hard cap 500 READ rows per user; 0048 R2-NOTIF-N2 adds a second cap:
+-- non-urgent UNREAD rows capped at 500/recipient (newest kept; returns a
+-- pruned_unread_over_cap count). Urgent unread is NEVER capped — the caps
+-- never destroy an unseen urgent alert: urgent unread is exempt from the
+-- volume cap and pruned only by the 365d age tier:
 delete from public.notifications n
  where n.read_at is not null
    and n.seq <= (select x.seq from public.notifications x
                   where x.recipient_id = n.recipient_id and x.read_at is not null
+                  order by x.seq desc offset 500 limit 1);
+
+delete from public.notifications n
+ where n.read_at is null
+   and n.type not in (/* the seven urgent types */)
+   and n.seq <= (select x.seq from public.notifications x
+                  where x.recipient_id = n.recipient_id and x.read_at is null
+                    and x.type not in (/* the seven urgent types */)
                   order by x.seq desc offset 500 limit 1);
 ```
 
@@ -564,7 +610,7 @@ missing pg_cron; `npm run` escape hatch). Cap runs weekly, age-prune daily.
 | T5 | verify | record_face_check fail→paused→pass cycles | NO flagged/submitted rows; genuine flag fires once **within the same UTC day** (day bucket is `to_char(now(),…)` = DB/UTC time; cross-day re-fire accepted-untested, like D9) |
 | T6 | verify | RLS: cross-student select/update; anon | 0 rows / 0 updated / denied; foreign ids in mark-read ignored |
 | T7 | verify | mark-read cap: 201 ids → typed error; 200 → ok | `updated` accurate via GET DIAGNOSTICS |
-| T8 | verify | retention: backdated read/unread/high-urgency/over-500-read-cap | windows honored; high-urgency unread survives; cap touches READ rows only |
+| T8 | verify | retention: backdated read/unread/high-urgency/over-500-read-cap/over-500-non-urgent-unread | windows honored; urgent unread survives both caps; non-urgent unread capped at 500 |
 | T9 | verify | keyset: 25 rows w/ identical created_at | page 2 = exactly 5, no dupes (seq tiebreak) |
 | T10 | verify | publication membership | pg_publication_tables row exists |
 | T11 | verify | seq-cursor mark-all: insert A(seq1), B(seq2); `mark_notifications_read_before(seq1)` | A read, B still unread |
@@ -584,8 +630,13 @@ missing pg_cron; `npm run` escape hatch). Cap runs weekly, age-prune daily.
 
 - **D1** Payload whitelist enforced by test; `to_jsonb(NEW)` banned.
 - **D2** RLS (not the client filter) is the Realtime boundary.
-- **D3** `WHEN OTHERS THEN NULL` banned; narrow handlers only.
-- **D4** Writes: triggers + two inline RPC inserts; everything else RPC-only
+- **D3** `WHEN OTHERS THEN NULL` banned; narrow handlers only. **One
+  documented exception (0033)**: `unlock_session`'s `session_unlocked` insert
+  is wrapped in `when others then raise warning` — best-effort unlock mail
+  must never fail the unlock (§3.3).
+- **D4** Writes: triggers + three inline RPC inserts (`reset_session`,
+  `unlock_session`, `report_face_unavailable`) plus `quiz_autoclose()`
+  (digest recovery, 0048 §5); everything else RPC-only
   (`mark_notifications_read[_before]`).
 - **D5** `seq` identity for ordering/pagination; keyset only.
 - **D6** No lecturer names in student payloads (MED-1).
@@ -594,10 +645,12 @@ missing pg_cron; `npm run` escape hatch). Cap runs weekly, age-prune daily.
 - **D8** `results_revealed` fans out to completed sessions only; late
   submitters see results inline on submit.
 - **D9** `quiz_completed_all` suppressed across reset+retake cycles.
-- **D10** `quiz_closed` cut (dead surface); advisories never notify.
+- **D10** Advisories never notify.
 - **D11** Pinning is client-derived from `type` and means "unread + high
   urgency"; any read action dismisses the pin (rows are never hidden by read
-  state). Retention exempts a type list, and its hard cap touches READ rows
-  only — retention can never destroy an unseen integrity alert.
+  state). Retention exempts a seven-type urgent list (0046 M-22 added
+  `session_unlocked`), and its caps never destroy an unseen urgent alert —
+  urgent unread is exempt from the volume cap (0048 R2-NOTIF-N2) and pruned
+  only by the 365d age tier.
 - **D12** Poll is the consistency backbone; Realtime is a latency
   optimization; hidden tabs disconnect.

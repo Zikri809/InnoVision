@@ -1,10 +1,10 @@
 # Easy2U user manual — production plan
 
-> **Status:** Plan only, 2026-09-25. No current screenshots are included.
-> The existing repository captures are outdated. While the active E2E run uses
-> the shared app, do not open it or capture screenshots. Code-based drafting can
-> continue. Later UI verification and capture require a dedicated environment
-> with a release build and synthetic data.
+> **Status:** English internal edition finalized, 2026-09-25. The local
+> release build was captured with synthetic accounts after Docker became
+> available. The older repository screenshots remain excluded. Publication
+> still needs reader testing, support details, Bahasa Malaysia, and a final
+> screenshot audit against the deployed release.
 
 ## 1. Goal and deliverables
 
@@ -101,6 +101,31 @@ route map. Validate behavior in the UI; `docs/ARCHITECTURE.md` and
 `docs/EXHIBITION_MANUAL.md` supply background but contain implementation and
 demo details unsuitable for end users.
 
+### Desktop and phone paths
+
+For every procedure in Parts A–C, verify both layouts and mark its entry path
+as **Same steps**, **Different navigation**, or **Different interaction**.
+Where interaction differs, write short labeled **Desktop** and **Phone**
+subsections at the affected step. Do not make readers infer a phone action
+from a desktop screenshot. Keep the result and troubleshooting text shared
+when behavior is the same.
+
+| Task | Desktop path to document | Phone path to document |
+| --- | --- | --- |
+| Navigate and manage account | Top navigation, notification bell, account popover. | Bottom dock, notification panel and account sheet. |
+| Find a class or quiz | Class/quiz cards and visible page navigation. | Dock entry, compact cards and any filters or sheets. |
+| Review class roster | Class detail sections or tabs at desktop width. | Phone tab controls and the roster view. |
+| Add or edit quiz questions | Builder form and question list. | Add-question sheet and compact/expandable question controls. |
+| Review gradebook | Cross-quiz table. | Student list plus per-student and per-quiz bottom sheets. |
+| Take or recover a quiz | Player controls, timer, gate and pause state. | Same goal with phone-sized controls, camera/fullscreen prompts, and any changed action placement. |
+| Review results | Results overview, session detail and insights. | Compact status filters, drill-down and phone back navigation. |
+
+The code currently has separate phone navigation, a mobile builder sheet, and
+a mobile gradebook composition; verify exact labels and behavior on the
+release candidate before writing the final steps. The phone review should
+cover 375 px and 320 px widths, English and Bahasa Malaysia, portrait layout,
+touch targets, and the on-screen keyboard where forms are involved.
+
 ## 3. Manual outline and required procedures
 
 ### Part A — Start here (both roles)
@@ -172,17 +197,46 @@ Parts B and C are pure how-to material; Part D is pure reference.
   readable screenshots and text alternatives, browser zoom, camera consent,
   handling downloaded reports, and how to stop sharing a personal quiz.
 
+### Common troubleshooting entries to write
+
+Each entry starts with the exact message or visible symptom in the release UI,
+then gives safe steps in order, the expected result, and a link to `support.md`
+if the reader remains stuck. Verify final labels and recovery behavior against
+the release candidate. Do not tell a student to refresh or restart an active
+assessment as a universal first step; use the on-screen recovery or
+Retry-submit path when it is available.
+
+| Symptom users search for | First self-service steps to document | Escalation |
+| --- | --- | --- |
+| Cannot sign in or confirm an account | Check the entered account email, use password reset, complete an outstanding confirmation, or choose institutional sign-in if that is how the account was created. | Institution account support if recovery fails. |
+| Join code or QR does not work | Check that the code is complete, retry the current class code from the lecturer, and follow the displayed lockout message after repeated failures. | Lecturer checks the class/code and whether the class is archived. |
+| Class or quiz is missing | Check that the student joined the intended class and review quiz status, opening time, deadline and filters. | Lecturer checks publishing, schedule and enrollment. |
+| Camera permission is denied or no camera appears | Follow the browser's site-permission prompt, check device camera availability and retry the app's camera step. | Lecturer or institution support if the camera remains unavailable; document the supported exemption process where applicable. |
+| Face setup or liveness check fails | Follow the on-screen pose/blink prompt, use even lighting and one visible face, then retry the offered step. | Lecturer reviews any pending enrollment or blocked attempt. |
+| Hand gesture does not select an answer | Confirm gestures are enabled for that quiz, show a steady visible hand and follow the confirmation cue; use the available click/tap control if offered. | Lecturer if the quiz cannot be answered by any offered method. |
+| Assessment pauses or becomes flagged | Read the pause reason, use the displayed self-recovery steps, and distinguish a temporary pause from a flagged state. | Lecturer unlocks or reviews a flagged attempt; student does not create a second attempt unless directed. |
+| Answer, timer or final submission appears stuck | Follow the on-screen retry/recovery control and note the quiz title, time and message; explain what the saved attempt shows after reconnection. | Lecturer checks the attempt if the state remains unclear. |
+| Score or answer review is missing | Check whether the assessment is complete, whether results have been released, and whether marking is still pending. | Lecturer checks reveal and marking status. |
+| AI generation, import or export fails | Check the current file type/size or import format and retry once when the UI offers it; use manual question entry if generation is unavailable. | Lecturer/institution support for repeated service or export failures. |
+| Phone controls seem missing | Close the on-screen keyboard, use the bottom dock or sheet controls described in the phone steps, and check the same task at the documented phone width. | Support if a control is still inaccessible. |
+
+For support reports, request only the role, device/browser, page or quiz title,
+approximate time, and the visible error text. Tell users not to send passwords,
+invite codes, matric numbers, face images, or downloaded gradebooks.
+
 ## 4. Screenshot plan
 
-### Capture manifest — future work only
+### Capture manifest and remaining candidates
 
-The screenshot set in the repository is **outdated** and is not evidence of
-the current app. No browser visit, app screenshot, or screenshot reuse is part
-of this planning pass. The states below form a **candidate shot list**, not a
-quota. Captures happen only in the dedicated capture environment after the
-active shared-app E2E run is clear; choose only images that make a task easier
-to follow in the release candidate. Every listed state still needs a
-matching text procedure, whether or not an image is selected.
+The older screenshot set in the repository is **outdated** and is not evidence
+of the current app. Current synthetic captures are recorded in
+`docs/user-manual/screenshots/manifest.csv`; the figures used by the English
+internal edition live in `docs/user-manual/screenshots/figures/`. The states
+below remain a
+**candidate shot list**, not a quota. Add only images that make a task easier
+to follow. Every listed state needs a matching text procedure whether or not
+an image is selected. The remaining complex camera, quiz recovery, AI, and
+localized states need capture and release review.
 
 | ID | Manual section | State to capture and annotate |
 | --- | --- | --- |
@@ -231,14 +285,17 @@ matching text procedure, whether or not an image is selected.
 - Review AI-generated and imported fixture output for PII before it enters a
   capture state; generated questions must not echo real names or matric
   numbers.
-- Storage: keep originals and annotated files in clearly separated
-  directories under `docs/user-manual/screenshots/`, publish only annotated,
-  optimized images (PNG for UI, per-image and total-PDF size caps set at
-  capture time), and keep originals out of the published PDF.
+- Storage: keep originals and publication figures in separate directories
+  under `docs/user-manual/screenshots/`. Publish only privacy-reviewed,
+  optimized images with descriptive captions; add graphic callouts when they
+  clarify a control or state. Keep originals out of the website and PDF.
 - Use desktop 1440×900 and a real-phone-sized 375×812 viewport as baselines;
   add a smaller 320 px check for navigation and forms. Capture a full page only
   for orientation; crop task figures tightly enough that controls remain
   readable at normal document width.
+- For any selected state marked **Different interaction** in the device-path
+  matrix, capture and caption both desktop and phone versions. Link each image
+  to its device-labeled steps rather than mixing the two layouts in one figure.
 - Disable development overlays. Use synthetic records and an approved
   fake-camera setup so passwords, invite codes, access tokens, live join/share
   codes, real names, emails, matric numbers, real faces, and incident footage
@@ -263,11 +320,11 @@ matching text procedure, whether or not an image is selected.
 
 | Phase | Work | Exit check |
 | --- | --- | --- |
-| 1. Verify scope | After the shared-app E2E run is clear, walk every route in a dedicated environment on a release candidate; confirm feature flags and current labels with one lecturer and one student scenario. Audit user-visible strings outside `src/messages/` and record exceptions so screenshot-label parity can be reviewed. Mark unavailable institution-specific features as conditional. | Approved procedure checklist, exact UI labels, no undocumented branch in the critical journeys, string-audit findings resolved or documented. |
+| 1. Verify scope | After the shared-app E2E run is clear, walk every route on desktop and phone in a dedicated environment on a release candidate; complete the device-path classification above and confirm feature flags and current labels with one lecturer and one student scenario. Audit user-visible strings outside `src/messages/` and record exceptions so screenshot-label parity can be reviewed. Mark unavailable institution-specific features as conditional. | Approved desktop/phone procedure matrix, exact UI labels, no undocumented branch in the critical journeys, string-audit findings resolved or documented. |
 | 2. Build capture data | Create synthetic class, draft/live/closed quizzes, attempts and review states in a disposable local environment; stage a **fully synthetic fake-camera source** (generated loop via virtual camera — never a real person) and AI/import fixtures. Review AI and import fixture output for PII. Pin the environment to a commit and record its config. | Every capture state reproducible without real personal data; fake-camera provenance documented; fixtures pass PII review. |
 | 3. Write the guide | Draft quick starts, then student and lecturer procedures, then state tables/glossary/troubleshooting, the "During the quiz" card, and `support.md`/`CHANGELOG.md`. Code-based drafting can proceed while E2E runs. Use consistent “Where to go → Steps → What you should see → If it fails.” Keep procedures short and split long flows at checkpoints. Mark the few steps where a visual would reduce confusion. | Every action named in the outline has a working route and visible outcome, with or without images; long procedures have been split at meaningful checkpoints. |
 | 4. Capture and annotate | Select useful states from IDs A01–M01 based on the draft, capture them from the release candidate in the capture environment using **scripted Playwright sessions (reuse existing e2e journeys)** with the clean capture profile, make original/annotated files, fill manifest, compare desktop/mobile. | Every chosen image clarifies a task and matches the release; the guide is usable without images; manifest complete for every image. |
-| 5. Test with readers | **Informed consent + privacy notice first:** participants complete face-enrollment tasks on test accounts, so consent must cover biometric template creation, retention, and deletion; offer an opt-out from biometric tasks; **delete all test-account biometric data after testing**. Give at least three first-time students and three first-time lecturers only the manual and test accounts — run **two revise-and-retest rounds** (or five per role in a single round), with scripted tasks, think-aloud protocol, recorded time-on-task and errors. Include desktop and phone tasks. Check the **manual's own keyboard traversal** (heading order, skip link, visible focus) and one keyboard-only reading path for each role in the app. | ≥90% of participants complete their role's critical journey unassisted per round; wrong turns and time-on-task recorded; fixes retested; consent fulfilled and biometric data deleted. |
+| 5. Test with readers | **Informed consent + privacy notice first:** participants complete face-enrollment tasks on test accounts, so consent must cover biometric template creation, retention, and deletion; offer an opt-out from biometric tasks; **delete all test-account biometric data after testing**. Give at least three first-time students and three first-time lecturers only the manual and test accounts — run **two revise-and-retest rounds** (or five per role in a single round), with scripted tasks, think-aloud protocol, recorded time-on-task and errors. Test each role's critical journey on both desktop and phone, with participants split across devices and layout-specific steps checked on each. Check the **manual's own keyboard traversal** (heading order, skip link, visible focus) and one keyboard-only reading path for each role in the app. | ≥90% of participants complete their role's critical journey unassisted per round on each tested layout; wrong turns and time-on-task recorded; fixes retested; consent fulfilled and biometric data deleted. |
 | 6. Localize and publish | Fix the BM register before translation: **formal DBP-aligned register**, a signed-off BM terminology list, and a named native-speaker reviewer. Translate to Bahasa Malaysia, **recapture BM figures for every selected task image** and re-run the 320 px check in BM, verify date/time formats and labels, then generate an **accessible PDF from a named toolchain** (tagged export, verified reading order, bookmarks, `lang` metadata, callout contrast ≥4.5:1) plus **BM-edition testing with 1–2 BM-preferring readers**. Review privacy and links, then publish on the searchable docs site with version/date and changelog entry. | Links, image alt text, accessibility checks on the PDF, screenshots, and procedures pass final review; BM register and terminology signed off. |
 | 7. Maintain | Assign a documentation owner. Manual changes go through **PR review with owner sign-off**. CI runs a **link checker** (e.g., lychee) on every PR. Keep a mapping from each screenshot to its source screen and review affected images on UI changes; image hashes alone cannot detect UI drift. On each UI label, navigation, feature flag, or flow change, review affected procedures and images before release. | The manual version identifies the matching app release and has a visible last-reviewed date; link checks and affected-image reviews pass. |
 
@@ -295,6 +352,9 @@ matching text procedure, whether or not an image is selected.
 - [ ] Desktop and phone navigation, both languages, and keyboard/touch paths
   are checked — including the manual's own keyboard traversal and responsive
   published pages. No private data, secrets, or development overlays appear.
+- [ ] Each procedure identifies whether desktop and phone steps match or
+  diverge. Different interactions have explicit device-labeled steps, and
+  each role's critical journey has been tested on both layouts.
 - [ ] The published PDF has verified tags, reading order, bookmarks,
   `lang` metadata, and ≥4.5:1 contrast for callouts; PDF/UA conformance is
   claimed only after formal validation. Web and PDF content parity is checked.
@@ -313,6 +373,7 @@ matching text procedure, whether or not an image is selected.
 - Behavior and edge cases: `docs/ARCHITECTURE.md` §7,
   `docs/EXHIBITION_MANUAL.md` §3, and the relevant `e2e/*.spec.ts` journeys
   (also reused as the basis for scripted capture sessions).
-- The existing `screenshots/` tree is historical and excluded from manual
-  artwork. New captures happen only in the dedicated capture environment.
+- The repository's older `screenshots/` tree is historical and excluded from
+  manual artwork. The new manual captures were made from a local release build
+  with synthetic accounts and a clean Playwright browser context.
 

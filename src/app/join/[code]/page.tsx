@@ -4,7 +4,9 @@ import type { Metadata } from "next";
 import { getTranslations } from "next-intl/server";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeJoinCode } from "@/lib/classes/join-code";
+import { isDemoModeEnabled, DEMO_JOIN_CODE, isGuestEmail } from "@/lib/demo/gate";
 import { JoinConfirmClient } from "./join-confirm-client";
+import { DemoConfirmClient } from "./demo-confirm-client";
 
 /**
  * /join/[code] — the QR-code scan target for class enrollment.
@@ -76,6 +78,46 @@ export default async function JoinPage({ params }: Params) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
+  // ── Demo walk-up branch (PLAN_DEMO_MODE.md D4) ──────────────────────────
+  // MUST run before the anonymous bounce below: the middleware skips the bounce
+  // for this code (D3), and this page is the authoritative branch (Node runtime,
+  // so a stale build-time middleware env degrades to the login wall, never a
+  // broken kiosk). The predicate is re-derived here — no state is passed from
+  // middleware (the code param IS the state).
+  //
+  // Three auth states:
+  //   anonymous           → walk-up join card (mints a guest on click)
+  //   authenticated GUEST → "Continue" / "Start fresh" (reused phone)
+  //   authenticated REAL  → falls through to the ordinary confirm-and-join
+  //                         (their account is never replaced)
+  if (isDemoModeEnabled() && normalized === DEMO_JOIN_CODE) {
+    if (!user) {
+      return (
+        <div className="flex min-h-dvh items-center justify-center px-4">
+          <DemoConfirmClient code={normalized} />
+        </div>
+      );
+    }
+
+    if (isGuestEmail(user.email)) {
+      // Best-effort display name; the profile read is non-critical.
+      const { data: guestProfile } = await supabase
+        .from("profiles")
+        .select("full_name")
+        .eq("id", user.id)
+        .maybeSingle();
+      return (
+        <div className="flex min-h-dvh items-center justify-center px-4">
+          <DemoConfirmClient
+            code={normalized}
+            guestName={guestProfile?.full_name ?? null}
+          />
+        </div>
+      );
+    }
+    // Real account → ordinary flow below.
+  }
 
   // Defense-in-depth: middleware already bounces anonymous users off /join
   // (it is not a PUBLIC_ROUTE). Kept in sync with the /s/[code] precedent so

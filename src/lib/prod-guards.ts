@@ -82,6 +82,10 @@ const KILL_SWITCHES: readonly { key: string; why: string }[] = [
     key: "NEXT_PUBLIC_INTEGRITY_HARDENING_OFF",
     why: "baked into the client bundle at BUILD time; clipboard/fullscreen integrity hardening never mounts (src/lib/integrity/hardening-gate.ts)",
   },
+  {
+    key: "NEXT_PUBLIC_DEMO_MODE",
+    why: "baked into the client bundle at BUILD time; arms the exhibition walk-up flow — anonymous scanners of the demo join code get auto-provisioned guest student accounts (POST /api/demo/guest), and the /demo status/reset surfaces become reachable (src/lib/demo/gate.ts, docs/plans/PLAN_DEMO_MODE.md)",
+  },
 ];
 
 /**

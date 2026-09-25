@@ -563,6 +563,7 @@ Compose reads `.env`, not `.env.local`.
 | `E2E_RATE_LIMIT_DISABLED` | **must stay unset or `0`** | RUNTIME | Kill switch (§8.4) |
 | `NEXT_PUBLIC_E2E_FAKE_SEAM` | **must stay unset or `0`** | **BUILD** (inlined) | Kill switch |
 | `NEXT_PUBLIC_INTEGRITY_HARDENING_OFF` | **must stay unset or `0`** | **BUILD** (inlined) | Kill switch |
+| `NEXT_PUBLIC_DEMO_MODE` | **must stay unset or `0`** | **BUILD** (inlined) | Kill switch |
 | `FACE_MOCK_ENABLED` | **must stay unset or `0`** | RUNTIME | Kill switch |
 | `E2E_*`, `PLAYWRIGHT_*`, `MOCK_*`, `FULL`, `CI` | **must stay unset** | — | Harness-only |
 | `ALLOW_PROD_SEED` | **must stay unset** | scripts | Bypasses the destructive-op prompt |
@@ -1000,7 +1001,7 @@ If the container comes up healthy with a kill switch armed, `PROD_ENV_STRICT` is
 not set (or not reaching the process). That is a silent success — treat it as a
 blocker.
 
-### 8.4 The four kill switches that must be OFF
+### 8.4 The five kill switches that must be OFF
 
 | Var | `1` means | Class |
 |---|---|---|
@@ -1011,11 +1012,11 @@ blocker.
 
 ```bash
 # Must print nothing (or only commented lines).
-grep -nE '^(E2E_RATE_LIMIT_DISABLED|NEXT_PUBLIC_E2E_FAKE_SEAM|FACE_MOCK_ENABLED|NEXT_PUBLIC_INTEGRITY_HARDENING_OFF)=1' \
+grep -nE '^(E2E_RATE_LIMIT_DISABLED|NEXT_PUBLIC_E2E_FAKE_SEAM|FACE_MOCK_ENABLED|NEXT_PUBLIC_INTEGRITY_HARDENING_OFF|NEXT_PUBLIC_DEMO_MODE)=1' \
   .env .env.local
 ```
 
-The two `NEXT_PUBLIC_*` ones are **baked into the client bundle** — a harness
+The `NEXT_PUBLIC_*` ones are **baked into the client bundle** — a harness
 image promoted to the VPS carries them forever. That is why the compose build
 args pin them to `"0"` and why a rebuild (not an env edit) is the only fix.
 
@@ -1034,7 +1035,7 @@ args pin them to `"0"` and why a rebuild (not an env edit) is the only fix.
 - [ ] VPS env file built from §4.2 (fresh, not copied) and the startup log line
       (§4.5) checked.
 - [ ] `PROD_ENV_STRICT=1` armed and the deliberate-failure test (§8.3) passed.
-- [ ] The four kill switches absent (§8.4).
+- [ ] The five kill switches absent (§8.4).
 - [ ] `TRUSTED_PROXY_COUNT` matches the real posture (§5).
 - [ ] **Backup rehearsed** (§10.4) — do not flip before the restore has been
       proven once.

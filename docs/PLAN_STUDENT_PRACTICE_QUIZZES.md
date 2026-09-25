@@ -29,10 +29,13 @@ migration is additive-only.
    re-sharing mints a fresh code.
 4. Creator keeps full edit rights at all times; players are warned content
    may change, with a designed failure path for mid-play mutations (§4).
+5. AI generation for student quizzes (shipped in 0029): creator-gated,
+   rate-limited generation route with a per-day budget via the
+   `ai_generation_usage` counter, cancel checkpoint, and results clamped to
+   the 50-question cap, persisted via `save_student_quiz_questions`.
 
 **Non-goals (explicitly out of scope for v1)**
 - Anonymous (logged-out) sharing — requires anon policies + public routes.
-- AI generation for student quizzes (token cost + abuse surface).
 - Discovery/search/listing of shared quizzes ("marketplace").
 - Moderation/reporting UI (a `report` seam is reserved; see §8).
 - Scores/leaderboards persistence across players (stateless grading).
@@ -47,7 +50,7 @@ migration is additive-only.
 | D-SQ3 | Share model: unlisted 10-char code on the join-code alphabet (`^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{10}$`, CHECK-enforced, ~2^50 space); **single source of truth: `share_code IS NOT NULL` ⇔ shared** (no separate boolean column) | Matches join-code UX; brute-force infeasible; one fact, no drift states. Unshare sets `share_code = NULL`; regenerate gated on being shared |
 | D-SQ4 | Server-side grading via RPC gives **per-question reveal** (NOT absolute key secrecy): a determined player can harvest the key by answering every question. Accepted for practice semantics; anyone adding scores/leaderboards later inherits this | Keeps "never trust the client"; player view exposes questions WITHOUT correct_index/explanation (mirrors `student_question_view` from 0008). NULL selections are rejected — they must not reveal anything |
 | D-SQ5 | Stateless play (no session rows, grading RPC performs ZERO writes) | Practice = unlimited tries; no one-attempt guard needed; avoids FK entanglement with `quiz_sessions`. Also makes creator-cannot-see-who-played true **by construction** — keep it that way permanently |
-| D-SQ6 | Authz split: **authoring routes/RPCs require student role; the two play routes (`GET shared/[code]`, `POST shared/answer`) require authentication only**, matching the RLS SELECT policy exactly (no role predicate) | Resolves the draft's contradiction; lecturers opening a student link get a working page, not a mysterious 403. Route guard and RPC predicate MUST agree; tested explicitly |
+| D-SQ6 | Authz split: **authoring routes/RPCs require student role; the two play routes (`GET shared/[code]`, `POST shared/answer`) require authentication only**; the shared-play surface is reached exclusively through `resolve_shared_student_quiz` (definer RPC) + `student_quiz_player_question_view` | Resolves the draft's contradiction; lecturers opening a student link get a working page, not a mysterious 403. Route guard and shared-read paths MUST agree; tested explicitly. Note: the RLS SELECT policy is creator-only (narrowed in 0045 §2.1 — a shared arm would let any authenticated user dump the whole practice corpus), so shared reads are code-gated, never direct table reads |
 | D-SQ7 | Caps enforced DB-side with row-derived owner + advisory-lock serialization (never bare count-then-insert, never `auth.uid()` inside triggers) | Concurrent-insert oversubscription closed; works under service_role where `auth.uid()` is NULL |
 
 ## 3. Schema — migration `0023_student_practice_quizzes.sql`
@@ -78,11 +81,18 @@ create table if not exists public.student_quiz_questions (
   options       text[] not null check (cardinality(options) between 2 and 5),
   correct_index int not null check (correct_index >= 0 and correct_index < cardinality(options)),
   explanation   text,
+  image_path    text,
+  generation_id uuid,
   created_at    timestamptz not null default now(),
   check (type <> 'true_false' or cardinality(options) = 2)
 );
 create index if not exists student_quiz_questions_quiz_id_order_idx
   on public.student_quiz_questions (quiz_id, order_index);
+-- image_path (0028): shape CHECK (sq_questions_image_path_shape) + ownership
+-- trigger tr_sq_questions_image_path_ownership (0046 C-03) — self-service
+-- writes must point at the caller's own storage folder.
+-- generation_id (0045): tags AI-generated batches for append-retry
+-- idempotency; partial index on non-null generation_id.
 
 -- ─── Role/ownership helpers (house convention: security definer, pinned
 -- search_path, revoke from public+anon, grant to authenticated). NOTE:
@@ -117,11 +127,13 @@ grant execute on function public.is_shared_student_quiz(uuid) to authenticated;
 alter table public.student_quizzes enable row level security;
 alter table public.student_quiz_questions enable row level security;
 
--- SELECT: creator OR any authenticated user if shared (NO role predicate —
--- deliberate; lecturers can play too, see D-SQ6).
+-- SELECT: creator-only (narrowed in 0045 §2.1: the earlier shared arm let any
+-- authenticated user dump the whole practice corpus via the table). Shared
+-- reads flow exclusively through the definer RPC + player view (D-SQ6).
 drop policy if exists "Creator or shared-visible" on public.student_quizzes;
-create policy "Creator or shared-visible" on public.student_quizzes for select
-  using (created_by = auth.uid() or is_shared_student_quiz(id));
+create policy "Creator only (shared reads are code-gated RPC/view paths)"
+  on public.student_quizzes for select
+  using (created_by = auth.uid());
 
 drop policy if exists "Student creates own quiz" on public.student_quizzes;
 create policy "Student creates own quiz" on public.student_quizzes for insert
@@ -158,10 +170,11 @@ create trigger student_questions_options_distinct
 -- ─── Caps (D-SQ7): row-derived owner, advisory-lock serialized ──────
 -- 25 quizzes/student; 50 questions/quiz. BEFORE INSERT triggers derive owner
 -- from NEW (works under service_role), take pg_advisory_xact_lock(
--- hashtext('student_quiz_cap:' || owner)) before counting. The question cap
--- uses the SAME lock key as append_student_question's order_index lock so the
--- RPC→trigger path is reentrant (same session+key = no-op) with no reverse
--- order (no deadlock).
+-- hashtext('student_quiz_cap:' || owner)) before counting. The question
+-- cap/append path is unified on the advisory lock
+-- 'student_quiz_append:' || quiz_id, taken BEFORE any count/delete by BOTH
+-- append_student_question and save_student_quiz_questions (0045/0049) —
+-- same session+key is reentrant (no-op), no reverse order (no deadlock).
 
 -- ─── updated_at ─────────────────────────────────────────────────────
 -- BEFORE UPDATE plpgsql fn sets updated_at = now(). A child-side trigger on
@@ -170,10 +183,12 @@ create trigger student_questions_options_distinct
 ```
 
 Notes:
-- Enum reuse couples domains (documented in header): a future
-  `alter type question_type add value` widens the student surface too; Zod
-  constants remain the real gate. Acceptable — revisit only if divergence is
-  near-term.
+- Enum boundary hard-pinned in DB (divergence happened, so the Zod gate alone
+  is no longer the story): 0037 adds `student_quiz_questions_no_multi_select`
+  CHECK; 0052 §8 adds `student_questions_no_new_types` CHECK pinning
+  `type in ('mcq','true_false')` — short_text explicitly has no AI path in
+  practice (no spend budget; practice short_text is not even authorable).
+  The same boundary 400s at the API (`StudentQuestionInputSchema`).
 - Title sanitization: strip bidi-override / zero-width characters at Zod
   validation time (homoglyph spoofing defense).
 
@@ -206,6 +221,21 @@ create or replace function public.answer_student_question(
 -- Security-definer helper exposing ONLY split_part(full_name,' ',1),
 -- callable when is_shared_student_quiz(p_quiz_id). created_by UUID itself is
 -- STRIPPED from every player-facing payload (metadata, questions, grades).
+
+-- Bulk persistence RPC (live 5-arg form):
+-- save_student_quiz_questions(
+--   p_quiz_id uuid,
+--   p_questions jsonb,
+--   p_mode text,
+--   p_generation_id uuid default null,   -- append-retry idempotency: a
+--                                        -- generation_id already tagged on
+--                                        -- the quiz returns the saved rows
+--                                        -- instead of duplicating
+--                                        -- (audit-1 P1-10)
+--   p_replace_ids uuid[] default null)   -- replace deletes ONLY the listed
+--                                        -- ids, so a manual question appended
+--                                        -- mid-generation survives
+--                                        -- (0049 H3-ATOM-F1)
 ```
 
 Share code issuance lives in the API route (`generateShareCode()` port of
@@ -230,6 +260,8 @@ the existing `payloadTooLarge` precedent).
 | `DELETE /api/student-quizzes/[id]` | Delete (cascades questions) |
 | `POST /api/student-quizzes/[id]/questions` | Append via RPC `append_student_question` (advisory lock on `'student_quiz_append:'||quiz_id`, same key as the cap trigger) |
 | `PATCH/DELETE /api/student-quizzes/[id]/questions/[questionId]` | Edit/remove (always editable) |
+| `POST/DELETE /api/student-quizzes/[id]/questions/[questionId]/image` | Attach/remove question image (0028; ownership-triggered storage path per 0046 C-03) |
+| `POST /api/student-quizzes/[id]/generate` | AI generation (0029; creator-gated, rate-limited, per-day budget via `ai_generation_usage`): SSE stream with cancel checkpoint, clamped to the 50-question cap, persisted via `save_student_quiz_questions` |
 | `POST /api/student-quizzes/[id]/reorder` | RPC reorder (mirror of 0004 semantics) |
 | `GET /api/student-quizzes/shared/[code]` [auth-only] | Resolve code -> quiz metadata + creator first name + questions via player view (no answer key, no created_by) |
 | `POST /api/student-quizzes/shared/answer` [auth-only] | Thin wrapper around `answer_student_question`; NULL selected_index rejected with `invalid_body` |
@@ -316,6 +348,10 @@ New student section "My Quizzes" (claymorphism cards, next-intl **en + ms**
    suite's beforeEach; hour-window 429 tests via N real calls (seam has no
    windowMs param). Authz split tested explicitly: student B denied A's
    unshared quiz (route test) + lecturer CAN play shared link (route test).
+   RLS note: B sees ZERO rows in both tables (SELECT policy is creator-only,
+   0045 §2.1); shared access is via `resolve_shared_student_quiz` + the
+   player view only, so direct-table read probes assert creator-only and
+   shared-flow probes assert through the RPC/view paths.
 3. DB/RLS probes: extend the verify-family — `scripts/verify-student-quizzes.mjs`
    + package.json `verify:student-quizzes` + ci.yml step. Built INCREMENTALLY:
    RLS/policy probes land with Phase 1, RPC/route-authZ probes with Phase 2

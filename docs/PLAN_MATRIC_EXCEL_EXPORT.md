@@ -144,14 +144,21 @@ CVE-2024-22363 history, styling gaps).
   principal). No TOCTOU concern (class ownership immutable; RLS re-checks
   every read under the same JWT). Invariant: **all reads on the user-scoped
   client; `createAdminClient()` forbidden in this route**.
+- **[FIX]** `checkSameOrigin()` runs ABOVE the rate limiter (audit-2 M-22).
 - **[FIX] Rate limit** `EXPORT_RATE ≈ { limit: 10, windowMs: 60_000 }` keyed
   `export:${userId}` immediately after the guard (every route in this repo
   throttles; this is the most expensive read + PII payload).
-- Reads: quiz meta via guard; `lecturer_session_view` (GET-envelope minus
-  nonce); extended roster; `questions` ordered by `order_index` **with**
-  `correct_index`/`explanation` (same principal already sees them in builder;
-  play-time D10 untouched); `lecturer_answers_view .in(session_id, ids)`.
-  Caps: `RESULTS_SESSION_LIMIT` (200) and roster cap apply.
+- Reads: quiz meta via guard; the lecturer's `profiles.locale` (localized
+  workbook labels); `lecturer_session_view` (GET-envelope minus nonce, plus
+  `attempt`, `pending_count`, `face_fail_count`, `fullscreen_pause_count`,
+  `hand_pause_count`); extended roster; `lecturer_questions_view` ordered by
+  `order_index` **with** `correct_index`/`explanation` — [FIX] 0054 revoked
+  answer-key columns from `authenticated`, so the owner-predicated view is
+  the only readable path (plain `questions` base-table read replaced);
+  `lecturer_answers_view .in(session_id, ids)` capped at
+  **`ANSWERS_LIMIT = 20_000`** — hitting it sets `answersTruncated` →
+  workbook truncation warning. Caps: `RESULTS_SESSION_LIMIT` (200) and
+  roster cap apply.
 - Response: xlsx bytes, `Content-Type: application/vnd.openxmlformats-
   officedocument.spreadsheetml.sheet`, `Cache-Control: no-store`,
   `Content-Disposition: attachment; filename="<safe>-results-YYYY-MM-DD.xlsx";
@@ -159,9 +166,10 @@ CVE-2024-22363 history, styling gaps).
   (CRLF would throw in undici Headers → 500; quotes/backslashes corrupt
   parsing; RFC 5987 covers non-ASCII), date suffix added per critique.
 - Route test: student token → **403** (`requireUser` role denial), zero xlsx
-  bytes; unknown/malformed id → 404; non-owner lecturer → 404 (guard's
-  no-oracle semantics); rate-limit → 429; happy path parses the workbook and
-  asserts attempt data actually reached the Results sheet.
+  bytes; unknown/malformed id → 404; rate-limit → 429; happy path parses the
+  workbook and asserts attempt data actually reached the Results sheet.
+  (Non-owner lecturer → 404 is covered by `requireQuizOwner`'s own guard
+  tests, not in `export-route.test.ts`.)
 
 ### 2.3 Pure model layer (`src/lib/results/export.ts`)
 
@@ -175,7 +183,9 @@ CVE-2024-22363 history, styling gaps).
   students: [{ studentId, matricNo|null, fullName|null, status, score|null,
                total, percent|null, startedAtISO, submittedAtISO,
                durationSec|null, faceFails|null, focusPauses|null,
-               answers: (string|null)[], answerCorrect: (boolean|null)[] }],
+               fullscreenExits|null, handPauses|null,
+               answers: (string|null)[], answerCorrect: (boolean|null)[],
+               pendingCount, attempt }],
   distribution: [[{ optionIndex, chosenCount, chosenPercent }]] // per question
 }
 ```
@@ -193,10 +203,12 @@ CVE-2024-22363 history, styling gaps).
   so assessment retakes (QC-4, migration 0032) are already handled:
   the LATEST completed attempt is the graded row, earlier attempts never
   double-count. Practice retakes collapse to the terminal attempt
-  (completed/flagged), else the most recently started. Deliberate grading
-  semantics, NOT strict dashboard parity (the dashboard ranks in_progress
-  above completed). Distribution math and attemptedCount draw from exactly
-  this session set.
+  (completed outranks flagged — audit-2 H-09: flagged is representative only
+  when no completed attempt exists), else the most recently started.
+  Deliberate grading semantics, NOT strict dashboard parity (the dashboard
+  ranks in_progress above completed). Distribution math and attemptedCount
+  draw from exactly this session set. Representative rows also carry
+  `attempt` (ordinal) and `pendingCount`.
 - **Orphan attempts** (session whose student left the roster) still get a row
   appended — same honesty rule as the dashboard's session-without-roster rows;
   blank names render via the dashboard's "Student"/"Pelajar" label.
@@ -215,18 +227,34 @@ CVE-2024-22363 history, styling gaps).
   apostrophe accepted. Unit-test banner/explanation cells explicitly.
 - Distribution math over answered attempts only; whole-number rounding;
   zero-answer questions yield zeroed percentages (no div-by-zero).
-- `truncated: true` when session count hits 200 or roster hits 100.
+- **[FIX] Pending/skipped cell semantics**: `short_text` answers with
+  `mark_status='pending'` render the neutral pending label ("Pending mark")
+  — never the dash, never the provisional partial score; skipped answers
+  render the "Skipped" label. A session's percent divides by the RESOLVED
+  denominator (`total − pendingCount`); the workbook prints the pending
+  label as text with numFmt suppressed on that cell. `score` is NUMERIC
+  (0053) arriving as a string over PostgREST — coerced via `coerceScore`
+  before any math.
+- `truncated: true` when session count hits 200, roster hits 100, **or the
+  route reports the 20k answer-cap hit (`answersTruncated`)** — three-way
+  OR.
 
 ### 2.4 Workbook layout
 
 - **Sheet 1 "Results"**: Row 1 merged banner quiz title; Row 2 class name +
   mode + generated-at; Row 3 blank; Row 4 header; frozen panes below header,
   autofilter on. Columns: `# · Matric No · Name · Status · Score · Total · %
-  · Started · Submitted · Duration · Face fails · Focus pauses* · Q1 … Qn`.
-  (*integrity pair present only for assessment mode.) Wrong answers red,
-  correct dark-green; `%` stored numeric with percent format.
-  **[FIX]** When `meta.truncated`, a styled warning row under the header:
-  "Showing first N enrolled / M sessions".
+  · Started · Submitted · Duration · Face fails · Focus pauses · Fullscreen
+  exits · Hand pauses · Q1 … Qn · Attempt`. (The four integrity columns
+  `Face fails · Focus pauses · Fullscreen exits · Hand pauses` are present
+  only for assessment mode — migrations 0043/0044; `Attempt` (session
+  ordinal, 0032/0044) trails the question cells.)
+  Wrong answers red, correct dark-green; `%` stored numeric with percent
+  format. **[FIX]** When `meta.truncated`, a styled warning row is inserted
+  directly under the header — copy
+  `"Truncated export — showing the first {count} rows only."` with
+  `{count} = max(attemptedCount, students.length)` — shifting data rows to
+  row 6.
 - **Sheet 2 "Questions & Key"**: `Q# · Type · Prompt · Option A…E (✓ marks
   correct) · Correct Answer · Explanation · Times answered · Times correct ·
   % correct`.
@@ -281,7 +309,7 @@ with a warning — it must never abort the whole demo provisioning.
 |---|---|
 | Vitest units | `normalizeMatric` (whitespace deletion, 6-digit shape, reserved 99xxxx range); `sanitizeFilenamePart`; `buildExportModel` (roster-driven not-started rows, matric sort w/ nulls, unanswered `—`, distribution math incl. zero-division over representative sessions only, `safeText` on EVERY string cell incl. banner/explanation/names, truncation flag incl. answers cap, practice-retake representative selection, orphan-session rows, equal-timestamp tie behavior, duration/integrity columns) |
 | Server-action tests | `register` (matric required/reserved/invalid; normalized metadata; pre-check short-circuit before signUp; unique-race → matricTaken; lecturer path ignores garbage matric and skips the pre-check) and `updateMyMatric` (unauthenticated/non-student copy paths; validation; probe clash → taken without write; 23505 at write → taken; happy-path normalization) |
-| Route tests | student token → 403 no bytes; unknown id → 404; malformed id → 404; happy path buffer >0 with 3 correctly named sheets AND attempt data asserted inside the parsed workbook; hostile-title filename sanitization; 429 after budget |
+| Route tests | student token → 403 no bytes; unknown id → 404; malformed id → 404; happy path buffer >0 with 3 correctly named sheets AND attempt data asserted inside the parsed workbook; hostile-title filename sanitization; 429 after budget (7 tests; non-owner 404 lives in `requireQuizOwner` guard tests) |
 | `scripts/verify-matric.mjs` | self-contained fixtures (admin.createUser + deleteUser teardown, random stamp suffix): trigger copies normalized metadata; malformed metadata → NULL not abort; reserved-range metadata refused by trigger; duplicate matric second createUser errors; plural NULLs ok; format CHECK rejects direct bad writes; roster view exposes matric to owning lecturer only with exact column ORDER (select("*") key-order probe); negative probes: enrolled student SELECT on roster view → 0 rows; cross-profile matric read → 0 rows; RLS self-update of own matric + claiming another's fails with 23505. Backfill correctness is pinned by migration review + db:reset replay, not a live probe |
 | CI | `verify:matric` wired into the verify chain |
 

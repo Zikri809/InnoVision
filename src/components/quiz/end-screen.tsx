@@ -8,6 +8,8 @@ import { Lock, RotateCcw, Timer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BotAvatar } from "@/components/bot/bot-avatar";
 import { QuestionImage } from "@/components/media/question-image";
+import { isDemoModeEnabled, DEMO_JOIN_CODE } from "@/lib/demo/gate";
+import { createClient } from "@/lib/supabase/client";
 import { VList } from "virtua";
 import { ScoreRing } from "@/components/quiz/score-ring";
 import {
@@ -745,6 +747,51 @@ export function EndScreen({
       <div className="hidden px-4 py-6 sm:py-12 lg:block">
         {wideLayout}
       </div>
+
+      {/* Demo walk-up footer (PLAN_DEMO_MODE.md D11): only under the booth
+          flag. Gives the visitor the payoff ("watch the big screen") and a
+          clean exit so the next visitor gets a fresh session. */}
+      {isDemoModeEnabled() && <DemoDoneFooter />}
     </>
+  );
+}
+
+/** Client-side sign-out so a booth device is ready for the next visitor. */
+function DemoDoneFooter() {
+  const td = useTranslations("demo");
+  const router = useRouter();
+  const [signingOut, setSigningOut] = useState(false);
+
+  async function done() {
+    setSigningOut(true);
+    try {
+      const supabase = createClient();
+      await supabase.auth.signOut();
+    } catch {
+      // Non-fatal — the next guest's sign-in overwrites the cookie anyway.
+    } finally {
+      // Send the visitor back to the demo card, NOT a protected route: after
+      // sign-out, /student/quizzes would 307 to /login (a dead-end for the next
+      // visitor). The demo join code is the correct hand-back target.
+      router.replace(`/join/${DEMO_JOIN_CODE}`);
+      router.refresh();
+    }
+  }
+
+  return (
+    <div className="mx-auto mt-6 max-w-2xl px-4 pb-10">
+      <div className="rounded-2xl border-[3px] border-border bg-card px-5 py-4 text-center shadow-[var(--shadow-clay-sm)]">
+        <p className="font-heading text-base font-bold">{td("endFooter")}</p>
+        <Button
+          type="button"
+          variant="outline"
+          className="mt-3"
+          onClick={() => void done()}
+          disabled={signingOut}
+        >
+          {signingOut ? td("starting") : td("doneCta")}
+        </Button>
+      </div>
+    </div>
   );
 }

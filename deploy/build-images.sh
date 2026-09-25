@@ -140,7 +140,7 @@ command -v docker >/dev/null 2>&1 || die "docker not found"
 
 step "0/3  Kill-switch preflight (gate S5)"
 
-for key in NEXT_PUBLIC_E2E_FAKE_SEAM NEXT_PUBLIC_INTEGRITY_HARDENING_OFF E2E_RATE_LIMIT_DISABLED FACE_MOCK_ENABLED; do
+for key in NEXT_PUBLIC_E2E_FAKE_SEAM NEXT_PUBLIC_INTEGRITY_HARDENING_OFF E2E_RATE_LIMIT_DISABLED FACE_MOCK_ENABLED NEXT_PUBLIC_DEMO_MODE; do
   raw="${!key:-}"
   value="${raw#"${raw%%[![:space:]]*}"}"
   value="${value%"${value##*[![:space:]]}"}"
@@ -217,6 +217,7 @@ build_app() {
     --build-arg "ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-}" \
     --build-arg "NEXT_PUBLIC_E2E_FAKE_SEAM=0" \
     --build-arg "NEXT_PUBLIC_INTEGRITY_HARDENING_OFF=0" \
+    --build-arg "NEXT_PUBLIC_DEMO_MODE=0" \
     . || die "app image build failed"
 
   ok "built ${APP_IMAGE}:${TAG}"

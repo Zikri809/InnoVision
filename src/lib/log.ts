@@ -23,7 +23,7 @@
 
 export type LogContext = Record<string, unknown> & {
   /** Cross-subsystem correlator: which subsystem emitted this. */
-  subsystem?: "quiz-play" | "integrity" | "verification" | "seam";
+  subsystem?: "quiz-play" | "integrity" | "verification" | "seam" | "demo";
   /** The typed error the route maps to an HTTP status (when known). */
   errorCode?: string;
   /** The session this concerns, when applicable. */

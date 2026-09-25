@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Troubleshooting · Easy2U manual</title>
+  <meta name="description" content="Task-based help for Easy2U students and lecturers.">
+  <link rel="stylesheet" href="style.css">
+  <script src="search.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#article">Skip to content</a>
+  <header class="site-header">
+    <a class="brand" href="index.html" aria-label="Easy2U manual home"><span class="brand-mark" aria-hidden="true">E2</span><span>Easy2U <small>User manual</small></span></a>
+    <a class="back-app" href="support.html">Get help</a>
+  </header>
+  <div class="mobile-tools">
+    <details class="mobile-menu"><summary>Manual sections</summary><nav aria-label="Manual sections"><div class="nav-group"><p class="nav-group-label">Start</p><a href="index.html">Start here</a></div>
+<div class="nav-group"><p class="nav-group-label">Guides</p><a href="student.html">Student guide</a><a href="lecturer.html">Lecturer guide</a><a href="during-quiz.html">During a quiz</a></div>
+<div class="nav-group"><p class="nav-group-label">Help and reference</p><a href="troubleshooting.html" aria-current="page">Troubleshooting</a><a href="glossary.html">Glossary</a><a href="support.html">Get more help</a><a href="CHANGELOG.html">Change log</a></div></nav></details>
+  </div>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Manual navigation">
+      <label class="search-label" for="manual-search">Search the manual</label>
+      <input id="manual-search" class="search-input" type="search" placeholder="Search tasks and problems…" autocomplete="off" aria-controls="search-results">
+      <div id="search-results" class="search-results" role="status" aria-live="polite" hidden></div>
+      <nav class="section-nav" aria-label="Manual sections"><div class="nav-group"><p class="nav-group-label">Start</p><a href="index.html">Start here</a></div>
+<div class="nav-group"><p class="nav-group-label">Guides</p><a href="student.html">Student guide</a><a href="lecturer.html">Lecturer guide</a><a href="during-quiz.html">During a quiz</a></div>
+<div class="nav-group"><p class="nav-group-label">Help and reference</p><a href="troubleshooting.html" aria-current="page">Troubleshooting</a><a href="glossary.html">Glossary</a><a href="support.html">Get more help</a><a href="CHANGELOG.html">Change log</a></div></nav>
+    </aside>
+    <main id="article" class="article-card" tabindex="-1">
+      <article><h1 id="troubleshooting">Troubleshooting</h1><details class="page-toc"><summary>On this page <span>12 topics</span></summary><nav aria-label="On this page"><a class="toc-level-2" href="#account-and-sign-in">Account and sign-in</a>
+<a class="toc-level-3" href="#i-cannot-create-an-account">I cannot create an account</a>
+<a class="toc-level-3" href="#the-app-says-the-email-or-password-is-invalid">The app says the email or password is invalid</a>
+<a class="toc-level-3" href="#i-am-asked-for-a-matric-number">I am asked for a matric number</a>
+<a class="toc-level-3" href="#a-qr-join-link-sends-me-to-sign-in-and-i-do-not-return-to-the-class">A QR join link sends me to sign in and I do not return to the class</a>
+<a class="toc-level-2" href="#class-joining">Class joining</a>
+<a class="toc-level-3" href="#the-join-code-is-rejected">The join code is rejected</a>
+<a class="toc-level-3" href="#the-app-says-i-already-joined">The app says I already joined</a>
+<a class="toc-level-3" href="#i-joined-but-cannot-find-a-quiz">I joined, but cannot find a quiz</a>
+<a class="toc-level-2" href="#face-setup-and-camera">Face setup and camera</a>
+<a class="toc-level-3" href="#the-camera-permission-was-denied">The camera permission was denied</a>
+<a class="toc-level-3" href="#the-camera-is-unavailable-or-busy">The camera is unavailable or busy</a>
+<a class="toc-level-3" href="#face-capture-does-not-progress">Face capture does not progress</a>
+<a class="toc-level-3" href="#my-enrollment-says-pending-review">My enrollment says pending review</a>
+<a class="toc-level-3" href="#face-setup-succeeded-but-the-assessment-still-blocks-me">Face setup succeeded, but the assessment still blocks me</a>
+<a class="toc-level-2" href="#class-quizzes-and-results">Class quizzes and results</a>
+<a class="toc-level-3" href="#the-quiz-says-it-is-not-open-yet">The quiz says it is not open yet</a>
+<a class="toc-level-3" href="#the-quiz-says-the-window-has-closed">The quiz says the window has closed</a>
+<a class="toc-level-3" href="#i-already-attempted-the-quiz-or-cannot-retake-it">I already attempted the quiz or cannot retake it</a>
+<a class="toc-level-3" href="#my-result-says-awaiting-results">My result says “Awaiting results”</a>
+<a class="toc-level-3" href="#i-cannot-find-view-results">I cannot find “View results”</a>
+<a class="toc-level-2" href="#paused-or-interrupted-assessment">Paused or interrupted assessment</a>
+<a class="toc-level-3" href="#a-pause-overlay-asks-me-to-verify-my-face">A pause overlay asks me to verify my face</a>
+<a class="toc-level-3" href="#the-camera-stopped-during-the-assessment">The camera stopped during the assessment</a>
+<a class="toc-level-3" href="#the-app-says-i-left-the-tab-or-fullscreen">The app says I left the tab or fullscreen</a>
+<a class="toc-level-3" href="#the-page-reloaded-browser-closed-or-connection-dropped">The page reloaded, browser closed, or connection dropped</a>
+<a class="toc-level-3" href="#submission-failed-or-the-timer-expired">Submission failed or the timer expired</a>
+<a class="toc-level-3" href="#a-gesture-or-focus-warning-keeps-appearing">A gesture or focus warning keeps appearing</a>
+<a class="toc-level-2" href="#personal-quizzes-and-sharing">Personal quizzes and sharing</a>
+<a class="toc-level-3" href="#i-cannot-create-or-edit-a-personal-quiz">I cannot create or edit a personal quiz</a>
+<a class="toc-level-3" href="#a-shared-quiz-link-says-it-is-invalid-or-unavailable">A shared quiz link says it is invalid or unavailable</a>
+<a class="toc-level-3" href="#a-shared-quiz-stopped-working-while-i-was-playing">A shared quiz stopped working while I was playing</a>
+<a class="toc-level-2" href="#classes-and-join-codes">Classes and join codes</a>
+<a class="toc-level-3" href="#i-created-a-class-but-students-cannot-join">I created a class, but students cannot join</a>
+<a class="toc-level-3" href="#a-student-is-missing-from-the-roster">A student is missing from the roster</a>
+<a class="toc-level-2" href="#quiz-creation-and-publishing">Quiz creation and publishing</a>
+<a class="toc-level-3" href="#publish-quiz-is-unavailable">Publish quiz is unavailable</a>
+<a class="toc-level-3" href="#students-cannot-see-or-start-a-published-quiz">Students cannot see or start a published quiz</a>
+<a class="toc-level-3" href="#i-closed-a-quiz-by-mistake">I closed a quiz by mistake</a>
+<a class="toc-level-2" href="#assessment-attempts-and-face-checks">Assessment attempts and face checks</a>
+<a class="toc-level-3" href="#a-student-is-flagged-or-cannot-resume">A student is flagged or cannot resume</a>
+<a class="toc-level-3" href="#face-enrollment-needs-review">Face enrollment needs review</a>
+<a class="toc-level-3" href="#a-result-is-missing-or-still-hidden-from-students">A result is missing or still hidden from students</a>
+<a class="toc-level-2" href="#ai-import-and-export">AI import and export</a>
+<a class="toc-level-3" href="#import-questions-reports-a-line-error">Import questions reports a line error</a>
+<a class="toc-level-3" href="#ai-generation-or-document-scanning-fails">AI generation or document scanning fails</a>
+<a class="toc-level-3" href="#export-excel-fails-or-appears-incomplete">Export Excel fails or appears incomplete</a>
+<a class="toc-level-2" href="#phone-layout">Phone layout</a>
+<a class="toc-level-3" href="#i-cannot-see-the-bottom-navigation">I cannot see the bottom navigation</a>
+<a class="toc-level-3" href="#the-lecturer-gradebook-looks-different-on-my-phone">The lecturer gradebook looks different on my phone</a>
+<a class="toc-level-3" href="#a-quiz-builder-control-is-missing-on-my-phone">A quiz-builder control is missing on my phone</a>
+<a class="toc-level-2" href="#escalation">Escalation</a></nav></details>
+<p>Use the closest symptom below. Keep the quiz page open during an assessment problem when possible. For issues that need staff access, contact your lecturer first; see <a href="support.html">Support</a> for what to include and where to escalate.</p>
+<h2 id="account-and-sign-in">Account and sign-in</h2>
+<h3 id="i-cannot-create-an-account">I cannot create an account</h3>
+<p>Check that <strong>Email</strong> is valid, the password has at least six characters, a student role is selected, and the requested <strong>Matric number</strong> is filled in. The registration form requires the biometric consent checkbox before <strong>Create account</strong> is enabled. Read the consent information before selecting it. If a field is rejected, correct it and submit again. If the same error persists, contact your institution's account administrator.</p>
+<h3 id="the-app-says-the-email-or-password-is-invalid">The app says the email or password is invalid</h3>
+<p>Check the spelling and sign-in method. If you use institutional Microsoft sign-in, choose that option when it is offered. Select <strong>Forgot password?</strong> to request a reset link, then check the email inbox and spam folder. The reset confirmation is generic by design. If you cannot access your email or the reset link has expired, contact the institution's account administrator.</p>
+<h3 id="i-am-asked-for-a-matric-number">I am asked for a matric number</h3>
+<p>Complete the one-time matric capture prompt for your institutional account. If the value is rejected, check the institution's expected format and contact its account administrator. Do not create a second account to work around the prompt.</p>
+<h3 id="a-qr-join-link-sends-me-to-sign-in-and-i-do-not-return-to-the-class">A QR join link sends me to sign in and I do not return to the class</h3>
+<p>Finish sign-in or registration in the same browser. Open the QR link again if necessary, review the displayed class code, then explicitly confirm the join. A QR scan only opens the confirmation page; it does not enroll you automatically.</p>
+<h2 id="class-joining">Class joining</h2>
+<h3 id="the-join-code-is-rejected">The join code is rejected</h3>
+<p>Check that it has six characters and compare it with the lecturer's current code. Codes can be invalid or for an archived class. If several incorrect attempts have triggered a temporary lock, wait for the lock to expire and ask the lecturer to confirm the code. Do not keep guessing.</p>
+<h3 id="the-app-says-i-already-joined">The app says I already joined</h3>
+<p>Open <strong>My Classes</strong> and look for the class. Select its card to view quizzes. If it is not present after refreshing the page, sign out and back in once; then contact the lecturer with the class name.</p>
+<h3 id="i-joined-but-cannot-find-a-quiz">I joined, but cannot find a quiz</h3>
+<p>Open <strong>Class Quizzes</strong>, clear a class filter if one is active, and confirm the quiz is live and within its availability window. Draft quizzes are not visible to students. Ask the lecturer whether the quiz has been published and whether your class is enrolled.</p>
+<h2 id="face-setup-and-camera">Face setup and camera</h2>
+<h3 id="the-camera-permission-was-denied">The camera permission was denied</h3>
+<p>Open the browser's site settings for Easy2U, allow camera access, return to <strong>Face Setup</strong>, and select <strong>Retry</strong>. On a phone, also check the operating system camera permission for the browser.</p>
+<h3 id="the-camera-is-unavailable-or-busy">The camera is unavailable or busy</h3>
+<p>Close video calls and other apps/tabs using the camera. Check that the device has a working camera, then select <strong>Retry</strong>. If the browser says the page is not secure or cannot use the camera, open the institution's approved Easy2U address and contact the administrator if the issue continues.</p>
+<h3 id="face-capture-does-not-progress">Face capture does not progress</h3>
+<p>Use a brighter, evenly lit place; position one face in the guide; remove obstructions; and follow the blink and head-turn instruction for each pose. Make sure no other person is in frame. Retry once the on-screen guidance indicates a centered face and suitable lighting.</p>
+<h3 id="my-enrollment-says-pending-review">My enrollment says pending review</h3>
+<p>This is a normal review state, not an accusation. Wait for the lecturer or reviewer to complete the check, then revisit <strong>Face Setup</strong>. If an assessment is due before the review finishes, contact the lecturer and explain that your enrollment is pending. Do not attempt to bypass verification.</p>
+<h3 id="face-setup-succeeded-but-the-assessment-still-blocks-me">Face setup succeeded, but the assessment still blocks me</h3>
+<p>Return to <strong>Face Setup</strong> and check its current status. A pending review or withdrawn biometric consent can block a face-required assessment. Complete the stated setup/review step. If your status is enrolled and the quiz still blocks you, contact the lecturer with the quiz title and exact message.</p>
+<h2 id="class-quizzes-and-results">Class quizzes and results</h2>
+<h3 id="the-quiz-says-it-is-not-open-yet">The quiz says it is not open yet</h3>
+<p>Check the opening time shown on the quiz and try again after it begins. Confirm your device date/time is correct. If the displayed time has passed, ask the lecturer to verify the quiz schedule.</p>
+<h3 id="the-quiz-says-the-window-has-closed">The quiz says the window has closed</h3>
+<p>The availability period has ended. Contact the lecturer to ask whether the quiz can be reopened; students cannot change the window.</p>
+<h3 id="i-already-attempted-the-quiz-or-cannot-retake-it">I already attempted the quiz or cannot retake it</h3>
+<p>The attempt limit and retake setting are controlled by the lecturer. Return to the quiz card and use <strong>Resume</strong>, <strong>Start</strong>, or <strong>View results</strong> only when that action is shown. Ask the lecturer if you believe the attempt was interrupted or recorded incorrectly.</p>
+<h3 id="my-result-says-awaiting-results">My result says “Awaiting results”</h3>
+<p>The quiz was submitted but the lecturer has not released results. Check again later or ask when results will be available. You cannot access hidden scores from the student view before release.</p>
+<h3 id="i-cannot-find-view-results">I cannot find “View results”</h3>
+<p>Confirm the lecturer has released results and that the quiz card shows the released state. Clear any class filter and verify you are in the correct class. If the quiz remains missing, contact the lecturer.</p>
+<h2 id="paused-or-interrupted-assessment">Paused or interrupted assessment</h2>
+<h3 id="a-pause-overlay-asks-me-to-verify-my-face">A pause overlay asks me to verify my face</h3>
+<p>Stay on the quiz page, center your face, and follow the blink instruction. Keep the camera available and wait for the recovery control/state. A pause is a recovery state; it does not by itself mean you have been accused of misconduct.</p>
+<h3 id="the-camera-stopped-during-the-assessment">The camera stopped during the assessment</h3>
+<p>Restore the Easy2U browser camera permission, close any other app using it, and use the retry/recovery action shown on the overlay. Keep the page open. Contact your lecturer if it does not resume.</p>
+<h3 id="the-app-says-i-left-the-tab-or-fullscreen">The app says I left the tab or fullscreen</h3>
+<p>Return to the quiz tab and accept the fullscreen prompt if shown. Keep the page in the foreground. If the app asks the lecturer to unlock the attempt, contact them with the quiz title and approximate pause time.</p>
+<h3 id="the-page-reloaded-browser-closed-or-connection-dropped">The page reloaded, browser closed, or connection dropped</h3>
+<p>Reopen <strong>Class Quizzes</strong> and check whether the card offers a resume action. An answer is not guaranteed saved if the player did not acknowledge it before the interruption. Avoid starting a new attempt unless the card offers it or your lecturer advises you to.</p>
+<h3 id="submission-failed-or-the-timer-expired">Submission failed or the timer expired</h3>
+<p>Keep the player open and use an on-screen retry if one appears. Wait for a completion/submission state, then check the quiz card. A timed attempt may submit automatically at expiry. If there is no completion state or the recorded status looks wrong, contact the lecturer promptly with the time and error text.</p>
+<h3 id="a-gesture-or-focus-warning-keeps-appearing">A gesture or focus warning keeps appearing</h3>
+<p>Follow the on-screen instructions and keep your hand/face visible if those checks are enabled. Use a normal answer control only if the interface offers it. If you cannot operate the quiz, contact the lecturer; do not attempt to disable or bypass checks.</p>
+<h2 id="personal-quizzes-and-sharing">Personal quizzes and sharing</h2>
+<h3 id="i-cannot-create-or-edit-a-personal-quiz">I cannot create or edit a personal quiz</h3>
+<p>Check required title, prompt, and answer fields, then retry the visible save/add action. AI generation and image options depend on institution configuration. If your quiz is missing from <strong>My Quizzes</strong> after a refresh, contact support using <a href="support.html">Support</a>.</p>
+<h3 id="a-shared-quiz-link-says-it-is-invalid-or-unavailable">A shared quiz link says it is invalid or unavailable</h3>
+<p>Ask the owner for the current link. They may have rotated the code, stopped sharing, or deleted the quiz. A previous link will not work after rotation or revocation. Sign in if prompted, then reopen the current link.</p>
+<h3 id="a-shared-quiz-stopped-working-while-i-was-playing">A shared quiz stopped working while I was playing</h3>
+<p>The owner may have stopped sharing during your attempt. Ask them for a new link if they intend to share it again. Answers or feedback may no longer be available after access is revoked.</p>
+<h2 id="classes-and-join-codes">Classes and join codes</h2>
+<h3 id="i-created-a-class-but-students-cannot-join">I created a class, but students cannot join</h3>
+<p>Open <strong>My Classes</strong> and check that the class is active. From its detail page,
+select <strong>Copy join code</strong> or <strong>Show QR</strong> and share the current code or link.
+An archived class cannot accept new joins. If students see a temporary
+lockout, they should wait for the displayed interval rather than keep trying
+codes. Send them the <a href="student.html#join-a-class">student join steps</a>.</p>
+<h3 id="a-student-is-missing-from-the-roster">A student is missing from the roster</h3>
+<p>Confirm that the student joined this class, not another class with a similar
+name. On a phone, select the <strong>Students</strong> tab in class detail. If a large
+class shows a truncation notice, only the first 100 students are listed, but
+other enrolled students still count toward quizzes and exports. Check the
+gradebook or contact <a href="support.html">Support</a> if the enrollment is disputed.</p>
+<h2 id="quiz-creation-and-publishing">Quiz creation and publishing</h2>
+<h3 id="publish-quiz-is-unavailable">Publish quiz is unavailable</h3>
+<p>Open the draft in the builder and add at least one valid question. Check
+each question's prompt, options or rubric, and answer key. A class must be
+active to accept a new quiz. Review any validation message and retry the
+visible <strong>Publish quiz</strong> action.</p>
+<h3 id="students-cannot-see-or-start-a-published-quiz">Students cannot see or start a published quiz</h3>
+<p>Check that the status is <strong>Live</strong>, the student belongs to the class, and the
+<strong>Opens at</strong> and <strong>Closes at</strong> times permit a start. A live quiz can be
+scheduled for later or past its closing time. If the class is archived,
+restore it only after checking whether its live quizzes should reopen.</p>
+<h3 id="i-closed-a-quiz-by-mistake">I closed a quiz by mistake</h3>
+<p>Closing is one-way. Do not promise students that it can be returned to Live.
+Review the submitted attempts and results, then use your institution's
+support route for the next course action. A duplicate creates a fresh draft,
+but it does not carry student attempts or results.</p>
+<h2 id="assessment-attempts-and-face-checks">Assessment attempts and face checks</h2>
+<h3 id="a-student-is-flagged-or-cannot-resume">A student is flagged or cannot resume</h3>
+<p>Open the quiz's <strong>Results</strong>, find the student's session, and read its status
+and <strong>Integrity timeline</strong>. Decide whether <strong>Unlock</strong> is appropriate.
+If a camera issue prevents checks, consider <strong>Face-exempt</strong> for that attempt
+and record the required reason. Do not <strong>Reset</strong> unless you intend to
+permanently delete that attempt's answers, progress and integrity details.</p>
+<h3 id="face-enrollment-needs-review">Face enrollment needs review</h3>
+<p>On <strong>My Classes</strong>, inspect the pending enrollment panel. Use your normal
+identity-check process before selecting <strong>Approve</strong> or <strong>Reject — ask to
+re-enroll</strong>. A rejection asks the student to capture again. If you cannot
+establish the identity, use <a href="support.html">Support</a> rather than guessing.</p>
+<h3 id="a-result-is-missing-or-still-hidden-from-students">A result is missing or still hidden from students</h3>
+<p>Check that the student's attempt is completed. Inspect <strong>Pending</strong> or
+<strong>Needs review</strong> short answers before releasing marks. On <strong>Results</strong>,
+<strong>Results are hidden</strong> means students cannot yet see scores. Select
+<strong>Reveal to students</strong> only when the assessment is ready. An <strong>unrevealed</strong>
+marker in the gradebook is expected before release.</p>
+<h2 id="ai-import-and-export">AI import and export</h2>
+<h3 id="import-questions-reports-a-line-error">Import questions reports a line error</h3>
+<p>Return to <strong>Bulk import questions</strong>, check the line named in the message,
+and correct its pipe-separated format and <code>*</code> answer marker. Confirm the
+preview and that the draft has enough of its 30 question slots remaining.
+Only <code>.txt</code> and <code>.csv</code> files load through this import dialog.</p>
+<h3 id="ai-generation-or-document-scanning-fails">AI generation or document scanning fails</h3>
+<p>Review the file type and size shown in <strong>Generate quiz from file</strong>. Check
+the extracted-content preview before continuing. For scanned material,
+switch to an available scanner or retry the pages the dialog names. If a
+generation was cancelled, nothing was saved; if it says questions were
+saved but the review screen failed, reopen the builder. You can add
+questions manually while a configured AI service is unavailable.</p>
+<h3 id="export-excel-fails-or-appears-incomplete">Export Excel fails or appears incomplete</h3>
+<p>Check whether you are on the quiz's <strong>Results</strong> page or the class
+<strong>Gradebook</strong>; they produce different reports. Retry once if the page
+reports a temporary export error. If a gradebook shows a row, column or
+session truncation notice, read that notice before interpreting the file.
+Store any downloaded report in an institution-approved location and use
+<a href="support.html">Support</a> if exports continue to fail.</p>
+<h2 id="phone-layout">Phone layout</h2>
+<h3 id="i-cannot-see-the-bottom-navigation">I cannot see the bottom navigation</h3>
+<p>Close the on-screen keyboard. The bottom dock hides while a text field is
+active so it does not cover the form. If you are taking an assessment, use
+the quiz's own navigation controls; the usual app dock is absent in the
+focused quiz player.</p>
+<h3 id="the-lecturer-gradebook-looks-different-on-my-phone">The lecturer gradebook looks different on my phone</h3>
+<p>The desktop gradebook is a student-by-quiz table. On a phone it becomes a
+student list with a sheet for one student or quiz at a time. Select a student
+or quiz to inspect its details, then close the sheet to return to the list.</p>
+<h3 id="a-quiz-builder-control-is-missing-on-my-phone">A quiz-builder control is missing on my phone</h3>
+<p>Use the builder's add-question control to open its sheet, or expand a
+question's compact controls. Some actions are under <strong>More actions</strong>.
+If a control remains inaccessible after closing the keyboard, report the
+device, browser, screen width and control name through <a href="support.html">Support</a>.</p>
+<h2 id="escalation">Escalation</h2>
+<p>Contact your lecturer for class membership, quiz schedules, face review, attempt pauses/unlocks, retakes, and result release. Contact your institution's account administrator for sign-in, matric, institutional Microsoft sign-in, or camera/security configuration problems. If neither can resolve an app failure, use the student route in <a href="support.html">Support</a>. Include the exact message, quiz/class title, device/browser, and approximate time; never send your password, share code, or face image in a support report.</p></article>
+      <footer class="article-footer"><a href="support.html">Need more help?</a><span>English internal edition · 25 September 2026</span></footer>
+    </main>
+    <aside class="on-page" aria-label="On this page"><p>On this page</p><nav><a class="toc-level-2" href="#account-and-sign-in">Account and sign-in</a>
+<a class="toc-level-3" href="#i-cannot-create-an-account">I cannot create an account</a>
+<a class="toc-level-3" href="#the-app-says-the-email-or-password-is-invalid">The app says the email or password is invalid</a>
+<a class="toc-level-3" href="#i-am-asked-for-a-matric-number">I am asked for a matric number</a>
+<a class="toc-level-3" href="#a-qr-join-link-sends-me-to-sign-in-and-i-do-not-return-to-the-class">A QR join link sends me to sign in and I do not return to the class</a>
+<a class="toc-level-2" href="#class-joining">Class joining</a>
+<a class="toc-level-3" href="#the-join-code-is-rejected">The join code is rejected</a>
+<a class="toc-level-3" href="#the-app-says-i-already-joined">The app says I already joined</a>
+<a class="toc-level-3" href="#i-joined-but-cannot-find-a-quiz">I joined, but cannot find a quiz</a>
+<a class="toc-level-2" href="#face-setup-and-camera">Face setup and camera</a>
+<a class="toc-level-3" href="#the-camera-permission-was-denied">The camera permission was denied</a>
+<a class="toc-level-3" href="#the-camera-is-unavailable-or-busy">The camera is unavailable or busy</a>
+<a class="toc-level-3" href="#face-capture-does-not-progress">Face capture does not progress</a>
+<a class="toc-level-3" href="#my-enrollment-says-pending-review">My enrollment says pending review</a>
+<a class="toc-level-3" href="#face-setup-succeeded-but-the-assessment-still-blocks-me">Face setup succeeded, but the assessment still blocks me</a>
+<a class="toc-level-2" href="#class-quizzes-and-results">Class quizzes and results</a>
+<a class="toc-level-3" href="#the-quiz-says-it-is-not-open-yet">The quiz says it is not open yet</a>
+<a class="toc-level-3" href="#the-quiz-says-the-window-has-closed">The quiz says the window has closed</a>
+<a class="toc-level-3" href="#i-already-attempted-the-quiz-or-cannot-retake-it">I already attempted the quiz or cannot retake it</a>
+<a class="toc-level-3" href="#my-result-says-awaiting-results">My result says “Awaiting results”</a>
+<a class="toc-level-3" href="#i-cannot-find-view-results">I cannot find “View results”</a>
+<a class="toc-level-2" href="#paused-or-interrupted-assessment">Paused or interrupted assessment</a>
+<a class="toc-level-3" href="#a-pause-overlay-asks-me-to-verify-my-face">A pause overlay asks me to verify my face</a>
+<a class="toc-level-3" href="#the-camera-stopped-during-the-assessment">The camera stopped during the assessment</a>
+<a class="toc-level-3" href="#the-app-says-i-left-the-tab-or-fullscreen">The app says I left the tab or fullscreen</a>
+<a class="toc-level-3" href="#the-page-reloaded-browser-closed-or-connection-dropped">The page reloaded, browser closed, or connection dropped</a>
+<a class="toc-level-3" href="#submission-failed-or-the-timer-expired">Submission failed or the timer expired</a>
+<a class="toc-level-3" href="#a-gesture-or-focus-warning-keeps-appearing">A gesture or focus warning keeps appearing</a>
+<a class="toc-level-2" href="#personal-quizzes-and-sharing">Personal quizzes and sharing</a>
+<a class="toc-level-3" href="#i-cannot-create-or-edit-a-personal-quiz">I cannot create or edit a personal quiz</a>
+<a class="toc-level-3" href="#a-shared-quiz-link-says-it-is-invalid-or-unavailable">A shared quiz link says it is invalid or unavailable</a>
+<a class="toc-level-3" href="#a-shared-quiz-stopped-working-while-i-was-playing">A shared quiz stopped working while I was playing</a>
+<a class="toc-level-2" href="#classes-and-join-codes">Classes and join codes</a>
+<a class="toc-level-3" href="#i-created-a-class-but-students-cannot-join">I created a class, but students cannot join</a>
+<a class="toc-level-3" href="#a-student-is-missing-from-the-roster">A student is missing from the roster</a>
+<a class="toc-level-2" href="#quiz-creation-and-publishing">Quiz creation and publishing</a>
+<a class="toc-level-3" href="#publish-quiz-is-unavailable">Publish quiz is unavailable</a>
+<a class="toc-level-3" href="#students-cannot-see-or-start-a-published-quiz">Students cannot see or start a published quiz</a>
+<a class="toc-level-3" href="#i-closed-a-quiz-by-mistake">I closed a quiz by mistake</a>
+<a class="toc-level-2" href="#assessment-attempts-and-face-checks">Assessment attempts and face checks</a>
+<a class="toc-level-3" href="#a-student-is-flagged-or-cannot-resume">A student is flagged or cannot resume</a>
+<a class="toc-level-3" href="#face-enrollment-needs-review">Face enrollment needs review</a>
+<a class="toc-level-3" href="#a-result-is-missing-or-still-hidden-from-students">A result is missing or still hidden from students</a>
+<a class="toc-level-2" href="#ai-import-and-export">AI import and export</a>
+<a class="toc-level-3" href="#import-questions-reports-a-line-error">Import questions reports a line error</a>
+<a class="toc-level-3" href="#ai-generation-or-document-scanning-fails">AI generation or document scanning fails</a>
+<a class="toc-level-3" href="#export-excel-fails-or-appears-incomplete">Export Excel fails or appears incomplete</a>
+<a class="toc-level-2" href="#phone-layout">Phone layout</a>
+<a class="toc-level-3" href="#i-cannot-see-the-bottom-navigation">I cannot see the bottom navigation</a>
+<a class="toc-level-3" href="#the-lecturer-gradebook-looks-different-on-my-phone">The lecturer gradebook looks different on my phone</a>
+<a class="toc-level-3" href="#a-quiz-builder-control-is-missing-on-my-phone">A quiz-builder control is missing on my phone</a>
+<a class="toc-level-2" href="#escalation">Escalation</a></nav></aside>
+  </div>
+  <div class="mobile-search" aria-label="Search this manual">
+    <label for="manual-search-mobile">Search the manual</label>
+    <input id="manual-search-mobile" type="search" placeholder="Search tasks and problems…" autocomplete="off" aria-controls="mobile-search-results">
+    <div id="mobile-search-results" role="status" aria-live="polite" hidden></div>
+  </div>
+</body>
+</html>

@@ -21,10 +21,10 @@
    - 7.3 File upload → extraction/OCR pipeline
    - 7.4 Quiz lifecycle: draft → live → closed
    - 7.5 Assessment session: the core loop
-   - 7.6 Face verification protocol (the deepest part)
+   7.6 Face verification protocol (the deepest part)
    - 7.7 Gesture answering (hand tracking)
    - 7.8 Incident clips (pre-incident video)
-   - 7.9 Results & reveal gating
+   - 7.9 Results & reveal gating (+ export)
    - 7.10 Notifications
    - 7.11 Student practice quizzes & sharing
    - 7.12 Media: question images, avatars, student AI generation
@@ -67,7 +67,7 @@ Postgres functions.
                │ fetch (JSON) / supabase-js (RLS-scoped)
 ┌──────────────▼──────────────────────────────────────────────┐
 │  Next.js server (Node)                                      │
-│  ├─ /api/* route handlers (~36) — self-authenticating       │
+│  ├─ /api/* route handlers (~51) — self-authenticating       │
 │  ├─ Server actions: login / register / locale               │
 │  └─ "server-only" modules hold all secrets                  │
 └──────────────┬──────────────────────────────────────────────┘
@@ -75,7 +75,9 @@ Postgres functions.
 ┌──────────────▼──────────────────────────────────────────────┐
        │  Supabase (self-hosted local / hosted)                     │
        │  ├─ Postgres: tables, RLS on everything, SECURITY DEFINER   │
-       │  │   RPCs own every sensitive write                         │
+       │  │   RPCs own every sensitive write; pg_cron jobs (7):      │
+       │  │   autoclose, silence flag, incident prune, AI-mark       │
+       │  │   sweep + escalate, verify-silence + notify prunes       │
        │  ├─ Auth (GoTrue): sessions, cookies via @supabase/ssr      │
        │  ├─ Storage: private buckets (quiz-sources, incident-footage│
        │  │   question-images, avatars — last two zero-policy)        │
@@ -83,15 +85,19 @@ Postgres functions.
 └──────────────┬──────────────────────────────┬───────────────┘
                │ HTTP                          │ HTTP
 ┌──────────────▼─────────────┐  ┌─────────────▼───────────────┐
-│  CompreFace (Docker)       │  │  GLM-OCR (vLLM, optional)   │
-│  face enroll/detect/       │  │  OpenAI-compatible chat for │
-│  recognize (1:N gallery)   │  │  OCR + AI question gen      │
+│  InsightFace sidecar       │  │  GLM-OCR (vLLM, optional)   │
+│  (single FastAPI/ONNX      │  │  OpenAI-compatible chat for │
+│  container; /extract →     │  │  OCR + AI question gen;     │
+│  512-d embedding + pose +  │  │  local leg OR Z.ai remote   │
+│  MiniFASNet spoof verdict) │  │  leg behind one route       │
 └────────────────────────────┘  └─────────────────────────────┘
 ```
 
 Key files: `package.json`, `next.config.ts` (security headers, React
-Compiler), `proxy.ts` (middleware), `supabase/migrations/0001–0024`
-(authoritative schema), `src/lib/supabase/{server,client,admin,middleware}.ts`.
+Compiler), `proxy.ts` (middleware), `supabase/migrations/0001–0067`
+(authoritative schema — 64 files; 0061/0063/0064 are pgTAP test rounds under
+`supabase/tests/`, not migrations),
+`src/lib/supabase/{server,client,admin,middleware}.ts`.
 
 ---
 
@@ -172,6 +178,10 @@ quiz → class → lecturer so a non-owner gets the same 404 as a missing row
   student layout gates them behind one-time `/matric-capture`
   (`src/lib/auth/matric-capture.ts`, server-side 0027 validation + role
   check) until captured.
+- **Locale** is a cookie (`LOCALE_COOKIE_NAME`), read by
+  `src/i18n/request.ts`; users change it via the server action `setLocale`
+  (no HTTP route — there is no `/api/locale`), stored on `profiles.locale`
+  too.
 - **Lecturer promotion** happens only in the `register` server action
   (`src/lib/auth/register.ts`): the submitted invite code is compared against
   a hash of `LECTURER_INVITE_CODE` using `extensions.digest` in
@@ -179,9 +189,17 @@ quiz → class → lecturer so a non-owner gets the same 404 as a missing row
   The DB restricted-columns trigger (`protect_profile_restricted_columns`,
   migration 0019) rejects any direct client write to `role` /
   `consent_given_at` unless an RPC set the `app.consent_write` GUC.
-- **Locale** is a cookie (`LOCALE_COOKIE_NAME`), read by
-  `src/i18n/request.ts`; users change it via the `/api/locale`-backed switch
-  (server action `setLocale`), stored on `profiles.locale` too.
+- **Institutional-domain gate in the trigger itself (0050)**: `handle_new_user`
+  reads the `app.institutional_email_domains` GUC in the one chokepoint every
+  provisioning path passes (password signup, OAuth, admin API) — an unset GUC
+  means no restriction, a set one refuses foreign domains at the DB layer,
+  closing the public GoTrue signup bypass.
+- **Matric numbers**: SSO-provisioned students have `matric_no NULL` — the
+  student layout gates them behind one-time `/matric-capture`
+  (`src/lib/auth/matric-capture.ts`, server-side 0027 validation + role
+  check) until captured. A captured `matric_no` is IMMUTABLE via
+  self-service (0046) and can never enter the reserved `99xxxx` namespace
+  (0027 CHECK + 0038 signup validation, 6-digit format).
 
 Login/register flows: `src/app/(auth)/login/page.tsx`,
 `src/app/(auth)/register/page.tsx` (client components calling server actions
@@ -208,51 +226,75 @@ All migrations live in `supabase/migrations/`; generated types in
 ```
 profiles ──┬──< classes (lecturer_id, join_code unique, archived_at)
            │         └──< class_enrollments >── students (profiles)
-           │         └──< quizzes (class_id, created_by, mode, status,
-           │                  time_limit_sec, results_revealed_at,
-           │                  auto_reveal_on_complete, shuffle_questions,
-           │                  source_file_url…)
-           │                  └──< questions (order_index, type
-           │                        [mcq|true_false|multi_select], options[],
-           │                        correct_index (null on multi),
-           │                        correct_indices (multi only), explanation)
-           │                  └──< quiz_sessions (student_id, status, mode,
-           │                        verify_nonce uuid, face_fail_streak,
-           │                        focus_pause_count, paused_at, score,
-           │                        face_exempt, started_at/submitted_at…)
-           │                        ├──< session_answers (unique(session_id,
-           │                        │    question_id), selected_index,
-           │                        │    selected_indices (multi only),
-           │                        │    is_correct)   ← is_correct column-revoked
-           │                        ├──< face_checks (similarities[], matched,
-           │                        │    trigger, frame_hash — frames NEVER stored)
-           │                        ├──< session_advisories (adv_type, count)
-           │                        └──< incident_clips (storage_path, reason,
-           │                             duration_ms, recorded_from)
-           ├──< student_quizzes (created_by, share_code nullable unique)
-           │         └──< student_quiz_questions (same shape as questions)
-           ├──< notifications (recipient_id, type, payload jsonb,
-           │                   dedupe_key, seq identity, read_at)
-           ├──< audit_events (actor_id, subject_id, action, metadata)  ← RLS deny-all
-           └──< class_join_attempts (fail_count, locked_until)         ← RLS deny-all
+            │         └──< quizzes (class_id, created_by, mode, status,
+            │                  time_limit_sec, results_revealed_at,
+            │                  auto_reveal_on_complete, shuffle_questions,
+            │                  gestures_enabled (0052, draft-frozen),
+            │                  source_file_url, sources jsonb provenance…)
+            │                  └──< questions (order_index, type
+            │                        [mcq|true_false|multi_select|short_text],
+            │                        options[], correct_index (null on multi),
+            │                        correct_indices (multi only), explanation,
+            │                        answer_key (short_text rubric — revoked),
+            │                        max_score, image_path — all key columns
+            │                        column-revoked from authenticated, 0054)
+            │                  └──< quiz_sessions (student_id, status, mode,
+            │                        verify_nonce uuid, face_fail_streak,
+            │                        focus_pause_count, fullscreen_pause_count,
+            │                        hand_pause_count, face_fail_count,
+            │                        last_pause_reason, face_exempt,
+            │                        score NUMERIC, started_at/submitted_at…)
+            │                        ├──< session_answers (unique(session_id,
+            │                        │    question_id), selected_index,
+            │                        │    selected_indices (multi only),
+            │                        │    answer_text (short_text), skipped,
+            │                        │    mark_status [pending|marked|
+            │                        │    needs_review|failed], mark_score
+            │                        │    (0/0.5/1 ladder), attempt_version,
+            │                        │    is_correct)   ← is_correct, mark_*,
+            │                        │    answer_text column-revoked (0048/0054)
+            │                        ├──< face_checks (similarities[], matched,
+            │                        │    trigger, nonce, frame_poses, frame_hash
+            │                        │    — frames NEVER stored)
+            │                        ├──< session_advisories (adv_type, count)
+            │                        └──< incident_clips (storage_path, reason,
+            │                             duration_ms, recorded_from)
+            ├──< student_quizzes (created_by, share_code nullable unique)
+            │         └──< student_quiz_questions (same shape as questions)
+            ├──< notifications (recipient_id, type, payload jsonb,
+            │                   dedupe_key, seq identity, read_at)
+            ├──< audit_events (actor_id, subject_id, action, metadata)  ← RLS deny-all
+            ├──< class_join_attempts (fail_count, locked_until)         ← RLS deny-all
+            ├──< profile_face_samples (pgvector 512-d, zero policies,   ← service_role only
+            │                         one row per (profile, angle), 0039)
+            └──< ai_marking_ledger (idempotency_key unique, status,     ← service_role only
+                  attempts ≤3, claim_token 5-min lease, tokens/usd spend,
+                  day; RLS deny-all, 0057)                              
 ```
 
 Statuses:
 
 - `quizzes.status`: `draft → live → closed` (one-way; enforced by trigger).
 - `quiz_sessions.status`: `active ↔ paused → completed`, plus `flagged`
-  (terminal until lecturer unlock/exempt).
+  (terminal until lecturer unlock/exempt) and `abandoned` (sealed stale
+  attempts — 0056).
+- `session_answers.mark_status`: `pending → marked | needs_review | failed`
+  (short_text AI-marking state machine, 0052).
 
 Views worth knowing (all definer-owned, `security_barrier`):
 
 | View | Purpose |
 |---|---|
 | `student_class_view` | enrolled classes without `join_code`/lecturer columns |
-| `student_quiz_view` | LIVE quizzes of enrolled classes (+ reveal metadata, retake config) |
+| `student_quiz_view` | LIVE quizzes of enrolled classes (+ reveal metadata, retake config, `gestures_enabled`) |
+| `student_closed_revealed_quiz_view` | closed+revealed read path (QC-2 twin of the above) |
 | `student_session_view` | own sessions incl. `verify_nonce` + `attempt`; score NULL until revealed |
-| `lecturer_session_view` | lecturer-visible sessions incl. score + `attempt`, never nonce |
-| `student_results` / breakdown views | reveal-gated score + per-question review (latest completed attempt) |
-| `student_quiz_player_question_view` | shared practice play: omits `correct_index`/explanation behind barrier |
+| `lecturer_session_view` | lecturer-visible sessions incl. score + integrity counters + `pending_count`, never nonce |
+| `student_question_view` / `student_quiz_player_question_view` | questions with NO answer key of any kind behind the barrier |
+| `lecturer_questions_view` | owner-predicated view with FULL answer keys — the ONLY key-bearing read path for lecturers (base-table key columns revoked in 0054) |
+| `student_answers_view` | own answers; `answer_text`/`skipped` ungated (resume), `mark_status`/`mark_score` reveal-gated |
+| `lecturer_answers_view` | full per-answer matrix for the quiz's lecturer |
+| `student_results` (RPC) | reveal-gated score + per-question review incl. `answer_key` (latest completed attempt) |
 
 ---
 
@@ -274,10 +316,14 @@ Five layers, in the order an attacker meets them:
    state machine rules under row locks (`for update`) or advisory locks.
    All pin `set search_path = public`; `CREATE` on schema public is revoked
    (anti shadow-object hijack); pgcrypto calls are schema-qualified.
-5. **Column-level secrecy.** Students cannot SELECT `questions.correct_index`
-   (no policy grants non-creators), cannot read `session_answers.is_correct`
-   or `quiz_sessions.score` directly (column-revoked, migration 0012) — those
-   values are re-exposed only through reveal-gated views.
+5. **Column-level secrecy.** Students cannot SELECT `questions.correct_index`,
+   `correct_indices`, `answer_key`, `explanation`, or `image_path`, cannot
+   read `session_answers.is_correct`/`mark_score`/`mark_status` or
+   `quiz_sessions.score` directly (column-revoked: 0012, re-done properly in
+   0048/0054 with explicit column grants) — those values are re-exposed only
+   through reveal-gated views/RPCs. The posture is "revoke the table, then
+   grant explicit safe columns" (the 0048 lesson: column revokes were no-ops
+   while a table grant stood).
 
 Additional hardening: CSRF via Origin check (`checkSameOrigin`),
 per-user in-memory rate limits on every mutating route, body-size caps
@@ -285,12 +331,18 @@ pre-parse, magic-byte sniffing on video uploads, constant-time invite-code
 compare, CSP currently Report-Only (`next.config.ts`), secrets only in
 server-only modules, `.env.local` gitignored.
 
-**Trust boundary note (documented residual risk):** the browser sends face
-*similarity numbers* to `record_face_check`; the RPC recomputes the majority
-verdict but cannot prove the numbers came from CompreFace. The route derives
-them server-side from real frames; a student calling the RPC directly over
-PostgREST could fabricate them. Mitigations and the signed-verdict design are
-discussed in `docs/PLAN_INTEGRITY_SUITE.md`.
+**Trust boundary (face similarity numbers) — CLOSED (0045/0047/0067).** The
+browser once sent raw similarity numbers to `record_face_check`; a student
+calling the RPC over PostgREST could fabricate them. Now:
+`app_private.verify_proof_secret` (HMAC key generated at migration time,
+fully revoked from client roles) is read ONLY by the server route via the
+service-role-only `get_verify_proof_secret()`; the route mints
+`HMAC-SHA256(secret, "sessionId:nonce:frameHash")` proofs that the RPC
+verifies (double-HMAC compare) inside the transaction, and a per-session
+attempt ledger (`app_private.face_verify_attempts`, 600/10 min) burns budget
+on every attempt. 0067 extends the same mechanism to ANSWERS: the answer
+route mints a second "answer proof" HMAC over the canonical answer fields,
+so identity verification and grading commit together or not at all.
 
 ---
 
@@ -485,6 +537,16 @@ visibility follows status only. Retake config (`allow_retake`/
 `max_attempts`) and windows are live-quiz management (outside the DB
 edit-freeze). Full record: PLAN_CLOSE_AND_SCHEDULE.md.
 
+**Sealing (vs submitting).** `quiz_autoclose` also SEALS in-flight
+active/paused assessment sessions of closed quizzes (flagged sessions are
+excluded — no `submitted_at` write ever happens: **sealed ≠ submitted**).
+A scoreless completion (sealed or abandoned) is materialized by the
+`quiz_sessions_seal_score` BEFORE-trigger → `assign_seal_score()`, which
+computes the D10 SUM and sets the `app.session_sealing` GUC so
+`notify_session_terminal` suppresses the bogus submit mail. Stale-paused
+sessions are additionally sealed at next `start_quiz_session`. Every seal
+writes a `session_sealed` audit row (0066).
+
 ### 7.5 Assessment session: the core loop
 
 Entry point: student clicks Start on a live quiz → `POST /api/sessions`
@@ -511,31 +573,52 @@ envelope + first question via `student_session_view` and hands off to
 - **Phase machine**: `gate → question → feedback → submitting/submitted |
   paused | recovering | flagged | timeUp | dead`
 - **Face pipeline** (`use-face-pipeline.ts`): boots tracker, drives verify
-  cadence, reacts to statuses
-- **Timer**: UX countdown synced to `started_at + time_limit`; expiry forces
-  submit (`timeUp` phase still allows one retry-submit)
-- **Answers**: `POST /api/sessions/[id]/answer` → RPC `answer_question`
-  - validates index against THAT question's option count (no clean-400
-    pre-fetch by design)
-  - stores `(selected_index)`; computes `is_correct` server-side
-  - **assessment**: response is KEYLESS `{ok}` pre-reveal — the correct
-    answer never crosses the wire until results are revealed
+  cadence, reacts to statuses. Face enforcement (and per-answer identity
+  binding) is gated on `quiz.gestures_enabled === true` — a gestures-off
+  quiz runs the whole verification stack silently OFF.
+- **Timer**: server-seeded `remainingMs` (the client never reads its own
+  clock to start) counted down monotonically; expiry forces submit (`timeUp`
+  phase still allows one retry-submit). `dead` means the session was sealed
+  server-side by `quiz_autoclose` — never by a client timer.
+- **Answers: `POST /api/sessions/[id]/answer` → RPC `commit_answer`
+  (migration 0067) — answers and identity verification commit TOGETHER.**
+
+  For a gesture-enabled assessment session (`mode='assessment' AND
+  quizzes.gestures_enabled AND NOT face_exempt`) the RPC requires a nonce +
+  exactly 3 frames + 3 server-computed similarities, verifies a second HMAC
+  "answer proof" over the canonical answer fields (length-prefixed
+  `questionId|selectedIndex|sorted-dedup selectedIndices|answerText|skipped`),
+  then calls `record_face_check(...)` and `answer_question(...)` in ONE
+  transaction under one row lock. A face non-match aborts the answer and
+  returns `face_mismatch` with the `faceCheck` payload; a proof forgery dies
+  at `proof_invalid`. Non-gesture sessions (practice, lecturer-exempt,
+  gestures-off) delegate straight to `answer_question` — which is now
+  REVOKED from `public`/`anon`/`authenticated`: `commit_answer` is the only
+  public entry point (direct PostgREST grading bypass closed).
+
+  - validates index/set/text against THAT question's shape (no clean-400
+    pre-fetch by design); schedule/timer gates run BEFORE the face gate so a
+    lapsed exam reports `quiz_window_closed`/`time_expired`, not
+    `face_verification_required`
+  - **assessment**: response is KEYLESS `{recorded:true}` pre-reveal — the
+    correct answer never crosses the wire until results are revealed
+    (replay of an answered question is also keyless `already_answered`)
   - **practice**: response includes correctness + explanation immediately
-- **Multi-select questions (QT-1, `type = 'multi_select'`)**: the answer
-  key is `questions.correct_indices` (sorted+distinct int[], the scalar
-  `correct_index` is NULL on multi rows); students submit
-  `selectedIndices` (1..5 elements, each validated against THIS question's
-  options, SQL NULLs rejected explicitly) which the RPC normalizes to
-  sorted+distinct before grading as exact-set equality and storing in
-  `session_answers.selected_indices` (scalar stays NULL). Grading is
-  all-or-nothing — `is_correct` semantics are unchanged, so
-  submit_session/scoring/gradebook structure is untouched. Multi rows are
-  answered by taps (toggle + Confirm button) OR gestures (holding N
-  fingers toggles presented option N, an open palm commits the set; a
-  latch re-arms only after the pose changes, and the 4-option cap
-  `questions_multi_option_cap` guarantees five fingers is never an option
-  pose). Student-authored quizzes are v1-out-of-scope and BLOCKED by a
-  CHECK on `student_quiz_questions`.
+    (and re-answering is an upsert; assessment is one-shot first-answer-wins)
+  - a second-face advisory (`report_session_advisory 'second_face'`) fires
+    fire-and-forget when the frames showed 2 faces
+  - rate limits: 60/min per user + 30/min per session (tightened because
+    each short_text answer queues an AI marking call)
+
+  **Question types on the wire** (`AnswerSchema` — exactly one of):
+  `selectedIndex` (mcq/true_false), `selectedIndices` (multi_select, 1..5
+  elements, normalized sorted+distinct before grading as exact-set equality
+  against `correct_indices`; all-or-nothing `is_correct`), `answerText`
+  (short_text, trimmed 1..500 chars → lands `mark_status='pending'` and a
+  ledger row; contributes 0 to every score until the AI finalizer writes —
+  see 7.5c), or `skipped` (terminal in assessment; a graded-0 row, not an
+  absence). Student-authored quizzes are pinned to mcq/true_false
+  (`student_questions_no_new_types`).
 - **Per-student shuffling (QT-3, opt-in `quizzes.shuffle_questions`)**:
   when on, the play page permutes the question array AND each question's
   options into "presented" space, deterministically derived from
@@ -555,15 +638,27 @@ envelope + first question via `student_session_view` and hands off to
   `"questions"` scope is positional (a future live-question editor would
   desync the mapping). Student practice quizzes (no session row) are out
   of scope.
+- **The gesture toggle (`quizzes.gestures_enabled`, 0052)**: quiz-level kill
+  switch, frozen while live (`quiz_status_transition` rejects changes on a
+  non-draft quiz — no "arm the pad for some students" hazard). OFF means:
+  gesture layer is a passthrough with an "off" chip, hand-loss pause never
+  fires, face pipeline returns `off`, and `commit_answer` delegates straight
+  to `answer_question` — NO per-answer identity check. The verify-silence
+  cron is toggle-aware (candidacy requires `gestures_enabled = true`) so
+  gesture-off sessions are never silence-flagged. `short_text` never arms
+  the AnswerPad (`TYPE_HAS_FINGER_INPUT` allow-list: mcq, true_false,
+  multi_select — gesture multi-select caps at 4 options so five fingers is
+  always the palm-commit pose; `questions_multi_option_cap`).
 - **Pause sources (all server-mediated)**:
 
 | Source | Trigger | Effect |
 |---|---|---|
-| face fail streak | 3 fails in last 5 checks | `paused` → recover flow (blink liveness + re-verify) |
-| focus loss | visibility/blur advisories, debounced | 3rd strike auto-flags session |
-| hand loss | MediaPipe loses both hands mid-hold | transient `hand_loss` pause (auto-resumes) |
-| fullscreen exit | fullscreenchange exit while armed (integrity hardening) | plain `fullscreen_exit` pause (no counter increment — deferred one release; blur/fullscreen same-gesture duplicates dedupe via a shared 2s stamp) |
-| verify silence | pg_cron `flag_verify_silent_sessions` (migration 0042): active assessment, last face check >300s old, an answer within 90s, no reported camera outage | auto-flags (`auto_flag_verify_silence` audit) — closes the "client stopped sending verifies" bypass; honest clients verify every 30–45s while answering. audit-5 M1 (0062): `submit_session` and the `quiz_autoclose` seal arm evaluate the SAME predicate (`session_verify_silent`) at finalization, because a session that submits between cron ticks was otherwise never flagged by any writer |
+| face fail streak | 3 fails in flat last-5 checks (verdict = strict majority of ≥3 frames ≥ 0.5 vs the student's OWN baseline) | `paused` → recover flow (blink liveness + re-verify, timer credit capped at 120 s); lifetime `face_fail_count` never resets |
+| frozen-frame replay | a MATCHED verdict whose frame bytes hash identically to BOTH previous commits (3× identical) | `paused` — a static image is being resubmitted (E2E mock seam + one-retry nonce-resend pair carved out) |
+| focus loss | DEBOUNCED (900 ms) window blur while visible | `focus_pause_count++`; **3rd strike auto-flags**; on an already-paused session the count persists WITHOUT touching `last_activity_at` (no freshness fuzzing) |
+| hand loss | MediaPipe loses both hands mid-hold | transient `hand_loss` pause; `hand_pause_count++` and **auto-flags at 3** (mirrors focus since 0044) |
+| fullscreen exit | fullscreenchange exit while armed | `fullscreen_pause_count++` but **NEVER auto-flags** (0043: repeat exit→think→recover cycling is lecturer-visible; escalation stays with the lecturer). Blur/fullscreen same-gesture duplicates dedupe via a shared pause stamp; the pause route coalesces replays in a 10 s window per (user, session, reason) |
+| verify silence | pg_cron `flag_verify_silent_sessions`: active GESTURE-ENABLED assessment, last face check >300s old, ≥2 answers after it, answered within 90s, no fresh+corroborated camera-outage claim, `resume_grace_until` expired, quiz still live | auto-flags (`auto_flag_verify_silence` audit) — closes the "client stopped sending verifies" bypass. audit-5 M1 (0062): `submit_session` and the `quiz_autoclose` seal arm evaluate the SAME predicate (`session_verify_silent`) at finalization, because a session that submits between cron ticks was otherwise never flagged by any writer |
 
 Recovery paths out of `paused`/`flagged`:
 
@@ -602,8 +697,56 @@ seal/abandonment spike is visible without reading day-bucketed mail. Enabling
 index: `audit_events(action, created_at desc)`.
 
 **Submit**: `POST /api/sessions/[id]/submit` → RPC `submit_session`
-(row-lock → compute score from `session_answers.is_correct` count → mark
-completed → maybe auto-reveal — see 7.9).
+(row-lock → compute score → mark completed → maybe auto-reveal — see 7.9).
+The score is the **D10 single scoring arithmetic** (0055/0056), used by
+EVERY score writer (submit ×2, seal, AI finalize, override, `student_results`):
+
+```
+SUM(COALESCE(mark_score, CASE WHEN is_correct THEN 1 ELSE 0 END))
+  WHERE mark_status <> 'pending'      -- a pending answer contributes exactly 0
+```
+
+`quiz_sessions.score` is NUMERIC (half-marks would round under int4).
+`submit_session` is deliberately permissive about *submitting* ("timer stops
+ANSWERS, not submits") and, on re-submit, recomputes the D10 score so a
+post-submit lecturer override reaches the student's re-read (0066 C5-7).
+
+### 7.5c short_text AI marking (v4.9, migrations 0051–0059)
+
+short_text answers are marked by an AI worker, asynchronously, under spend
+and epoch guards:
+
+1. **Ledger** — `ai_marking_ledger` (service_role only; carries answer text
+   indirectly): `idempotency_key` (`session:question:attempt_version`),
+   `attempts` cap 3, 5-minute `claim_token` lease, `day` for reconciliation,
+   tokens/USD spend booked on every call so the caps actually trip.
+2. **Claim — `sweep_ai_marks()`** (cron `innovision-ai-mark-sweep`, every
+   minute): per-quiz daily spend caps via `check_mark_spend` (50k tokens /
+   $5, fail-closed), claim ≤10 rows `FOR UPDATE SKIP LOCKED`, mint one
+   claim_token, COMMIT, then `pg_net`-POST the worker (locks released before
+   the 45s model call).
+3. **Worker — `POST /api/internal/ai-mark-sweep`** (server-to-server;
+   bearer `AI_MARK_WORKER_KEY` vs Vault/`app.settings`, constant-time
+   compare, fail-closed 401 before body read): re-verifies each row's
+   claim_token BEFORE any model call (a superseding sweep owns stale rows),
+   fences the untrusted student answer (backtick + fence-char escaped),
+   strict Zod contract `{score: 0|0.5|1, confidence, rationale ≤300}`,
+   temperature 0, then writes back through `finalize_ai_mark` — epoch guard
+   on `attempt_version` (a lecturer override invalidates in-flight AI
+   writes), score ≥0.5 ⇒ `is_correct=true`, out-of-ladder ⇒ `needs_review`,
+   D10 recompute.
+4. **Escalation — `escalate_stale_marks()`** (cron every 5 min; also invoked
+   by the worker route): attempts ≥3 → `needs_review` (lecturer adjudicates
+   via `override_answer_mark` — bumps `attempt_version`, recomputes, and
+   re-publishes the reveal through the `app.mark_overridden` GUC arm of
+   `quiz_reveal_once`).
+5. **Reveal coupling**: a quiz with ANY `pending` answer is never
+   auto-revealed (`quiz_autoclose`/`submit_session` zero-pending term —
+   reveal is irreversible, so it waits for the sweep). The student's
+   EndScreen polls `student_pending_count` (a COUNT, not an oracle — never
+   which, never their marks) and the lecturer's session view carries
+   `pending_count`. Practice short_text has NO AI path (no spend budget):
+   `mark_status='needs_review'`, never scored.
 
 ### 7.5b Client integrity hardening (deterrence tier)
 
@@ -686,8 +829,14 @@ space than the student was guided by. See `src/lib/face/pose-gate.ts`.
 **Verification (during an assessment)** — driven by `use-face-pipeline.ts`:
 
 ```
-cadence: periodic (30–45s) + on question transitions; nonce-chained:
-  GET session → verify_nonce(N₀)
+cadence: periodic (30–45s, jittered) + a 'start' gate (explicit Begin click
+  + blink liveness + anti-replay HEAD-TURN challenge) — the per-question
+  verify POST was REMOVED: the identity check is now taken atomically with
+  the answer commit (commit_answer, 0067). Bounded precheck deferral
+  (lighting / mid-commit hand / unaligned face, max 2) then captures anyway
+  — the server judges the real frame. Cadence paused while the tab is
+  hidden; catch-up verify on return.
+GET session → verify_nonce(N₀)
 POST /api/face/verify {sessionId, frames[≤3], trigger, nonce:Nᵢ}
   route (api/face/verify/route.ts):
     1. guard/CSRF/rate(10/min)/frame-size caps
@@ -697,18 +846,29 @@ POST /api/face/verify {sessionId, frames[≤3], trigger, nonce:Nᵢ}
        compare_face_baseline(emb): max cosine vs the student's OWN stored
        samples (1:1-by-baseline; no gallery search is callable by students)
        empty frame / no qualifying face = FAIL vote (integrity-conservative)
-    4. RPC record_face_check(session, uid, similarities[], trigger, nonce, frame_hashes)
-       - verifies nonce == session.verify_nonce → mismatch 409
-       - rotates verify_nonce (replay protection)
+       spoof gate: per-frame MiniFASNet verdict; FACE_SPOOF_ENFORCE=1 in
+       prod forces similarities to 0 on a spoof verdict (fail-closed)
+    4. route mints the HMAC verify-proof (never the client) →
+       RPC record_face_check(session, uid, similarities[], trigger, nonce,
+       frame_hashes, proof, poses)
+       - verifies nonce == session.verify_nonce → mismatch 409, rotates it
+       - verifies the HMAC proof (double-HMAC compare) → forgery dies here
+       - per-session attempt throttle (600/10 min, success or fail burns)
        - matched = STRICT MAJORITY(similarities ≥ 0.5)
-       - flat last-5 window: ≥3 fails → 'paused', writes face_checks row
-         (hashes only — pixels never persisted)
+       - flat last-5 window: ≥3 fails → 'paused'; writes the face_checks row
+         (hashes + pose trail only — pixels never persisted)
+       - too-frequent (<2s) / suspected-replay (identical frame hash)
+         advisories recorded ON the row
   response: {matched, distance, sessionStatus, nextNonce, faceFailStreak}
 ```
 
-Client statuses derived from that: `off → booting → ready → paused/
-recovering → flagged/unavailable`. Tab-hide pauses the cadence and issues a
-catch-up verify on return (nothing recorded while hidden).
+Client statuses: `off / unavailable / exempt / gate / ready / paused /
+recovering / flagged` (8-state machine). Transport-failure backstops:
+consecutive transport failures or 429s degrade to `unavailable` and arm the
+outage claim (`report_face_unavailable`) BEFORE the silence cron can
+false-flag — the claim must be fresh AND corroborated (a real
+`face_checks` row or `face_verify_attempted_at` within 10 min) to exempt a
+session from silence-flagging.
 
 **E2E mock seam**: fake tracker emits marker frames
 (`FAKE_FRAME_MATCH/MISMATCH`); when `NEXT_PUBLIC_E2E_FAKE_SEAM === "1"` AND
@@ -757,11 +917,13 @@ server-side with the service-role client.
 
 Score secrecy is enforced at three layers:
 
-1. `session_answers.is_correct` and `quiz_sessions.score` are column-revoked
-   from `authenticated`;
-2. `student_session_view` exposes score ONLY when
-   `is_student_reveal_allowed(quiz_id)` (practice always true; assessment
-   when `results_revealed_at` set);
+1. `session_answers.is_correct`/`mark_score`/`mark_status` and
+   `quiz_sessions.score` are column-revoked from `authenticated`;
+2. every read funnels through reveal-gated views/RPCs behind
+   **`is_student_reveal_allowed(quiz_id)`** (0049 body — THE authoritative
+   gate): practice always; assessment requires `results_revealed_at` set
+   AND NOT (quiz live AND the CALLER has an in-flight session) — a live-quiz
+   retake also masks attempt 1's correctness, deliberately;
 3. answers ack keylessly pre-reveal (7.5).
 
 Reveal switches:
@@ -769,15 +931,34 @@ Reveal switches:
 ```
 lecturer: PATCH /api/quizzes/[id]/reveal-settings {autoRevealOnComplete}
           POST   /api/quizzes/[id]/reveal            → sets results_revealed_at
-auto:     submit_session flips it when the LAST fresh session completes
-          AND the submitting student has no retake budget left (QC-4;
-          advisory-lock serialized, 2h staleness window, works on closed quizzes)
+          (one-way, live OR closed — QC-2 closed-before-reveal recovery;
+           refuses 409 quiz_in_progress when an in-flight session has already
+           ANSWERED something; idempotent 200 {already:true}; the
+           quiz_reveal_once trigger is the backstop)
+auto:     submit_session flips it when NO fresh (≤2h) active/paused/flagged
+          session remains AND no answer anywhere in the quiz is
+          mark_status='pending' (L4 — reveal waits for the AI sweep because
+          reveal is irreversible) AND the submitting student has no retake
+          budget left (QC-4; advisory-lock serialized, works on closed quizzes)
+override: override_answer_mark (lecturer adjudication) can UN-publish
+          (results_revealed_at → NULL) only through the app.mark_overridden
+          GUC arm of quiz_reveal_once, then the notify trigger re-fires
 ```
 
 Once revealed: student sees score + per-question breakdown
-(`student_results` RPC); lecturer dashboard shows full matrix regardless.
-Reveal fires the `notify_results_revealed` trigger (completed-assessment
-sessions get one deduped notification).
+(`student_results` RPC — single no-oracle gate `not_revealed` for
+everything else, D10 score in both branches); lecturer dashboard shows the
+full matrix regardless. Reveal fires the `notify_results_revealed` trigger
+(completed-assessment sessions get one deduped notification).
+
+**Quiz results export** (`GET /api/quizzes/[id]/export`, PLAN_MATRIC_EXCEL_EXPORT):
+lecturer .xlsx via exceljs — Summary / Key / Distribution sheets including
+per-question item analysis. Owner guard + CSRF + 10/min; ALL reads on the
+user-JWT client under RLS (the barrier views — `createAdminClient()` is
+deliberately forbidden here); 200-session/20k-answer caps with a truncation
+warning; pending AI marks render as a neutral label. The cross-quiz
+gradebook export (`GET /api/classes/[id]/gradebook-export`) shares the same
+pure model family (`src/lib/results/*`).
 
 Cross-quiz aggregate (RA-1, 2026-08-28): `/lecturer/classes/[id]/gradebook`
 renders a student × quiz matrix from `lecturer_session_view` (representative
@@ -949,7 +1130,8 @@ into `${uid}/${quizId}/…`.
 | Route tests | Vitest + `fake-supabase.ts` (a fake that mimics RLS/RPC semantics and THROWS on unknown filters) | every API route's guard/CSRF/rate-limit/validation/error-mapping contracts |
 | AI boundary | MSW (`src/test/msw`) | mocked OpenAI-compatible endpoints |
 | Live-SQL harnesses | `npm run verify:*` (needs local supabase) | RLS policies, RPC state machines, caps, secrecy probes (e.g. `verify:student-quizzes` SQ-D1–D9 + QT1-D8b/D10, `verify:media` MEDIA-D1–D12, `verify:quizzes` QT3-D1–D6 + QT1-D1/D2, `verify:sessions` D42–D55 + QT1-D3–D8a/D7, `verify:clone` AP2-D1–D11 + QT1-D9) |
-| E2E | Playwright, chromium, dev-server + mock AI + CompreFace mock seam | full user journeys; `e16` is the integrity reference spec; `e52` is the QR-join reference spec (deep-link + auth bounce chain); specs skip loudly if `LECTURER_INVITE_CODE` unset; `e45` covers the multi-select journey (authoring, practice set-feedback, resume, keyless assessment + canonical-set probe, gesture-disabled contract) |
+| E2E | Playwright (chromium desktop + mobile projects + a nowebsearch project for the web-search flags spec; 78 specs), dev-server + mock AI + `FACE_MOCK_ENABLED` mock seam | full user journeys; `e16` is the integrity reference spec; `e52` is the QR-join reference spec (deep-link + auth bounce chain); `e45` covers the multi-select journey; `e53`/`e54`/`e55` cover gestures-off, short_text, and AI marking; `e59` is the opt-in demo walk-up suite; specs skip loudly if `LECTURER_INVITE_CODE` unset |
+| DB / RLS suites | pgTAP (`supabase/tests/`, `npx supabase test db`) | audit-round test suites (incl. 0063/0064 audit-5 rounds — concurrency + integrity gates) |
 | Types/schema drift | `gen:types` + CI diff | database.ts vs migrated schema |
 | Copy drift | `check:i18n` | en/ms parity + referenced-key existence |
 
@@ -967,15 +1149,22 @@ See `.env.local.example` for the authoritative annotated list. Summary:
 | `NEXT_PUBLIC_SUPABASE_URL` / `_ANON_KEY` | everywhere (browser + server) | anon key is RLS-scoped by design |
 | `SUPABASE_SERVICE_ROLE_KEY` | admin client only (incident storage, results signing, register promotion) | server-only module; bypasses RLS |
 | `LECTURER_INVITE_CODE` | register promotion | hashed compare; also required by e2e specs |
-| `INSTITUTIONAL_EMAIL_DOMAINS` | `lib/auth/institutional.ts` (SSO callback + login button gating) | comma-separated university domain allowlist; unset = SSO disabled |
+| `INSTITUTIONAL_EMAIL_DOMAINS` | `lib/auth/institutional.ts` + the 0050 DB trigger gate | comma-separated university domain allowlist; unset = no restriction |
 | `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL` | `lib/ai/client.ts` (server) | OpenAI-compatible; e2e points at the mock server |
 | `AI_STREAM_IDLE_TIMEOUT_MS` | `lib/ai/client.ts` chatStream (server) | inter-chunk abort for streaming generations (default 90000; e2e harness sets 3000 for the stall scenario) |
-| `INSIGHTFACE_BASE_URL` / `FACE_SIDECAR_TOKEN` | `insightface-client.ts` (server) | self-hosted sidecar (loopback) |
-| `FACE_MOCK_ENABLED` | same | `"1"` opts into canned responses (non-prod only) |
-| `GLM_*` | extraction dialog config | optional local vLLM OCR |
+| `AI_MARK_WORKER_URL` / `AI_MARK_WORKER_KEY` | AI marking worker provisioning | actuals live in DB Vault/`app.settings` (provisioned by `deploy/sync-migrations.sh`); env only seeds deploy tooling |
+| `INSIGHTFACE_BASE_URL` / `FACE_SIDECAR_TOKEN` | `insightface-client.ts` (server) | self-hosted sidecar (loopback-only) |
+| `FACE_MOCK_ENABLED` | same | `"1"` opts into canned responses (non-prod only, paired with `NEXT_PUBLIC_E2E_FAKE_SEAM`) |
+| `FACE_SPOOF_ENFORCE` | face verify route + answer route | `"1"` in prod: a spoof verdict forces all similarities to 0 (fail-closed) |
+| `GLM_*`, `ZAI_*` | extraction dialog + `/api/extract/ocr` | GLM_PROVIDER=local (vLLM) or remote (Z.ai API, billed); spend-governor vars cap it — see GLM_OCR_SETUP.md |
+| `TINYFISH_API_KEY` | `lib/ai/tinyfish.ts` (server) | grounded web search flag; empty = UI hidden + route 503 |
+| `TRUSTED_PROXY_COUNT`, `TRUSTED_ORIGINS` | deploy proxy posture | VPS runs NGINX in front of the app |
+| `E2E_RATE_LIMIT_DISABLED`, `NEXT_PUBLIC_E2E_FAKE_SEAM`, `NEXT_PUBLIC_INTEGRITY_HARDENING_OFF`, `NEXT_PUBLIC_DEMO_MODE`, `PROD_ENV_STRICT` | harness / kill switches | never 1 in prod (`prod-guards.ts` + `instrumentation.ts` fail-closed gate) |
 | `PLAYWRIGHT_PORT`, `MOCK_AI_PORT` | e2e | defaults 3001 / 8787 |
 
 ---
 
-*Generated during the Aug 2026 audit remediation. If behavior covered here
-changes, update this doc in the same PR — see doc conventions in README.*
+*Reconciled against the working tree 2026-09-25 (migrations through 0067,
+v4.9 gesture-off + short_text AI marking, audit-5 hardening). If behavior
+covered here changes, update this doc in the same PR — see doc conventions
+in README.*

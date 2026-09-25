@@ -141,6 +141,12 @@ ARG ALLOWED_ORIGINS=""
 # explicit, reviewable build arg instead of an invisible shell-env leak.
 ARG NEXT_PUBLIC_E2E_FAKE_SEAM="0"
 ARG NEXT_PUBLIC_INTEGRITY_HARDENING_OFF="0"
+# Demo-mode kiosk flag (docs/plans/PLAN_DEMO_MODE.md). MUST be "0" or empty for
+# a production image: it is INLINED into the client bundle (and read by the Edge
+# middleware at build time), arming the walk-up guest-provisioning flow. Declared
+# here so an accidental `=1` is an explicit, reviewable build arg instead of an
+# invisible shell-env leak; prod-guards.ts + ci.yml + build-images.sh all reject it.
+ARG NEXT_PUBLIC_DEMO_MODE="0"
 
 # Export them for the build. Two reasons this is an ENV and not an inline
 # prefix on the RUN below: Next reads them through its own env loader, and the
@@ -157,7 +163,8 @@ ENV NODE_ENV=production \
     ALLOWED_HOSTS=${ALLOWED_HOSTS} \
     ALLOWED_ORIGINS=${ALLOWED_ORIGINS} \
     NEXT_PUBLIC_E2E_FAKE_SEAM=${NEXT_PUBLIC_E2E_FAKE_SEAM} \
-    NEXT_PUBLIC_INTEGRITY_HARDENING_OFF=${NEXT_PUBLIC_INTEGRITY_HARDENING_OFF}
+    NEXT_PUBLIC_INTEGRITY_HARDENING_OFF=${NEXT_PUBLIC_INTEGRITY_HARDENING_OFF} \
+    NEXT_PUBLIC_DEMO_MODE=${NEXT_PUBLIC_DEMO_MODE}
 
 RUN npm run build
 

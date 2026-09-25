@@ -1,5 +1,6 @@
 # Integrity Suite — migration 0020 + 0021 (authoritative)
 
+> **Last verified against migrations through 0067** (answer-face commit era).
 > This document is the **current source of truth** for the face/integrity
 > pipeline's verify semantics, focus-loss pause, advisories, and incident
 > recording. It supersedes the contradicting parts of
@@ -9,7 +10,9 @@
 ## 1. Verify: 1:1-by-lookup + multi-frame majority voting
 
 **One check = up to 3 frames → ONE `face_checks` row decided by strict
-majority.**
+majority.** (The ANSWER-COMMIT path — migration 0067 — requires exactly
+3/3 frames and 3 similarities; only the standalone verify route tolerates
+the 1..3 omit-on-flake semantics.)
 
 - The client captures a best-frame (centered, open eyes, ≤1.5s window) plus
   two quick secondary frames ~500 ms apart (`VERIFY_FRAMES_PER_CHECK = 3`).
@@ -17,18 +20,26 @@ majority.**
   actually submitted (capture flakiness is not a fail vote). Total capture
   failure POSTs the `[""]` sentinel → guaranteed fail row (unchanged
   integrity-conservative semantics).
-- The verify route runs CompreFace `/recognize` per non-empty frame and
-  extracts the **caller's OWN subject similarity**
-  (`selfSimilarity()` — max over all detected faces of the entry whose
-  subject equals `auth.uid()`). Any nonzero similarity is by construction a
+- The verify route runs the InsightFace sidecar `/extract` per non-empty
+  frame and compares the resulting 512-d embedding against the caller's OWN
+  stored samples (`compare_face_baseline` — max cosine over the student's
+  baseline, 1:1-by-baseline; no gallery search is callable by students; the
+  CompreFace-era subject-registry wording below predates migration 0039).
+  Any nonzero similarity is by construction a
   SELF-similarity: **a lookalike classmate ranking top-1 in the gallery can
   no longer fail the check.** The old top1−top2 margin rule
   (`FACE_MARGIN_MIN`) is DELETED — no SQL constant, no client mirror.
-- `record_face_check(p_session_id, p_subject, p_similarities real[],
-  p_trigger, p_nonce, p_frames text[])` (migration 0020, hardened in 0021):
-  - verdict: `p_subject = auth.uid() AND hits*2 > cardinality(p_similarities)`
-    where hits = count of `similarity ≥ 0.5` (SQL constant
-    `FACE_SIMILARITY_MIN`);
+- `record_face_check(p_session_id, p_similarities real[], p_trigger,
+  p_nonce, p_frames text[], p_proof text default null, p_poses jsonb
+  default null)` (introduced 0020/0021; the `p_subject` parameter was
+  DROPPED in the 0039/0047 era — the baseline compare is internal now;
+  `p_proof` is the route-minted HMAC per 0045; `p_poses` is the per-frame
+  pose/spoof trail per 0047; the redefined function in 0067 also persists
+  `nonce` + `frame_poses` columns on every `face_checks` row):
+  - verdict: `v_matched = v_hits * 2 > cardinality(p_similarities)` —
+    the caller's OWN subject only (1:1 by baseline lookup upstream; no
+    gallery search is callable by students) — where hits = count of
+    `similarity ≥ 0.5` (SQL constant `FACE_SIMILARITY_MIN`);
   - `distance = 1 − max(similarity)` — the lecturer timeline shows the BEST
     frame's reading;
   - `frame_hash = sha256(concat(frames))` feeds the unchanged
@@ -39,7 +50,8 @@ majority.**
     per-frame ≤ 200k chars;
   - paused_at cleared on ANY transition to `flagged` (unlock must never
     convert flagged idle time into exam time).
-- Threshold 0.5 is still the CompreFace default. Tune empirically with
+- Threshold 0.5 (cosine against the stored pgvector baseline since 0039).
+  Tune empirically with
   `npm run face:report` (reads real `face_checks` distributions, suggests
   the ROC elbow) — update BOTH mirrors (`src/lib/face/constants.ts` and the
   SQL constant) together.
@@ -47,12 +59,23 @@ majority.**
 ### Client pacing
 
 - 8 s floor between verify POSTs (latest-wins deferral timer) so fast
-  Q-transitions + periodic + catch-up never spend the route's 10/min budget
-  into a bricking 429 (`minClientVerifyGapMs` in `cadence.ts`, unit-pinned;
+  Q-transitions + periodic + catch-up never spend the route's
+  **60/min-per-user** budget into a bricking 429 (`VERIFY_RATE` in the
+  verify route; `minClientVerifyGapMs` in `cadence.ts`, unit-pinned;
   the E2E fake seam relaxes it to the 2 s advisory mirror so fast-cadence
   specs keep their timing).
+- SQL-side attempt throttle (defense in depth): `app_private.face_verify_attempts`
+  allows **600 attempts per 10 min per session** (raised from 60 in the
+  0045→0067 era), counted AFTER the nonce gate and BEFORE the proof check so
+  a forgery loop pays even though it never inserts a `face_checks` row.
 - A 429 maps to *stay `ready` + re-arm cadence* — a busy server is not an
-  outage and must not brick proctoring.
+  outage and must not brick proctoring. But a SUSTAINED streak of ≥4 429s
+  (or 4 consecutive transport failures, `VERIFY_TRANSPORT_FAIL_LIMIT`)
+  degrades the client to `unavailable` + arms the outage claim
+  (`reportUnavailable`) — the silence-cron backstop: the limiter records NO
+  `face_checks` rows while answers keep flowing, so the honest degradation
+  must fire before the verify-silence cron flags on silence (the route
+  stamps `face_verify_attempted_at`, so the claim stays corroborated).
 - Bad lighting defers a check (bounded to 2 retries × 4 s, phase re-checked
   at fire time) instead of sending a doomed dark frame; the gate (`start`)
   always proceeds.
@@ -67,12 +90,23 @@ The FLAT last-5 window lives INSIDE `record_face_check` (server-authoritative;
   (lecturer-only unlock; submits rejected while flagged).
 - **A pass never flags the current check** and resets the streak, but does NOT
   launder standing fails (F,P,F,P,F ⇒ flagged).
-- Triggers are the enum `start | question | periodic` (gate, Q-transition,
-  jittered 30–45 s timer; tab-return catch-up reuses `periodic`).
+- Triggers are the enum `start | question | periodic`. The standalone
+  verify route carries only `'start'` (gate) and `'periodic'` (jittered
+  30–45 s timer; tab-return catch-up and the flagged-poll/unavailable
+  probes reuse `periodic`) — the client no longer POSTs a per-question
+  verify. The `'question'` row is now produced by `commit_answer`
+  (migration 0067) calling `record_face_check` atomically INSIDE the
+  answer commit, so a fresh identity check gates every answer on
+  gesture-enabled assessments.
 - Advisory-only columns on `face_checks` — `suspected_replay` (identical
   concatenated-frame hash as the previous row) and `too_frequent` (<2 s since
-  the previous row) — are written by the same RPC, never change status, and are
-  UNRELATED to the `session_advisories` table in §3.
+  the previous row) — are written by the same RPC and are
+  UNRELATED to the `session_advisories` table in §3. They still never flag on
+  their own, BUT replay has a status consequence now (0045 P0-2): a MATCHED
+  verdict whose frame hash equals BOTH previous rows' hashes (frozen-frame
+  replay, 3× identical — impossible for honest captures, JPEG noise
+  guarantees drift) lands as **`paused`**, not `active` (E2E mock marker
+  frames and the nonce-retry resend pair are carved out).
 
 ## 2. Focus-loss pause
 
@@ -110,22 +144,28 @@ Blink self-recovery recovers all of the above EXCEPT `flagged`
 (lecturer-only) and resets `face_fail_streak` — it deliberately does NOT
 reset the pause counters (only `unlock_session`/`exempt_face_session` do).
 
-**Timer-credit cap (0044):** `self_recover_session` credits the paused
+**Timer-credit cap (0044, extended 0045):** `self_recover_session` credits the paused
 duration back into `started_at` capped at **120 s** per recovery
 (`MAX_RECOVERY_CREDIT_SECONDS`). Honest pauses are always far shorter
 (blur debounce 900 ms; face pause → blink recovery), so honest sessions are
 unaffected; scripted pause/recover cycling is no longer a profitable time
 source — and the hand/focus 3-strike flags it anyway. `unlock_session` (a
-lecturer decision) still credits the FULL paused duration.
+lecturer decision) caps its timer credit at the SAME **120 s** ceiling
+(0045), resets `focus_pause_count`, `fullscreen_pause_count` AND
+`hand_pause_count`, and returns the server's `remainingMs` so the client
+countdown re-syncs instead of freezing through the pause.
 
 ## 2c. Timer semantics
 
 The assessment deadline is anchored to `started_at`. While `paused`, time is
 CREDITED BACK: `self_recover_session` / `unlock_session` extend `started_at`
-by the paused duration (`paused_at`, migrations 0019/0021). Flagged idle time
+by the paused duration capped at **120 s** (`paused_at`,
+`MAX_RECOVERY_CREDIT_SECONDS` — migrations 0019/0021, capped 0044/0045).
+Flagged idle time
 is NOT credited (`paused_at` cleared on any transition to `flagged`), so a
 lecturer unlock never converts flagged waiting into exam time. The client-side
-countdown mirrors this by pausing on `paused`/`flagged`.
+countdown mirrors this by pausing on `paused`/`flagged` and adopts the
+server's `remainingMs` on every recovery/unlock (D-F2).
 
 ## 3. Advisories (lecturer review hints — NEVER status changes)
 
@@ -138,7 +178,7 @@ PostgREST spam returns ok without inflating); reads owner-or-lecturer
 
 | Type | Source | Client throttle |
 |---|---|---|
-| `second_face` | tracker runs MediaPipe `numFaces:2`; sustained ≥2 faces for 1 s | 55 s |
+| `second_face` | client tracker runs MediaPipe `numFaces:2`, sustained ≥2 faces for 1 s; **SERVER-SIDE source too (integrity hardening): the verify route and the answer route fire `report_session_advisory('second_face')` fire-and-forget after a successful check, over the faces the server just judged — tamper-resistant where the client tracker is suppressible by a tampered browser** | 55 s |
 | `looked_away` | off-axis/off-center accumulation ≥8 s inside rolling 60 s (consecutive away samples only) | 55 s |
 | `voice_activity` | mic RMS (AnalyserNode) speech-level accumulation ≥2 s inside rolling 30 s | 55 s |
 | `headset_active` | active input device label matches BT/headset patterns (one-shot after mic grant) | once |
@@ -179,9 +219,12 @@ Privacy contract: **nothing is uploaded unless an incident happens.**
   camera/recorder).
 - If the tab dies BEFORE an incident flush, the in-memory ring is lost —
   accepted (footage exists only for incidents that surface while alive).
-- Retention has NO automatic scheduler wired: run `npm run incident:cleanup`
-  from cron (or call `prune_expired_incident_clips()` via pg_cron) — 30-day
-  default.
+- Retention IS wired (migration 0042): pg_cron runs
+  `innovision-incident-prune` daily at **04:23** calling
+  `prune_expired_incident_clips()` (30-day default; deletes objects AND
+  rows), alongside the every-minute silence-flag job; 0047 added
+  `cron_health()` observability. `npm run incident:cleanup` is the
+  FALLBACK for environments without pg_cron.
 
 ## 5. Test surface
 
@@ -191,12 +234,15 @@ Privacy contract: **nothing is uploaded unless an incident happens.**
   `cadence.test.ts` (incl. `minClientVerifyGapMs` = 8 s),
   `face-routes.test.ts` (I-vote block, focus-loss escalation, advisory
   block), `face-session-routes.test.ts` (incident upload block).
-- SQL harness: `scripts/verify-face.mjs` — probes the REAL RPCs
-  (`p_similarities[]` signature): I-vote (lookalike-top1 passes, 1-of-3
+- SQL harness: `scripts/verify-face.mjs` — probes the REAL RPCs (the
+  8-arg `record_face_check` signature; it MINTS the HMAC proofs via
+  `mintProof`/`withProof`, since 0045 forged similarities die at the
+  proof gate): I-vote (lookalike-top1 passes, 1-of-3
   fails, distance=max), numeric gates, focus escalation + attribution +
   unlock reset, fullscreen counter (0043), hand-loss counter + 3-strike +
   reset, recovery credit cap (120 s), lifetime face_fail_count, unlock/exempt
-  audit session-attribution, advisory upsert/throttle. 71 checks.
+  audit session-attribution, advisory upsert/throttle, the 0045 proof/throttle/frozen-frame
+  blocks. **~85 checks.**
 - E2E: `e2e/e16-integrity.spec.ts` — debounced-blur pause copy, 3-strike
   flagging, and the full second-face advisory chain rendered as a dashboard
   chip. Fake tracker exposes `setFacePose` /
@@ -211,15 +257,21 @@ Privacy contract: **nothing is uploaded unless an incident happens.**
 
 ## 6. Known accepted limits
 
-- Direct-RPC self-passing (documented residual risk, Phase 7 §7): a student
-  calling the RPC directly can pass as THEMSELVES with forged similarities;
-  they cannot pass as anyone else. (Audit note 2026-09: severity is higher
-  than "pass as themselves" — no face is needed at all; `p_similarities` is
-  caller-supplied and frames are length-gated + hashed but never decoded.
-  Mitigations that raise the cost: the caller must hold a valid session +
-  nonce, every forged pass writes a permanent row, and the lecturer timeline
-  shows the pattern. A server-minted capture ticket remains the structural
-  fix and is deliberately deferred — browser boundary, out of MVP scope.)
+- Direct-RPC forgery is CLOSED (the old Phase 7 §7 residual risk):
+  0045 shipped the server-minted HMAC verify proof —
+  `app_private.verify_proof_secret`, the service-role-only getter, a
+  route-computed `HMAC-SHA256(secret, session_id || ':' || nonce || ':' ||
+  frame_concat)` over the EXACT frame bytes after the sidecar compare, a
+  double-HMAC compare (constant-useful, no match-prefix timing leak), a
+  per-session attempt ledger (`face_verify_attempts`, 600/10 min, counted
+  after the nonce gate / before the proof), and the frozen-frame pause
+  (P0-2). 0067 extends the same machinery to ANSWERS (`answer-proof` over
+  canonical answer fields inside `commit_answer`) and revokes direct
+  `answer_question` execution. **Remaining browser-boundary limit:** the
+  route trusts client-captured frames — a tampered client can submit
+  frames it likes through the route (the HMAC proves the ROUTE judged
+  them, not that a camera produced them), but it cannot skip the sidecar
+  compare or forge a direct RPC call.
 - Blink replay is MITIGATED (integrity hardening, 2026-09): the assessment
   gate AND blink recovery append a randomized head-turn challenge
   (`lib/face/challenge.ts`) — the student must turn toward a randomly chosen
@@ -232,24 +284,35 @@ Privacy contract: **nothing is uploaded unless an incident happens.**
   (lecturer-visible) instead of re-verifying a static frame forever. The
   challenge still runs only at gate/recovery — a genuine relay attack remains
   the documented browser boundary.
-- The verify-silence cron (`flag_verify_silent_sessions`, 0042) fires every
-  minute via pg_cron; NOTE the migration shipped with a plpgsql syntax bug
-  (cursor loop closed with `end if` instead of `end loop`) that prevented it
-  from applying to ANY database — fixed in place in the 0042 file itself
-  (safe: a migration that never applied has no state to preserve) and first
-  deployed alongside 0043. 0044 adds an ANSWER-COUNT grace to BOTH the
-  cursor and the guarded UPDATE: sessions with at most ONE answer after
-  their last face check are skipped this tick. A student returning from a
-  long tab-hide answers while the ~3 s catch-up capture is still in flight —
-  she has ≤1 post-check answer, so the cron waits for the next tick rather
-  than flagging mid-capture; a suppressed-verify session accumulates a
-  second post-check answer inside the 300s silence window and the count
-  resets only when a REAL verify commits, so the grace delays detection by
-  one answer without eliminating it. (A round-1 review rejected an earlier
-  15 s `last_activity_at` floor as permanently evadable — answers touch
-  that timestamp too. 0044 also moved `report_session_advisory`'s
-  activity touch inside its 55 s occurrence throttle so advisory spam
-  cannot blur freshness signals.)
+- The verify-silence cron (`flag_verify_silent_sessions`, 0042, reshaped
+  through 0067) fires every minute via pg_cron and runs ONLY for
+  gesture-enabled quizzes (a `gestures_enabled = true` term; non-gesture
+  assessments are never candidates). Freshness is keyed to
+  `session_answers.answered_at` (NOT `last_activity_at`, which advisories
+  touch): a candidate must have ≥2 answers AFTER its last face check
+  (0044 grace — a tab-return catch-up capture takes seconds; the count
+  resets only when a REAL verify commits), answered within the last 90 s,
+  with the last check >300 s old (coalesced to `started_at` for
+  zero-check sessions). The outage-claim exemption requires the claim to
+  be FRESH (≤10 min) AND CORROBORATED — a `face_checks` row OR a
+  `face_verify_attempted_at` stamp within 10 min — so the audit-2
+  block-verify-and-re-arm attack produces a fresh claim with no
+  corroboration → flagged, while an honest outage (attempts flowing) stays
+  exempt. The pause-resume guard is the dedicated `resume_grace_until`
+  trigger stamp (0047; the earlier `paused_at` form was a tautology). 0062
+  added `session_verify_silent()` plus submit-time and
+  autoclose-seal-time `auto_flag_verify_silence` evidence rows
+  (`via: 'submit'` / `'autoclose_seal'`), closing the
+  suppress-then-submit escape. The flag applies via a guarded UPDATE that
+  RE-STATES every freshness + exemption predicate (under READ COMMITTED a
+  verify committing between the cursor snapshot and the UPDATE
+  re-evaluates there — a student whose verify just landed is never
+  flagged on stale data). (0042's original plpgsql syntax bug — cursor
+  loop closed with `end if` — was fixed in place in the 0042 file
+  itself; a migration that never applied has no state to preserve.
+  0044 also moved `report_session_advisory`'s activity touch inside its
+  55 s occurrence throttle so advisory spam cannot blur freshness
+  signals.)
 - Phones/earbud-audio remain undetectable (browser boundary); advisories
   are review hints, not proof. Head PITCH now feeds the `looked_away`
   advisory in BOTH directions (`|pitch| > LOOK_AWAY_PITCH_DEG`) so moderate

@@ -2,6 +2,8 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import type { Database } from "@/lib/types/database";
 import { env, SUPABASE_AUTH_COOKIE } from "@/lib/env";
+import { isDemoModeEnabled, DEMO_JOIN_CODE } from "@/lib/demo/gate";
+import { normalizeJoinCode } from "@/lib/classes/join-code";
 
 const PUBLIC_ROUTES = ["/", "/login", "/register", "/auth/callback", "/forgot-password", "/reset-password"];
 
@@ -47,6 +49,32 @@ function shouldBounceAuthenticated(pathname: string): boolean {
   return !AUTH_BOUNCE_EXEMPT.some(
     (route) => pathname === route || pathname.startsWith(`${route}/`),
   );
+}
+
+/**
+ * Demo-mode exemption (PLAN_DEMO_MODE.md D3).
+ *
+ * `/join` is deliberately NOT in PUBLIC_ROUTES, so an anonymous scanner is
+ * bounced to `/login?redirect=…` here. Under `NEXT_PUBLIC_DEMO_MODE=1` the
+ * seeded demo class's code is exempted from that bounce so /join/[code] can
+ * render the walk-up "Join the demo" card instead of the login wall.
+ *
+ * This function's ONLY job is to NOT bounce. It renders nothing (middleware
+ * cannot) and passes no state — the page re-derives the same predicate
+ * server-side (Node runtime) and is the authoritative branch, so a stale
+ * build-time middleware env degrades to the login bounce, never a broken kiosk.
+ *
+ * Comparison is NORMALIZED (the DB/RPC world upper-cases and strips
+ * spaces/dashes): a raw `=== DEMO_JOIN_CODE` would miss `/join/scan23` and
+ * produce an inconsistent branch. `normalizeJoinCode` returns null for a
+ * malformed segment, which correctly falls through to the ordinary bounce.
+ * Exact equality against the normalized constant means no other code can ever
+ * take this branch; with the flag off this is dead code.
+ */
+function isDemoJoinSkip(pathname: string): boolean {
+  if (!isDemoModeEnabled()) return false;
+  const segment = pathname.split("/")[2];
+  return normalizeJoinCode(segment) === DEMO_JOIN_CODE;
 }
 
 export async function updateSession(request: NextRequest) {
@@ -122,6 +150,11 @@ export async function updateSession(request: NextRequest) {
 
   // Redirect unauthenticated users to login (except public routes)
   if (!user && !isPublicRoute(pathname)) {
+    // Demo mode: the seeded demo class QR must reach /join/[code] anonymously
+    // so the walk-up guest flow can render. See isDemoJoinSkip.
+    if (pathname.startsWith("/join/") && isDemoJoinSkip(pathname)) {
+      return supabaseResponse;
+    }
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     // audit-3 A-F8: preserve the QUERY STRING too. The old form stored only

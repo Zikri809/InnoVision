@@ -42,7 +42,7 @@ Browser (students + lecturer)
   MediaPipe (in-browser AI): face landmarks + blink, hand tracking
         │
         ▼
-Next.js server (Node) — ~36 API routes, all self-authenticating
+Next.js server (Node) — ~51 API routes, all self-authenticating
         │
         ▼
 Supabase  = Postgres database (with row-level security on everything)
@@ -251,6 +251,29 @@ Also useful:
 npm run test:face-smoke   # end-to-end face pipeline smoke test
 npm run check:env         # env parity check
 ```
+
+### 6b. Optional: demo mode (walk-up kiosk)
+
+If you want visitors to scan a QR and get an auto-created student account
+(no signup), enable the flag-gated demo mode
+(`docs/plans/PLAN_DEMO_MODE.md`):
+
+```bash
+# PowerShell: $env:NEXT_PUBLIC_DEMO_MODE=1; npm run demo:prep
+NEXT_PUBLIC_DEMO_MODE=1 npm run demo:prep
+```
+
+That one command runs supabase start → db reset → seed:demo → face:start →
+demo:reset → `next build` (with the flag) → `next start -H 0.0.0.0`. Then:
+
+- Visitors scan `http://<this-machine-LAN-IP>:3000/join/SCAN23` → tap **Join
+  the demo** → they play the walk-up practice quiz instantly (no camera).
+- The presenter control room is `http://localhost:3000/demo` (demo-lecturer
+  only): pre-flight ticks + a **Reset walk-up** button.
+- Run `npm run demo:reset:walkup` (or the /demo button) **between shows**;
+  it deletes guests older than 2h and recreates the quiz.
+- **Never** set `NEXT_PUBLIC_DEMO_MODE=1` in a real deployment — it is a kill
+  switch (`prod-guards.ts`); CI/Docker refuse a prod build carrying it.
 
 ---
 

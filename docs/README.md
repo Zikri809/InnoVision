@@ -4,18 +4,22 @@
 > is a historical record, and which has been superseded in part. When a plan
 > and the code disagree, the code + migrations win — then update the doc.
 >
-> Last reconciled: 2026-09-14 (GLM-OCR provider toggle + VPS deployment docs: `GLM_OCR_SETUP.md` §6 remote leg, `DEPLOY_VPS.md` runbook, `COSTS.md` VPS model, `PLAN_VPS_DEPLOYMENT.md` status).
+> Last reconciled: 2026-09-25 (ARCHITECTURE.md refresh: migrations 0036–0067,
+> commit_answer atomic answer+identity commit, InsightFace sidecar replacing
+> CompreFace prose, short_text AI marking pipeline, v4.9 gesture toggle,
+> audit-5 gates — GLM-OCR provider toggle + VPS deployment docs reconciled
+> 2026-09-14).
 
 ## ✅ Current / authoritative
 
 | Doc | Scope |
 |---|---|
 | **ARCHITECTURE.md** | How the app works end to end: stack topology, request lifecycle, data model, the 5-layer security model, and per-feature data-flow walkthroughs (face verify protocol, session state machine, reveal gating, notifications, practice quizzes). Start here. |
-| **PLAN_INTEGRITY_SUITE.md** | Face verification (1:1-by-lookup multi-frame voting), focus-loss pause, session advisories, incident recording. Migrations 0020+0021. THE source of truth for the face/integrity pipeline. |
-| **PLAN_NOTIFICATIONS.md** | Per-user notification feed (migration 0022): bell island, polling/merge/dedup, i18n copy, role-layout wiring. THE source of truth for notifications. |
-| **PLAN_STUDENT_PRACTICE_QUIZZES.md** | Student-created practice quizzes (migration 0023): creator-only authoring, unlisted share codes minted ONLY via definer RPC, stateless server-side grading, DB-side caps, `/s/[code]` play. THE source of truth for the SQ feature (post-critique final). |
-| **PLAN_MATRIC_EXCEL_EXPORT.md** | Matric numbers (migration 0027: 6-digit, 99xxxx reserved) + lecturer Excel export (`/api/quizzes/[id]/export`, exceljs, 3 sheets). Post-audit final; three subagent review iterations. |
-| **TESTING.md** | Test plan by layer: Vitest units, route tests, SQL harnesses (`verify:*.mjs`), E2E inventory. ⚠️ The Phase-7-era body predates the integrity suite — the suite's tests (I-vote/focus/advisory route tests, incident route tests, `vote`/`attention`/`vad` units, e16, verify-face 59 checks) are catalogued in PLAN_INTEGRITY_SUITE.md §5 instead; the student-quizzes suite lives in TESTING.md §2.7 + the E17 row. |
+| **PLAN_INTEGRITY_SUITE.md** | Face verification (1:1-by-baseline multi-frame voting + HMAC verify proofs, commit_answer atomic answer+identity commit), focus-loss pause, session advisories, incident recording. Verified against migrations through 0067. THE source of truth for the face/integrity pipeline. |
+| **PLAN_NOTIFICATIONS.md** | Per-user notification feed (migration 0022, extended through 0048: quiz_closed fan-out, session_unlocked pin, urgent-tier retention + unread caps): bell island, polling/merge/dedup, i18n copy, role-layout wiring. THE source of truth for notifications. |
+| **PLAN_STUDENT_PRACTICE_QUIZZES.md** | Student-created practice quizzes (migration 0023, extended: AI generation 0029, creator-only SELECT 0045, image ownership 0046): creator-only authoring, unlisted share codes minted ONLY via definer RPC, stateless server-side grading, DB-side caps, `/s/[code]` play. THE source of truth for the SQ feature (post-critique final). |
+| **PLAN_MATRIC_EXCEL_EXPORT.md** | Matric numbers (migration 0027: 6-digit, 99xxxx reserved) + lecturer Excel export (`/api/quizzes/[id]/export`, exceljs, 3 sheets, view-based reads per 0054/0060, 200-session/20k-answer caps). Post-audit final; three subagent review iterations. |
+| **TESTING.md** | Test plan by layer: Vitest units, route tests, SQL harnesses (`verify:*.mjs`), E2E inventory (77 specs). ⚠️ The Phase-7-era body predates the integrity suite — the suite's tests (I-vote/focus/advisory route tests, incident route tests, `vote`/`attention`/`vad` units, e16, verify-face ~85 checks) are catalogued in PLAN_INTEGRITY_SUITE.md §5 instead; the student-quizzes suite lives in TESTING.md §2.7 + the E17 row. |
 | **INSIGHTFACE_SETUP.md** | Self-hosted InsightFace sidecar (single container, stateless; embeddings in Supabase). |
 | **GLM_OCR_SETUP.md** | Optional GLM-OCR extraction engine setup — the **local** Docker/vLLM leg (§1–§5, §7–§8) and the **remote Z.ai API** leg (§6: `GLM_PROVIDER=remote`, `layout_parsing`, envelope precedence, billed probe cache, spend governor, OWED live-curl list). |
 | **COSTS.md** | Infra/service cost model: VPS + hosted Supabase + Z.ai OCR. Every number tagged MEASURED / ESTIMATED / UNVERIFIED; the superseded Vercel-Hobby model is kept in §5 as history. |
@@ -68,25 +72,49 @@ context/invariants; verify details against code.
 
 ## 🔑 Current-state quick facts
 
-- **Stack**: Next.js (App Router) · Supabase (Postgres, Auth, Storage) ·
-  MediaPipe tasks-vision (face landmarker + hand landmarker, vendored) ·
-  self-hosted CompreFace (Docker) · optional GLM-OCR with **two legs** behind one
-  route (`GLM_PROVIDER=local` → Docker/vLLM, free; `remote` → the Z.ai API,
-  billed — `GLM_OCR_SETUP.md` §6).
+- **Stack**: Next.js 16 (App Router, React 19) · Supabase (Postgres, Auth,
+  Storage) · MediaPipe tasks-vision (face landmarker + hand landmarker,
+  vendored) · self-hosted **InsightFace sidecar** (single FastAPI/ONNX
+  container — replaced the CompreFace stack, migration 0039) · optional
+  GLM-OCR with **two legs** behind one route (`GLM_PROVIDER=local` →
+  Docker/vLLM, free; `remote` → the Z.ai API, billed — `GLM_OCR_SETUP.md`
+  §6).
 - **Deployment**: two targets — the **laptop stack** (local Supabase + local
-  GLM-OCR container) and the **vCPU VPS** (Next.js + InsightFace, hosted
-  free-tier Supabase, Z.ai OCR; no GPU, no vLLM container). Operator runbook:
-  `DEPLOY_VPS.md`; cost model: `COSTS.md`.
-- **Migrations**: `supabase/migrations/0001…0035` — authoritative schema.
+  GLM-OCR container) and the **vCPU VPS** (Next.js + InsightFace images from
+  GHCR, hosted free-tier Supabase, Z.ai OCR; no GPU, no vLLM container).
+  Operator runbook: `DEPLOY_VPS.md`; CI/CD: `DEPLOY_CICD.md`; cost model:
+  `COSTS.md`.
+- **Migrations**: `supabase/migrations/0001…0067` (64 files — 0061/0063/0064
+  are pgTAP test rounds under `supabase/tests/`) — authoritative schema.
   Regenerate types after schema changes: `npm run gen:types`.
-- **Face pipeline (current)**: enroll 3 angles → gate (blink + `'start'`
-  verify) → periodic/question re-verification with **up-to-3-frame majority
-  voting** against the caller's own CompreFace subject → FLAT last-5 fail
-  window (3 fails ⇒ flagged). Three pause sources coexist, all server-side:
-  face fail (`paused`), gesture hand-loss (`hand_loss`, transient), and
-  debounced focus-loss (`focus_lost`, 3rd strike ⇒ flagged). Tab-hide records
-  nothing (cadence pause + catch-up verify). Details: PLAN_INTEGRITY_SUITE.md
-  §1b/§2/§2b.
+- **Face pipeline (current)**: enroll 3 angles → gate (blink + head-turn +
+  `'start'` verify) → periodic 30–45s re-verification with up-to-3-frame
+  majority voting against the caller's own baseline → FLAT last-5 fail
+  window (3 fails ⇒ flagged). **The per-answer identity check is atomic with
+  grading** (migration 0067 `commit_answer`: HMAC answer-proof + face verify
+  + `answer_question` in ONE transaction; `answer_question` is no longer
+  directly callable). Verify proofs are HMAC-signed server-side
+  (`app_private.verify_proof_secret`) — a student cannot fabricate
+  similarities over PostgREST. Three pause sources coexist, all server-side:
+  face fail (`paused`), gesture hand-loss (`hand_loss`, flags at 3), and
+  debounced focus-loss (`focus_lost`, 3rd strike ⇒ flagged); fullscreen exits
+  are counted but never auto-flag. The verify-silence cron is
+  gesture-toggle-aware; finalization (submit + autoclose seal) re-checks the
+  same silence predicate. Tab-hide records nothing (cadence pause + catch-up
+  verify). Details: PLAN_INTEGRITY_SUITE.md + ARCHITECTURE.md §7.5–7.6.
+- **short_text AI marking (v4.9)**: AI-marked rubric questions via
+  `ai_marking_ledger` (service-role only) + a two-phase sweep: pg_cron claim
+  → pg_net POST → `/api/internal/ai-mark-sweep` worker → `finalize_ai_mark`
+  (epoch-guarded). 0/0.5/1 mark ladder; daily spend caps (50k tokens / $5
+  per quiz); pending answers contribute 0 and BLOCK auto-reveal; lecturer
+  override (`override_answer_mark`) bumps the epoch and can re-publish the
+  reveal. Gesture toggle (`quizzes.gestures_enabled`, draft-frozen) turns
+  the whole per-answer verification stack OFF for a quiz.
+- **Scoring**: one arithmetic everywhere —
+  `SUM(COALESCE(mark_score, CASE WHEN is_correct THEN 1 ELSE 0 END)) WHERE
+  mark_status <> 'pending'` (D10); `quiz_sessions.score` is NUMERIC.
+  Sealed ≠ submitted (autoclose seals scoreless completions via the
+  `assign_seal_score` trigger).
 - **Student practice quizzes (current)**: students author practice-only
   quizzes (no mode/status machinery), play them statelessly (grading RPC
   performs ZERO writes — creators cannot see who played, by construction),
@@ -126,15 +154,18 @@ context/invariants; verify details against code.
   npm run incident:cleanup # delete incident clips older than 30d (cron-able; no scheduler wired)
   npm run verify:sessions # …plus verify:classes/quizzes/ai/results/security
   npm run verify:clone    # clone_quiz AP-2 probes (14 checks; ownership/archived/fidelity/cap-free)
-  npm run check:i18n      # en <-> ms key parity
+  npm run verify:silence  # verify-silence cron predicate probes
+  npm run check:i18n      # en <-> ms key parity + referenced-key existence
   npm run check:env       # every env key read in src/** is documented in .env.local.example
-  node scripts/vps-smoke.mjs --base-url <origin> --email <lecturer> --password <pw>  # VPS smoke (ops gate O4)
-  npx playwright test     # E2E (needs LECTURER_INVITE_CODE in .env.local)
+  npx supabase test db    # pgTAP suites in supabase/tests/ (audit rounds incl. 0063/0064)
+  node scripts/vps-smoke.mjs --base-url <origin> --email <lecturer> --password <pw>  # VPS smoke (ops gate O4; node invocation, not an npm script)
+  npx playwright test     # E2E, 77 specs (needs LECTURER_INVITE_CODE in .env.local)
   ```
 - **Known debt**: legacy E2E specs (e3/e5/e6/e7/e9b/e10–e15) still carry
   pre-integrity-suite choreography drift; shared helpers were repaired
   (2026-08-22) so they run deep into their own assertions. `e16-integrity.spec.ts`
-  is the green reference for face flows.
+  is the green reference for face flows; `e51` is the opt-in hardening-ON
+  suite.
 
 ## 📝 Doc conventions
 

@@ -212,6 +212,22 @@ unaffected — marker frames short-circuit before the sidecar.
 >   pose-change re-arm gate, palm POSTs the sorted canonical set,
 >   palm-next advances in feedback).
 
+### 2.10 Short-text AI marking & pending semantics (`lib/results` + `lib/ai`)
+
+> The AI-marking pipeline's student-visible contract is "pending until a mark
+> lands". The vitest surface pins the derived-data half; the SQL half lives in
+> the pgTAP suites and the journey in E2E.
+
+- **`export.test.ts` / `export-workbook.test.ts`:** the pending-mark workbook
+  cell semantics (what renders while `mark_status='pending'`) and NUMERIC score
+  coercion (a 0.5 mark survives the round-trip as a number, not a string).
+- **`gradebook.test.ts`:** the gradebook pending/resolved-denominator contract
+  — a pending answer keeps the denominator resolved so scores don't silently
+  shift when a mark lands.
+- **SQL half:** pgTAP `0055_submit_pending.sql` (I-20), `0057_sweep.sql`
+  (I-24), `0058_override.sql` (I-21) — see §3.1.
+- **E2E journey:** E55 (`e55-ai-marking.spec.ts`) — see §5.
+
 ---
 
 ## 3. DB / RLS Tests (local Supabase)
@@ -269,13 +285,16 @@ unaffected — marker frames short-circuit before the sidecar.
 | D46 | **Session RLS + answer-after-submit (P5)** | student A reads own session/answers (visible); student B reads A's (0 rows); lecturer reads own quiz's sessions/answers (visible); submit then answer on same session | `{error:'session_not_active'}` |
 | D47 | **Anon denial (P5)** | raw-anon PostgREST call to `start_quiz_session`/`answer_question`/`submit_session` → denied (execute revoked); anon SELECT on `quiz_sessions`/`session_answers` → 0 rows (RLS/grants) |
 | — | **Quiz-delete guard (P5, route-owned)** | quiz DELETE with sessions → 409 `quiz_has_sessions` (route test **I-S12**; the DB layer cascades by design — D41 is deliberately not a D-test) |
+| D48 | **Verify-silence cron polarity** | 90s answer freshness / 300s check staleness / ≥2-answer grace / outage exemption — live-DB probes in `verify:silence` |
 
 ### 3.1 pgTAP suites (`supabase/tests/`, `npx supabase test db`)
 
 The D-table above documents the *manual/exploratory* DB contract. The
-**`supabase/tests/` pgTAP suites are the executable half** and are the ones CI
-must run — a D-row with no corresponding assertion here is documentation, not a
-gate.
+**`supabase/tests/` pgTAP suites are the executable half** and must be run
+before merge (locally: `npx supabase test db`) — a D-row with no corresponding
+assertion here is documentation, not a gate. CI does not run them
+(`.github/workflows/ci.yml` has no `supabase test db` step); its DB gate is the
+`verify:*` probe suite instead (§6).
 
 ```bash
 npx supabase start          # once
@@ -286,7 +305,7 @@ npx supabase test db supabase/tests/0057_sweep.sql   # one suite
 | File | Covers | Assertions |
 |---|---|---|
 | `0052_question_shape.sql` | I-25: per-type option cardinality (mcq 2..5, true_false exactly 2, multi 2..4, short_text 0), the three-way `questions_correct_shape`, the short_text shape/rubric CHECKs (incl. the 500-char `answer_key` ceiling), the `0/0.5/1` mark ladder, `answer_text` <=500, the pending/skip shape CHECKs, a `mark_metadata` JSONB smoke insert, the `gestures_enabled DEFAULT true NOT NULL` pin, and the `student_questions_no_new_types` scope guard | 27 |
-| `0054_privs.sql` | I-23: the column-privilege seal. Asserts `has_column_privilege` is FALSE for every S1-withheld column (`is_correct`, `mark_score`, `mark_status`, `marked_at`, `answer_text`, `attempt_version`, `mark_metadata`, `answer_key`, `correct_index/indices`, `image_path`), that no table-level SELECT survives, that the definer RPCs (`finalize_ai_mark`, `check_mark_spend`, `sweep_ai_marks`, `escalate_stale_marks`, `recheck_quiz_completion`) are NOT executable by `authenticated` **or `anon`**, and that the barrier views project exactly what they claim (ungated `answer_text`/`skipped`, reveal-gated `mark_status`/`mark_score`, owner-gated `lecturer_questions_view.answer_key`) | 40 |
+| `0054_privs.sql` | I-23: the column-privilege seal. Asserts `has_column_privilege` is FALSE for every S1-withheld column (`is_correct`, `mark_score`, `mark_status`, `marked_at`, `answer_text`, `attempt_version`, `mark_metadata`, `answer_key`, `correct_index/indices`, `image_path`), that no table-level SELECT survives, that the definer RPCs (`finalize_ai_mark`, `check_mark_spend`, `sweep_ai_marks`, `escalate_stale_marks`, `recheck_quiz_completion`) are NOT executable by `authenticated` **or `anon`**, and that the barrier views project exactly what they claim (ungated `answer_text`/`skipped`, reveal-gated `mark_status`/`mark_score`, owner-gated `lecturer_questions_view.answer_key`) | 41 |
 | `0055_submit_pending.sql` | I-20: a pending answer contributes 0 (D10 SUM + pending filter), `v_all_done` is FALSE while any answer quiz-wide is pending so the quiz does NOT auto-reveal, `quiz_autoclose` refuses for the same reason, the completed-count excludes pending sessions, `student_pending_count` answers pre-reveal and returns `not_found` for a foreign session, a 0.5 mark survives the recompute as 1.5 (the NUMERIC column's whole purpose), and the `already_submitted` branch RECOMPUTES after a post-submit override while the unrevealed->`score:null` arm stays intact (M6) | 31 |
 | `0057_sweep.sql` | I-24: the sweep lifecycle - claim mints ONE shared `claim_token` and advances `attempts`, a second sweep does not re-claim inside the lease but a claim staler than 5 min IS re-claimed (crashed-worker recovery), the A6-4 stale-token finalize is DISCARDED and the ledger row stays `marking` with its token, a low-confidence mark routes to `needs_review` while the score stands, a model FAILURE leaves the answer pending so R3-M2 retries it, the D2-13 epoch guard discards BOTH a post-override write and a true stale-epoch write against a still-pending answer, R3-MIN3 closes the discarded ledger row, A6-1 escalation reaches an exhausted row, and the digest/v_all_done re-fire from finalize against a genuinely SUBMITTED session (incl. the honest 2h-quiet-window hold) | 46 |
 | `0058_override.sql` | I-21: override validation (NULL mark / bad reason / over-max / foreign question / no answer row all return typed errors, never a silent `ok:true`), the D10 recompute, `attempt_version` incrementing as the override epoch, an `audit_events` row, NO `last_activity_at` OR `submitted_at` stamp (D4), no extra `session_submitted` notification, and the C6/L1 re-publish - the override NULLs `results_revealed_at` under its GUC while the one-way trigger still blocks an un-reveal outside it | 24 |
@@ -296,8 +315,9 @@ npx supabase test db supabase/tests/0057_sweep.sql   # one suite
 | `0063_audit5_test_round.sql` | T2/T3/T5/T6/T7/T9 + O1 (audit-5 §4–§5): `flag_verify_silent_sessions` polarity (90s answer freshness, 300s check staleness, ≥2 post-check answer grace, outage-claim exemption with/without corroboration); the frozen-frame 3× rule (3 identical MATCHED frames share one `frame_hash` → 3rd pauses); the HMAC proof gates (`proof_required` / forged `proof_invalid` / cross-payload `proof_invalid`) + attempt-ledger rows; nonce replay → `nonce_mismatch` + rotation on a genuine verdict; the 2h `last_activity_at` auto-reveal boundary; `pause_session` strike accounting (1 per call, 3rd flags, `fullscreen_exit` never flags); `session_started` / `session_submitted` / `session_sealed` audit rows | 25 |
 | `0064_concurrency.sql` | T1 (audit-5 §4): concurrency GUARANTORS — the `one_active_assessment_attempt` partial unique index rejects a duplicate live row (23505); a second `start_quiz_session` → `already_attempted` pointing at the SAME session; `submit_session` is idempotent (`already_submitted`, stable score, no duplicate rows). A true multi-connection race cannot run under `supabase test db` (non-superuser; libpq refuses passwordless dblink) — the mechanisms are pinned instead | 7 |
 | `0065_integrity_snapshot.sql` | O2/O5 (audit-5 §5): `integrity_snapshot(window_hours)` returns `windowHours`/`flags24h`/`flagsByAction`/`flaggedNow`/`sealed`/`submitted`/`started`/`pendingMarks`; a quiet system reports zero flags; start/submit feed the counters; `flaggedNow` tracks a flag; the RPC is service_role-only (never anon/authenticated) | 6 |
+| `0067_answer_face_commit.sql` | I-31: the answer write + a fresh identity verdict commit ATOMICALLY (a mismatch verdict pauses while the answer write stays absent) + the gestures-enabled toggle freeze | 10 |
 
-**Counts are the `select plan(N)` values in each suite and must be updated in the same commit as the assertion.** Running total: 27 + 40 + 31 + 46 + 24 + 15 + 12 + 13 + 25 + 7 + 6 = **246**.
+**Counts are the `select plan(N)` values in each suite and must be updated in the same commit as the assertion.** Running total: 27 + 41 + 31 + 46 + 24 + 15 + 12 + 13 + 25 + 7 + 6 + 10 = **257**.
 
 **Why privilege assertions rather than query results** (`0054_privs.sql`): a
 column-level `REVOKE` is a NO-OP while a table-level `SELECT` grant exists -
@@ -398,6 +418,7 @@ suites are order-independent and rerunnable against a persistent local DB.
 | I-C4 | `DELETE /api/classes/[id]` (P2) | lecturer soft-deletes class | 200 `{ ok: true, archived: true }`, sets `archived_at` (audit preservation) |
 | I-C5 | `GET /api/classes/[id]` (P2) | student requests archived class | 404 (hidden via `student_class_view`) |
 | I-C6 | `POST /api/classes/join` (P2) | student attempts to join archived class | 400 `class_archived` |
+| I-Export | `GET /api/quizzes/[id]/export` | 7 route tests: student caller → 403; unknown quiz → 404; malformed id → 404; happy path → 200 with workbook substance; hostile-title filename sanitization; rate limit → 429 | route-owned guard set for the export endpoint |
 
 ---
 
@@ -442,6 +463,40 @@ suites are order-independent and rerunnable against a persistent local DB.
 | E2F | **Grounded web-search generation (TinyFish topic mode)** — `e2f-web-generate.spec.ts` + `e2f-web-generate-flags.spec.ts` (flags project) | lecturer selects the "Web topic" source mode in the generate dialog and submits a topic carrying a `[MOCK:tf_*]` scenario marker (echo chain: topic → query planner → mock AI → mock-tinyfish-server, all stateless/parallel-safe): happy path (`tf_ok`: 3 search results on 3 distinct hostnames, page 3 carries an "IGNORE PREVIOUS INSTRUCTIONS" injection fixture) asserts the search stage + tool trace lines, the web-variant payoff stamp, and exactly 3 builder chips (`role="link"`, `data-testid="web-source-chip"`, exact fixture hrefs) with the injection text absent from saved prompts; `tf_thin` → distinct localized `search_corpus_thin` strip + topic preserved on retry; `tf_5xx`/`tf_401` → `search_failed` vs `search_unavailable` (DIFFERENT localized copy); `tf_slow` (8s search delay) → deterministic mid-search cancel + immediate retry not locked out; `tf_partial` → skipped-fetch line + exactly 2 chips; mobile 360×640 (`test.use` viewport) happy path with no horizontal overflow; student surface shows no chooser. Server-side TinyFish calls are proven via the mock's `GET /__requests` log (`expect.poll`) — `page.route` cannot see them. The flags spec runs on the `chromium-nowebsearch` project (second server port, `TINYFISH_API_KEY=""` explicitly): chooser hidden + paste flow intact (escape hatch 1). Dup/429-retry/scoring/caps are unit-pinned in `tinyfish.test.ts` + `web-generate.test.ts` | every scenario's strip copy is localized; zero rows saved on any failure; the flag cleanly disables the feature |
 | E52 | **QR class join (scan-to-enroll)** — `e2e/e52-qr-join.spec.ts`, 4 serial tests | (1) lecturer registers + creates a class → DETAIL page "Show QR" (archived gating checked later) → dialog renders the QR + resolved `{origin}/join/{code}` URL; student joins via `/join/{code}` confirm card → `/student/classes` shows the class → re-visit asserts the localized `already_enrolled` copy. (2) EXISTING account: anonymous `/join/{code}` hits the middleware login bounce → password sign-in → `?redirect=` returns to the join → confirm completes. (3) FIRST-DAY account: bounce → Register link (carries `?redirect=`) → inline registration (matric via the exported `matricForEmail` hash — no timestamp-slice collisions) → post-signup push lands on `/join` → join completes. (4) `/join/zz` (malformed) → neutral invalid card; lecturer scanning → `lecturerNotice` info card with no join CTA; archive the class → archived DETAIL page (via "View audit" link — the archived list title is not clickable) shows NO QR affordance. Error mapping unit-pinned in `src/app/join/[code]/join-errors.test.ts`; redirect-chain sanitization (incl. the dot-segment `//`-output guard) unit-pinned in `redirect.test.ts` | confirm-join is user-initiated; typed errors localized; the bounce chain survives both the login and register paths; archived classes hide the QR |
 | E-60 | **Rich-type audit gate** (CI: `npm run check:sealed`) | `scripts/check-sealed-tables.mjs` scans USER-scoped `src/**` clients on the sealed tables (`questions`, `session_answers`, `quiz_sessions`, `ai_marking_ledger`) for reads outside an admin client (explicit allowlist with reasons); requires a terminal `NOTIFY pgrst, 'reload schema'` in each recreation file (0054/0055/0057/0058/0060); ties `EXPECTED_JOBS` = `EXPECTED_CRON_JOBS` = the 0059 expected count (all 7); and asserts all six frozen testids exist. **Wired into `.github/workflows/ci.yml` (checks job) and `package.json` (`check:sealed`).** Known limitation: computed access (`supabase["from"]`), destructured `from`, and const table names evade the regex scan — it is a drift alarm, not a sandbox. | Zero unaccounted sealed-table reads; one terminal NOTIFY per recreation file; cron constants agree; frozen testids present |
+| E53 | **Gestures off → layer dies** — `e53-gestures-off.spec.ts` | quiz with the gesture flag OFF → gesture layer does not mount; hand-loss pause path asserted (server 409/blink contract); per-answer face-commit observed | no gesture surface when disabled; pause semantics intact |
+| E54 | **Short-text authoring + play** — `e54-short-text.spec.ts` | author a `short_text` question in the builder → student plays it → pending label path | short_text renders, answers, and shows the pending mark label |
+| E55 | **AI marking pipeline** — `e55-ai-marking.spec.ts` | AI marking journey: `pending` → `marked` / `needs_review` on the student surface + EndScreen banner | mark status transitions render incl. the review banner |
+| E56 | **Skip flow** — `e56-skip.spec.ts` | skip a question in an assessment (terminal in-assessment state) + practice-mode skip reset | skipped row persists in assessment; practice re-answer resets the skip |
+| E57 | **Clone + live flag freeze** — `e57-clone-and-flag.spec.ts` | clone a quiz; flip the integrity flag on a live quiz | clone fidelity; live-quiz flag freeze enforced |
+| E58 | **Practice oracle guard** — `e58-practice-oracle.spec.ts` | practice-mode oracle boundaries | no leak of the answer key through practice surfaces |
+
+### 5.4 Mobile + smoke suites
+
+- **Mobile specs (`m1`–`m4`)** cover the mobile grammar (dock tabs, account
+  sheet, bell popover, gradebook sheets — see §6's explore-mobile script for
+  the manual counterpart). CI runs an **`m1` allowlist** (the fastest stable
+  mobile journey) rather than the full mobile set.
+- **`insightface-smoke.spec.ts`** is an opt-in real-sidecar smoke test:
+  `npm run test:face-smoke` (requires `FACE_SMOKE=1` and a reachable
+  InsightFace container). It is never part of the default harness — the fake
+  tracker seam covers E2E (§5 preamble).
+
+Total E2E spec count: **78**.
+
+### 5.2a Demo walk-up suite (e59, opt-in) — exhibition kiosk
+
+`e2e/e59-demo-walkup.spec.ts` exercises the walk-up flow (docs/plans/PLAN_DEMO_MODE.md): an anonymous visitor scans the seeded demo class QR (`/join/SCAN23`), gets the demo card instead of the login wall, taps "Join the demo", and reaches the practice quiz player; a second test proves a non-demo join code still bounces to `/login`.
+
+**Why it is skipped by default:** the demo branch keys on `NEXT_PUBLIC_DEMO_MODE`, which is build-time inlined and OFF in the main harness (it would otherwise let any anonymous scanner mint real student accounts). Run it only against a demo-mode build:
+
+```
+NEXT_PUBLIC_DEMO_MODE=1 NEXT_PUBLIC_E2E_FAKE_SEAM=1 FACE_MOCK_ENABLED=1 \
+E2E_RATE_LIMIT_DISABLED=1 npm run build && npm run start && npm run seed:demo
+DEMO_MODE_E2E=1 npx playwright test e2e/e59-demo-walkup.spec.ts
+```
+
+The `DEMO_MODE_E2E` skip gate is its OWN variable (mirrors e51's `E51_HARDENING_E2E`): the build signal (`NEXT_PUBLIC_DEMO_MODE`) and the "turn the spec on" signal are separate so a stray build env cannot silently run it against the wrong server.
+
 ### 5.2 Integrity hardening suite (e51, opt-in) — clipboard + fullscreen
 
 `e2e/e51-integrity-hardening.spec.ts` exercises the client hardening (copy/cut/context-menu blocked + `user-select: none` on the question card; fullscreen requested at Begin; an exit → pause POST with `reason: 'fullscreen_exit'`).
@@ -497,9 +552,15 @@ The env var does double duty: e51's own `test.skip` gate keys on it, and the web
 
 ## 6. Coverage Targets & CI
 
+- **CI topology (`ci.yml`, five jobs):** the actual gate set is:
+  1. **`workflow-lint`** — `npm run lint:workflows` parses every `.github/workflows/*.yml` with js-yaml and fails on a syntax error, dependency-free, so a broken `ci.yml` (which GitHub reports as a single anonymous failure) is caught loudly.
+  2. **`checks`** — lint / typecheck / vitest-coverage / i18n / env-parity / `check:sealed` (the E-60 audit gate). The fast checks run in their own job so a unit failure no longer skips E2E.
+  3. **`e2e`** — Playwright incl. the `gen:types` diff gate (`git diff --exit-code src/lib/types/database.ts`), the S5 kill-switch assert, `verify:mediapipe`, a 40-minute budget, and a concurrency group with cancel-in-progress.
+  4. **`probes`** — the 14 `verify:*` scripts: security, classes, class-archiving, quizzes, ai, sessions, face, results, student-quizzes, clone, media, matric, web-sources, silence.
+  5. **`integrity-e2e`** — opt-in e51 run (§5.2; `E51_HARDENING_E2E=1` + `INTEGRITY_E2E=1`).
 - **Unit + integration:** run on every push (`vitest run`), target **≥80%** on `lib/face`, `lib/gestures`, `lib/ai`, `lib/extract`, scoring/timer, **`app/api/sessions/*` and `app/api/face/*`** (they carry the integrity logic). CRUD/UI can be lower. Coverage thresholds are per-file (vitest v8) — P5 added `lib/sessions/**` + `app/api/sessions/**` to `coverage.include` with literal per-file keys; P6 added `lib/gestures/**` (`finger-count`/`hold-confirm`/`hand-loss` ≥80% stmts/lines/funcs, ≥70% branches; `hand-tracker.ts` 0-key browser-only); browser-only UI components (`play-client`, `question-card`, `option-card`, `progress-hud`, `end-screen`, `student-quizzes-client`, `gesture-layer`, `gesture-calibration`) are E2E-covered and excluded from the report; **SQ** added `lib/student-quizzes/**` + `app/api/student-quizzes/**` to include with literal rows (libs 80/80/80/70, routes 60/60/60/50, `question-draft.ts` 80/80/80/70).
-- **CI-bootstrap gates (H3-INFRA-F1/F5/F6, audit 2026-09):** `npm run lint:workflows` parses every `.github/workflows/*.yml` with js-yaml and fails on a syntax error — run in a dependency-free `workflow-lint` job so a broken `ci.yml` (which GitHub reports as a single anonymous failure) is caught loudly; it is also the FIRST step of the `test` job. Coverage `include`/`thresholds` must stay in lock-step: every threshold key must resolve to a file matched by an `include` glob (a dead key is silently inert), and every tested module must be in `include` (otherwise deleting its test changes nothing) — `classes/join/route.ts`, `lib/classes/rate-limit.ts`, `lib/classes/join-code.ts`, `app/auth/callback/route.ts`, `lib/theme/theme.ts`, `lib/a11y/timer-milestones.ts`, `lib/bot/engine.ts` and `app/join/[code]/join-errors.ts` were added with floors at measured coverage. **audit-5 O3** added `lib/log.ts` (structured error logging, 100% line floor).
-- **DB/RLS:** `supabase start` in CI, run SQL test suite; **D1–D18 are blocking** (they guard the demo's core promises). Phase 2 D8/D12 are additionally proven by `scripts/verify-classes.mjs` (real anon-token clients). SQ adds `scripts/verify-student-quizzes.mjs` (SQ-D1–D9, 21 checks) as a blocking CI step.
+- **Coverage `include`/`thresholds` must stay in lock-step:** every threshold key must resolve to a file matched by an `include` glob (a dead key is silently inert), and every tested module must be in `include` (otherwise deleting its test changes nothing) — `classes/join/route.ts`, `lib/classes/rate-limit.ts`, `lib/classes/join-code.ts`, `app/auth/callback/route.ts`, `lib/theme/theme.ts`, `lib/a11y/timer-milestones.ts`, `lib/bot/engine.ts` and `app/join/[code]/join-errors.ts` were added with floors at measured coverage. **audit-5 O3** added `lib/log.ts` (structured error logging, 100% line floor).
+- **DB/RLS:** **D1–D18 are blocking** (they guard the demo's core promises); the pgTAP suites run locally pre-merge (§3.1) — CI's DB gate is the `probes` job instead. Phase 2 D8/D12 are additionally proven by `scripts/verify-classes.mjs` (real anon-token clients). SQ adds `scripts/verify-student-quizzes.mjs` (SQ-D1–D9, 21 checks) as a blocking CI step.
 - **E2E:** Playwright on PRs; **E5, E6, E7, E8, E12 are the "demo-killer" tests** (with the D1 data-integrity gate; counts drifted across phases — treat the §9 list as the canonical set). ⚠️ As of 2026-08-22 the face-cycle specs (e6/e7) carry choreography drift from the integrity-suite re-architecture; `e16-integrity.spec.ts` is the green face-flow reference until they are rehabilitated. — if any fail, do not demo.
 - **AI tests never hit a real model** — MSW serves canned valid/invalid JSON (keeps CI free and deterministic).
 - **Visual exploration (manual QA aid, not CI):** `scripts/seed-scenarios.mjs` provisions three dataset sizes (first/normal/extreme — see the script header); `scripts/explore-scenarios.mjs` walks every core page per scenario in light+dark at desktop 1440×900, screenshotting each stop and writing `screenshots/explore_scenarios/report.json`. The mobile counterpart `scripts/explore-mobile.mjs` runs at 375×812 (plus a 320px overflow sweep) with touch emulation and *operates* the mobile grammar (plan `PLAN_MOBILE_REDESIGN`): dock tabs + `aria-current`, account sheet, bell popover, keyboard-occlusion dock hide (`data-keyboard-open`), zero-state join hero, gradebook per-quiz/per-student sheets, shared-quiz play stage — 28 checks per theme. **`full` mode** (`node scripts/explore-mobile.mjs full|all`) adds the every-surface sweep: landing page (incl. the EN→BM language toggle), auth pages + password-eye, and every dialog/sheet/confirm that can open — bell mark-all confirm, my-quizzes share + delete dialogs, join-error state, builder settings/generate/import/duplicate/question-edit/regenerate dialogs, results reveal/exempt dialogs, class archive confirm — each screenshotted while open and overflow-audited (110 checks per theme). Screenshots + `report.json` land in `screenshots/explore_mobile/<light|dark>/`. Both need the dev server up and the seeded accounts (password `Password123!`).

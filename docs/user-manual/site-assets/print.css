@@ -1,0 +1,45 @@
+@page { size: A4; margin: 19mm 17mm 18mm; }
+* { box-sizing: border-box; }
+html { color: #39251b; background: #fff; }
+body { margin: 0; font: 10.5pt/1.45 "Segoe UI", Arial, sans-serif; }
+a { color: #99430f; text-decoration: underline; }
+h1, h2, h3 { color: #6f3018; line-height: 1.18; break-after: avoid; }
+h1 { margin: 0 0 8mm; font-size: 25pt; }
+h2 { margin: 9mm 0 3mm; padding-top: 3mm; border-top: .6pt solid #ecc5a6; font-size: 17pt; }
+h3 { margin: 6mm 0 2mm; font-size: 12.5pt; }
+p { margin: 0 0 3.5mm; orphans: 3; widows: 3; text-align: justify; hyphens: none; }
+li { margin-bottom: 2mm; orphans: 2; widows: 2; text-align: justify; hyphens: none; }
+ol, ul { padding-left: 6mm; }
+blockquote { margin: 5mm 0; padding: 3mm 4mm; border-left: 2mm solid #1d4ed8; background: #eff6ff; }
+blockquote p:last-child { margin-bottom: 0; }
+table { width: 100%; border-collapse: collapse; margin: 5mm 0; font-size: 9pt; }
+th, td { border: .5pt solid #dfb997; padding: 2.2mm; text-align: left; vertical-align: top; }
+th { background: #fff1e3; }
+tr { break-inside: avoid; }
+code { font: 9pt Consolas, monospace; overflow-wrap: anywhere; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 3mm; background: #f7eee5; }
+.print-cover { min-height: 245mm; display: flex; flex-direction: column; justify-content: center; padding: 20mm 5mm; }
+.print-cover .eyebrow { color: #c2410c; font-weight: 800; letter-spacing: .15em; }
+.print-cover h1 { margin: 7mm 0 1mm; font-size: 40pt; }
+.print-cover .subtitle { margin-bottom: 16mm; font-size: 18pt; }
+.print-cover .notice { max-width: 135mm; margin-top: 28mm; padding: 4mm; border-left: 2mm solid #f97316; background: #fff7ed; }
+.print-cover p { text-align: left; }
+.print-contents { break-before: page; min-height: 245mm; }
+.print-contents > ol { margin: 0; padding: 0; list-style: none; columns: 2; column-gap: 12mm; }
+.print-contents li { text-align: left; hyphens: none; }
+.contents-chapter { break-inside: avoid; margin: 0 0 5mm; }
+.contents-row { display: flex; align-items: baseline; gap: 3mm; font-size: 11pt; font-weight: 800; }
+.contents-row a { flex: 1; border-bottom: .5pt dotted #c7aa90; text-decoration: none; }
+.toc-page { min-width: 8mm; text-align: right; color: #6f3018; }
+.contents-subtopics { margin: 2mm 0 0; padding-left: 3mm; list-style: none; }
+.contents-subtopics li { margin: 0 0 1.3mm; font-size: 8.5pt; line-height: 1.2; }
+.contents-subtopics a { color: #5c4a3e; text-decoration: none; }
+.print-chapter { break-before: page; }
+.print-chapter > h1 { padding-bottom: 3mm; border-bottom: 2pt solid #f97316; }
+.manual-shot { margin: 5mm 0 7mm; break-inside: avoid; }
+.manual-shot a { text-decoration: none; }
+.manual-shot img { display: block; max-width: 100%; max-height: 115mm; width: auto; height: auto; border: .7pt solid #ecc5a6; }
+.manual-shot[data-device="phone"] img { max-height: 160mm; margin-inline: auto; }
+.manual-shot[data-device="phone"] figcaption { max-width: 75mm; margin-inline: auto; text-align: center; }
+.manual-shot figcaption { margin-top: 2mm; color: #5f5148; font-size: 9pt; }
+.manual-shot .figure-number { color: #9a3412; font-weight: 800; }
