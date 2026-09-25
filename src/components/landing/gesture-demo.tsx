@@ -1,163 +1,120 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { Check, Hand, ScanFace } from "lucide-react";
+import { Check, Hand } from "lucide-react";
 
-const OPTIONS = ["Stack", "Queue", "Tree", "Graph"] as const;
-const TARGET = 1; // "Queue" — the answer the auto-play locks in.
-
-/** Hand hover spots, one per option slot (percent of the options box). */
-const POS = [
-  { left: "7%", top: "26%" },
-  { left: "52%", top: "26%" },
-  { left: "7%", top: "64%" },
-  { left: "52%", top: "64%" },
-];
-const SCAN_POS = { left: "30%", top: "-12%" };
+const OPTION_KEYS = ["demoOption1", "demoOption2", "demoOption3", "demoOption4"] as const;
+const LETTERS = ["A", "B", "C", "D"] as const;
 
 export function GestureDemo() {
   const t = useTranslations("landing");
-  const [locked, setLocked] = useState<number | null>(null);
-  const [hovered, setHovered] = useState<number | null>(null);
-  const hoveredRef = useRef<number | null>(null);
+  const [selected, setSelected] = useState(1);
+  const [revision, setRevision] = useState(0);
+  const options = OPTION_KEYS.map((key) => t(key));
 
-  // Auto-play: scan → lock "Queue" → hold → reset, forever. Hover is
-  // honoured first: every scheduled write is skipped while a finger is
-  // on an option, so the visitor's hand steers instead of the demo's.
-  useEffect(() => {
-    let cancelled = false;
-    const timers: number[] = [];
-    const later = (fn: () => void, ms: number) => {
-      timers.push(window.setTimeout(fn, ms));
-    };
-    const cycle = () => {
-      if (cancelled) return;
-      setLocked(null);
-      later(() => {
-        if (!cancelled && hoveredRef.current === null) setLocked(TARGET);
-      }, 2100);
-      later(() => {
-        if (!cancelled && hoveredRef.current === null) cycle();
-      }, 6800);
-    };
-    cycle();
-    return () => {
-      cancelled = true;
-      timers.forEach(clearTimeout);
-    };
-  }, []);
-
-  // Pinning: park the pointer on an option and the hand drifts over,
-  // then the answer stamps in — the real product's lock-in moment.
-  useEffect(() => {
-    hoveredRef.current = hovered;
-    if (hovered === null) return;
-    const timer = window.setTimeout(() => setLocked(hovered), 650);
-    return () => clearTimeout(timer);
-  }, [hovered]);
-
-  const overAnOption = hovered !== null || locked !== null;
-  const spot = hovered ?? locked ?? null;
-  const handPos = spot !== null ? POS[spot] : SCAN_POS;
+  function choose(index: number) {
+    setSelected(index);
+    setRevision((current) => current + 1);
+  }
 
   return (
-    <div className="clay-card relative p-3 text-left" style={{ boxShadow: "var(--shadow-clay), var(--shadow-clay-in)" }}>
-      {/* window chrome */}
-      <div className="flex items-center justify-between px-4 py-3">
-        <div className="flex gap-1.5" aria-hidden>
-          {[true, true, true, false, false, false].map((on, i) => (
-            <span key={i} className={`h-2.5 w-7 rounded-full transition-colors duration-500 ${on ? "bg-primary" : "bg-muted"}`} />
-          ))}
-        </div>
-        {/* The mock reads as a screenshot of the quiz UI, so its ink is pinned
-            to fixed dark values instead of theme-flipping tokens — text-primary
-            (#fb923c) on cream is 2.1:1, invisible in dark mode. */}
-        <span className="font-heading text-sm font-semibold text-orange-700 dark:text-primary">{t("demoProgress")}</span>
-      </div>
-
-      <div className="m-2 rounded-[20px] border-[3px] border-border bg-gradient-to-b from-orange-50 to-orange-100 p-5 md:p-6">
-        <div className="font-heading text-sm font-semibold tracking-wide text-orange-700">{t("demoBadge")}</div>
-        <div className="mt-2 min-h-14 font-heading text-lg font-semibold text-orange-950 md:text-xl [text-wrap:balance]">
-          {t("demoQ")}
-        </div>
-
-        {/* options + roaming hand */}
-        <div className="relative mt-5">
-          <div
-            aria-hidden
-            className="pointer-events-none absolute z-10 transition-all duration-700 ease-out"
-            style={{ left: handPos.left, top: handPos.top }}
-          >
-            <span
-              className={`inline-grid h-12 w-12 place-items-center rounded-2xl border-[3px] border-border bg-card shadow-[0_4px_0_var(--border)] ${
-                overAnOption ? "" : "landing-wave"
-              }`}
-            >
-              <Hand className={`h-6 w-6 ${locked !== null ? "text-green-600" : "text-primary"}`} />
+    <div className="w-full max-w-xl lg:ml-auto">
+      <div className="rounded-[32px] border-[3px] border-accent-deep bg-accent p-4 text-accent-foreground shadow-[8px_9px_0_rgba(29,78,216,0.18)] sm:p-5">
+        <div className="flex items-center justify-between gap-3 px-1 pb-4">
+          <span className="flex items-center gap-2.5 text-xs font-extrabold uppercase tracking-[0.12em] sm:text-sm">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[12px] bg-primary text-primary-foreground shadow-[0_3px_0_var(--primary-deep)]">
+              <Hand className="h-5 w-5" aria-hidden />
             </span>
-          </div>
+            {t("demoBadge")}
+          </span>
+          <span className="shrink-0 rounded-full border-2 border-current px-3 py-1 text-xs font-extrabold">
+            {t("demoProgress")}
+          </span>
+        </div>
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {OPTIONS.map((opt, i) => {
-              const isLocked = locked === i;
-              const isHovered = hovered === i && !isLocked;
+        <div className="rounded-[22px] border-[3px] border-orange-200 bg-orange-50 p-4 text-orange-950 shadow-[0_5px_0_rgba(29,78,216,0.16)] sm:p-5">
+          <p className="text-xs font-extrabold uppercase tracking-[0.12em] text-orange-700">
+            {t("demoQuestionLabel")}
+          </p>
+          <p className="mt-2 font-heading text-lg font-semibold leading-snug [text-wrap:balance] sm:text-xl">
+            {t("demoQ")}
+          </p>
+          <div className="mt-5 grid grid-cols-2 gap-2.5">
+            {options.map((option, index) => {
+              const isSelected = selected === index;
               return (
                 <button
-                  key={opt}
+                  key={OPTION_KEYS[index]}
                   type="button"
-                  onMouseEnter={() => setHovered(i)}
-                  onMouseLeave={() => setHovered(null)}
-                  onFocus={() => setHovered(i)}
-                  onBlur={() => setHovered(null)}
-                  onClick={() => {
-                    setHovered(i);
-                    setLocked(i);
-                  }}
-                  className={`flex cursor-pointer items-center gap-3 rounded-2xl border-[3px] px-4 py-3.5 text-left font-extrabold transition-[border-color,background-color,color,box-shadow] duration-300 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)] ${
-                    isLocked
-                      ? "border-accent bg-blue-50 text-blue-600 shadow-[0_4px_0_#bfdbfe]"
-                      : isHovered
-                        ? "border-primary bg-orange-50 text-orange-700 shadow-[0_4px_0_rgba(249,115,22,0.25)]"
-                        : "border-border bg-card text-muted-foreground shadow-[0_4px_0_var(--border)]"
-                  }`}
+                  aria-pressed={isSelected}
+                  onClick={() => choose(index)}
+                  className={"flex min-h-14 cursor-pointer items-center gap-2 rounded-[15px] border-[3px] px-2.5 py-2 text-left text-sm font-extrabold transition-[border-color,background-color,color,box-shadow] duration-200 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)] sm:px-3 " +
+                    (isSelected
+                      ? "border-accent bg-blue-50 text-blue-900 shadow-[0_3px_0_#bfdbfe]"
+                      : "border-orange-200 bg-white text-orange-950 shadow-[0_3px_0_#fed7aa] hover:border-primary")}
                 >
-                  <span
-                    className={`grid h-9 w-9 shrink-0 place-items-center rounded-[11px] font-heading font-semibold ${
-                      isLocked ? "bg-accent text-accent-foreground" : isHovered ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"
-                    }`}
-                  >
-                    {isLocked ? <Check className="h-5 w-5 landing-stamp" aria-hidden /> : String.fromCharCode(65 + i)}
+                  <span className={"grid h-8 w-8 shrink-0 place-items-center rounded-[10px] font-heading " +
+                    (isSelected ? "bg-accent text-accent-foreground" : "bg-orange-100 text-orange-950")}>
+                    {LETTERS[index]}
                   </span>
-                  <span>{opt}</span>
+                  <span className="min-w-0 flex-1 break-words">{option}</span>
+                  {isSelected && <Check className="hidden h-4 w-4 shrink-0 sm:block" aria-hidden />}
                 </button>
               );
             })}
           </div>
+        </div>
 
-          <span className="mt-3 hidden text-xs font-bold text-orange-700 lg:block">{t("demoHoverHint")}</span>
+        <div className="mt-4 rounded-[22px] border-[3px] border-accent-foreground/25 bg-accent-foreground/10 p-3">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-1 text-xs font-extrabold uppercase tracking-[0.1em]">
+            <span>{t("demoTryLabel")}</span>
+            <span className="font-bold normal-case tracking-normal">{t("demoNoCamera")}</span>
+          </div>
+          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] gap-3">
+            <div
+              className="aspect-square overflow-hidden rounded-[16px] border-2 border-blue-300/50 bg-blue-900 bg-[image:url('/landing/gesture-hands.webp')] bg-[length:200%_200%]"
+              style={{ backgroundPosition: `${(selected % 2) * 100}% ${Math.floor(selected / 2) * 100}%` }}
+              aria-hidden="true"
+            >
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {[1, 2, 3, 4].map((count) => {
+                const isSelected = selected === count - 1;
+                return (
+                  <button
+                    key={count}
+                    type="button"
+                    aria-label={t("demoFingerButton", { count })}
+                    aria-pressed={isSelected}
+                    onClick={() => choose(count - 1)}
+                    className={"grid min-h-[72px] cursor-pointer place-items-center rounded-[15px] border-[3px] font-heading text-2xl font-bold transition-[transform,background-color,box-shadow] duration-200 hover:-translate-y-0.5 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)] active:translate-y-0.5 " +
+                      (isSelected
+                        ? "border-primary-deep bg-primary text-primary-foreground shadow-[0_4px_0_var(--primary-deep)]"
+                        : "border-border bg-card text-foreground shadow-[0_4px_0_var(--accent-deep)]")}
+                  >
+                    {count}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 flex items-center gap-3 rounded-[16px] bg-card px-4 py-3 text-sm font-extrabold text-foreground">
+          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-accent text-accent-foreground">
+            <Check className="h-4 w-4" aria-hidden />
+          </span>
+          <span key={revision} aria-live="polite" className={revision > 0 ? "gesture-lock" : undefined}>
+            {t("demoSelected", {
+              count: selected + 1,
+              letter: LETTERS[selected],
+              option: options[selected],
+            })}
+          </span>
         </div>
       </div>
-
-      {/* status bar: identity check crossfade + lock-in callout */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 pb-2 pt-3 text-sm font-bold text-muted-foreground">
-        <span className="relative inline-grid h-7 items-center overflow-hidden align-middle">
-          <span className="landing-face-a inline-flex items-center gap-1.5">
-            <ScanFace className="h-4 w-4 text-green-600" aria-hidden />
-            {t("demoFaceA")}
-          </span>
-          <span className="landing-face-b absolute inset-0 inline-flex items-center gap-1.5">
-            <ScanFace className="h-4 w-4 text-green-600" aria-hidden />
-            {t("demoFaceB")}
-          </span>
-        </span>
-        <span className="inline-flex items-center gap-2">
-          <span className="grid h-6 w-6 place-items-center rounded-full bg-green-200 text-green-700">
-            <Check className="h-3.5 w-3.5" aria-hidden />
-          </span>
-          {t("demoWave")}
-        </span>
-      </div>
+      <p className="mt-4 text-center text-xs font-bold text-muted-foreground">{t("demoDisclosure")}</p>
     </div>
   );
 }
