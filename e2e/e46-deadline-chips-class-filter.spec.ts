@@ -173,6 +173,7 @@ test.describe("E46 — deadline chips + class filter", () => {
       quizTitle: QUIZ_DATED_A2,
       mode: "assessment",
       publish: true,
+      gesturesOff: true,
       questions: [{ type: "mcq", prompt: "E46 soon?", options: ["x", "y"], correctIndex: 0 }],
     });
 

@@ -110,13 +110,15 @@ test.describe("E12 — continuous verify", () => {
       .poll(() => verifyCapture.bodies.some((b) => b.includes('"periodic"')), { timeout: 10_000 })
       .toBe(true);
 
-    // ── Mismatch anchored after the Q2 feedback chip → Q3 transition fails ──
+    // ── Mismatch at the ANSWER COMMIT (0067) ────────────────────────
+    // With gestures ON, the identity check is now bound to the answer itself:
+    // a mismatching commit saves NO answer and triggers the pause/escalation
+    // policy, so the Next/Finish control must NOT appear.
     await setFaceVerifyMode(studentPage, "mismatch");
     await studentPage.getByRole("button", { name: /a/i }).click();
-    await expect(studentPage.getByRole("button", { name: /^(Next|Finish)$/, exact: true })).toBeVisible();
-    await studentPage.getByRole("button", { name: "Next", exact: true }).click();
-
-    // The Q3 transition verify fails → pause overlay AND GET paused.
+    // The answer is held: no feedback chip / Next control.
+    await expect(studentPage.getByRole("button", { name: /^(Next|Finish)$/, exact: true })).toHaveCount(0);
+    // The mismatch invokes the pause policy → pause overlay AND GET paused.
     await waitForPauseOverlay(studentPage);
 
     const sessionId = studentPage.url().split("/play/")[1];

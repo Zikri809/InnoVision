@@ -278,6 +278,7 @@ test.describe("E45 — multi-select questions", () => {
       quizTitle: QUIZ_ASSESSMENT,
       mode: "assessment",
       publish: true,
+      gesturesOff: true,
       questions: [
         { ...MULTI, type: "multi_select" as const },
         { type: "mcq", prompt: MULTI_PROMPT_2, options: ["2", "3", "4", "9"], correctIndex: 3 },

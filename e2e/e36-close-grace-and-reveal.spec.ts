@@ -192,6 +192,7 @@ test("reveal-first-then-close: unrevealed submissions warn, CTA reveals, student
     quizTitle: `${QUIZ_TITLE} B`,
     mode: "assessment",
     publish: true,
+    gesturesOff: true,
     questions: [
       { prompt: "E36b Q1?", options: ["A1", "B1"], correctIndex: 0 },
     ],
@@ -292,6 +293,7 @@ test("close-anyway: stranded pending state, later dashboard reveal recovers the 
     quizTitle: `${QUIZ_TITLE} C`,
     mode: "assessment",
     publish: true,
+    gesturesOff: true,
     questions: [
       { prompt: "E36c Q1?", options: ["A1", "B1"], correctIndex: 0 },
     ],

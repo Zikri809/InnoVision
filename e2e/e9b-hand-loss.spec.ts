@@ -8,6 +8,7 @@ import {
   completeCalibration,
   playGestureSequence,
   captureAnswerPosts,
+  captureFaceVerifyPosts,
   installFakeFaceTracker,
   enrollViaFacePage,
   setFaceVerifyMode,
@@ -166,6 +167,10 @@ test.describe("E9b — hand lost → server pause → blink recovery → answer"
     // Recovery is USER-initiated: the paused overlay's "Blink to recover"
     // button runs the liveness + self_recover_session flow.
     await setFaceVerifyMode(studentPage, "match");
+    // 0067: recovery now performs a FORCED server identity re-check and the
+    // client stays input-blocked until that verdict lands. Capture the verify
+    // POSTs so we can wait for that forced check before holding a gesture.
+    const recoveryVerifies = captureFaceVerifyPosts(studentPage);
     await recoverFromPause(studentPage);
 
     // The pipeline self-recovers (blink → self_recover_session → active).
@@ -181,6 +186,17 @@ test.describe("E9b — hand lost → server pause → blink recovery → answer"
         { timeout: 10_000 },
       )
       .toBe("active");
+
+    // Wait for the forced post-recovery verify to land (input is blocked until
+    // it does), then release the listener.
+    await expect
+      .poll(() => recoveryVerifies.bodies.some((b) => b.includes('"periodic"')), { timeout: 15_000 })
+      .toBe(true);
+    recoveryVerifies.detach();
+    // Let the client apply the verdict (status → ready) before holding.
+    await expect(studentPage.getByText("Hands left the camera", { exact: true })).toBeHidden({
+      timeout: 10_000,
+    });
 
     // Fresh hold → answer POST resolves 200.
     const recoveryRes = studentPage.waitForResponse(

@@ -59,6 +59,9 @@ test.describe("M2 — Mobile Play Chrome & EndScreen", () => {
       quizTitle,
       mode: "assessment",
       publish: false,
+      // 0067: mobile chrome composition, not identity — bypass the face gate
+      // (no fake face seam is installed on this student).
+      gesturesOff: true,
       questions: [
         {
           type: "mcq",

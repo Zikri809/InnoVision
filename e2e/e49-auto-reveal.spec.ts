@@ -56,6 +56,8 @@ test("auto-reveal flips on last submit — scored EndScreen, live link, lecturer
     quizTitle: AUTO_QUIZ,
     mode: "assessment",
     publish: true,
+    // 0067: auto-reveal semantics, not identity — bypass the face gate.
+    gesturesOff: true,
     questions: [{ prompt: "E49 auto q?", options: ["A1", "B1"], correctIndex: 1 }],
   });
   const autoQuizId = new URL(lecturer.url()).pathname.match(
@@ -68,6 +70,7 @@ test("auto-reveal flips on last submit — scored EndScreen, live link, lecturer
     quizTitle: MANUAL_QUIZ,
     mode: "assessment",
     publish: true,
+    gesturesOff: true,
     questions: [{ prompt: "E49 manual q?", options: ["A2", "B2"], correctIndex: 0 }],
   });
 

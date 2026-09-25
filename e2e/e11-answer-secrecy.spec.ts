@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { registerUser, createClass, joinClass } from "./helpers";
+import { registerUser, createClass, joinClass, setGesturesToggle } from "./helpers";
 
 const TEST_TIMESTAMP = Date.now();
 const LECTURER_EMAIL = `lecturer-e11-${TEST_TIMESTAMP}@innovision.test`;
@@ -90,6 +90,10 @@ test.describe("E11 — answer secrecy (assessment)", () => {
     await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
 
     const publishButton = lecturerPage.getByRole("button", { name: /publish/i });
+    // 0067: this spec pins answer-data SECRECY, not identity. Gestures OFF
+    // bypasses the answer-commit face gate (no face seam is installed here) so
+    // the answer responses still carry the full secrecy surface under test.
+    await setGesturesToggle(lecturerPage, false);
     await expect(publishButton).toBeEnabled();
     await publishButton.click();
     await expect(lecturerPage.getByText(/^Live/)).toBeVisible();

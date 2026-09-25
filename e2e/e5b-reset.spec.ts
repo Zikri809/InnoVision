@@ -106,6 +106,9 @@ test.describe("E5b — lecturer resets attempt", () => {
     await createAssessmentAndPublish(lecturerPage, {
       classTitle: CLASS_TITLE,
       quizTitle: QUIZ_TITLE,
+      // 0067: this spec pins reset/audit semantics, not identity. Gestures OFF
+      // bypasses the answer-commit face gate so fixtures answer click-first.
+      gesturesOff: true,
       questions: [
         { prompt: "What is 2+2?", options: ["3", "4"], correctIndex: 1 },
         { prompt: "Capital of France?", options: ["Paris", "London"], correctIndex: 0 },

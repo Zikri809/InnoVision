@@ -3,9 +3,6 @@ import {
   registerUser,
   createClass,
   joinClass,
-  installFakeFaceTracker,
-  enrollViaFacePage,
-  passAssessmentGate,
   createAssessmentAndPublish,
   openResults,
   resolveServiceClient,
@@ -79,6 +76,11 @@ test.describe("E13b — attendance = sessions", () => {
     await createAssessmentAndPublish(lecturerPage, {
       classTitle: CLASS_TITLE,
       quizTitle: QUIZ_TITLE,
+      // 0067: attendance/session-status matrix, not identity. Gestures OFF
+      // bypasses the answer-commit face gate so all four fixtures can answer
+      // click-first (a no-camera student is now HELD while gestures are on,
+      // which would invalidate the completed/in-progress/abandoned matrix).
+      gesturesOff: true,
       questions: [
         { prompt: "What is 2+2?", options: ["3", "4"], correctIndex: 1 },
         { prompt: "Capital of France?", options: ["Paris", "London"], correctIndex: 0 },
@@ -95,17 +97,15 @@ test.describe("E13b — attendance = sessions", () => {
     );
     await revealQuiz(lecturerPage, CLASS_TITLE, QUIZ_TITLE);
 
-    // ── 2. Student A: enroll → gate (face check) → answer → submit ──
+    // ── 2. Student A: join → open quizzes → answer → submit ──
     await registerUser(studentAPage, STUDENT_A_EMAIL, "student", LECTURER_INVITE_CODE);
     await expect(studentAPage.getByRole("heading", { name: "My Classes" })).toBeVisible();
     await joinClass(studentAPage, joinCode, CLASS_TITLE);
-    await installFakeFaceTracker(studentAPage);
-    await enrollViaFacePage(studentAPage);
+    await studentAPage.getByRole("link", { name: /View quizzes/i }).click();
+    await expect(studentAPage).toHaveURL(/\/student\/quizzes/);
     await expect(studentAPage.getByText(QUIZ_TITLE, { exact: true })).toBeVisible();
     await studentAPage.getByRole("button", { name: "Start", exact: true }).click();
     await expect(studentAPage).toHaveURL(/\/play\/[0-9a-f-]+/);
-    await passAssessmentGate(studentAPage);
-    await expect(studentAPage.getByRole("alertdialog")).toBeHidden({ timeout: 30_000 });
     await expect(studentAPage.getByText("What is 2+2?", { exact: true })).toBeVisible();
     await studentAPage.getByRole("button", { name: /4/i }).click();
     await expect(studentAPage.getByRole("button", { name: /^(Next|Finish)$/, exact: true })).toBeVisible();
@@ -198,15 +198,12 @@ test.describe("E13b — attendance = sessions", () => {
     // Scores: A and B both answered correctly → 2 / 2.
     await expect(lecturerPage.getByText("2 / 2", { exact: true })).toHaveCount(2);
 
-    // A's row shows a face-check summary (the gate recorded a real 'start'
-    // check + any cadence checks).
-    await expect(lecturerPage.getByText(/Face checks:/)).toHaveCount(1);
-
-    // B's row shows the camera-unavailable marker (unseamed boot report).
-    // C and D are ALSO unseamed, so their rows report it too — assert ≥1 (B
-    // is the row the plan pins; the others are a legitimate consequence of
-    // the unseamed boot path).
-    await expect(lecturerPage.getByText(/Camera unavailable/).first()).toBeVisible();
+    // 0067: with gestures OFF this assessment has no face gate, so no face
+    // checks and no camera-unavailable marker are recorded. The face-check
+    // TIMELINE coverage now lives in the gate-passing specs (E12/E9b/E3); the
+    // marker-while-held contract is pinned by the SQL probes.
+    await expect(lecturerPage.getByText(/Face checks:/)).toHaveCount(0);
+    await expect(lecturerPage.getByText(/Camera unavailable/)).toHaveCount(0);
 
     // Secrecy: verify_nonce / correct_index are structurally absent from the
     // rendered results DOM (RSC projections, D8/D10).

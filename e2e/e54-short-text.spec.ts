@@ -56,6 +56,8 @@ test.describe("E-54 — short_text authoring and play", () => {
       quizTitle: QUIZ_TITLE,
       mode: "assessment",
       publish: true,
+      // 0067: short_text authoring/marking, not identity - bypass the face gate.
+      gesturesOff: true,
       questions: [
         {
           type: "short_text" as const,
@@ -223,6 +225,7 @@ test.describe("E-54 — short_text authoring and play", () => {
       quizTitle: QUIZ_TITLE,
       mode: "assessment",
       publish: true,
+      gesturesOff: true,
       questions: [
         {
           type: "short_text" as const,

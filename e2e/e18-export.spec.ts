@@ -56,6 +56,8 @@ test.describe("E18 — results Excel export", () => {
     await createAssessmentAndPublish(lecturerPage, {
       classTitle: CLASS_TITLE,
       quizTitle: QUIZ_TITLE,
+      // 0067: export semantics, not identity — bypass the face gate.
+      gesturesOff: true,
       questions: [
         { prompt: "What is 2+2?", options: ["3", "4"], correctIndex: 1 },
         { prompt: "Capital of France?", options: ["Paris", "Rome"], correctIndex: 0 },

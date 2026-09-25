@@ -326,6 +326,7 @@ test.describe("E42 — per-session question/option shuffling", () => {
       quizTitle: QUIZ_ASSESSMENT,
       mode: "assessment",
       publish: true,
+      gesturesOff: true,
       shuffle: true,
       questions: QUESTIONS.map((q) => ({ type: "mcq" as const, ...q })),
     });

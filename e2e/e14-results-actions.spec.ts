@@ -55,6 +55,8 @@ test.describe("E14 — results action buttons", () => {
     await createAssessmentAndPublish(lecturerPage, {
       classTitle: CLASS_TITLE,
       quizTitle: QUIZ_TITLE,
+      // 0067: results-action semantics, not identity — bypass the face gate.
+      gesturesOff: true,
       questions: [{ prompt: "What is 2+2?", options: ["3", "4"], correctIndex: 1 }],
     });
 

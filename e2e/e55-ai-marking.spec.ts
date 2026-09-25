@@ -135,6 +135,7 @@ test.describe("E-55 — AI marking pipeline", () => {
       // budget), so a practice quiz would show no pending banner at all.
       mode: "assessment",
       publish: true,
+      gesturesOff: true,
       questions: [
         {
           type: "short_text" as const,
@@ -280,6 +281,7 @@ test.describe("E-55 — AI marking pipeline", () => {
       // budget), so a practice quiz would show no pending banner at all.
       mode: "assessment",
       publish: true,
+      gesturesOff: true,
       questions: [
         {
           type: "short_text" as const,

@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { registerUser, createClass, joinClass } from "./helpers";
+import { registerUser, createClass, joinClass, setGesturesToggle } from "./helpers";
 
 const TEST_TIMESTAMP = Date.now();
 const LECTURER_EMAIL = `lecturer-e5-${TEST_TIMESTAMP}@innovision.test`;
@@ -67,6 +67,9 @@ test.describe("E5 — assessment one-attempt lock", () => {
     await expect(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
 
     const publishButton = lecturerPage.getByRole("button", { name: /publish/i });
+    // 0067: this spec pins the one-attempt lock, not identity. Gestures OFF
+    // bypasses the answer-commit face gate so both students answer click-first.
+    await setGesturesToggle(lecturerPage, false);
     await expect(publishButton).toBeEnabled();
     await publishButton.click();
     await expect(lecturerPage.getByText(/^Live/)).toBeVisible();

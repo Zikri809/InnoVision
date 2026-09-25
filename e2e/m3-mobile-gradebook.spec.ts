@@ -59,6 +59,7 @@ test.describe("M3 — Mobile Gradebook", () => {
     await createAssessmentAndPublish(lecturerPage, {
       classTitle: CLASS_TITLE,
       quizTitle: QUIZ_ALPHA,
+      gesturesOff: true,
       questions: [
         { prompt: "What is 2+2?", options: ["3", "4"], correctIndex: 1 },
         { prompt: "Capital of France?", options: ["Paris", "Rome"], correctIndex: 0 },
@@ -69,6 +70,7 @@ test.describe("M3 — Mobile Gradebook", () => {
     await createAssessmentAndPublish(lecturerPage, {
       classTitle: CLASS_TITLE,
       quizTitle: QUIZ_BETA,
+      gesturesOff: true,
       questions: [
         { prompt: "5 x 5 = ?", options: ["20", "25"], correctIndex: 1 },
       ],

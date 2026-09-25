@@ -52,6 +52,8 @@ test.describe("E39 — gradebook", () => {
     await createAssessmentAndPublish(lecturerPage, {
       classTitle: CLASS_TITLE,
       quizTitle: QUIZ_1,
+      // 0067: gradebook semantics, not identity — bypass the face gate.
+      gesturesOff: true,
       questions: [
         { prompt: "What is 2+2?", options: ["3", "4"], correctIndex: 1 },
         { prompt: "Capital of France?", options: ["Paris", "Rome"], correctIndex: 0 },
@@ -60,6 +62,7 @@ test.describe("E39 — gradebook", () => {
     await createAssessmentAndPublish(lecturerPage, {
       classTitle: CLASS_TITLE,
       quizTitle: QUIZ_2,
+      gesturesOff: true,
       questions: [{ prompt: "5x5=?", options: ["20", "25"], correctIndex: 1 }],
     });
 

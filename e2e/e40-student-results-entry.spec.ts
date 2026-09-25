@@ -8,6 +8,7 @@ import {
   completeQuiz,
   startQuizByTitle,
   currentSessionId,
+  setGesturesToggle,
 } from "./helpers";
 
 const TEST_TIMESTAMP = Date.now();
@@ -56,11 +57,14 @@ test.describe("E40 — student results entry point", () => {
     await createAssessmentAndPublish(lecturerPage, {
       classTitle: CLASS_TITLE,
       quizTitle: QUIZ_1,
+      // 0067: results-entry semantics, not identity — bypass the face gate.
+      gesturesOff: true,
       questions: [{ prompt: "What is 3+3?", options: ["5", "6"], correctIndex: 1 }],
     });
     await createAssessmentAndPublish(lecturerPage, {
       classTitle: CLASS_TITLE,
       quizTitle: QUIZ_2,
+      gesturesOff: true,
       questions: [{ prompt: "What is 7+7?", options: ["13", "14"], correctIndex: 1 }],
     });
 
@@ -151,6 +155,8 @@ test.describe("E40 — student results entry point", () => {
     await lecturerPage.getByRole("button", { name: /add this question/i }).click();
     await fast(lecturerPage.getByRole("textbox", { name: "Question prompt" })).toHaveValue("");
     const publishButton = lecturerPage.getByRole("button", { name: /publish/i });
+    // 0067: this spec pins results-entry point, not identity — bypass the gate.
+    await setGesturesToggle(lecturerPage, false);
     await publishButton.click();
     await fast(lecturerPage.getByText("Live", { exact: true })).toBeVisible();
 

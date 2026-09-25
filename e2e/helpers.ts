@@ -442,6 +442,15 @@ export async function createQuizWithQuestions(
     }
   }
 
+  if (opts.gesturesOff) {
+    // DRAFT-FROZEN: the toggle must be flipped BEFORE publish (the DB trigger
+    // rejects a gesture change once the quiz leaves draft). With gestures off
+    // the 0067 answer-commit gate is bypassed end-to-end, so a spec that is
+    // not exercising face identity can drive a plain click-first answer flow
+    // without enrolling or passing the Begin gate.
+    await setGesturesToggle(page, false);
+  }
+
   if (opts.publish) {
     const publishButton = page.getByRole("button", { name: /publish/i });
     await expect(publishButton).toBeEnabled();
@@ -948,6 +957,8 @@ export async function createAssessmentAndPublish(
     classTitle: string;
     quizTitle: string;
     questions: QuestionInput[];
+    /** 0067: flip the gestures toggle off to bypass the answer-commit face gate. */
+    gesturesOff?: boolean;
   },
 ) {
   await createQuizWithQuestions(page, {
@@ -956,6 +967,7 @@ export async function createAssessmentAndPublish(
     mode: "assessment",
     questions: opts.questions,
     publish: true,
+    gesturesOff: opts.gesturesOff,
   });
 }
 

@@ -54,6 +54,8 @@ test("retake journey: enable on live quiz → spawn → chip → budget exhausti
     quizTitle: QUIZ_TITLE,
     mode: "assessment",
     publish: true,
+    // 0067: retake semantics, not identity — bypass the answer-commit face gate.
+    gesturesOff: true,
     questions: [
       { prompt: "E37 Q1?", options: ["A1", "B1"], correctIndex: 0 },
       { prompt: "E37 Q2?", options: ["A2", "B2"], correctIndex: 1 },

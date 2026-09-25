@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { registerUser, createClass, joinClass, revealQuiz } from "./helpers";
+import { registerUser, createClass, joinClass, revealQuiz, setGesturesToggle } from "./helpers";
 
 const TEST_TIMESTAMP = Date.now();
 const LECTURER_API_EMAIL = `lecturer-e10api-${TEST_TIMESTAMP}@innovision.test`;
@@ -47,6 +47,12 @@ async function createTimedAssessment(
   await page.getByText(opts.quizTitle, { exact: true }).click();
   await expect(page).toHaveURL(/\/lecturer\/quizzes\/[^/]+\/builder/);
   const quizId = page.url().split("/builder")[0].split("/").pop()!;
+
+  // This spec pins TIMER semantics, not identity. 0067 gates answers behind a
+  // fresh face commit for gesture-on assessments, so flip gestures OFF. Do it
+  // BEFORE the time-limit PATCH: the settings dialog's Save rewrites the whole
+  // metadata form and would clear the sub-minute limit written below.
+  await setGesturesToggle(page, false);
 
   // Sub-minute test limits (e.g. 5s/10s) set via direct PATCH
   await page.evaluate(

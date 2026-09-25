@@ -55,6 +55,7 @@ test.describe("E-56 — skip flow", () => {
       quizTitle: QUIZ_TITLE,
       mode: "assessment",
       publish: true,
+      gesturesOff: true,
       questions: [
         { prompt: Q1, options: ["Red", "Blue"], correctIndex: 0 },
         { prompt: Q2, options: ["Up", "Down"], correctIndex: 1 },
