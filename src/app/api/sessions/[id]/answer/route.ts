@@ -4,7 +4,15 @@ import { requireStudent } from "@/lib/classes/guards";
 import { isUuid } from "@/lib/classes/roster";
 import { rateLimit } from "@/lib/classes/rate-limit";
 import { AnswerSchema } from "@/lib/sessions/validation";
+import { MAX_FRAME_BASE64_CHARS } from "@/lib/face/constants";
+import { selectPrimaryFace } from "@/lib/face/embedding";
+import { spoofGateDecision, type SpoofFrameVerdict } from "@/lib/face/spoof";
+import { shouldReportSecondFace } from "@/lib/face/second-face";
+import * as insightface from "@/lib/face/server/insightface-client";
+import { mintAnswerProof, mintVerifyProof } from "@/lib/face/server/verify-proof";
+import { withFaceInference } from "@/lib/face/server/inference-limit";
 import { logError } from "@/lib/log";
+import { createAdminClient } from "@/lib/supabase/admin";
 import {
   checkSameOrigin,
   firstIssueMessage,
@@ -94,17 +102,73 @@ export async function POST(request: Request, { params }: Params) {
     return invalidBody(firstIssueMessage(parsed.error.issues, "Invalid answer payload."));
   }
 
+  let similarities: number[] | null = null;
+  let poses: Array<Record<string, number | null>> | null = null;
+  let frameProof: string | null = null;
+  let answerProof: string | null = null;
+  let facesForAdvisory: insightface.InsightFaceExtractResult["faces"][] | null = null;
+  if (parsed.data.faceVerification) {
+    const { frames, nonce } = parsed.data.faceVerification;
+    if (frames.length !== 3 || frames.some((f) => !f || f.length > MAX_FRAME_BASE64_CHARS)) {
+      return invalidBody("Answer verification requires three valid frames.");
+    }
+    try {
+      const admin = createAdminClient();
+      const { data: secret, error: secretError } = await admin.rpc("get_verify_proof_secret");
+      if (secretError || typeof secret !== "string" || !secret) throw secretError ?? new Error("missing proof secret");
+      const results = await Promise.all(frames.map(async (frame) => {
+        if (frame === "") return { similarity: 0, faces: [] as insightface.InsightFaceExtractResult["faces"], spoof: null };
+        const extracted = await withFaceInference(() => insightface.extractFace(frame, auth.userId));
+        if ("error" in extracted) return extracted;
+        const primary = selectPrimaryFace(extracted.faces);
+        if (!primary) return { similarity: 0, faces: extracted.faces, spoof: extracted.spoof ?? null };
+        const compared = await supabase.rpc("compare_face_baseline" as never, { p_embedding: primary.embedding } as never);
+        const result = compared.data as Record<string, unknown> | null;
+        if (compared.error || typeof result?.similarity !== "number") return { error: "insightface_unavailable" as const };
+        return { similarity: result.present === true ? Math.max(0, Math.min(1, result.similarity)) : 0, faces: extracted.faces, spoof: extracted.spoof ?? null };
+      }));
+      const failed = results.find((r) => "error" in r);
+      if (failed && "error" in failed) {
+        return failed.error === "invalid_frame"
+          ? jsonError("invalid_frame", undefined, 400)
+          : jsonError("verification_unavailable", undefined, 503);
+      }
+      facesForAdvisory = results.map((r) => (r as { faces: insightface.InsightFaceExtractResult["faces"] }).faces);
+      similarities = results.map((r) => Math.max(0, Math.min(1, (r as { similarity: number }).similarity)));
+      const spoofVerdicts: SpoofFrameVerdict[] = results.map((r) => (r as { spoof: insightface.SpoofVerdict | null }).spoof);
+      const spoof = spoofGateDecision(spoofVerdicts);
+      if (process.env.FACE_SPOOF_ENFORCE === "1" && spoof.forcedFail) similarities = similarities.map(() => 0);
+      poses = results.map((r): Record<string, number | null> => {
+        const primary = selectPrimaryFace((r as { faces: insightface.InsightFaceExtractResult["faces"] }).faces);
+        return primary
+          ? { yaw: primary.yaw, pitch: primary.pitch, roll: primary.roll, spoof: (r as { spoof: insightface.SpoofVerdict | null }).spoof?.score ?? null }
+          : { spoof: (r as { spoof: insightface.SpoofVerdict | null }).spoof?.score ?? null };
+      });
+      frameProof = mintVerifyProof(secret, id, nonce, frames);
+      answerProof = mintAnswerProof(secret, id, nonce, frames, parsed.data);
+    } catch (err) {
+      logError("answer.face_verification", err, { subsystem: "verification", errorCode: "insightface_unavailable", sessionId: id });
+      return jsonError("verification_unavailable", undefined, 503);
+    }
+  }
+
   // Exactly one answer field is present (Zod one-of). supabase-js drops
   // `undefined` keys, and every 0055 RPC param defaults to null/false — so the
   // absent side resolves to its SQL default at the RPC (the pre-0055 arities
   // were dropped, so there is no overload to fall into).
-  const { data, error } = await supabase.rpc("answer_question", {
+  const { data, error } = await supabase.rpc("commit_answer", {
     p_session_id: id,
     p_question_id: parsed.data.questionId,
     p_selected_index: parsed.data.selectedIndex,
     p_selected_indices: parsed.data.selectedIndices,
     p_answer_text: parsed.data.answerText,
     p_skipped: parsed.data.skipped,
+    p_nonce: parsed.data.faceVerification?.nonce,
+    p_frames: parsed.data.faceVerification?.frames,
+    p_similarities: similarities ?? undefined,
+    p_proof: frameProof ?? undefined,
+    p_answer_proof: answerProof ?? undefined,
+    p_poses: poses ?? undefined,
   });
 
   if (error) {
@@ -117,28 +181,47 @@ export async function POST(request: Request, { params }: Params) {
   }
 
   const payload = data as Record<string, unknown> | null;
+  const faceCheck = payload?.faceCheck as Record<string, unknown> | undefined;
+  if (faceCheck && typeof faceCheck.nextNonce === "string") {
+    if (facesForAdvisory && shouldReportSecondFace(facesForAdvisory)) {
+      void Promise.resolve(supabase.rpc("report_session_advisory", { p_session_id: id, p_type: "second_face" })).catch(() => {});
+    }
+  }
 
   if (payload?.error === "not_student") return forbidden();
   if (payload?.error === "not_authenticated") return unauthorized();
   if (payload?.error === "not_owner") return notFound();
   if (payload?.error === "session_not_active") {
-    return jsonError("session_not_active", undefined, 409);
+    return rpcError(payload, 409);
   }
+  if (payload?.error === "face_verification_required") {
+    return rpcError(payload, 409);
+  }
+  if (payload?.error === "face_mismatch") {
+    return NextResponse.json({ error: "face_mismatch", faceCheck: payload.faceCheck }, { status: 409, headers: { "content-type": "application/json" } });
+  }
+  if (payload?.error === "nonce_mismatch") {
+    return NextResponse.json({ error: "verification_stale", ...(payload.faceCheck ? { faceCheck: payload.faceCheck } : {}) }, { status: 409, headers: { "content-type": "application/json" } });
+  }
+  if (payload?.error === "rate_limited") return rateLimited("Too many verification attempts. Try again shortly.");
+  if (payload?.error === "not_enrolled" || payload?.error === "consent_required") return rpcError(payload, 403);
+  if (payload?.error === "invalid_frame" || payload?.error === "invalid_trigger") return rpcError(payload, 400);
+  if (payload?.error === "proof_invalid" || payload?.error === "proof_required") return rpcError(payload, 403);
   if (payload?.error === "quiz_not_live") {
-    return jsonError("quiz_not_live", undefined, 409);
+    return rpcError(payload, 409);
   }
   // Availability window hard stop (QC-3) — schedule state, same 409 family.
   if (payload?.error === "quiz_window_closed") {
-    return jsonError("quiz_window_closed", undefined, 409);
+    return rpcError(payload, 409);
   }
   if (payload?.error === "time_expired") {
-    return jsonError("time_expired", undefined, 403);
+    return rpcError(payload, 403);
   }
   if (payload?.error === "already_answered") {
     // Payload passed through, key-mapped only — never synthesized. Pre-reveal
     // the assessment replay carries NO is_correct (keyless; I10 pins the 409).
     return NextResponse.json(
-      { error: "already_answered" },
+      { error: "already_answered", ...(payload.faceCheck ? { faceCheck: payload.faceCheck } : {}) },
       { status: 409, headers: { "content-type": "application/json" } },
     );
   }
@@ -148,7 +231,7 @@ export async function POST(request: Request, { params }: Params) {
     payload?.error === "invalid_selected_indices" ||
     payload?.error === "invalid_answer_text"
   ) {
-    return jsonError(String(payload.error), undefined, 400);
+    return rpcError(payload, 400);
   }
 
   // Success gate accepts BOTH the practice payload (is_correct) and the
@@ -190,5 +273,13 @@ function mapAnswerPayload(payload: Record<string, unknown>): Record<string, unkn
   if ("explanation" in payload && payload.explanation != null) {
     out.explanation = payload.explanation;
   }
+  if ("faceCheck" in payload) out.faceCheck = payload.faceCheck;
   return out;
+}
+
+function rpcError(payload: Record<string, unknown>, status: number): NextResponse {
+  return NextResponse.json(
+    { error: String(payload.error), ...(payload.faceCheck ? { faceCheck: payload.faceCheck } : {}) },
+    { status, headers: { "content-type": "application/json" } },
+  );
 }

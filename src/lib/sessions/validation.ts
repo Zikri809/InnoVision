@@ -67,6 +67,14 @@ export const AnswerSchema = z
     // payload — the RPC grades it 0 and, in assessment, treats it as terminal
     // (first-answer-wins).
     skipped: z.boolean().optional(),
+    // Fresh, answer-bound assessment verification. Optional at the schema
+    // boundary because practice, lecturer-exempt, and gesture-off sessions
+    // deliberately do not require face capture; the atomic RPC decides the
+    // policy from its own locked quiz/session rows.
+    faceVerification: z.object({
+      nonce: z.string().uuid(),
+      frames: z.array(z.string()).min(1).max(3),
+    }).optional(),
   })
   .superRefine((a, ctx) => {
     // Shape exclusivity only — the schema cannot see the question's type, so

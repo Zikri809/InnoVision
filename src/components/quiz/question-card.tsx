@@ -26,6 +26,7 @@ export function QuestionCard({
   holdProgress,
   onSelect,
   pendingMulti = [],
+  pendingSingle = null,
   pendingText = "",
   onTextChange,
   practiceAttempts = 0,
@@ -38,6 +39,7 @@ export function QuestionCard({
   onSelect: (index: number) => void;
   /** QT-1: the in-progress multi-selection (presented space) before Confirm. */
   pendingMulti?: number[];
+  pendingSingle?: number | null;
   /** v4.9: the in-progress free-text answer for a short_text question. */
   pendingText?: string;
   /** v4.9: called on every keystroke in the short-text textarea. */
@@ -187,7 +189,9 @@ export function QuestionCard({
             ? isMulti
               ? (answer.selectedIndices?.includes(i) ?? false)
               : answer.selectedIndex === i
-            : pendingMulti.includes(i);
+            : isMulti
+              ? pendingMulti.includes(i)
+              : pendingSingle === i;
           const showCorrect = mode === "practice" && answer && !answer.seeded;
           const isCorrectOption = showCorrect &&
             (isMulti

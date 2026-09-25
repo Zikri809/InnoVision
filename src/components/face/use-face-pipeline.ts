@@ -7,7 +7,6 @@ import { randomTurnSide } from "@/lib/face/challenge";
 import { PeriodicCadence, minClientVerifyGapMs, shouldScheduleFaceCheck } from "@/lib/face/cadence";
 import { shouldDeferFaceCheck } from "@/lib/face/face-check-gate";
 import { resolveVerifyOutcome } from "@/lib/face/outcome";
-import { recoveryLanding } from "@/lib/face/recovery";
 import { getFakeFaceControl } from "@/lib/face/fake-seam";
 import { isFakeFaceSeamEnabled } from "@/lib/face/seam-gate";
 import {
@@ -69,6 +68,8 @@ export type FacePipelineProps = {
   enrolled: boolean;
   consentGiven: boolean;
   faceExempt: boolean;
+  /** Lecturer-controlled quiz toggle, authoritative metadata frozen at live. */
+  faceEnforcementEnabled?: boolean;
   initialNonce: string;
   initialFaceStatus: FaceStatus;
   questionId: string | null;
@@ -151,6 +152,7 @@ export function useFacePipeline(props: FacePipelineProps) {
     enrolled,
     consentGiven,
     faceExempt,
+    faceEnforcementEnabled = true,
     initialNonce,
     initialFaceStatus,
     questionId,
@@ -167,6 +169,7 @@ export function useFacePipeline(props: FacePipelineProps) {
 
   const [status, setStatus] = useState<FaceStatus>(() => {
     if (quizMode !== "assessment") return "off";
+    if (!faceEnforcementEnabled) return "off";
     if (faceExempt) return "exempt";
     if (initialFaceStatus === "flagged" || initialFaceStatus === "paused") {
       return initialFaceStatus;
@@ -217,6 +220,7 @@ export function useFacePipeline(props: FacePipelineProps) {
 
   const nonceRef = useRef(initialNonce);
   const verifyLock = useRef(false);
+  const answerPriorityRef = useRef(false);
   // Client-side POST pacing: rapid triggers (fast Q-transitions + periodic +
   // catch-up) must not spend the route's 10/min budget into 429s.
   const lastVerifyPostAtRef = useRef(0);
@@ -889,7 +893,8 @@ export function useFacePipeline(props: FacePipelineProps) {
     // gate below exists to stop the NORMAL cadence, not a recovery probe).
     force = false,
   ) {
-    if (isTerminalRef.current) return;
+    if (isTerminalRef.current || !faceEnforcementEnabled) return;
+    if (answerPriorityRef.current && trigger !== "start") return;
     if (verifyLock.current) {
       // A verify is in flight — defer the new one (latest-wins), fired exactly
       // once after the lock releases (never silently dropped).
@@ -985,6 +990,7 @@ export function useFacePipeline(props: FacePipelineProps) {
       const health =
         typeof tracker.getFaceHealth === "function" ? tracker.getFaceHealth() : null;
       if (
+        !force &&
         shouldDeferFaceCheck(
           health,
           isHandActiveRef.current,
@@ -1051,6 +1057,13 @@ export function useFacePipeline(props: FacePipelineProps) {
       // handler's catch-up verify runs when the student returns.
       if (!primary) {
         if (hiddenRef.current) return;
+        if (force) {
+          // A local camera/quality failure during a recovery or outage probe
+          // is not a biometric mismatch. Keep input blocked and wait for a
+          // usable frame before asking the server to judge identity.
+          if (statusRef.current === "recovering") setStatusBoth("paused");
+          return;
+        }
         await postVerifyInternal([""], trigger, nonceRef.current, true);
         return;
       }
@@ -1084,12 +1097,101 @@ export function useFacePipeline(props: FacePipelineProps) {
         // Re-check the CURRENT displayed question + status at fire time.
         const qid = lastQuestionIdRef.current;
         if (
+          !answerPriorityRef.current &&
           qid === questionIdAtStart ||
-          shouldScheduleFaceCheck(statusRef.current, questionVisibleRef.current ? "question" : "feedback")
+          (!answerPriorityRef.current && shouldScheduleFaceCheck(statusRef.current, questionVisibleRef.current ? "question" : "feedback"))
         ) {
           void runVerify(deferred);
         }
       }
+    }
+  }
+
+  /** Capture three fresh answer frames after any background verify completes. */
+  async function captureAnswerFrames(): Promise<{
+    frames: string[];
+    nonce: string;
+    release: () => void;
+  } | null> {
+    if (faceExemptRef.current || quizMode !== "assessment" || statusRef.current !== "ready") return null;
+    answerPriorityRef.current = true;
+    if (cadenceTimerRef.current) clearTimeout(cadenceTimerRef.current);
+    cadenceTimerRef.current = null;
+    pendingVerifyRef.current = null;
+    const waitStart = Date.now();
+    while (verifyLock.current && Date.now() - waitStart < 20_000 && !disposedRef.current) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    const tracker = trackerRef.current;
+    const finish = () => {
+      answerPriorityRef.current = false;
+      if (statusRef.current === "ready") scheduleCadence();
+    };
+    if (!tracker || verifyLock.current || hiddenRef.current || disposedRef.current || isTerminalRef.current || statusRef.current !== "ready") {
+      finish();
+      return null;
+    }
+    const frames: string[] = [];
+    let handedOff = false;
+    try {
+      for (let i = 0; i < VERIFY_FRAMES_PER_CHECK; i++) {
+        if (i) await new Promise((resolve) => setTimeout(resolve, 200));
+        if (hiddenRef.current || trackerRef.current !== tracker || disposedRef.current || isTerminalRef.current || statusRef.current !== "ready") return null;
+        let frame: string | null = null;
+        const captureStartedAt = Date.now();
+        let unhealthySince: number | null = null;
+        while (!frame && Date.now() - captureStartedAt < 1800 && !hiddenRef.current && trackerRef.current === tracker && statusRef.current === "ready") {
+          const health = tracker.getFaceHealth?.();
+          const sustainedIssue = health && (!health.faceDetected || (health.facesSeen ?? 1) > 1);
+          if (sustainedIssue) {
+            unhealthySince ??= Date.now();
+            if (Date.now() - unhealthySince >= 1000) return null;
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            continue;
+          }
+          unhealthySince = null;
+          frame = await tracker.captureFrame();
+          if (!frame) await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        // A locally unusable capture holds the answer without creating a
+        // server mismatch vote; only valid image frames reach identity logic.
+        if (!frame) return null;
+        frames.push(frame);
+      }
+      handedOff = true;
+      return { frames, nonce: nonceRef.current, release: finish };
+    } catch {
+      return null;
+    } finally {
+      if (!handedOff) finish();
+    }
+  }
+
+  function applyAnswerFaceCheck(faceCheck: unknown) {
+    if (!faceCheck || typeof faceCheck !== "object") return;
+    const result = faceCheck as { nextNonce?: unknown; sessionStatus?: unknown };
+    if (typeof result.nextNonce === "string") nonceRef.current = result.nextNonce;
+    if (result.sessionStatus === "paused") setStatusBoth("paused");
+    else if (result.sessionStatus === "flagged") {
+      setStatusBoth("flagged");
+      startFlaggedPoll();
+    } else if (result.sessionStatus === "active" && (statusRef.current === "ready" || statusRef.current === "recovering")) {
+      setStatusBoth("ready");
+    }
+  }
+
+  async function refreshNonce() {
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}`, { method: "GET", cache: "no-store" });
+      const body = await res.json().catch(() => ({}));
+      if (typeof body.verify_nonce === "string") nonceRef.current = body.verify_nonce;
+      if (body.status === "paused") setStatusBoth("paused");
+      else if (body.status === "flagged") {
+        setStatusBoth("flagged");
+        startFlaggedPoll();
+      }
+    } catch {
+      // The next click will retry capture with the last known nonce.
     }
   }
 
@@ -1182,18 +1284,17 @@ export function useFacePipeline(props: FacePipelineProps) {
         if (typeof body.remainingMs === "number" && body.remainingMs >= 0) {
           onRecoveredRemainingRef.current?.(body.remainingMs);
         }
-        setStatusBoth(recoveryLanding(hadStartVerifyRef.current));
         if (hadStartVerifyRef.current) {
-          // Immediate identity re-check after recovery (mirrors the
-          // flagged-poll path): without it the next face verify is a full
-          // 30–45s cadence away, and whoever is at the desk can answer
-          // unverified. Safe to call here — cadence is clear-then-set (no
-          // stacking) and runVerify's min-gap deferral absorbs a POST <8s
-          // old (the production gap — the E2E seam's 2s mirror does not
-          // apply here; the deferral is bounded and the cadence stands as
-          // the safety net if the deferred run never fires).
-          void runVerify("periodic");
-          scheduleCadence();
+          // Keep input blocked until a fresh server identity verdict lands.
+          // Blink and turn liveness only prove motion; they do not authorize
+          // answers after a mismatch or recovery.
+          await runVerify("periodic", 0, true);
+          if ((statusRef.current as FaceStatus) === "recovering") {
+            setStatusBoth("unavailable");
+            reportUnavailable();
+          }
+        } else {
+          setStatusBoth("gate");
         }
       } else if (body.error === "flagged") {
         setStatusBoth("flagged");
@@ -1439,25 +1540,12 @@ export function useFacePipeline(props: FacePipelineProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Q-transition trigger: the parent reports the CURRENT question id. When it
-  // CHANGES (and is visible), fire a Q-transition verify after a settling
-  // delay (2000ms) so the student has completed their gesture/click and is
-  // facing the camera.
+  // Track the current question for stale-flight guards. The identity check is
+  // now taken atomically with the answer commit, so a separate question-change
+  // POST would be redundant and could race the answer nonce.
   useEffect(() => {
     if (!questionVisible || questionId === null) return;
-    const prev = lastQuestionIdRef.current;
     lastQuestionIdRef.current = questionId;
-    if (prev === null) return; // first question — gate covered it
-    if (prev === questionId) return; // same question re-render
-
-    const timer = setTimeout(() => {
-      if (statusRef.current === "ready" && !isTerminalRef.current && !disposedRef.current) {
-        void runVerify("question");
-      }
-    }, 2000);
-
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [questionId, questionVisible]);
 
   // Gate Begin: run blink liveness, then the anti-replay head-turn
@@ -1542,6 +1630,9 @@ export function useFacePipeline(props: FacePipelineProps) {
     setTracker,
     setStatusBoth,
     markConsentGiven,
+    captureAnswerFrames,
+    applyAnswerFaceCheck,
+    refreshNonce,
   };
 }
 

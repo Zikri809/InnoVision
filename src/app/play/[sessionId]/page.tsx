@@ -281,7 +281,7 @@ export default async function PlayPage({ params }: PageProps) {
     ownProfile?.face_enrollment_status === "enrolled" && baseline?.present === true;
 
   let initialFaceStatus: FaceStatus = "off";
-  if (s.mode === "assessment") {
+  if (s.mode === "assessment" && quiz.gestures_enabled === true) {
     if (s.status === "flagged") initialFaceStatus = "flagged";
     else if (s.status === "paused") initialFaceStatus = "paused";
     else if (s.face_exempt && s.status === "active") initialFaceStatus = "exempt";

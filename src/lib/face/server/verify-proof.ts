@@ -39,7 +39,7 @@ export function frameHash(frames: string[]): string {
 
 /** The exact message the RPC HMACs. Exposed for tests. */
 export function proofMessage(sessionId: string, nonce: string, frames: string[]): string {
-  return `${sessionId}:${nonce}:${frameConcat(frames)}`;
+  return `${sessionId.toLowerCase()}:${nonce.toLowerCase()}:${frameConcat(frames)}`;
 }
 
 /** Mint the p_proof value for record_face_check. */
@@ -51,5 +51,42 @@ export function mintVerifyProof(
 ): string {
   return createHmac("sha256", secret)
     .update(proofMessage(sessionId, nonce, frames), "utf8")
+    .digest("hex");
+}
+
+/** Canonical, length-prefixed answer encoding shared with the SQL RPC. */
+export function canonicalAnswer(
+  answer: {
+    questionId: string;
+    selectedIndex?: number;
+    selectedIndices?: number[];
+    answerText?: string;
+    skipped?: boolean;
+  },
+): string {
+  const part = (value: string | null) =>
+    value === null ? "-:" : `${Buffer.byteLength(value, "utf8")}:${value}`;
+  return [
+    part(answer.questionId.toLowerCase()),
+    part(answer.selectedIndex === undefined ? null : String(answer.selectedIndex)),
+    part(answer.selectedIndices === undefined ? null : [...new Set(answer.selectedIndices)].sort((a, b) => a - b).join(",")),
+    part(answer.answerText ?? null),
+    // The RPC contract defaults omitted p_skipped to false; bind that same
+    // value whether the browser omitted it or sent false explicitly.
+    part(String(answer.skipped ?? false)),
+  ].join("");
+}
+
+/** Proof binding the fresh frame set to this exact question and answer. */
+export function mintAnswerProof(
+  secret: string,
+  sessionId: string,
+  nonce: string,
+  frames: string[],
+  answer: Parameters<typeof canonicalAnswer>[0],
+): string {
+  const frameDigest = frameHash(frames);
+  return createHmac("sha256", secret)
+    .update(`answer:${sessionId.toLowerCase()}:${nonce.toLowerCase()}:${frameDigest}:${canonicalAnswer(answer)}`, "utf8")
     .digest("hex");
 }

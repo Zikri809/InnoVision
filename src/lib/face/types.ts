@@ -91,7 +91,7 @@ export interface IFaceTracker {
    */
   onError?(cb: (err: unknown) => void): () => void;
   /** Read current framing & lighting health. */
-  getFaceHealth?(): { aligned: boolean; lightingOk: boolean; faceDetected: boolean };
+  getFaceHealth?(): { aligned: boolean; lightingOk: boolean; faceDetected: boolean; facesSeen?: number };
   /**
    * Adaptive duty cycle: slow the detection loop during sustained play,
    * restore full rate before liveness-critical states (see the tier

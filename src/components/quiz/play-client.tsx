@@ -227,6 +227,7 @@ export function PlayClient({
   const router = useRouter();
   const t = useTranslations("play");
   const tCommon = useTranslations("common");
+  const tFace = useTranslations("face");
   // audit-1 P1-12: the mid-exam expired-session copy (authErrors key was
   // written for the register flow and unused until now).
   const tAuth = useTranslations("authErrors");
@@ -327,6 +328,8 @@ export function PlayClient({
   const isPractice = quiz.mode === "practice";
   const question = questions[Math.min(index, questions.length - 1)];
   const answered = answers[question?.id];
+  const faceCommitRequired = quiz.mode === "assessment" && quiz.gesturesEnabled && faceStatus !== "exempt";
+  const faceCommitHold = faceCommitRequired && faceStatus !== "ready";
 
   // Polish round (W2 C2): cam status for the quiz-info sheet — mirrors the
   // ProgressHud camStatus derivation so a phone can check camera state
@@ -370,13 +373,18 @@ export function PlayClient({
   const [pendingByQuestion, setPendingByQuestion] = useState<Record<string, number[]>>(() => {
     // audit-2 L-12: the stashed multi draft re-arms the Confirm button for
     // its question (re-POSTs on confirm — the server never recorded it).
-    // A stashed SINGLE selection has no pending UI (single answers commit on
-    // click) — restoring it into `answers` would strand the question, so it
-    // is intentionally dropped: the student re-clicks, one tap.
     return stashedDraft?.selectedIndices
       ? { [stashedDraft.questionId]: stashedDraft.selectedIndices }
       : {};
   });
+  const [pendingSingleByQuestion, setPendingSingleByQuestion] = useState<Record<string, number>>(() =>
+    stashedDraft?.selectedIndex === undefined ? {} : { [stashedDraft.questionId]: stashedDraft.selectedIndex },
+  );
+  const [pendingSkipByQuestion, setPendingSkipByQuestion] = useState<Record<string, true>>(() =>
+    stashedDraft?.skipped ? { [stashedDraft.questionId]: true } : {},
+  );
+  const pendingSingle = question ? pendingSingleByQuestion[question.id] ?? null : null;
+  const pendingSkip = question ? pendingSkipByQuestion[question.id] === true : false;
   const pendingMulti = answers[question?.id] ? [] : (pendingByQuestion[question?.id] ?? []);
   function setPendingMulti(next: number[] | ((prev: number[]) => number[])) {
     if (!question) return;
@@ -463,6 +471,7 @@ export function PlayClient({
     // MediaPipe landmarker would stay hot indefinitely with no pipeline.
     enabled:
       quiz.mode === "assessment" &&
+      quiz.gesturesEnabled &&
       Boolean(face) &&
       phase !== "submitted" &&
       phase !== "dead",
@@ -550,6 +559,7 @@ export function PlayClient({
   const pipeline = useFacePipeline({
     sessionId,
     quizMode: quiz.mode,
+    faceEnforcementEnabled: quiz.gesturesEnabled,
     enrolled: face?.enrolled ?? false,
     consentGiven: face?.consentGiven ?? false,
     faceExempt: face?.faceExempt ?? false,
@@ -599,7 +609,7 @@ export function PlayClient({
     // OS mic indicator stayed hot after submit (the camera tracker is
     // disposed but the advisory mic stream was not).
     enabled:
-      quiz.mode === "assessment" &&
+      quiz.mode === "assessment" && quiz.gesturesEnabled &&
       Boolean(face) &&
       faceTracker.available &&
       phase !== "submitted" &&
@@ -623,7 +633,7 @@ export function PlayClient({
   useIncidentRecorder({
     sessionId,
     enabled:
-      quiz.mode === "assessment" &&
+      quiz.mode === "assessment" && quiz.gesturesEnabled &&
       Boolean(face) &&
       !isFakeFace &&
       phase !== "submitted" &&
@@ -639,7 +649,7 @@ export function PlayClient({
 
   // If the tracker is unavailable, force the pipeline to passthrough.
   useEffect(() => {
-    if (faceUnavailable && quiz.mode === "assessment" && faceStatus !== "unavailable") {
+    if (faceUnavailable && quiz.mode === "assessment" && quiz.gesturesEnabled && faceStatus !== "unavailable") {
       pipeline.setStatusBoth("unavailable");
       // Record the gap once (idempotent server-side).
       void fetch(`/api/sessions/${sessionId}/face-unavailable`, {
@@ -758,6 +768,7 @@ export function PlayClient({
       );
       return;
     }
+    setPendingSingleByQuestion((prev) => ({ ...prev, [question.id]: optionIndex }));
     void answer(optionIndex);
   }
 
@@ -765,12 +776,25 @@ export function PlayClient({
   // the skip affordance. Both ride the SAME submit lock / phase machine as a
   // selection so first-answer-wins and the error arms are shared, not forked.
   async function answer(selection: number | number[] | string | "skip") {
+    const isSkip = selection === "skip";
+    if (question) {
+      setPendingSkipByQuestion((prev) => {
+        if (isSkip) return { ...prev, [question.id]: true };
+        if (!(question.id in prev)) return prev;
+        const next = { ...prev };
+        delete next[question.id];
+        return next;
+      });
+    }
+    if (faceCommitHold) {
+      setError(tFace("answerHold"));
+      return;
+    }
     if (submitLock.current) return;
     submitLock.current = true;
     setPhaseAndRef("locked");
     setError(null);
 
-    const isSkip = selection === "skip";
     const isText = typeof selection === "string" && !isSkip;
     const isMulti = Array.isArray(selection);
     const scalar = isMulti || isSkip || isText ? undefined : (selection as number);
@@ -778,6 +802,7 @@ export function PlayClient({
     const text = isText ? (selection as string) : undefined;
 
     const controller = new AbortController();
+    let releaseFaceFrames: (() => void) | null = null;
     const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
     const promise = (async () => {
@@ -803,6 +828,16 @@ export function PlayClient({
             : isMulti
               ? { questionId: question.id, selectedIndices: wire }
               : { questionId: question.id, selectedIndex: wire };
+        if (faceCommitRequired) {
+          const captured = await pipeline.captureAnswerFrames();
+          if (!captured) {
+            setError(tFace("answerHold"));
+            setPhaseAndRef("question");
+            return;
+          }
+          releaseFaceFrames = captured.release;
+          reqBody.faceVerification = { nonce: captured.nonce, frames: captured.frames };
+        }
         const res = await fetch(`/api/sessions/${sessionId}/answer`, {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -812,9 +847,31 @@ export function PlayClient({
         // Strictly parse the body; a non-JSON 200 must NOT render "Incorrect"
         // for a correct answer (the server recorded the truth). If a 200 body
         // has no usable shape, surface an error instead of fabricating feedback.
-        let body: Record<string, unknown> = {};
-        if (res.ok || res.status === 409 || res.status === 403) {
-          body = await res.json().catch(() => ({}));
+        const body: Record<string, unknown> = await res.json().catch(() => ({}));
+        // A face row may commit before a later timer/question error. Adopt its
+        // rotated nonce and server session state before interpreting answer IO.
+        if (body.faceCheck) pipeline.applyAnswerFaceCheck(body.faceCheck);
+
+        if (res.status === 409 && body.error === "face_mismatch") {
+          setError(tFace("pausedBody"));
+          setPhaseAndRef("question");
+          return;
+        }
+        if (res.status === 409 && (body.error === "verification_stale" || body.error === "face_verification_required")) {
+          if (body.error === "verification_stale") await pipeline.refreshNonce();
+          setError(tFace("answerHold"));
+          setPhaseAndRef("question");
+          return;
+        }
+        if (res.status >= 500) {
+          setError(tFace("answerHold"));
+          setPhaseAndRef("question");
+          return;
+        }
+        if (res.status === 429) {
+          setError(tFace("answerHold"));
+          setPhaseAndRef("question");
+          return;
         }
 
         // Shape-validate the SUCCESS body: practice requires `isCorrect:boolean`;
@@ -846,6 +903,8 @@ export function PlayClient({
             },
           }));
           setPendingMulti([]);
+          setPendingSingleByQuestion((prev) => { const next = { ...prev }; delete next[question.id]; return next; });
+          setPendingSkipByQuestion((prev) => { const next = { ...prev }; delete next[question.id]; return next; });
           setPhaseAndRef("feedback");
           return;
         }
@@ -1054,6 +1113,8 @@ export function PlayClient({
           return next;
         });
         setPendingMulti([]);
+        setPendingSingleByQuestion((prev) => { const next = { ...prev }; delete next[question.id]; return next; });
+        setPendingSkipByQuestion((prev) => { const next = { ...prev }; delete next[question.id]; return next; });
         bumpPracticeAttemptsForCurrentQuestion();
         setPhaseAndRef("feedback");
         // AX-3: confirm the commit by its VISIBLE label (on-screen option
@@ -1082,6 +1143,7 @@ export function PlayClient({
         }
         setPhaseAndRef("question");
       } finally {
+        releaseFaceFrames?.();
         submitLock.current = false;
         clearTimeout(timeout);
       }
@@ -1439,6 +1501,7 @@ export function PlayClient({
           size="lg"
           variant="outline"
           data-testid="skip-question"
+          aria-pressed={pendingSkip}
           onClick={() => void answer("skip")}
         >
           {t("skip.action")}
@@ -1568,7 +1631,7 @@ export function PlayClient({
           nextArmed={phase === "feedback"}
           answerMode={question.type === "multi_select" ? "multi" : "single"}
           hasMultiQuestions={hasMultiQuestions}
-          blockInput={BLOCK_INPUT_PHASES.includes(phase) || lastSubmitFailed || faceStatus === "paused" || faceStatus === "recovering" || faceStatus === "flagged"}
+          blockInput={BLOCK_INPUT_PHASES.includes(phase) || lastSubmitFailed || faceCommitHold || faceStatus === "paused" || faceStatus === "recovering" || faceStatus === "flagged"}
           sessionPaused={faceStatus === "paused" || faceStatus === "recovering" || faceStatus === "flagged"}
           faceStatus={faceStatus}
           onPause={() => {
@@ -1764,6 +1827,7 @@ export function PlayClient({
               holdProgress={holdProgress}
               onSelect={selectOption}
               pendingMulti={pendingMulti}
+              pendingSingle={pendingSingle}
               pendingText={pendingText}
               onTextChange={setPendingText}
               practiceAttempts={practiceAttempts}

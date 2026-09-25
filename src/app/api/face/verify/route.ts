@@ -11,6 +11,7 @@ import { spoofGateDecision, type SpoofFrameVerdict } from "@/lib/face/spoof";
 import { shouldReportSecondFace } from "@/lib/face/second-face";
 import { mintVerifyProof } from "@/lib/face/server/verify-proof";
 import * as insightface from "@/lib/face/server/insightface-client";
+import { withFaceInference } from "@/lib/face/server/inference-limit";
 import {
   checkSameOrigin,
   firstIssueMessage,
@@ -30,8 +31,9 @@ export const dynamic = "force-dynamic";
 // calls run in parallel, so the budget is a single extract + overhead.
 export const maxDuration = 20;
 
-// Per-user rate limit on verifies (10/min — cadence is 30–45s + Q-transitions).
-const VERIFY_RATE = { limit: 10, windowMs: 60 * 1000 };
+// Per-user verification budget. Normal background cadence is far below this;
+// answer commits also have independent 60/user and 30/session limits.
+const VERIFY_RATE = { limit: 60, windowMs: 60 * 1000 };
 
 // audit-2 C-01: photo/replay gate posture. With FACE_SPOOF_ENFORCE=1 a
 // majority-spoofed frame set forces the whole check to a FAIL vote; without
@@ -265,7 +267,7 @@ export async function POST(request: Request) {
         // sidecar exists in CI — a fetch would 503 instead of failing as a
         // vote, which would kill the pause/streak specs).
         if (insightface.isMockMismatchFrame(frame)) return { similarity: 0, faces: [], spoof: null };
-        const extracted = await insightface.extractFace(frame, auth.userId);
+        const extracted = await withFaceInference(() => insightface.extractFace(frame, auth.userId));
         if ("error" in extracted) return { error: extracted.error };
         const sim = await comparePrimaryFace(supabase, extracted.faces);
         const spoof = extracted.spoof ?? null;

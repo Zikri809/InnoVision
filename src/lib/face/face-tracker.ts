@@ -477,12 +477,13 @@ export class FaceTracker implements IFaceTracker {
   }
 
   /** Read current framing & lighting health. */
-  getFaceHealth(): { aligned: boolean; lightingOk: boolean; faceDetected: boolean } {
+  getFaceHealth(): { aligned: boolean; lightingOk: boolean; faceDetected: boolean; facesSeen?: number } {
     const aligned = this.currentPose.faceDetected && this.currentPose.centered && Math.abs(this.currentPose.yaw) <= 25;
     return {
       aligned,
       lightingOk: this.currentLighting === "good",
       faceDetected: this.currentPose.faceDetected,
+      facesSeen: this.currentPose.facesSeen,
     };
   }
 
