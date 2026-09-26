@@ -469,6 +469,7 @@ suites are order-independent and rerunnable against a persistent local DB.
 | E56 | **Skip flow** — `e56-skip.spec.ts` | skip a question in an assessment (terminal in-assessment state) + practice-mode skip reset | skipped row persists in assessment; practice re-answer resets the skip |
 | E57 | **Clone + live flag freeze** — `e57-clone-and-flag.spec.ts` | clone a quiz; flip the integrity flag on a live quiz | clone fidelity; live-quiz flag freeze enforced |
 | E58 | **Practice oracle guard** — `e58-practice-oracle.spec.ts` | practice-mode oracle boundaries | no leak of the answer key through practice surfaces |
+| E60 | **Gesture-off AI generation** — `e60-gesture-off-generation.spec.ts` | gesture-off draft + `[MOCK:gesture_off]` payload (multi + short) generates, persists via the real save RPC, rubric round-trips through Edit, short regenerates, publishes, student sees it; gesture-ON draft + same payload → 422 zero rows; short without `answer_key` (`[MOCK:gesture_off_invalid]`) → 422 zero rows | mixed types persist with rubrics; gates hold with atomic saves |
 
 ### 5.4 Mobile + smoke suites
 
@@ -481,7 +482,7 @@ suites are order-independent and rerunnable against a persistent local DB.
   InsightFace container). It is never part of the default harness — the fake
   tracker seam covers E2E (§5 preamble).
 
-Total E2E spec count: **78**.
+Total E2E spec count: **79**.
 
 ### 5.2a Demo walk-up suite (e59, opt-in) — exhibition kiosk
 

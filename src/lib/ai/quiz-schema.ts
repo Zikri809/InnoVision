@@ -3,13 +3,19 @@ import { z } from "zod";
 /**
  * AI quiz generation contract (PLAN §2 AiQuizSchema) + shared constants.
  *
- * Deliberate rules (locked in PLAN §0/§2; QT-1 multi-select added):
+ * Deliberate rules (locked in PLAN §0/§2; QT-1 multi-select added;
+ * gesture-off short_text added):
  *  - `mcq` (2–5 options), `true_false` (exactly 2 options) — the
  *    gesture-friendly types (1–5 fingers; 1 = true, 2 = false) — and
  *    `multi_select` (QT-1: 1..options.length correct indices; answered by
  *    tap+confirm, gesture answering disabled on these questions).
- *  - `correct_index` / `correct_indices` must reference existing options
- *    (strictly one-of by type — mirroring QuestionInputSchema).
+ *  - `short_text` (gesture-off only: 0 options, typed answer graded by the
+ *    AI marker against `answer_key`, 1–500 chars mirroring
+ *    questions_answer_key_shape). The model emits it ONLY when the caller
+ *    opts in via `allowShortText` (auto-enabled for gesture-off quizzes);
+ *    otherwise it is rejected with retry, exactly like multi_select.
+ *  - `correct_index` / `correct_indices` / `answer_key` must be strictly
+ *    one-of by type (mirroring QuestionInputSchema).
  *  - 3–30 questions per generation (gesture round + token budget).
  *  - `title` trimmed 1–200 (mirrors the quizzes DB CHECK).
  */
@@ -38,22 +44,22 @@ export const GENERATION_BUDGET_MS = 900_000;
 /** A single AI question (shared by the quiz schema and single-question regen). */
 export const AiQuestionSchema = z
   .object({
-    type: z.enum(["mcq", "true_false", "multi_select"]),
+    type: z.enum(["mcq", "true_false", "multi_select", "short_text"]),
     prompt: z
       .string()
       .trim()
       .min(5, "Prompt must be at least 5 characters.")
       .max(2000, "Prompt must be at most 2000 characters."),
-    options: z
-      .array(
-        z
-          .string()
-          .trim()
-          .min(1, "Options must not be empty.")
-          .max(500, "Each option must be at most 500 characters."),
-      )
-      .min(2, "A question needs at least 2 options.")
-      .max(5, "A question can have at most 5 options."),
+    // Per-element shape only — per-type cardinality lives in the arms below
+    // (a schema-level min(2) would reject short_text's 0 options before any
+    // superRefine runs; same restructure QuestionInputSchema did in B5-5).
+    options: z.array(
+      z
+        .string()
+        .trim()
+        .min(1, "Options must not be empty.")
+        .max(500, "Each option must be at most 500 characters."),
+    ),
     correct_index: z.number().int().min(0).optional(),
     // QT-1: the multi answer key — 1..options.length canonical indices,
     // sorted+distinct (mirror of QuestionInputSchema.correctIndices).
@@ -61,6 +67,13 @@ export const AiQuestionSchema = z
       .array(z.number().int().min(0))
       .min(1)
       .max(5)
+      .optional(),
+    // Gesture-off short-text rubric: the model answer the AI marker grades
+    // against (1..500 mirrors questions_answer_key_shape, 0052).
+    answer_key: z
+      .string()
+      .trim()
+      .max(500, "The answer key must be at most 500 characters.")
       .optional(),
     // Models frequently emit `explanation: null` — accept both absent and null.
     explanation: z
@@ -72,12 +85,75 @@ export const AiQuestionSchema = z
   })
   // Gesture constraint: true_false must have exactly 2 options; the answer
   // key must be strictly one-of by type and point at existing options.
+  // Per-type cardinality mirrors the DB CHECK (0052); the messages preserve
+  // the pre-short_text schema-level bounds verbatim.
   .superRefine((q, ctx) => {
+    // ── short_text (gesture-off) ────────────────────────────────────
+    // ZERO options, a required rubric, none of the index keys. First:
+    // every arm below assumes an option list to index into.
+    if (q.type === "short_text") {
+      if (q.options.length !== 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["options"],
+          message: "Short-text questions have no options.",
+        });
+      }
+      if (q.correct_index !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["correct_index"],
+          message: "Short-text questions are graded against an answer key, not an option index.",
+        });
+      }
+      if (q.correct_indices !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["correct_indices"],
+          message: "Short-text questions are graded against an answer key, not option indices.",
+        });
+      }
+      if (q.answer_key === undefined || q.answer_key.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["answer_key"],
+          message: "An answer key is required for short-text questions.",
+        });
+      }
+      return;
+    }
+
+    // No other type may carry a rubric.
+    if (q.answer_key !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["answer_key"],
+        message: "answer_key is only valid for short-text questions.",
+      });
+    }
+
+    if (q.type === "mcq" && (q.options.length < 2 || q.options.length > 5)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["options"],
+        message:
+          q.options.length < 2
+            ? "A question needs at least 2 options."
+            : "A question can have at most 5 options.",
+      });
+    }
     if (q.type === "true_false" && q.options.length !== 2) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["options"],
         message: "True/False questions must have exactly 2 options.",
+      });
+    }
+    if (q.type === "multi_select" && q.options.length < 2) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["options"],
+        message: "A question needs at least 2 options.",
       });
     }
     if (q.type === "multi_select") {
@@ -185,10 +261,12 @@ export const AiQuizSchema = z
     (q) =>
       q.questions.every(
         (x) =>
-          x.type === "multi_select"
-            ? x.correct_indices !== undefined &&
-              x.correct_indices.every((i) => i < x.options.length)
-            : x.correct_index !== undefined && x.correct_index < x.options.length,
+          x.type === "short_text"
+            ? x.answer_key !== undefined && x.answer_key.length > 0
+            : x.type === "multi_select"
+              ? x.correct_indices !== undefined &&
+                x.correct_indices.every((i) => i < x.options.length)
+              : x.correct_index !== undefined && x.correct_index < x.options.length,
       ),
     {
       message: "Every correct answer must reference an existing option.",
@@ -202,13 +280,16 @@ export type AiQuestion = AiQuiz["questions"][number];
 /** DB-shaped question row payload for replace_quiz_questions. Multi rows
  * (QT-1) carry `correct_indices` and NULL the scalar; single-answer types
  * are the reverse (`correct_indices` stays undefined so JSON.stringify
- * drops it before the RPC sees it). */
+ * drops it before the RPC sees it). Short-text rows carry NO option keys at
+ * all — just the `answer_key` rubric (`answer_key` stays undefined on every
+ * other type for the same drop-the-key reason). */
 export type ReplaceQuestionRow = {
-  type: "mcq" | "true_false" | "multi_select";
+  type: "mcq" | "true_false" | "multi_select" | "short_text";
   prompt: string;
   options: string[];
   correct_index: number | null;
   correct_indices?: number[] | null;
+  answer_key?: string | null;
   explanation: string | null;
 };
 
@@ -262,6 +343,19 @@ export function normalizeOptions(
 export function aiQuizToRows(quiz: AiQuiz): ReplaceQuestionRow[] {
   const rows: ReplaceQuestionRow[] = [];
   for (const q of quiz.questions) {
+    if (q.type === "short_text") {
+      // Validation guarantees the rubric exists for short-text rows.
+      // Options stay the EMPTY array (the 0052 DB convention, not NULL).
+      rows.push({
+        type: q.type,
+        prompt: q.prompt,
+        options: [],
+        correct_index: null,
+        answer_key: q.answer_key as string,
+        explanation: q.explanation ?? null,
+      });
+      continue;
+    }
     if (q.type === "multi_select") {
       // Validation guarantees the set exists for multi rows.
       const set = q.correct_indices as number[];

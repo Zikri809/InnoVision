@@ -279,13 +279,126 @@ describe("QT-1 — multi-select AI contract", () => {
     expect("correct_indices" in (res as object)).toBe(false);
   });
 
+  it("U-QT1-A8 multi with 1 option is rejected (schema-level min now per-type)", () => {
+    const quiz: AiQuiz = {
+      title: "Biology",
+      questions: [
+        { type: "mcq", prompt: "What is 2+2?", options: ["3", "4"], correct_index: 1 },
+        { type: "true_false", prompt: "Sun is hot.", options: ["True", "False"], correct_index: 0 },
+        { ...multiQuestion, options: ["Only"] },
+      ],
+    };
+    expect(AiQuizSchema.safeParse(quiz).success).toBe(false);
+  });
+});
+
+describe("Gesture-off — short_text AI contract", () => {
+  const shortQuestion = {
+    type: "short_text" as const,
+    prompt: "Why is the sky blue?",
+    options: [] as string[],
+    answer_key: "Rayleigh scattering by air molecules.",
+  };
+  const twoChoice = [
+    { type: "mcq", prompt: "What is 2+2?", options: ["3", "4"], correct_index: 1 },
+    { type: "true_false", prompt: "Sun is hot.", options: ["True", "False"], correct_index: 0 },
+  ] as AiQuiz["questions"];
+
+  it("U-ST-A1 accepts a valid short_text question", () => {
+    const quiz: AiQuiz = { title: "Physics", questions: [...twoChoice, shortQuestion] };
+    expect(AiQuizSchema.safeParse(quiz).success).toBe(true);
+  });
+
+  it("U-ST-A2 rejects short_text carrying options", () => {
+    const quiz = {
+      title: "Physics",
+      questions: [...twoChoice, { ...shortQuestion, options: ["a", "b"] }],
+    };
+    expect(AiQuizSchema.safeParse(quiz).success).toBe(false);
+  });
+
+  it("U-ST-A3 rejects short_text carrying index keys (strict one-of)", () => {
+    for (const extra of [{ correct_index: 0 }, { correct_indices: [0] }]) {
+      const quiz = {
+        title: "Physics",
+        questions: [...twoChoice, { ...shortQuestion, ...extra }],
+      };
+      expect(AiQuizSchema.safeParse(quiz).success).toBe(false);
+    }
+  });
+
+  it("U-ST-A4 rejects short_text without an answer key (or over 500 chars)", () => {
+    const { answer_key: _drop, ...noKey } = shortQuestion;
+    void _drop;
+    expect(
+      AiQuizSchema.safeParse({ title: "Physics", questions: [...twoChoice, noKey] }).success,
+    ).toBe(false);
+    expect(
+      AiQuizSchema.safeParse({
+        title: "Physics",
+        questions: [...twoChoice, { ...shortQuestion, answer_key: "A".repeat(501) }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("U-ST-A5 rejects answer_key on choice types", () => {
+    const quiz = {
+      title: "Physics",
+      questions: [
+        { ...twoChoice[0], answer_key: "stray" },
+        twoChoice[1],
+        shortQuestion,
+      ],
+    };
+    expect(AiQuizSchema.safeParse(quiz).success).toBe(false);
+  });
+
+  it("U-ST-A6 mcq cardinality arms preserved after the per-type restructure", () => {
+    const mcq = twoChoice[0];
+    expect(
+      AiQuizSchema.safeParse({
+        title: "Physics",
+        questions: [{ ...mcq, options: ["only"] }, twoChoice[1], shortQuestion],
+      }).success,
+    ).toBe(false);
+    expect(
+      AiQuizSchema.safeParse({
+        title: "Physics",
+        questions: [
+          { ...mcq, options: ["a", "b", "c", "d", "e", "f"] },
+          twoChoice[1],
+          shortQuestion,
+        ],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("U-ST-A7 aiQuizToRows emits the option-less rubric row for short_text", () => {
+    const quiz: AiQuiz = { title: "Physics", questions: [...twoChoice, shortQuestion] };
+    const rows = aiQuizToRows(quiz);
+    expect(rows[2]).toEqual({
+      type: "short_text",
+      prompt: "Why is the sky blue?",
+      options: [],
+      correct_index: null,
+      answer_key: "Rayleigh scattering by air molecules.",
+      explanation: null,
+    });
+    expect("correct_indices" in (rows[2] as object)).toBe(false);
+  });
+
   it("U-QT1-A7 aiQuizToRows emits correct_index:null + correct_indices for multi rows", () => {
     const quiz: AiQuiz = {
       title: "Biology",
       questions: [
         { type: "mcq", prompt: "What is 2+2?", options: ["3", "4"], correct_index: 1 },
         { type: "true_false", prompt: "Sun is hot.", options: ["True", "False"], correct_index: 0 },
-        multiQuestion,
+        {
+          type: "multi_select",
+          prompt: "Which of these are mammals?",
+          options: ["Dolphin", "Shark", "Bat", "Trout"],
+          correct_indices: [0, 2],
+        },
       ],
     };
     const rows = aiQuizToRows(quiz);

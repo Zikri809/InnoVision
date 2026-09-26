@@ -422,7 +422,12 @@ since they're rendered to rosters.
         → low text density ⇒ 422 "run OCR in the browser"
   3. Prompt build (lib/ai/quiz-prompt.ts): strict JSON contract,
      language/difficulty/format steering; chat call via lib/ai/client.ts
-     (OpenAI SDK, baseURL override; AbortController budget GENERATION_BUDGET_MS)
+     (OpenAI SDK, baseURL override; AbortController budget GENERATION_BUDGET_MS).
+     Gesture-off quizzes auto-enable the tap/typed types in the prompt
+     (multi_select + short_text with answer_key rubric, allowMultiSelect /
+     allowShortText ORed with gestures_enabled from requireQuizOwner);
+     gesture-on quizzes and the student path stay mcq/true_false (lib-level
+     retry gate, 0069 RPC arm for the short_text save shape)
   4. Parse+validate output twice: JSON.parse guarded → AiQuizSchema (Zod)
      → normalizeOptions (dedupe/fold) → aiQuizToRows (DB-shaped)
      Invalid after one retry ⇒ 422, ZERO writes (atomic replace not reached)

@@ -596,6 +596,10 @@ async function main() {
     title: "InnoVision Live Demo",
     joinCode: "SCAN23",
   });
+  // Walk-up quiz prefix: the reset scripts recreate ONLY quizzes whose title
+  // starts with this (see src/lib/demo/walkup-reset.ts + scripts/demo-reset.mjs).
+  // Curated gesture-off quizzes below keep FIXED titles so resets can tell them
+  // apart from timestamped walk-up recreations.
   await ensureQuiz({
     classId: demoClass,
     createdBy: demoLecturer.id,
@@ -612,6 +616,52 @@ async function main() {
       { type: "mcq", prompt: "Which structure processes the MOST urgent task first?", options: ["Queue", "Stack", "Priority queue", "Array"], correctIndex: 2, explanation: "A priority queue orders by importance, not arrival." },
     ],
   });
+
+  // Gesture-OFF assessment guests can ALSO play: click-to-answer, no camera, so
+  // it works on visitor phones over plain-HTTP LAN (no navigator.mediaDevices).
+  // Untimed like the walk-up quiz — exhibition manual says never time the demo.
+  await ensureQuiz({
+    classId: demoClass,
+    createdBy: demoLecturer.id,
+    title: "Demo Assessment — Click to Answer (No Camera)",
+    mode: "assessment",
+    timeLimitSec: null,
+    status: "live",
+    gesturesEnabled: false,
+    questions: [
+      { type: "mcq", prompt: "A helpdesk handles support tickets in arrival order. Which structure fits?", options: ["Stack", "Queue", "Tree", "Graph"], correctIndex: 1, explanation: "First ticket in is the first handled — FIFO, a queue." },
+      { type: "true_false", prompt: "In a queue, the LAST item added is served first.", options: ["True", "False"], correctIndex: 1, explanation: "That would be a stack (LIFO). A queue serves the oldest item first." },
+      { type: "mcq", prompt: "Pressing undo (Ctrl+Z) repeatedly behaves like a…", options: ["Queue", "Stack", "Priority queue", "Linked list"], correctIndex: 1, explanation: "Undo reverses the most recent action first — LIFO, a stack." },
+      { type: "mcq", prompt: "Which search needs the list to be SORTED first?", options: ["Linear search", "Binary search", "Bubble search", "Hash lookup"], correctIndex: 1, explanation: "Binary search halves the range, which only works on sorted input." },
+      { type: "true_false", prompt: "A priority queue always serves whichever item arrived FIRST.", options: ["True", "False"], correctIndex: 1, explanation: "It serves by importance (priority), not arrival order — that's a plain queue." },
+    ],
+  });
+
+  // Closed + revealed gesture-OFF history: guests see past results (scores,
+  // review) without playing, and the lecturer dashboard has real rows to show.
+  // Sessions are seeded from REAL seeded students (not guests) so the
+  // between-shows reset — which only purges GUEST sessions — keeps this
+  // history intact. No camera traces: a click quiz records none.
+  const demoHistory = await ensureQuiz({
+    classId: demoClass,
+    createdBy: demoLecturer.id,
+    title: "Past Results — Loops & Lists (revealed)",
+    mode: "assessment",
+    timeLimitSec: 420,
+    status: "closed",
+    gesturesEnabled: false,
+    questions: [
+      { type: "mcq", prompt: "Which loop runs its body AT LEAST once, even if the condition starts false?", options: ["for", "while", "do-while", "foreach"], correctIndex: 2, explanation: "do-while checks the condition AFTER the body, so it always runs once." },
+      { type: "true_false", prompt: "Reading an array element by its index takes the same time however big the array is.", options: ["True", "False"], correctIndex: 0, explanation: "Indexing is arithmetic on the base address — O(1)." },
+      { type: "mcq", prompt: "Appending to a dynamic array (ArrayList) is usually…", options: ["O(n²)", "O(n)", "Amortized O(1)", "O(log n)"], correctIndex: 2, explanation: "Occasional resizes average out — effectively constant time." },
+    ],
+  });
+  await ensureRevealed(demoHistory.id);
+  // Seeded history for the lecturer dashboard + guest past-results view.
+  // Staggered starts, mixed scores, no camera traces (gestures-off click quiz).
+  await seedSession({ quizId: demoHistory.id, studentId: danish.id, mode: "assessment", correctCount: 3, totalQuestions: 3, status: "completed", startedMinutesAgo: 3 * 24 * 60, durationMin: 7 });
+  await seedSession({ quizId: demoHistory.id, studentId: aisyah.id, mode: "assessment", correctCount: 2, totalQuestions: 3, status: "completed", startedMinutesAgo: 3 * 24 * 60 + 12, durationMin: 9, wrongOffset: 1 });
+  await seedSession({ quizId: demoHistory.id, studentId: weijian.id, mode: "assessment", correctCount: 1, totalQuestions: 3, status: "completed", startedMinutesAgo: 3 * 24 * 60 + 21, durationMin: 11, wrongOffset: 2 });
 
   // SHOWCASE class: presenter-only (guests NEVER join). Gestures-ON assessment
   // kept DRAFT until showtime; a random, never-printed join code so it cannot
@@ -633,6 +683,24 @@ async function main() {
       { type: "mcq", prompt: "Hold up fingers to answer. Which number is shown as ONE finger?", options: ["1", "2", "3", "4"], correctIndex: 0, explanation: "One finger selects the first option." },
       { type: "true_false", prompt: "The camera verifies the same student answers each question.", options: ["True", "False"], correctIndex: 0, explanation: "Per-answer identity binding is the core control." },
       { type: "mcq", prompt: "A second face in frame triggers a...", options: ["Score bonus", "Second-face advisory", "Skip", "Lockout"], correctIndex: 1, explanation: "The server records a second_face advisory for review." },
+    ],
+  });
+
+  // Showcase gesture-OFF twin (draft, presenter-only): the same assessment
+  // beat answered with clicks instead of fingers, for the side-by-side
+  // modality comparison in the 5-min showcase.
+  await ensureQuiz({
+    classId: demoShowcaseClass,
+    createdBy: demoLecturer.id,
+    title: "Showcase — Click to Answer (gestures OFF)",
+    mode: "assessment",
+    timeLimitSec: 600,
+    status: "draft",
+    gesturesEnabled: false,
+    questions: [
+      { type: "mcq", prompt: "No camera needed — answer with a click. Which structure is FIFO?", options: ["Stack", "Queue", "Tree", "Heap"], correctIndex: 1, explanation: "First in, first out — a queue." },
+      { type: "true_false", prompt: "A click-to-answer quiz still records a score and an answer sheet.", options: ["True", "False"], correctIndex: 0, explanation: "Only the input modality changes; grading is identical." },
+      { type: "mcq", prompt: "Integrity on a click quiz comes from…", options: ["Finger counting", "Session timing + lecturer review", "Voice commands", "Eye tracking only"], correctIndex: 1, explanation: "Timing, attempt patterns, and the lecturer's review of the session." },
     ],
   });
 

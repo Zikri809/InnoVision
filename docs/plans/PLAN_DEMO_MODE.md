@@ -67,9 +67,13 @@ Support two distinct demo audiences on one machine:
   projects a believable roster. Guests are full student principals (can
   author practice quizzes, hit student-AI spend) — accepted booth risk;
   per-user spend caps + the reset scripts contain it.
-- **Two quizzes in TWO classes (leak containment):**
-  - **Demo class** (guests auto-join): contains ONLY the walk-up quiz —
-    **`mode: 'practice'`**. Practice answers reveal correctness + explanation
+- **Gesture-off quiz set in TWO classes (leak containment):**
+  - **Demo class** (guests auto-join): the walk-up quiz (**`mode:
+    'practice'`**) PLUS two curated gesture-off quizzes — a LIVE
+    gesture-off **assessment** (click-to-answer, no camera, so it works on
+    visitor phones over plain-HTTP LAN) and a CLOSED+revealed gesture-off
+    assessment with seeded history (past-results view + lecturer dashboard
+    data). Practice answers reveal correctness + explanation
     instantly on the wire (satisfying booth loop) and skip the face gate
     entirely (gate applies only to `mode === 'assessment'` starts).
     Containment facts (corrected): practice sessions DO create
@@ -184,9 +188,15 @@ Support two distinct demo audiences on one machine:
   **demo class** (fixed join code `SCAN23` — legal alphabet
   `^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$` EXCLUDES O/0/1/I/L; `DEMO23` is
   illegal) + its walk-up practice quiz (live; gestures false
-  belt-and-braces), **showcase class** (random unprinted join code, draft
-  gestures-ON assessment quiz + reuse of the seeded closed history).
-  Idempotent like the rest.
+  belt-and-braces) + a live gesture-off assessment ("Demo Assessment — Click
+  to Answer (No Camera)", untimed) + a closed+revealed gesture-off
+  assessment with seeded sessions ("Past Results — Loops & Lists
+  (revealed)"), **showcase class** (random unprinted join code, draft
+  gestures-ON assessment quiz + a draft gesture-OFF twin for the
+  side-by-side modality beat + reuse of the seeded closed history).
+  Idempotent like the rest. The walk-up quiz owns the `Try InnoVision`
+  title prefix; curated quizzes keep fixed titles so the reset can tell the
+  groups apart (see the as-built note on reset scoping).
 - [ ] **D6. Reset scripts — split by blast radius.** Single source of truth
   in `src/lib/demo/walkup-reset.ts` (service-role admin client,
   `resetWalkup({ maxAgeHours })` → summary object). Thin route
@@ -286,6 +296,16 @@ Support two distinct demo audiences on one machine:
   spec).
 - **Session binding**: the guest route asserts `user.id === guest.id`, not
   just the email domain (adversarial round 1).
+- **Reset scoping for the multi-quiz demo class**: `resetWalkup()` recreates
+  ONLY `Try InnoVision`-prefixed quizzes (cloned from the newest walk-up
+  source) and prunes only stale walk-up rows; curated gesture-off quizzes
+  keep their rows and only lose GUEST `quiz_sessions` (answers cascade), so
+  the seeded past-results history survives between shows. Literal
+  row-recreation of curated quizzes was rejected: it would wipe the results
+  history every reset and triplicate the question banks across seed / route /
+  CLI (the drift the gate parity test exists to prevent). The CLI twin
+  (`scripts/demo-reset.mjs`) mirrors the scoping via the same prefix
+  literal.
 
 ## Critique revisions (folded in)
 

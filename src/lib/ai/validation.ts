@@ -78,6 +78,16 @@ export const GenerateQuizSchema = z.object({
    * lib-level default-false and can never emit multi rows.
    */
   allowMultiSelect: z.boolean().optional().default(false),
+  /**
+   * Gesture-off opt-in (default false): when true, the mixed distribution
+   * may include short_text questions (typed answer + answer_key rubric).
+   * The lecturer route ORs this with the quiz's gesture mode, so
+   * gesture-off quizzes get short-answer variety with no client change.
+   * Deliberately ABSENT from GenerateStudentQuizSchema — the student path
+   * inherits default-false and can never emit a row its table CHECK
+   * (student_questions_no_new_types) would reject.
+   */
+  allowShortText: z.boolean().optional().default(false),
   steeringPrompt: z
     .string()
     .trim()

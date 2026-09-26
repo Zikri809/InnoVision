@@ -168,6 +168,7 @@ export async function POST(request: Request, context?: { params?: Promise<{ id?:
     quizId,
     userId: owner.userId,
     quizTitle: owner.quiz.title,
+    gesturesEnabled: owner.quiz.gestures_enabled,
     body: parsed.data,
     deadlineMs: Date.now() + GENERATION_BUDGET_MS,
   };
@@ -189,6 +190,8 @@ type GenerationContext = {
   quizId: string;
   userId: string;
   quizTitle: string;
+  /** Quiz-level gesture kill switch — drives the gesture-off type opt-ins. */
+  gesturesEnabled: boolean;
   body: z.infer<typeof GenerateQuizSchema>;
   deadlineMs: number;
 };
@@ -574,6 +577,12 @@ async function runAiGeneration(
       : async (messages, timeoutMs) =>
           chatCompletions({ client: ai, model: AI_MODEL, messages, timeoutMs, signal: opts.signal });
 
+  // Gesture-off quizzes unlock the tap/typed types (multi_select via
+  // tap+confirm, short_text via typing) with no client change: the dialog
+  // never sends the flags, so an explicit body opt-in is ORed with the
+  // quiz's own mode. Gesture-on behavior is unchanged (both default false
+  // → byte-identical prompt, lib-level retry gate holds).
+  const gesturesOff = ctx.gesturesEnabled === false;
   return generateQuiz({
     chat,
     text,
@@ -581,7 +590,8 @@ async function runAiGeneration(
     language: body.language,
     difficulty: body.difficulty,
     formatDistribution: body.formatDistribution,
-    allowMultiSelect: body.allowMultiSelect,
+    allowMultiSelect: body.allowMultiSelect || gesturesOff,
+    allowShortText: body.allowShortText || gesturesOff,
     steeringPrompt: body.steeringPrompt,
     deadlineMs: ctx.deadlineMs,
     onEvent: opts.onLibEvent,
@@ -757,7 +767,7 @@ async function saveGeneration(
   const readBack = () =>
     createAdminClient()
       .from("questions")
-      .select("id, quiz_id, order_index, type, prompt, options, correct_index, correct_indices, explanation")
+      .select("id, quiz_id, order_index, type, prompt, options, correct_index, correct_indices, answer_key, explanation")
       .eq("quiz_id", quizId)
       .order("order_index", { ascending: true });
 

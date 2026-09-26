@@ -42,6 +42,7 @@ export function DemoResetButton() {
               enrollments: s.realEnrollmentsRemoved,
               recreated: s.quizRecreated ? "✓" : "✕",
               stale: s.staleQuizzesDeleted,
+              cleared: s.curatedGuestSessionsCleared ?? 0,
             })
           : t("doneCta"),
       );

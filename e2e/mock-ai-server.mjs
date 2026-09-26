@@ -56,6 +56,43 @@ const BRACES_QUIZ = {
 // Invalid twice → exercises the validation-retry path end-to-end.
 const INVALID_JSON = "{not valid json";
 
+// Gesture-off generation fixture (scenario [MOCK:gesture_off]): a mix the
+// gesture-on contract would reject — multi_select + short_text with a rubric.
+// Returned ONLY when the pasted source text carries the marker, so parallel
+// workers on the default fixture never see it.
+const GESTURE_OFF_QUIZ = {
+  title: "Gesture-Off Matter Quiz",
+  questions: [
+    { type: "mcq", prompt: "What is 2+2?", options: ["3", "4"], correct_index: 1, explanation: null },
+    { type: "true_false", prompt: "Water boils at 100°C at sea level.", options: ["True", "False"], correct_index: 0, explanation: null },
+    { type: "multi_select", prompt: "Which are prime numbers?", options: ["2", "3", "4"], correct_indices: [0, 1], explanation: null },
+    { type: "short_text", prompt: "Why does ice float on water?", options: [], answer_key: "Ice is less dense than liquid water.", explanation: null },
+  ],
+};
+
+// Malformed gesture-off fixture (scenario [MOCK:gesture_off_invalid]): the
+// short_text row has NO answer_key — schema validation must fail twice and
+// the route must 422 with zero rows saved (atomicity proof).
+const GESTURE_OFF_INVALID_QUIZ = {
+  title: "Bad Gesture-Off Quiz",
+  questions: [
+    { type: "mcq", prompt: "What is 2+2?", options: ["3", "4"], correct_index: 1, explanation: null },
+    { type: "true_false", prompt: "Sun is hot.", options: ["True", "False"], correct_index: 0, explanation: null },
+    { type: "short_text", prompt: "Why is the sky blue?", options: [] },
+  ],
+};
+
+// Regenerate answers per kept type. The kept type is sniffed from the request
+// itself ("Keep the SAME type (short_text)") — deterministic with no marker,
+// so parallel workers never cross-contaminate.
+const SHORT_VALID_QUESTION = {
+  type: "short_text",
+  prompt: "REPLACED: Why does ice float?",
+  options: [],
+  answer_key: "Frozen water is less dense than liquid water.",
+  explanation: null,
+};
+
 function sse(res, chunks, { delayMs = 10 } = {}) {
   res.writeHead(200, { "content-type": "text/event-stream" });
   let i = 0;
@@ -143,13 +180,22 @@ const server = http.createServer((req, res) => {
       if (body.stream) {
         if (isRegenerate) {
           // Regenerate is legacy (non-streaming) today; still answer correctly.
+          // A kept short_text type gets the rubric-carrying rewrite.
+          const keptShort = userMsg.includes("Keep the SAME type (short_text)");
+          const content = keptShort ? SHORT_VALID_QUESTION : VALID_QUESTION;
           res.writeHead(200);
-          res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: JSON.stringify(VALID_QUESTION) } }] }));
+          res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: JSON.stringify(content) } }] }));
           return;
         }
         switch (scenario) {
           case "braces":
             streamQuizContent(res, BRACES_QUIZ);
+            return;
+          case "gesture_off":
+            streamQuizContent(res, GESTURE_OFF_QUIZ);
+            return;
+          case "gesture_off_invalid":
+            streamQuizContent(res, GESTURE_OFF_INVALID_QUIZ);
             return;
           case "invalid":
             streamQuizContent(res, INVALID_JSON);
@@ -211,6 +257,16 @@ const server = http.createServer((req, res) => {
         return;
       }
 
+      // Regenerate answers per kept type (no marker — sniffed from the
+      // request, so parallel workers never cross-contaminate).
+      if (isRegenerate) {
+        const keptShort = userMsg.includes("Keep the SAME type (short_text)");
+        content = JSON.stringify(keptShort ? SHORT_VALID_QUESTION : VALID_QUESTION);
+        res.writeHead(200);
+        res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content } }] }));
+        return;
+      }
+
       switch (scenario) {
         case "invalid":
           content = INVALID_JSON;
@@ -218,8 +274,14 @@ const server = http.createServer((req, res) => {
         case "braces":
           content = JSON.stringify(BRACES_QUIZ);
           break;
+        case "gesture_off":
+          content = JSON.stringify(GESTURE_OFF_QUIZ);
+          break;
+        case "gesture_off_invalid":
+          content = JSON.stringify(GESTURE_OFF_INVALID_QUIZ);
+          break;
         default:
-          content = isRegenerate ? JSON.stringify(VALID_QUESTION) : JSON.stringify(VALID_QUIZ);
+          content = JSON.stringify(VALID_QUIZ);
       }
 
       res.writeHead(200);

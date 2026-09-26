@@ -68,6 +68,10 @@ export async function requireQuizOwner(
         mode: Database["public"]["Enums"]["quiz_mode"];
         status: Database["public"]["Enums"]["quiz_status"];
         time_limit_sec: number | null;
+        /** v4.9 gesture kill switch — lets AI generation auto-enable the
+         * gesture-off question types (multi_select, short_text) for
+         * gesture-off quizzes without a client change. */
+        gestures_enabled: boolean;
       };
     }
   | { ok: false; response: Response }
@@ -87,7 +91,7 @@ export async function requireQuizOwner(
   const { data: row, error } = await supabase
     .from("quizzes")
     .select(
-      "id, class_id, title, mode, status, time_limit_sec, classes!inner(lecturer_id)",
+      "id, class_id, title, mode, status, time_limit_sec, gestures_enabled, classes!inner(lecturer_id)",
     )
     .eq("id", quizId)
     .eq("classes.lecturer_id", auth.userId)
@@ -106,6 +110,7 @@ export async function requireQuizOwner(
     mode: row.mode,
     status: row.status,
     time_limit_sec: row.time_limit_sec,
+    gestures_enabled: row.gestures_enabled ?? true,
   };
 
   return { ok: true, userId: auth.userId, quiz };

@@ -1579,12 +1579,12 @@
     "checkTinyfishKey": "Kunci TinyFish ditetapkan (carian web berpandukan)",
     "checkSidecar": "Sidecar muka boleh dicapai",
     "resetCta": "Set semula demo walk-up (antara persembahan sahaja)",
-    "resetWarning": "Ini memadam tetamu demo lebih 2j, membuang pendaftaran bukan tetamu dari kelas demo, dan mencipta semula kuiz walk-up. Pelawat yang sedang menjawab akan terganggu. Jalankan hanya antara persembahan.",
+    "resetWarning": "Ini memadam tetamu demo lebih 2j, membuang pendaftaran bukan tetamu dari kelas demo, mencipta semula kuiz walk-up, dan memadam percubaan tetamu pada kuiz demo yang lain. Pelawat yang sedang menjawab akan terganggu. Jalankan hanya antara persembahan.",
     "resetConfirm": "Ya, set semula sekarang",
     "resetCancel": "Batal",
     "resetBusy": "Sedang set semula…",
     "resetFailed": "Set semula gagal.",
-    "resetDone": "Dipadam {guests} tetamu, dibuang {enrollments} pendaftaran sebenar, kuiz dicipta semula: {recreated}, kuiz lama dipadam: {stale}.",
+    "resetDone": "Dipadam {guests} tetamu, dibuang {enrollments} pendaftaran sebenar, kuiz dicipta semula: {recreated}, kuiz lama dipadam: {stale}, percubaan tetamu dipadam pada kuiz terpilih: {cleared}.",
     "runSheetBody": "Trek orang ramai: pelawat mengimbas kod QR kelas di /join/{code}, ketik Sertai demo, dan bermain. Trek penyampai: log masuk sebagai pensyarah demo, jalankan lawatan 10 minit (cipta kelas → jana AI → terbitkan → pemantauan langsung → tutup/dedah → integriti), kemudian pertunjukan 5 minit (pendaftaran muka → gerak isyarat → jeda sengaja → tanda → buka kunci). Ia juga ada pada senarai tugas bercetak."
   },
   "media": {

@@ -12,8 +12,10 @@
 //      enrollments/sessions/answers);
 //   2. find the demo class by join code (DEMO_JOIN_CODE = SCAN23);
 //   3. strip non-guest enrollments from the demo class;
-//   4. recreate a fresh walk-up practice quiz cloned from the newest existing
-//      one, then delete the stale ones.
+//   4. recreate a fresh walk-up practice quiz cloned from the newest WALK-UP
+//      one (title prefix "Try InnoVision"), then delete the stale walk-up
+//      ones; clear remaining guest sessions on curated gesture-off quizzes
+//      (their rows + seeded history are kept).
 //
 // Run:  node scripts/demo-reset.mjs [--max-age-hours=2] [--skip-guest-purge]
 //                                   [--remote]
@@ -30,6 +32,10 @@ if (isRemote) await confirmRemote("RESET the walk-up demo (delete guests, recrea
 const DEMO_JOIN_CODE = "SCAN23"; // MUST equal src/lib/demo/gate.ts DEMO_JOIN_CODE
 const DEMO_LECTURER_EMAIL = "demo-lecturer@innovision.test";
 const GUEST_DOMAIN = "demo.innovision.test";
+// MUST equal WALKUP_QUIZ_TITLE_PREFIX in src/lib/demo/walkup-reset.ts: only
+// quizzes with this title prefix are recreated; curated gesture-off quizzes
+// (fixed titles) keep their rows and only lose guest attempts.
+const WALKUP_QUIZ_TITLE_PREFIX = "Try InnoVision";
 
 const maxAgeArg = process.argv.find((a) => a.startsWith("--max-age-hours="));
 const MAX_AGE_HOURS = maxAgeArg ? Number(maxAgeArg.split("=")[1]) : 2;
@@ -61,6 +67,8 @@ async function main() {
     staleQuizzesDeleted: 0,
     demoClassFound: false,
     quizRecreateFailedReason: undefined,
+    curatedGuestSessionsCleared: 0,
+    curatedQuizzesPreserved: 0,
   };
 
   let demoLecturerId = null;
@@ -119,13 +127,35 @@ async function main() {
   log(`  - removed ${summary.realEnrollmentsRemoved} real enrollment(s)`);
 
   // Recreate the walk-up quiz (guarded ordering: never delete the source until
-  // a replacement is verified live).
+  // a replacement is verified live). Scoped to WALK-UP-titled quizzes so the
+  // curated gesture-off quizzes are never collapsed into the clone; their
+  // guest attempts are cleared instead (seeded history is kept).
   const { data: quizzes } = await admin
     .from("quizzes")
     .select("id, title, created_at")
     .eq("class_id", demoClass.id)
     .order("created_at", { ascending: false });
-  const source = (quizzes ?? [])[0];
+  const walkupQuizzes = (quizzes ?? []).filter((q) =>
+    (q.title ?? "").startsWith(WALKUP_QUIZ_TITLE_PREFIX),
+  );
+  const curatedQuizzes = (quizzes ?? []).filter(
+    (q) => !(q.title ?? "").startsWith(WALKUP_QUIZ_TITLE_PREFIX),
+  );
+  summary.curatedQuizzesPreserved = curatedQuizzes.length;
+  const source = walkupQuizzes[0] ?? (quizzes ?? [])[0];
+
+  if (curatedQuizzes.length > 0 && guestIds.size > 0) {
+    const { count, error: clearError } = await admin
+      .from("quiz_sessions")
+      .delete({ count: "exact" })
+      .in(
+        "quiz_id",
+        curatedQuizzes.map((q) => q.id),
+      )
+      .in("student_id", [...guestIds]);
+    if (!clearError) summary.curatedGuestSessionsCleared = count ?? 0;
+    log(`  - cleared ${summary.curatedGuestSessionsCleared} guest session(s) on ${curatedQuizzes.length} curated quiz(zes)`);
+  }
   if (source && demoLecturerId) {
     const { data: questions, error: questionsError } = await admin
       .from("questions")
@@ -181,8 +211,8 @@ async function main() {
       return summary;
     }
 
-    // Verified live → prune the stale quizzes.
-    const staleIds = (quizzes ?? []).map((q) => q.id).filter((id) => id !== created.id);
+    // Verified live → prune the stale WALK-UP quizzes (curated ids excluded).
+    const staleIds = walkupQuizzes.map((q) => q.id).filter((id) => id !== created.id);
     if (staleIds.length > 0) {
       const { count } = await admin.from("quizzes").delete({ count: "exact" }).in("id", staleIds);
       summary.staleQuizzesDeleted = count ?? 0;

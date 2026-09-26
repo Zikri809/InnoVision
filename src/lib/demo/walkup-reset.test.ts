@@ -22,7 +22,7 @@ interface Recorded {
 function makeAdmin(opts: {
   questions?: unknown[] | null;
   questionsError?: unknown;
-  quizzes?: { id: string; created_at: string }[];
+  quizzes?: { id: string; title?: string; created_at: string }[];
   users?: { id: string; email: string; created_at: string }[];
 }): { admin: SupabaseClient<Database>; rec: Recorded } {
   const rec: Recorded = { quizDeletes: [] };
@@ -72,7 +72,9 @@ function makeAdmin(opts: {
         if (mode === "insert") return { data: { id: NEW_QUIZ }, error: null };
         if (mode === "update") return { data: null, error: null };
         return {
-          data: opts.quizzes ?? [{ id: SOURCE_QUIZ, created_at: "2026-01-01T00:00:00Z" }],
+          data: opts.quizzes ?? [
+            { id: SOURCE_QUIZ, title: "Try InnoVision — Live Demo", created_at: "2026-01-01T00:00:00Z" },
+          ],
           error: null,
         };
       }
@@ -128,6 +130,30 @@ describe("resetWalkup — ordering guarantees", () => {
     expect(summary.quizRecreated).toBe(false);
     expect(summary.quizRecreateFailedReason).toBe("source_empty");
     expect(rec.quizDeletes.length).toBe(0);
+  });
+
+  it("curated quizzes are preserved: the stale prune touches only walk-up rows", async () => {
+    const CURATED = "quiz-curated";
+    const { admin, rec } = makeAdmin({
+      quizzes: [
+        {
+          id: SOURCE_QUIZ,
+          title: "Try InnoVision — Live Demo",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+        {
+          id: CURATED,
+          title: "Demo Assessment — Click to Answer (No Camera)",
+          created_at: "2026-01-02T00:00:00Z",
+        },
+      ],
+    });
+    const summary = await resetWalkup(admin);
+    expect(summary.quizRecreated).toBe(true);
+    expect(summary.curatedQuizzesPreserved).toBe(1);
+    expect(rec.quizDeletes.length).toBe(1);
+    expect(rec.quizDeletes[0]).toContain(SOURCE_QUIZ);
+    expect(rec.quizDeletes[0]).not.toContain(CURATED);
   });
 
   it("no demo lecturer → reason no_lecturer, no delete", async () => {

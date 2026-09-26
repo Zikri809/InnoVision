@@ -684,3 +684,70 @@ describe("I-PREAMBLE � generate route preamble pins (plan �6 blind-spot fix)
     expect(wire.toLowerCase()).toContain("hard"); // difficulty marker
   });
 });
+
+describe("Gesture-off — generation auto-enables multi + short_text", () => {
+  const gestureOffQuizJson = JSON.stringify({
+    title: "Gesture-off quiz",
+    questions: [
+      { type: "mcq", prompt: "What is 2+2?", options: ["3", "4"], correct_index: 1 },
+      { type: "true_false", prompt: "Sun is hot.", options: ["True", "False"], correct_index: 0 },
+      {
+        type: "multi_select",
+        prompt: "Which are prime?",
+        options: ["2", "3", "4"],
+        correct_indices: [0, 1],
+      },
+      {
+        type: "short_text",
+        prompt: "Why is the sky blue?",
+        options: [],
+        answer_key: "Rayleigh scattering.",
+      },
+    ],
+  });
+
+  it("gesture-off quiz accepts a multi + short AI payload with no body flags", async () => {
+    const ctx = ownerContext();
+    const quizRow = ctx.client.tables["quizzes"]?.find((q) => q.id === QUIZ_C);
+    if (quizRow) quizRow.gestures_enabled = false;
+    stubAiContent(gestureOffQuizJson);
+    const { generate } = await importHandlers();
+    const res = await generate.POST(
+      req({ quizId: QUIZ_C, extractedText: "Chapter text", questionCount: 4 }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const types = (body.questions as Array<{ type: string }>).map((q) => q.type);
+    expect(types).toContain("multi_select");
+    expect(types).toContain("short_text");
+  });
+
+  it("gesture-on quiz still rejects short output (retry → 422, zero rows)", async () => {
+    ownerContext(); // seeded quiz has no gestures_enabled → guard defaults true
+    stubAiContent(gestureOffQuizJson);
+    const { generate } = await importHandlers();
+    const res = await generate.POST(
+      req({ quizId: QUIZ_C, extractedText: "Chapter text", questionCount: 4 }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe("invalid_ai_output");
+    expect(currentClient().tables["questions"] ?? []).toHaveLength(0);
+  });
+
+  it("gesture-off prompt advertises short_text on the wire", async () => {
+    const ctx = ownerContext();
+    const quizRow = ctx.client.tables["quizzes"]?.find((q) => q.id === QUIZ_C);
+    if (quizRow) quizRow.gestures_enabled = false;
+    resetCapturedChatBodies();
+    const { generate } = await importHandlers();
+    const res = await generate.POST(
+      req({ quizId: QUIZ_C, extractedText: "Chapter text", questionCount: 4 }),
+      { params: Promise.resolve({ id: QUIZ_C }) },
+    );
+    expect(res.status).toBe(200);
+    expect(capturedChatBodies.length).toBeGreaterThan(0);
+    expect(String(capturedChatBodies[0])).toContain("short_text");
+  });
+});

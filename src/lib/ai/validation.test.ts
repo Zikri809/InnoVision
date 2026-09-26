@@ -155,6 +155,34 @@ describe("QT-1 — allowMultiSelect flag plumbing", () => {
   });
 });
 
+describe("Gesture-off — allowShortText flag plumbing", () => {
+  it("U-ST-V1 GenerateQuizSchema defaults allowShortText to false", () => {
+    const r = GenerateQuizSchema.safeParse({
+      quizId: "00000000-0000-4000-8000-00000000000c",
+      sourcePath: "00000000-0000-4000-8000-00000000000a/00000000-0000-4000-8000-00000000000c/notes.pdf",
+    });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.allowShortText).toBe(false);
+  });
+
+  it("U-ST-V2 GenerateQuizSchema accepts allowShortText: true", () => {
+    const r = GenerateQuizSchema.safeParse({
+      quizId: "00000000-0000-4000-8000-00000000000c",
+      allowShortText: true,
+    });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.allowShortText).toBe(true);
+  });
+
+  it("U-ST-V3 GenerateStudentQuizSchema is strict — the flag is not leakable", () => {
+    const r = GenerateStudentQuizSchema.safeParse({
+      extractedText: "notes",
+      allowShortText: true,
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
 describe("GenerateQuizSchema — grounded web search (augmentation mode)", () => {
   const BASE = { quizId: "00000000-0000-4000-8000-00000000000c" };
 

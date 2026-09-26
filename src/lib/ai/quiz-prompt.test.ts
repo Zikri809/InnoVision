@@ -577,6 +577,89 @@ describe("QT-1 — allowMultiSelect gating", () => {
     }
   });
 
+  it("U-QT1-P6 default prompt never mentions short_text (unrelated flag)", () => {
+    expect(buildQuizSystemPrompt()).not.toContain("short_text");
+    expect(buildQuizSystemPrompt({ allowMultiSelect: true })).not.toContain("short_text");
+  });
+});
+
+describe("Gesture-off — allowShortText gating", () => {
+  const shortJson = JSON.stringify({
+    title: "Mixed quiz",
+    questions: [
+      { type: "mcq", prompt: "What is 2+2?", options: ["3", "4"], correct_index: 1 },
+      { type: "true_false", prompt: "Sun is hot.", options: ["True", "False"], correct_index: 0 },
+      {
+        type: "short_text",
+        prompt: "Why is the sky blue?",
+        options: [],
+        answer_key: "Rayleigh scattering by air molecules.",
+      },
+    ],
+  });
+
+  it("U-ST-P1 default prompt never mentions short_text (byte-identical default)", () => {
+    expect(buildQuizSystemPrompt()).not.toContain("short_text");
+    expect(buildQuizSystemPrompt()).not.toContain("answer_key");
+    expect(buildQuizSystemPrompt({ formatDistribution: "mixed" })).not.toContain("short_text");
+  });
+
+  it("U-ST-P2 opt-in prompt advertises short_text + answer_key", () => {
+    const prompt = buildQuizSystemPrompt({ allowShortText: true });
+    expect(prompt).toContain("short_text");
+    expect(prompt).toContain("answer_key");
+  });
+
+  it("U-ST-P3 default (flag off) rejects short output via the retry loop", async () => {
+    const res = await generateQuiz({
+      chat: okChat(shortJson),
+      text: "chapter",
+      questionCount: 10,
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error).toBe("invalid_ai_output");
+      expect(res.message).toContain("Short-text");
+    }
+  });
+
+  it("U-ST-P4 opt-in (flag on) accepts the mixed quiz", async () => {
+    const res = await generateQuiz({
+      chat: okChat(shortJson),
+      text: "chapter",
+      questionCount: 10,
+      allowShortText: true,
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.quiz.questions.some((q) => q.type === "short_text")).toBe(true);
+    }
+  });
+
+  it("U-ST-P5 regenerate keeps the short type and its rubric key", async () => {
+    const shortQuestion: AiQuestion = {
+      type: "short_text",
+      prompt: "Old short",
+      options: [],
+      answer_key: "Old rubric.",
+    };
+    const rewritten = JSON.stringify({
+      type: "short_text",
+      prompt: "New short",
+      options: [],
+      answer_key: "New rubric.",
+    });
+    const res = await regenerateQuestion({
+      chat: okChat(rewritten),
+      question: shortQuestion,
+      siblings: [],
+    });
+    expect(res.ok).toBe(true);
+    // The kept-type system prompt must have advertised answer_key.
+    expect(buildRegenerateSystemPrompt("auto", "short_text")).toContain("answer_key");
+    expect(buildRegenerateSystemPrompt("auto", "mcq")).not.toContain("answer_key");
+  });
+
   it("U-QT1-P5 regenerate keeps the multi type and its set key", async () => {
     const multiQuestion: AiQuestion = {
       type: "multi_select",

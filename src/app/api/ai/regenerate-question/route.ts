@@ -84,7 +84,7 @@ export async function POST(request: Request, context?: { params?: Promise<{ id?:
   const admin = createAdminClient();
   const { data: questionRow, error: qErr } = await admin
     .from("questions")
-    .select("id, quiz_id, order_index, type, prompt, options, correct_index, correct_indices, explanation")
+    .select("id, quiz_id, order_index, type, prompt, options, correct_index, correct_indices, answer_key, explanation")
     .eq("id", questionId)
     .maybeSingle();
 
@@ -152,6 +152,7 @@ async function handleRegenerate(ctx: {
     options: string[];
     correct_index: number | null;
     correct_indices: number[] | null;
+    answer_key: string | null;
     explanation: string | null;
   };
   instruction?: string;
@@ -159,23 +160,12 @@ async function handleRegenerate(ctx: {
 }): Promise<NextResponse> {
   const { supabase, questionId, questionRow, instruction, signal } = ctx;
 
-  // short_text (v4.9) has no arm in the AI question contract: its key is a
-  // lecturer-authored rubric, and a rewrite would have to invent one. Reject
-  // it here rather than feed the model an option-less row it cannot answer
-  // (the builder hides the button for the type; this is the route's backstop).
-  if (questionRow.type === "short_text") {
-    return unprocessable(
-      "Short-text questions cannot be regenerated — edit the answer key instead.",
-      "unsupported_question_type",
-    );
-  }
-
   // Load siblings for coherence (excluding the target). Service-role read —
   // same D2-19 reason as the target fetch above; ownership was proven before
   // this helper is reached.
   const { data: siblingRows, error: sibErr } = await createAdminClient()
     .from("questions")
-    .select("id, quiz_id, order_index, type, prompt, options, correct_index, correct_indices, explanation")
+    .select("id, quiz_id, order_index, type, prompt, options, correct_index, correct_indices, answer_key, explanation")
     .eq("quiz_id", questionRow.quiz_id)
     .neq("id", questionId)
     .order("order_index", { ascending: true });
@@ -185,8 +175,20 @@ async function handleRegenerate(ctx: {
     return internalError("Could not load the question list right now.");
   }
 
-  const toAi = (r: typeof questionRow): AiQuestion =>
-    r.type === "multi_select"
+  const toAi = (r: typeof questionRow): AiQuestion => {
+    // short_text IS in the AI contract now: the rubric flows in as the
+    // answer_key so a keep-SAME-type regen rewrites prompt + rubric
+    // together (previously rejected as unsupported_question_type).
+    if (r.type === "short_text") {
+      return {
+        type: r.type,
+        prompt: r.prompt,
+        options: [],
+        answer_key: r.answer_key ?? "",
+        explanation: r.explanation ?? undefined,
+      };
+    }
+    return r.type === "multi_select"
       ? {
           type: r.type,
           prompt: r.prompt,
@@ -203,13 +205,11 @@ async function handleRegenerate(ctx: {
           correct_index: r.correct_index ?? 0,
           explanation: r.explanation ?? undefined,
         };
+  };
   const target = toAi(questionRow);
-  // short_text siblings carry no options/correct_index, so they cannot enter
-  // the AI context as questions — they are dropped rather than coerced into a
-  // shape the model would then imitate.
-  const siblings = (siblingRows ?? [])
-    .filter((r) => r.type !== "short_text")
-    .map((r) => toAi(r as typeof questionRow));
+  // Every sibling type now has a faithful AI shape (short_text included),
+  // so all enter the coherence context — the model must not duplicate them.
+  const siblings = (siblingRows ?? []).map((r) => toAi(r as typeof questionRow));
 
   // 6. AI call. Explicit deadline (same budget as generate-quiz) so the route
   // never silently inherits a changed default inside regenerateQuestion. The
@@ -250,14 +250,55 @@ async function handleRegenerate(ctx: {
   // Normalize options + remap the answer key before writing (U-A8/I-A8).
   // Multi-select (QT-1) remaps the sorted+distinct correct SET; a vanished
   // correct option (duplicate collapse) fails the regen cleanly.
+  // Short-text has no options to normalize — its rubric writes verbatim
+  // (schema-validated 1..500, mirroring questions_answer_key_shape).
   const q = result.question;
+  const isShort = q.type === "short_text";
   const isMulti = q.type === "multi_select";
-  const normalized = normalizeOptions(
-    q.options,
-    isMulti ? (q.correct_indices as number[]) : (q.correct_index as number),
-  );
-  if (!normalized) {
-    return unprocessable("The regenerated question lost its correct answer. Try again.", "invalid_ai_output");
+
+  // The write payload per kept type (the invariant above guarantees
+  // q.type === questionRow.type, so a short regen always writes short).
+  let updatePayload: {
+    type: typeof q.type;
+    prompt: string;
+    options: string[];
+    correct_index: number | null;
+    correct_indices: number[] | null;
+    answer_key?: string | null;
+    explanation: string | null;
+  };
+  if (isShort) {
+    // q.answer_key is schema-guaranteed non-empty for short_text rows
+    // (AiQuestionSchema arm + the retry gate); the flat inferred type
+    // keeps it optional, which the payload's optional field accepts.
+    updatePayload = {
+      type: q.type,
+      prompt: q.prompt,
+      options: [],
+      correct_index: null,
+      correct_indices: null,
+      answer_key: q.answer_key,
+      explanation: q.explanation ?? null,
+    };
+  } else {
+    const normalized = normalizeOptions(
+      q.options,
+      isMulti ? (q.correct_indices as number[]) : (q.correct_index as number),
+    );
+    if (!normalized) {
+      return unprocessable("The regenerated question lost its correct answer. Try again.", "invalid_ai_output");
+    }
+    updatePayload = {
+      type: q.type,
+      prompt: q.prompt,
+      options: normalized.options,
+      correct_index: isMulti ? null : (normalized.correct_index ?? null),
+      correct_indices: isMulti ? (normalized.correct_indices ?? null) : null,
+      // A regen is a rewrite: a choice row must not retain a rubric the
+      // manual UI forbids (stray keys survive an UPDATE that omits them).
+      answer_key: null,
+      explanation: q.explanation ?? null,
+    };
   }
 
   // audit-3 F-F1: cancel checkpoint BEFORE the DB write. Even when the abort
@@ -280,17 +321,10 @@ async function handleRegenerate(ctx: {
   const admin = createAdminClient();
   const { data: updated, error: updErr } = await admin
     .from("questions")
-    .update({
-      type: q.type,
-      prompt: q.prompt,
-      options: normalized.options,
-      correct_index: isMulti ? null : (normalized.correct_index ?? null),
-      correct_indices: isMulti ? (normalized.correct_indices ?? null) : null,
-      explanation: q.explanation ?? null,
-    })
+    .update(updatePayload)
     .eq("id", questionId)
     .eq("quiz_id", questionRow.quiz_id)
-    .select("id, quiz_id, order_index, type, prompt, options, correct_index, correct_indices, explanation")
+    .select("id, quiz_id, order_index, type, prompt, options, correct_index, correct_indices, answer_key, explanation")
     .single();
 
   if (updErr) {

@@ -83,6 +83,20 @@ export default async function DemoPage() {
       ok: Boolean(liveQuiz?.id),
       detail: liveQuiz?.title,
     });
+    // Gesture-off live assessment: the second guest-playable quiz.
+    const { data: liveAssessment } = await admin
+      .from("quizzes")
+      .select("id, title, status")
+      .eq("class_id", demoClass.id)
+      .eq("mode", "assessment")
+      .eq("status", "live")
+      .limit(1)
+      .maybeSingle();
+    checks.push({
+      label: t("checkQuiz"),
+      ok: Boolean(liveAssessment?.id),
+      detail: liveAssessment?.title,
+    });
   }
 
   // AI keys (generation/showcase features fail without them).
@@ -107,9 +121,9 @@ export default async function DemoPage() {
       <section className="mt-8">
         <h2 className="font-heading text-lg font-bold">{t("preflightHeading")}</h2>
         <ul className="mt-3 space-y-2">
-          {checks.map((c) => (
+          {checks.map((c, i) => (
             <li
-              key={c.label}
+              key={`${i}-${c.label}-${c.detail ?? ""}`}
               className="flex items-center gap-3 rounded-2xl border-[3px] border-border bg-card px-4 py-3 text-sm font-semibold shadow-[var(--shadow-clay-sm)]"
             >
               <span

@@ -139,6 +139,7 @@ describe("requireQuizOwner", () => {
     mode: "assessment",
     status: "draft",
     time_limit_sec: 600,
+    gestures_enabled: true,
   };
 
   it("owner resolves the explicit quiz projection (no classes payload leak)", async () => {
@@ -153,6 +154,17 @@ describe("requireQuizOwner", () => {
       expect(result.quiz).toEqual(QUIZ_ROW);
       expect(JSON.stringify(result.quiz)).not.toContain("lecturer_id");
     }
+  });
+
+  it("gesture-off quizzes surface gestures_enabled:false (AI generation gating)", async () => {
+    const { stub } = makeStub({
+      user: { id: LECTURER_ID },
+      profile: { role: "lecturer" },
+      quiz: { ...QUIZ_ROW, gestures_enabled: false, classes: { lecturer_id: LECTURER_ID } },
+    });
+    const result = await requireQuizOwner(stub, QUIZ_ID);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.quiz.gestures_enabled).toBe(false);
   });
 
   it("missing/non-owned quiz → 404 no-oracle", async () => {

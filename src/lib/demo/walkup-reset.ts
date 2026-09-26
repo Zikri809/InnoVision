@@ -16,11 +16,14 @@ import { DEMO_JOIN_CODE, DEMO_GUEST_EMAIL_DOMAIN } from "@/lib/demo/gate";
  *  3. Strip non-guest enrollments from the demo class (a visitor who scanned
  *     with their REAL account before/after a show must not linger in the demo
  *     roster).
- *  4. Recreate a FRESH walk-up practice quiz by cloning the newest existing
- *     demo-class quiz's questions (quizzes are one-way lifecycle: recreate,
- *     never re-publish a closed/revealed row). The stale quizzes are deleted
- *     ONLY AFTER the replacement is verified live — a failed clone must never
- *     leave the demo class with nothing to play.
+ *  4. Recreate a FRESH walk-up practice quiz by cloning the newest WALK-UP
+ *     demo-class quiz's questions (title prefix `Try InnoVision`; quizzes are
+ *     one-way lifecycle: recreate, never re-publish a closed/revealed row).
+ *     The stale walk-up quizzes are deleted ONLY AFTER the replacement is
+ *     verified live — a failed clone must never leave the demo class with
+ *     nothing to play. Curated gesture-off quizzes (fixed titles) are never
+ *     recreated; only guest attempts on them are cleared (seeded history from
+ *     real students is kept for the results dashboard).
  *
  * Direct table writes under the service role (rather than an RPC) are the
  * deliberate posture for this booth-only reset: every other assessment write
@@ -37,6 +40,14 @@ import { DEMO_JOIN_CODE, DEMO_GUEST_EMAIL_DOMAIN } from "@/lib/demo/gate";
 /** Kept in sync with scripts/seed-demo.mjs and scripts/demo-reset.mjs. */
 export const DEMO_LECTURER_EMAIL = "demo-lecturer@innovision.test";
 
+/**
+ * Title prefix of the walk-up quiz (scripts/seed-demo.mjs). The reset
+ * recreates ONLY quizzes with this prefix; curated gesture-off quizzes
+ * ("Demo Assessment …", "Past Results …") keep FIXED titles so the two groups
+ * can never be confused, even after the walk-up title gains a timestamp.
+ */
+export const WALKUP_QUIZ_TITLE_PREFIX = "Try InnoVision";
+
 export interface WalkupResetOptions {
   /** Delete guests older than this many hours. 0 = delete all guests. */
   maxAgeHours?: number;
@@ -51,6 +62,10 @@ export interface WalkupResetSummary {
   newQuizId: string | null;
   staleQuizzesDeleted: number;
   demoClassFound: boolean;
+  /** Guest attempts cleared on the curated demo quizzes (seeded history kept). */
+  curatedGuestSessionsCleared: number;
+  /** Curated demo quizzes left in place (rows never recreated). */
+  curatedQuizzesPreserved: number;
   /**
    * Why the quiz recreation did not happen (for the /demo operator). Absent on
    * success. Values: "questions_read_error" | "source_empty" | "create_failed"
@@ -108,6 +123,8 @@ export async function resetWalkup(
     newQuizId: null,
     staleQuizzesDeleted: 0,
     demoClassFound: false,
+    curatedGuestSessionsCleared: 0,
+    curatedQuizzesPreserved: 0,
   };
 
   const { guestIds, demoLecturerId, users } = await listDemoUsers(admin);
@@ -154,13 +171,43 @@ export async function resetWalkup(
     if (!error) summary.realEnrollmentsRemoved = realIds.length;
   }
 
-  // 4. Recreate the walk-up quiz from the newest existing demo-class quiz.
+  // 4. Recreate the walk-up quiz from the newest WALK-UP demo-class quiz.
+  // Curated gesture-off quizzes (fixed titles, seeded history) are NEVER
+  // recreated: their rows stay in place and only GUEST attempts on them are
+  // cleared below. Scoping by title prefix is what stops a multi-quiz demo
+  // class from collapsing into a single clone.
   const { data: quizzes } = await admin
     .from("quizzes")
-    .select("id, created_at")
+    .select("id, title, created_at")
     .eq("class_id", demoClass.id)
     .order("created_at", { ascending: false });
-  const source = quizzes?.[0];
+  const walkupQuizzes = (quizzes ?? []).filter((q) =>
+    (q.title ?? "").startsWith(WALKUP_QUIZ_TITLE_PREFIX),
+  );
+  const curatedQuizzes = (quizzes ?? []).filter(
+    (q) => !(q.title ?? "").startsWith(WALKUP_QUIZ_TITLE_PREFIX),
+  );
+  summary.curatedQuizzesPreserved = curatedQuizzes.length;
+  // Backwards compat: a legacy demo class whose walk-up quiz predates the
+  // title-prefix convention still yields a source; the stale-prune below only
+  // ever touches walk-up-titled rows, so curated rows are safe either way.
+  const source = walkupQuizzes[0] ?? quizzes?.[0];
+
+  // 4b. Clear guest attempts on the curated quizzes (answers cascade from the
+  // session rows). Seeded history belongs to REAL seeded students, not guests,
+  // so the past-results dashboard survives the reset. Runs BEFORE the walk-up
+  // recreation so a walk-up failure still leaves curated quizzes guest-clean.
+  if (curatedQuizzes.length > 0 && guestIds.size > 0) {
+    const { count, error: clearError } = await admin
+      .from("quiz_sessions")
+      .delete({ count: "exact" })
+      .in(
+        "quiz_id",
+        curatedQuizzes.map((q) => q.id),
+      )
+      .in("student_id", [...guestIds]);
+    if (!clearError) summary.curatedGuestSessionsCleared = count ?? 0;
+  }
 
   if (source && demoLecturerId) {
     const createdBy = demoLecturerId;
@@ -241,10 +288,9 @@ export async function resetWalkup(
       return summary;
     }
 
-    // Replacement is verified live — NOW prune the stale walk-up quizzes.
-    const staleIds = (quizzes ?? [])
-      .map((q) => q.id)
-      .filter((id) => id !== newQuizId);
+    // Replacement is verified live — NOW prune the stale WALK-UP quizzes.
+    // Curated ids are excluded by construction (see the partition above).
+    const staleIds = walkupQuizzes.map((q) => q.id).filter((id) => id !== newQuizId);
     if (staleIds.length > 0) {
       const { count } = await admin
         .from("quizzes")
