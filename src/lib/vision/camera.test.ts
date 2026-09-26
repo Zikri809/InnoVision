@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   acquireCameraStream,
+  isCoarsePointerDevice,
   resolveStream,
   releaseCameraStream,
+  resolveVideoConstraints,
   _resetCameraState,
   _cameraRefcount,
   CameraFailureError,
@@ -236,5 +238,26 @@ describe("camera.ts refcount/generation", () => {
     expect(shared.active).toBe(true); // t2 still holds a ref → still live
     releaseCameraStream(t2);
     expect(shared.getTracks()[0].stopped).toBe(true);
+  });
+});
+
+describe("camera.ts device-class capture policy (mobile perf)", () => {
+  it("desktop constraints request 720p; coarse devices get 480p", () => {
+    expect(resolveVideoConstraints(false)).toEqual({
+      facingMode: "user",
+      width: { ideal: 1280 },
+      height: { ideal: 720 },
+    });
+    expect(resolveVideoConstraints(true)).toEqual({
+      facingMode: "user",
+      width: { ideal: 640 },
+      height: { ideal: 480 },
+    });
+  });
+
+  it("isCoarsePointerDevice reads desktop without a window (Node suite)", () => {
+    // Node env has no window.matchMedia — must fail closed to desktop, never
+    // throw (callers run this on every answer capture).
+    expect(isCoarsePointerDevice()).toBe(false);
   });
 });

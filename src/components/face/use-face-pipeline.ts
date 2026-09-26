@@ -27,6 +27,7 @@ import {
   VERIFY_TRANSPORT_FAIL_LIMIT,
 } from "@/lib/face/constants";
 import { FULLSCREEN_PAUSE_DEDUPE_MS } from "@/lib/integrity/use-fullscreen-guard";
+import { isCoarsePointerDevice } from "@/lib/vision/camera";
 
 /**
  * Client-side floor between verify POSTs (latest-wins deferral): 8 s in
@@ -1152,11 +1153,15 @@ export function useFacePipeline(props: FacePipelineProps) {
             continue;
           }
           unhealthySince = null;
-          // Answer frames ship 3-per-answer on every gesture-mode answer, so
-          // they capture downscaled (320px/q0.7 — still ~3× oversampled for
-          // the 112×112 embedding input; see ANSWER_FRAME_* in constants.ts).
-          // Enroll + periodic verify keep full resolution.
-          frame = await tracker.captureFrame({ maxDim: ANSWER_FRAME_MAX_DIM, quality: ANSWER_FRAME_JPEG_QUALITY });
+          // Mobile-only downscale (prod 2026-09-26): phone sensors afford the
+          // cut (320px still ~3× oversampled for the 112×112 embedding input);
+          // desktop webcams are optically limited, so desktop keeps full-res
+          // answer captures. See ANSWER_FRAME_* in constants.ts.
+          frame = await tracker.captureFrame(
+            isCoarsePointerDevice()
+              ? { maxDim: ANSWER_FRAME_MAX_DIM, quality: ANSWER_FRAME_JPEG_QUALITY }
+              : undefined,
+          );
           if (!frame) await new Promise((resolve) => setTimeout(resolve, 100));
         }
         // A locally unusable capture holds the answer without creating a

@@ -92,6 +92,34 @@ let state: CameraState = {
 
 let nextToken = 1;
 
+/**
+ * Device class for capture policy (prod 2026-09-26 mobile perf work).
+ * Coarse-pointer ≈ phone/tablet: sensors have headroom, so mobile takes the
+ * 480p stream + downscaled answer captures. Desktop webcams are optically
+ * limited — every pixel counts — so desktop keeps 720p + full-res captures.
+ * SSR/test-safe: no `window` (server, Node unit suite) reads as desktop.
+ */
+export function isCoarsePointerDevice(): boolean {
+  try {
+    return (
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(pointer: coarse)").matches
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Video constraints per device class (pure — unit-tested). */
+export function resolveVideoConstraints(coarse: boolean): MediaTrackConstraints {
+  return {
+    facingMode: "user",
+    width: { ideal: coarse ? 640 : 1280 },
+    height: { ideal: coarse ? 480 : 720 },
+  };
+}
+
 /** Reset the module (test-only; also used on hot-reload in dev). */
 export function _resetCameraState(): void {
   if (state.stream) {
@@ -179,11 +207,7 @@ async function acquireMediaStream(): Promise<MediaStream> {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: false,
-      video: {
-        facingMode: "user",
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-      },
+      video: resolveVideoConstraints(isCoarsePointerDevice()),
     });
     console.debug("[camera] getUserMedia resolved, active=", stream.active);
     return stream;
