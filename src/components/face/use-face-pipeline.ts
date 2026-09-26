@@ -10,6 +10,8 @@ import { resolveVerifyOutcome } from "@/lib/face/outcome";
 import { getFakeFaceControl } from "@/lib/face/fake-seam";
 import { isFakeFaceSeamEnabled } from "@/lib/face/seam-gate";
 import {
+  ANSWER_FRAME_JPEG_QUALITY,
+  ANSWER_FRAME_MAX_DIM,
   FACE_TRACK_FRAME_INTERVAL_MS,
   FACE_TRACK_SLOW_INTERVAL_MS,
   FOCUS_BLUR_DEBOUNCE_MS,
@@ -1150,7 +1152,11 @@ export function useFacePipeline(props: FacePipelineProps) {
             continue;
           }
           unhealthySince = null;
-          frame = await tracker.captureFrame();
+          // Answer frames ship 3-per-answer on every gesture-mode answer, so
+          // they capture downscaled (320px/q0.7 — still ~3× oversampled for
+          // the 112×112 embedding input; see ANSWER_FRAME_* in constants.ts).
+          // Enroll + periodic verify keep full resolution.
+          frame = await tracker.captureFrame({ maxDim: ANSWER_FRAME_MAX_DIM, quality: ANSWER_FRAME_JPEG_QUALITY });
           if (!frame) await new Promise((resolve) => setTimeout(resolve, 100));
         }
         // A locally unusable capture holds the answer without creating a

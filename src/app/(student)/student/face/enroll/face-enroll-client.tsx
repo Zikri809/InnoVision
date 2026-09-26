@@ -171,6 +171,12 @@ export function FaceEnrollClient({
   function enrollErrorMessage(body: { error?: string; message?: string }): string {
     const code = body.error;
     if (code === "spoof_detected") return t("poseSpoof");
+    // Prod incident 2026-09-26 (flagged-session lockout): a 409 live_assessment
+    // is NOT a capture problem — the student's frames passed every gate and the
+    // RPC refused on a stale unfinished assessment session. Showing the generic
+    // "Capture failed" copy here sent students back to better lighting for a
+    // failure retries can never fix; name the remedy (lecturer reset) instead.
+    if (code === "live_assessment") return t("enrollBlockedLive");
     const reason = typeof body.message === "string" && body.message.startsWith("pose_")
       ? body.message.slice("pose_".length)
       : code === "pose_invalid"
@@ -194,7 +200,10 @@ export function FaceEnrollClient({
         // through to the raw server message (which may be untranslated
         // English a ms-locale student can't read). Machine tokens are never
         // shown as-is.
-        if (code === "rate_limited") return tCommon("errorGeneric");
+        // A 429 is retry churn (route 5/min or the RPC's 3-admits/10-min
+        // throttle): further taps only extend the lockout, so say to wait
+        // instead of the generic failure copy.
+        if (code === "rate_limited") return t("enrollThrottled");
         if (code === "invalid_frame" || code === "payload_too_large") return t("poseNoFace");
         return body.message && !/^[a-z0-9_]+$/.test(body.message)
           ? body.message

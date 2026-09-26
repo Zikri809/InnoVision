@@ -837,6 +837,8 @@
       "pendingTitle": "Sent for review",
       "pendingBody": "We spotted a possible duplicate. Your lecturer will review your enrollment shortly.",
       "statusFailed": "Capture failed — please try again.",
+      "enrollBlockedLive": "Your capture was fine — but you have an unfinished assessment session. Ask your lecturer to reset it, then try again.",
+      "enrollThrottled": "Too many enrollment attempts in a short time. Wait about 10 minutes, then try just once.",
       "captureTimeout": "We ran out of time getting all three angles. Find your best lighting, get your whole face in the oval, and try again.",
       "captureAttempts": "Too many capture attempts. Hold each pose steady in the oval before blinking, then try again.",
       "statusUnavailable": "Face verification is unavailable right now. Please try again later.",

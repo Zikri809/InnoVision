@@ -408,7 +408,7 @@ export class FaceTracker implements IFaceTracker {
    * best-effort client quality gate. Returns null when the gate fails / the
    * video is not ready / the tab is hidden / the feed is not LIVE.
    */
-  async captureFrame(): Promise<string | null> {
+  async captureFrame(opts?: { maxDim?: number; quality?: number }): Promise<string | null> {
     if (this.disposed || !this.video) return null;
     if (typeof document !== "undefined" && document.hidden) return null;
     if (!this.isLiveFeed()) return null;
@@ -421,13 +421,17 @@ export class FaceTracker implements IFaceTracker {
       const vw = this.video.videoWidth || 640;
       const vh = this.video.videoHeight || 480;
 
-      // Downscale to ≤640px so the JPEG stays small (≈30–60 KB base64).
-      const scale = Math.min(1, CAPTURE_CANVAS_MAX / vw);
+      // Downscale so the JPEG stays small. Defaults preserve the legacy
+      // 640px/q0.85 captures (enroll + periodic verify); the answer-commit
+      // path passes a smaller budget (see ANSWER_FRAME_* in constants.ts).
+      const maxDim = opts?.maxDim ?? CAPTURE_CANVAS_MAX;
+      const quality = opts?.quality ?? FRAME_JPEG_QUALITY;
+      const scale = Math.min(1, maxDim / vw);
       canvas.width = Math.round(vw * scale);
       canvas.height = Math.round(vh * scale);
       ctx.drawImage(this.video, 0, 0, canvas.width, canvas.height);
 
-      return canvas.toDataURL("image/jpeg", FRAME_JPEG_QUALITY);
+      return canvas.toDataURL("image/jpeg", quality);
     } catch {
       return null;
     }

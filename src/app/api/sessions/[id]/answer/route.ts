@@ -4,7 +4,7 @@ import { requireStudent } from "@/lib/classes/guards";
 import { isUuid } from "@/lib/classes/roster";
 import { rateLimit } from "@/lib/classes/rate-limit";
 import { AnswerSchema } from "@/lib/sessions/validation";
-import { MAX_FRAME_BASE64_CHARS } from "@/lib/face/constants";
+import { MAX_FRAME_BASE64_CHARS, VERIFY_FRAMES_PER_CHECK } from "@/lib/face/constants";
 import { selectPrimaryFace } from "@/lib/face/embedding";
 import { spoofGateDecision, type SpoofFrameVerdict } from "@/lib/face/spoof";
 import { shouldReportSecondFace } from "@/lib/face/second-face";
@@ -20,6 +20,7 @@ import {
   internalError,
   invalidBody,
   jsonError,
+  MULTIPART_OVERHEAD_BYTES,
   notFound,
   rateLimited,
   readCappedJson,
@@ -90,11 +91,17 @@ export async function POST(request: Request, { params }: Params) {
     return rateLimited("Too many answers for this session. Try again in a minute.");
   }
 
-  // Body cap: selectedIndices is Zod-capped at 5 elements, but a huge JSON
-  // body would be parsed BEFORE Zod sees it (sibling-route convention).
-  // audit-1 P1-5: the streaming-capped read aborts mid-stream, so chunked
-  // bodies cannot bypass the cap the way a header-only check allowed.
-  const body = await readCappedJson(request);
+  // Body cap: face-bound answers (assessment + gestures, non-exempt) carry
+  // 3 base64 frames inside `faceVerification` — up to MAX_FRAME_BASE64_CHARS
+  // each. The 64KB readCappedJson default 413'd EVERY such answer with
+  // "Request body too large" (prod 2026-09-26: gesture-mode assessment answers
+  // always failed after the capture lag, with no server log — the capped read
+  // returns silently). The cap mirrors the verify route; the per-frame 400
+  // check below stays the real DoS bound, and the non-frame fields
+  // (indices/text) are Zod-capped to bytes.
+  const ANSWER_BODY_LIMIT_BYTES =
+    VERIFY_FRAMES_PER_CHECK * MAX_FRAME_BASE64_CHARS + MULTIPART_OVERHEAD_BYTES;
+  const body = await readCappedJson(request, ANSWER_BODY_LIMIT_BYTES);
   if (!body.ok) return body.response;
 
   const parsed = AnswerSchema.safeParse(body.data);

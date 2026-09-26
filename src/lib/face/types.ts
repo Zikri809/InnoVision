@@ -49,7 +49,18 @@ export interface IFaceTracker {
   /** Shared camera stream (read-only) — powers the recovery self-view. */
   readonly stream?: MediaStream | null;
   /** Capture a base64 JPEG frame, or null when no valid face is tracked. */
-  captureFrame(): Promise<string | null>;
+  captureFrame(opts?: {
+    /**
+     * Downscale the capture canvas to this max dimension (default 640).
+     * The answer-commit path passes ~320: ArcFace embeds at 112×112, so a
+     * 320px source stays ~3× oversampled while cutting per-answer upload
+     * bytes ~4–6× (prod 2026-09-26 perf fix). Enroll/verify omit it and keep
+     * full resolution.
+     */
+    maxDim?: number;
+    /** JPEG quality 0–1 (default 0.85; the answer path passes 0.7). */
+    quality?: number;
+  }): Promise<string | null>;
   /** Capture the highest quality frame available (face detected, centered, open eyes) within a time window. */
   captureBestFrame?(opts?: {
     maxWaitMs?: number;

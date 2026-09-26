@@ -218,3 +218,15 @@ export const INCIDENT_TIMESTRICE_MS = 5000;
 
 /** Maximum upload size for one incident clip (bytes). */
 export const MAX_INCIDENT_BYTES = 30_000_000;
+
+/**
+ * Answer-commit capture size (prod 2026-09-26 perf fix): answer-bound frames
+ * are downscaled to ~320px JPEG q0.7. ArcFace embeds at 112×112, so a 320px
+ * source is still ~3× oversampled — zero accuracy impact — while cutting
+ * upload bytes ~4–6× vs the full 640px/q0.85 captures. Every gesture-mode
+ * assessment answer ships 3 frames, so this is the per-answer latency lever.
+ * Enroll + periodic verify keep full resolution (rare, and enroll feeds the
+ * stored baseline where every pixel of margin counts).
+ */
+export const ANSWER_FRAME_MAX_DIM = 320;
+export const ANSWER_FRAME_JPEG_QUALITY = 0.7;

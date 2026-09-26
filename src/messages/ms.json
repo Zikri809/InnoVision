@@ -837,6 +837,8 @@
       "pendingTitle": "Dihantar untuk semakan",
       "pendingBody": "Kami mengesan kemungkinan wajah pendua. Pensyarah anda akan menyemak pendaftaran tidak lama lagi.",
       "statusFailed": "Pemeriksaan gagal — sila cuba lagi.",
+      "enrollBlockedLive": "Rakaman anda tiada masalah — tetapi anda mempunyai sesi penilaian yang belum selesai. Minta pensyarah anda menetapkan semula sesi itu, kemudian cuba lagi.",
+      "enrollThrottled": "Terlalu banyak percubaan pendaftaran dalam masa singkat. Tunggu kira-kira 10 minit, kemudian cuba sekali sahaja.",
       "captureTimeout": "Masa tidak cukup untuk mendapatkan ketiga-tiga sudut. Cari pencahayaan terbaik, pastikan seluruh wajah dalam bujur, dan cuba lagi.",
       "captureAttempts": "Terlalu banyak percubaan. Tahan setiap pose dengan stabil dalam bujur sebelum kelip, kemudian cuba lagi.",
       "statusUnavailable": "Pengesahan wajah tidak tersedia buat masa ini. Sila cuba lagi nanti.",
