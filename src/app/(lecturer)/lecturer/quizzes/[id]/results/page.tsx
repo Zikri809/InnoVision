@@ -266,7 +266,33 @@ export default async function LecturerQuizResultsPage({
           .from("incident-footage")
           .createSignedUrl(clip.storage_path, 3600);
         if (error || !signed?.signedUrl) {
-          console.error("Incident clip signing error:", clip.id, error);
+          // A row whose object is gone is an ORPHAN (its footage was pruned /
+          // removed out-of-band): the exact shape that used to spam
+          // `Object not found` / NoSuchKey on every load. It is expected
+          // retention residue, not a signing fault — warn once and
+          // best-effort delete the row so the listing self-heals. A genuine
+          // signing failure (transport/credentials) still logs as an error.
+          // `StorageApiError` carries the service code (NoSuchKey) plus the
+          // HTTP status (400) and statusCode ("404").
+          const storageError = error as
+            | { code?: string; status?: number; statusCode?: string | number }
+            | null;
+          const isMissingObject =
+            storageError?.code === "NoSuchKey" ||
+            String(storageError?.statusCode ?? "") === "404" ||
+            storageError?.status === 404;
+          if (isMissingObject) {
+            console.warn("Incident clip object missing — dropping orphan row:", clip.id);
+            void admin
+              .from("incident_clips")
+              .delete()
+              .eq("id", clip.id)
+              .then(({ error: delError }) => {
+                if (delError) console.warn("Incident clip orphan cleanup failed:", clip.id, delError.message);
+              });
+          } else {
+            console.error("Incident clip signing error:", clip.id, error);
+          }
           return null;
         }
         return {

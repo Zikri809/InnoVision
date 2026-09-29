@@ -596,9 +596,25 @@ async function seedIncidentClip(sessionId, { reason = "face_fail_streak", durati
   const { count } = await admin.from("incident_clips").select("id", { count: "exact", head: true }).eq("session_id", sessionId);
   if ((count ?? 0) > 0) return;
   const now = Date.now();
+  const storagePath = `demo/${sessionId.slice(0, 8)}/incident-${reason}.webm`;
+  // The results dashboard signs every incident_clips row (private
+  // `incident-footage` bucket, service-role createSignedUrl). A metadata row
+  // with NO backing object therefore logs `Object not found` / NoSuchKey on
+  // every load — the exact field bug this seed used to manufacture. Upload a
+  // real (minimal EBML/WebM) object alongside the row so the demo clip is
+  // genuinely signable. Best-effort: if the upload fails, skip the row too so
+  // we never seed an unplayable listing.
+  const webmStub = Buffer.from([0x1a, 0x45, 0xdf, 0xa3]);
+  const { error: uploadError } = await admin.storage
+    .from("incident-footage")
+    .upload(storagePath, webmStub, { contentType: "video/webm", upsert: true });
+  if (uploadError) {
+    log(`  ⚠ incident clip upload failed: ${uploadError.message} - row skipped`);
+    return;
+  }
   const { error } = await admin.from("incident_clips").insert({
     session_id: sessionId,
-    storage_path: `demo/${sessionId.slice(0, 8)}/incident-${reason}.webm`,
+    storage_path: storagePath,
     reason,
     duration_ms: durationMs,
     recorded_from: new Date(now - 10 * 60000).toISOString(),
