@@ -67,7 +67,8 @@ export function GradebookClient({
   const tPlay = useTranslations("play");
   // Mirrors ROSTER_LIMIT in @/lib/classes/roster — kept local so this client
   // island never imports the server roster module (audit-3 B-F6).
-  const ROSTER_DISPLAY_LIMIT = 100;
+  // A6: 200 (was 100) — keep in step.
+  const ROSTER_DISPLAY_LIMIT = 200;
   const [exporting, setExporting] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<GradebookStatusFilter>("all");

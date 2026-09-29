@@ -476,3 +476,85 @@ jobs:
         # Prebuilt above (hardening-ON) + two full two-role journeys:
         # Reuses the prebuilt bundle so the budget is 100% test execution.
         timeout-minutes: 25
+
+  demo-e2e:
+    # Opt-in demo suite (e59) — the exhibition kiosk branch was previously
+    # orphaned from CI entirely (no job set DEMO_MODE_E2E, so the walk-up
+    # flow could drift silently). Mirrors integrity-e2e: a demo-mode BUILD
+    # (NEXT_PUBLIC_DEMO_MODE bakes in at build time — playwright.config.ts
+    # never sets it in the main suite, where the demo branch is dead code and
+    # e59 would prove nothing), a seeded demo class, then ONLY e59.
+    #
+    # NO kill-switch assertion step here: this job's env DELIBERATELY carries
+    # NEXT_PUBLIC_DEMO_MODE / NEXT_PUBLIC_E2E_FAKE_SEAM / FACE_MOCK_ENABLED
+    # (a demo-mode build with fake seams is exactly what an exhibition booth
+    # runs), so the four-switch check would fail on its own correct
+    # configuration. The gate S5 enforcement lives in the `e2e` job.
+    runs-on: ubuntu-latest
+    env:
+      # Same CI-only invite code as the `e2e` job.
+      LECTURER_INVITE_CODE: ci-invite-code-7f3a9c2e4b8d1f6a0e5c7b3a
+      # e59's skip gate (mirrors e51's E51_HARDENING_E2E split): the build
+      # signal NEXT_PUBLIC_DEMO_MODE and the "turn the spec on" signal are
+      # separate so a stray build env cannot silently run it elsewhere.
+      DEMO_MODE_E2E: "1"
+      # Build-time demo flag (baked in) + the harness seams the booth build
+      # legitimately arms. PROD_ENV_STRICT stays unset (non-strict production
+      # = the documented harness posture).
+      NEXT_PUBLIC_DEMO_MODE: "1"
+      NEXT_PUBLIC_E2E_FAKE_SEAM: "1"
+      FACE_MOCK_ENABLED: "1"
+      INSIGHTFACE_BASE_URL: "http://localhost:8000"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Start local Supabase
+        run: npx supabase start
+        timeout-minutes: 10
+
+      - name: Write .env.local from Supabase status
+        run: |
+          npx supabase status -o env > .env.local
+          echo "NEXT_PUBLIC_SUPABASE_URL=$(grep '^API_URL=' .env.local | cut -d= -f2- | tr -d '\"')" >> .env.local
+          echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$(grep '^ANON_KEY=' .env.local | cut -d= -f2- | tr -d '\"')" >> .env.local
+          echo "SUPABASE_SERVICE_ROLE_KEY=$(grep '^SERVICE_ROLE_KEY=' .env.local | cut -d= -f2- | tr -d '\"')" >> .env.local
+          echo "LECTURER_INVITE_CODE=${{ env.LECTURER_INVITE_CODE }}" >> .env.local
+          echo "AI_BASE_URL=https://api.openai.com/v1" >> .env.local
+          echo "AI_API_KEY=test-key" >> .env.local
+          echo "AI_MODEL=gpt-4o-mini" >> .env.local
+          echo "OCR_DEFAULT_ENGINE=tesseract" >> .env.local
+          echo "GLM_BASE_URL=http://localhost:11434" >> .env.local
+          echo "OCR_GLM_MODEL=glm-ocr" >> .env.local
+          echo "OCR_VISION_MODEL=gpt-4o-mini" >> .env.local
+          echo "GLM_PROVIDER=local" >> .env.local
+
+      - name: Reset DB (apply migrations)
+        run: npx supabase db reset
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: "Build (demo-mode: NEXT_PUBLIC_DEMO_MODE baked IN)"
+        run: npm run build
+        # Playwright starts ALL webServers on every run regardless of
+        # --project filtering; the :3002/:3003 servers poll .next/BUILD_ID
+        # with a 120s timeout. Prebuild so the BUILD_ID exists before the
+        # webServer timeout window starts.
+
+      - name: Seed the demo class + walk-up quiz
+        run: npm run seed:demo
+
+      - name: E2E demo walk-up (e59 only, demo-mode build)
+        run: npx playwright test e2e/e59-demo-walkup.spec.ts --project=chromium
+        env:
+          PLAYWRIGHT_SKIP_BUILD: "1"
+        # Prebuilt above + four walk-up/control-room journeys.
+        timeout-minutes: 20

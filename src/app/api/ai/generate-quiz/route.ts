@@ -48,7 +48,9 @@ export const dynamic = "force-dynamic";
 // export const maxDuration = 60; // (removed for local runs)
 
 // Per-user rate limit on generation (token cost guard, S4). In-memory and
-// per-process — accepted at demo scale (documented in SECURITY_AUDIT).
+// per-process — accepted at demo scale (documented in docs/COSTS.md §2.3/§3:
+// single-instance constraint; externalize the ledger + limiter before scaling
+// horizontally).
 const GENERATE_RATE = { limit: 10, windowMs: 60 * 60 * 1000 };
 
 // Generous parse timeout: a pathological file can otherwise stall the route

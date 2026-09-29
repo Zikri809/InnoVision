@@ -19,6 +19,7 @@ import { EmptyBoxIllustration } from "@/components/illustrations/empty-box";
 import { formatDuration } from "@/lib/format/duration";
 import { getModeLabel } from "@/lib/quizzes/labels";
 import { formatDue } from "@/lib/format/window";
+import { DEMO_JOIN_CODE, isDemoModeEnabled } from "@/lib/demo/gate";
 
 type QuizRow = {
   id: string;
@@ -42,11 +43,69 @@ type QuizRow = {
 /** SQ-1: "closing soon" styling threshold. */
 const CLOSING_SOON_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * A3 (PLAN_DEMO_DAY_HARDENING) — retry-join banner for a signed-in but
+ * unenrolled demo guest. The guest route redirects here with ?join=retry when
+ * enrollment failed post-sign-in; without this the visitor faces a dead empty
+ * list with no recourse. Renders only under the demo flag with an empty list.
+ * POSTs the real join API (same shape as join-confirm-client) and drops the
+ * query param on success.
+ */
+function JoinRetryBanner() {
+  const router = useRouter();
+  const td = useTranslations("demo");
+  const tCommon = useTranslations("common");
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
+
+  async function retry() {
+    if (retrying) return;
+    setRetrying(true);
+    setRetryError(null);
+    try {
+      const res = await fetch("/api/classes/join", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code: DEMO_JOIN_CODE }),
+      });
+      if (!res.ok) {
+        setRetryError(td("joinRetryFailed"));
+        return;
+      }
+      router.replace("/student/quizzes");
+      router.refresh();
+    } catch {
+      setRetryError(tCommon("errorGeneric"));
+    } finally {
+      setRetrying(false);
+    }
+  }
+
+  return (
+    <div className="rounded-2xl border-[3px] border-amber-300 bg-amber-50 p-5 shadow-[var(--shadow-clay-sm)] dark:border-amber-500/40 dark:bg-amber-500/10 dark:shadow-none">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <p className="text-sm font-bold text-amber-800 dark:text-amber-200">
+          {td("joinRetryTitle")}
+        </p>
+        <Button type="button" variant="outline" onClick={() => void retry()} disabled={retrying}>
+          {retrying ? td("starting") : td("joinRetryCta")}
+        </Button>
+      </div>
+      {retryError && (
+        <p role="alert" className="mt-3 text-sm font-bold text-destructive">
+          {retryError}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function StudentQuizzesClient({
   quizzes,
   enrolled,
   classFilter = null,
   classFilterTitle = null,
+  joinRetry = false,
 }: {
   quizzes: QuizRow[];
   enrolled: boolean;
@@ -54,10 +113,13 @@ export function StudentQuizzesClient({
   classFilter?: string | null;
   /** SQ-4: the filtered class's title (null when the id is unknown/unenrolled). */
   classFilterTitle?: string | null;
+  /** A3: ?join=retry — the demo guest route enrolled nothing post-sign-in. */
+  joinRetry?: boolean;
 }) {
   const router = useRouter();
   const locale = useLocale();
   const t = useTranslations("student.quizzes");
+  const td = useTranslations("demo");
   const tCommon = useTranslations("common");
   // Mobile polish round 3: <sm renders the compact list layout (Flavor 1 —
   // clay glyph rows) via an early return, so the desktop JSX below is
@@ -117,12 +179,16 @@ export function StudentQuizzesClient({
       // audit-5 M2: the assessment face-eligibility gate. Both are 403 client
       // errors, never an outage — show the actionable copy instead of the raw
       // code the fallback would render.
+      // Demo booth: guests on plain-HTTP phones have no camera / Face Setup is
+      // a dead end there. Consent is granted at provisioning (guest route A1),
+      // so reaching here means provisioning failed — point at the presenter,
+      // not at Face Setup. Face + gestures are presenter-laptop only by design.
       if (res.status === 403 && body.error === "consent_required") {
-        setError(t("consentRequiredStart"));
+        setError(isDemoModeEnabled() ? td("guestStartBlocked") : t("consentRequiredStart"));
         return;
       }
       if (res.status === 403 && body.error === "face_enrollment_pending") {
-        setError(t("faceEnrollmentPending"));
+        setError(isDemoModeEnabled() ? td("guestStartBlocked") : t("faceEnrollmentPending"));
         return;
       }
 
@@ -231,6 +297,9 @@ export function StudentQuizzesClient({
             </p>
           )}
         </div>
+
+        {/* A3: signed-in but unenrolled demo guest — offer the join retry */}
+        {joinRetry && quizzes.length === 0 && isDemoModeEnabled() && <JoinRetryBanner />}
 
         {quizzes.length === 0 ? (
           <EmptyState
@@ -418,6 +487,9 @@ export function StudentQuizzesClient({
           </p>
         )}
       </div>
+
+      {/* A3: signed-in but unenrolled demo guest — offer the join retry */}
+      {joinRetry && quizzes.length === 0 && isDemoModeEnabled() && <JoinRetryBanner />}
 
       {!enrolled && (
         <div className="flex flex-wrap items-center justify-between gap-4 rounded-[24px] border-[3px] border-amber-300 bg-amber-50 p-5 shadow-[0_4px_0_rgba(217,119,6,0.15)] dark:border-amber-500/40 dark:bg-amber-500/10 dark:shadow-none">

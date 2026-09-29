@@ -142,11 +142,12 @@ export type BuildGradebookInput = {
   /**
    * audit-2 M-13 / audit-3 B-F5: the roster read's own truncation flag. The
    * roster array is ALREADY capped by getClassRoster, so the model cannot
-   * infer truncation from its length (exactly-100 is indistinguishable from
-   * >100); callers pass the read's flag through. Omitted (pure-model callers)
-   * → inferred as `roster.length > ROSTER_LIMIT`, i.e. flagged only when rows
-   * were ACTUALLY dropped by an uncapped feed (the old `>=` off-by-one
-   * reported a full, untruncated 100-row roster as truncated).
+   * infer truncation from its length (exactly-at-cap is indistinguishable
+   * from over-cap); callers pass the read's flag through. Omitted
+   * (pure-model callers) → inferred as `roster.length > ROSTER_LIMIT`, i.e.
+   * flagged only when rows were ACTUALLY dropped by an uncapped feed (the
+   * old `>=` off-by-one reported a full, untruncated at-cap roster as
+   * truncated).
    */
   rosterTruncated?: boolean;
 };
@@ -288,7 +289,7 @@ export function buildGradebookModel(input: BuildGradebookInput): GradebookModel 
   }
 
   // audit-3 B-F1: orphan attempts (representative sessions whose student is
-  // no longer on the roster — removed/unenrolled, or pushed past the 100-row
+  // no longer on the roster — removed/unenrolled, or pushed past the
   // roster read cap) get appended rows with a null name, exactly like the
   // per-quiz export's honesty rule (export.ts orphanSessions). The per-quiz
   // class average already counted these students; without a row the Summary

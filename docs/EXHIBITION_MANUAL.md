@@ -68,6 +68,17 @@ Mental model in one line each:
 | GLM-OCR | OCR for scanned PDFs (`npm run glm:start`, GPU) | Only if demoing OCR on scanned docs |
 | AI endpoint | Quiz generation + short-text marking (`AI_*` env) | Yes if demoing AI quiz generation |
 
+> **Verified 2026-09-28:** booth `.env.local` runs the OCR **remote leg**
+> (`GLM_PROVIDER=remote`, `ZAI_BASE_URL=https://api.z.ai/api/paas/v4`,
+> `ZAI_API_KEY` set, `GLM_REMOTE_MAX_PAGES=30`, daily cap 2M tokens) —
+> selector reads REMOTE, key present. Runtime-only vars: a restart picks up
+> OCR changes, no rebuild. OCR is **lecturer-only** (`requireLecturer` —
+> guests/students get 403), so walk-up and auto-created guests need nothing:
+> "ready" = server env + restarted + `GET /api/extract/ocr` probe `ok` under
+> the demo-lecturer session before doors. Whole-document `{file}` calls only;
+> over-cap PDFs 413 pre-spend; `GLM_SPEND_DISABLED=1` is the instant kill
+> switch (restart). Single-instance only (per-host spend ledger).
+
 **Two deployment postures** — know which one you're presenting on:
 
 1. **Laptop stack (everything local):** `npx supabase start` + Docker
@@ -171,9 +182,11 @@ Keep these ready as talking points:
 
 ---
 
-## 5. Demo accounts and seeded data
+## 5. Demo accounts and seeded data (single source — full sheet)
 
-The seed script creates a believable semester (`scripts/seed-demo.mjs`):
+The seed script creates a believable semester (`scripts/seed-demo.mjs`,
+source of truth for every email / code below — `src/lib/demo/gate.ts`
+pins `SCAN23`, `src/lib/demo/walkup-reset.ts` pins the demo-lecturer email):
 
 ```bash
 npm run seed:demo          # local;  --remote targets the hosted project
@@ -183,9 +196,30 @@ npm run seed:demo          # local;  --remote targets the hosted project
 
 | Account | Role | Notes |
 |---|---|---|
-| `lecturer@innovision.test` | Lecturer (Dr. Farah Omar) | Owns the demo classes |
+| `lecturer@innovision.test` | Lecturer (Dr. Farah Omar) | Owns the CS101 / CS205 demo classes |
 | `lecturer2@innovision.test` | Lecturer (Dr. Rajesh Kumar) | Second lecturer |
-| `student1@…` … `student10@innovision.test` | Students | Varied engagement; e.g. `student1` = Muhammad Danish |
+| `demo-lecturer@innovision.test` | Lecturer (Dr. Demo Presenter) | **Presenter-only** — owns `SCAN23` demo + showcase classes, sole login for `/demo` control room |
+| `student1@…` … `student10@innovision.test` | Students | Varied engagement; matrics below (student1–4 see each subject once — farah's copy) |
+| `student11@…` … `student14@innovision.test` | Students (demo-cohort) | Seeded history in the booth x444 subject copies only; enrolled nowhere else |
+
+Student matrics (`scripts/seed-demo.mjs` `PEOPLE`):
+
+| Account | Name | Matric |
+|---|---|---|
+| `student1@innovision.test` | Muhammad Danish | `231201` |
+| `student2@innovision.test` | Nur Aisyah | `231202` |
+| `student3@innovision.test` | Lim Wei Jian | `231203` |
+| `student4@innovision.test` | Tan Mei Mei | `231204` |
+| `student5@innovision.test` | Arjun Kumar | `231205` |
+| `student6@innovision.test` | Siti Zubaidah | `231206` |
+| `student7@innovision.test` | Ahmad Firdaus | `231207` |
+| `student8@innovision.test` | Priya Nair | `231208` |
+| `student9@innovision.test` | Chong Kah Meng | `231209` |
+| `student10@innovision.test` | Nurul Huda | `231210` |
+| `student11@innovision.test` | Aina Farhana | `231211` | Demo-cohort: `ECN444` / `RSK444` / `SPK444` only (seeded history there) |
+| `student12@innovision.test` | Jason Tan | `231212` | Demo-cohort, same as above |
+| `student13@innovision.test` | Divya Rao | `231213` | Demo-cohort, same as above |
+| `student14@innovision.test` | Hakim Rosli | `231214` | Demo-cohort, same as above |
 
 Seeded classes (join codes):
 
@@ -194,11 +228,55 @@ Seeded classes (join codes):
 | CS101 — Intro to Algorithms | `DEMK42` | active |
 | CS205 — Database Systems | `DBSYS5` | active |
 | CS100 — Programming Fundamentals | `ARCH99` | **archived** (shows join rejection) |
+| ECON101 — Principle of Economics | `ECN222` / `ECN333` / `ECN444` | active, one per lecturer (farah / rajesh / demo) |
+| RISK201 — Risk & Insurance | `RSK222` / `RSK333` / `RSK444` | active, one per lecturer |
+| SPEECH301 — Public Speaking Skills | `SPK222` / `SPK333` / `SPK444` | active, one per lecturer |
+| InnoVision Live Demo (demo-lecturer) | `SCAN23` | **walk-up kiosk** — guests auto-join here (must equal `DEMO_JOIN_CODE`) |
+| InnoVision Showcase (Presenter Only) | random 6-char, never printed | presenter-only, guests NEVER join |
 
-Seeded quizzes: a live **"Assessment: Midterm — Algorithms"**, a closed
-**"Weekly Quiz 3 — Sorting"** with historical sessions and *revealed*
-results (best for showing the gradebook/insights without touching anything),
-drafts, and student practice quizzes (some shared).
+Seeded quizzes: a live **"Assessment: Midterm — Algorithms"** (whole CS101
+cohort submitted), a closed **"Weekly Quiz 3 — Sorting"** with historical
+sessions and *revealed* results (best for showing the gradebook/insights
+without touching anything), a closed CS205 **"Quiz 1 — ER Modelling"**
+(whole CS205 cohort sat it — the assessment counterpart of the ER practice),
+a retake-enabled live SQL quiz with attempt-1 rows for the full CS205
+cohort, drafts, and student practice quizzes (some shared: `/s/STUDYHARD2`,
+`/s/EXAMPREP24`). Every live practice has a live **assessment counterpart**
+(same question bank, graded, click-to-answer, untimed — 2 core + 9 subject
+copies), so every `student1–10` sees 3–11 startable assessments, and every
+one carries ≥4 assessment sessions, so all gradebook rows and results
+dashboards read full. Kahmeng/nurul (CS205-only, no subject home) ride the
+booth x444 subject copies — no duplicates anywhere.
+
+Each subject class (ECON101 / RISK201 / SPEECH301) carries the same full set:
+a live practice quiz, a closed+revealed Quiz 1 with seeded sessions, and an
+**AI Draft** quiz holding the real handout files (Economics chapters,
+Risk Ch.1 pp.1–10, Public Speaking slides) already uploaded to
+`quiz-sources` — open the draft builder → Generate from file to demo
+AI generation on stage. Source files live in `seed-assets/`
+(see `seed-assets/README.md` for the Risk truncation note).
+
+Walk-up / showcase quizzes (in demo-lecturer classes, `docs/plans/PLAN_DEMO_MODE.md` D5):
+
+| Quiz | Class | Mode / state |
+|---|---|---|
+| `Try InnoVision — Live Demo` | Live Demo (`SCAN23`) | `practice` / live, **gestures-ON** — guests get finger gestures with NO face check (safe: face arms only on assessment+gestures); recreated on every walk-up reset (prefix `Try InnoVision`) |
+| `Demo Assessment — Click to Answer (No Camera)` | Live Demo (`SCAN23`) | `assessment` / live, gestures-off — needs guest consent at provisioning |
+| `Past Results — Loops & Lists (revealed)` | Live Demo (`SCAN23`) | `assessment` / closed+revealed — seeded history from real students, survives resets |
+| `Showcase — Gesture & Face Verification` | Showcase | `assessment` / draft, gestures-ON, untimed — duplicate per show |
+| `Showcase — Click to Answer (gestures OFF)` | Showcase | `assessment` / draft, gestures-off, untimed — modality comparison |
+| `Showcase — Past Session (revealed)` | Showcase | `assessment` / closed+revealed — fallback history with face timelines + incident clip |
+
+Walk-up guest accounts (auto-created, `docs/plans/PLAN_DEMO_MODE.md`):
+
+* Flow: scan `/join/SCAN23` → tap **Join the demo** → `POST /api/demo/guest`.
+* Identity: `guest-<8rand>@demo.innovision.test`, matric random `980000–989999`
+  (`98xxxx`, never `99xxxx` — reserved), name `Guest #N (Visitor)`.
+* Limits: cap 200 live guests; resets default to purging idle guests `>2h`;
+  at/near cap reset with `0h` (`npm run demo:reset:walkup -- --max-age-hours=0`).
+* Guardrail: never enable gestures on walk-up ASSESSMENTS — guests hit the real
+  face gate and hard-fail. Walk-up PRACTICE is gestures-ON by design (face stays
+  off). Presenter room is `/demo` (demo-lecturer only).
 
 **Face enrollment is intentionally NOT seeded** — biometric enrollment is a
 deliberate user action. If you want to demo face verify live, enroll the demo
@@ -268,10 +346,61 @@ demo:reset → `next build` (with the flag) → `next start -H 0.0.0.0`. Then:
 
 - Visitors scan `http://<this-machine-LAN-IP>:3000/join/SCAN23` → tap **Join
   the demo** → they play the walk-up practice quiz instantly (no camera).
+  If the booth serves through a public tunnel instead of LAN, swap the
+  origin for the tunnel link (e.g. `https://<tunnel>/join/SCAN23`) — same
+  flow, and HTTPS to boot.
+- **Verified 2026-09-28 (do not re-verify from scratch):** booth prod build
+  has `NEXT_PUBLIC_DEMO_MODE=1` baked (`SCAN23` present in
+  `.next/static/chunks`), serves `npx next start -H 0.0.0.0 -p 3000` with
+  `/api/health` → `{"ok":true,"db":{"reachable":true},"face":{"available":true}}`,
+  and the tunnel `https://innovision.zikr-i.uk` routes to this server
+  (tunnel `/api/health` matches local uptime; `POST /api/demo/guest` via the
+  tunnel with `Origin: https://innovision.zikr-i.uk` mints
+  `Guest #N (Visitor)` → `{"redirect":"/student/quizzes"}`).
+  `TRUSTED_ORIGINS=https://innovision.zikr-i.uk` is already in `.env.local`.
+  Direct-LAN access (`http://<LAN-IP>:3000`) is the fallback only: it needs
+  `TRUSTED_ORIGINS+=http://<LAN-IP>:3000` + `TRUSTED_PROXY_COUNT=0` + restart
+  (direct `/api/demo/guest` otherwise 403s `invalid_origin`), and a tunnel
+  hostname change needs a REBUILD (server-action allowlist is build-baked),
+  not just a restart.
+- **Booth card:** open `/booth` on the presenter machine (demo-lecturer
+  session) and project or print it — 4 QRs (SCAN23 entry + the
+  demo-lecturer subject copies `ECN444` / `RSK444` / `SPK444`) with the
+  "1. Scan 2. Tap Join the demo 3. Answer" steps. The QR origin follows
+  whatever address the page is loaded from, so tunnel rotations need zero
+  regeneration — just reload. Visitors scan SCAN23 first (mints their Guest
+  account), then any subject QR to join that class and play its live
+  practice + revealed Quiz 1. The farah/rajesh subject copies stay pristine
+  for the lecturer-track demo. Prefer a paper backup? `node
+  scripts/booth-qr.mjs --base-url <origin>` bakes the same 4 QRs into
+  `booth-card/` (re-run + reprint whenever the tunnel link rotates).
 - The presenter control room is `http://localhost:3000/demo` (demo-lecturer
   only): pre-flight ticks + a **Reset walk-up** button.
-- Run `npm run demo:reset:walkup` (or the /demo button) **between shows**;
-  it deletes guests older than 2h and recreates the quiz.
+- The crowd-as-live-data surface is the WALK-UP QUIZ'S results page
+  (`/lecturer/quizzes/<walk-up-id>/results`) with **Live updates ON** — not
+  the gradebook (gradebook columns are published-assessment only, crowd
+  practice sessions never appear there).
+- Run `npm run demo:reset:walkup` (or the /demo button) **between shows**:
+  it deletes IDLE guests older than 2h, strips idle real-account enrollments,
+  recreates the walk-up quiz, and clears completed guest attempts on the
+  curated quizzes. Mid-quiz visitors — auto guests and real accounts alike —
+  are never touched (quiz recreation defers with `deferred_active_sessions`
+  while anyone is on a walk-up quiz; retry after the show). If the guest
+  count is at/near cap (amber/red on `/demo`): reset with **0h** between
+  shows, or `npm run demo:reset:walkup -- --max-age-hours=0` (0h still skips
+  mid-quiz visitors).
+- Morning nuke (booth closed ONLY): `npm run demo:reset:full` wipes the whole
+  DB and reseeds — never while visitors are playing. The walk-up reset above
+  is the booth-open one; it never touches other classes, student practice
+  quizzes, or seeded history.
+- **Showcase second-show (A7):** the showcase quizzes are one-way
+  draft→live→closed, so each show gets a FRESH copy — on the quiz builder,
+  **Duplicate** the showcase quiz into the showcase class (the copy preserves
+  the gestures toggle and always lands as draft), publish the copy, run the
+  beat, close it afterwards. The next volunteer starts the NEW copy (no
+  already-taken block) and the old copy's sessions stay as history.
+  Never enable gestures on the walk-up quizzes — guests would hit the real
+  face gate and hard-fail.
 - **Never** set `NEXT_PUBLIC_DEMO_MODE=1` in a real deployment — it is a kill
   switch (`prod-guards.ts`); CI/Docker refuse a prod build carrying it.
 
@@ -300,8 +429,29 @@ demo:reset → `next build` (with the flag) → `next start -H 0.0.0.0`. Then:
    Mention: consent before camera, blink = liveness, pixels never stored.
 4. **(Lecturer)** Open the live Midterm assessment. **(Student)** Start it:
    fullscreen arms, face gate, then answer one question **by holding up
-   fingers** (gestures), one by click. Deliberately switch tabs once → focus
-   advisory. Let face verify run (30–45 s cadence).
+   fingers** (gestures), one by click. Integrity beats, demo-safe first
+   (verified 2026-09-28, unit suites green — gate/http 39, walkup/guests 19,
+   second-face/attention/streak/recovery/incident 41; hardening ON):
+   - **Copy prevention** (zero-risk opener): right-click / Ctrl+C on the
+     question does nothing (`user-select:none` + copy/cut/contextmenu block,
+     assessment-only).
+   - **Fullscreen-exit pause → recovery** (most deterministic): press Esc →
+     `fullscreen_exit` paused overlay (timer frozen, counter++,
+     NEVER auto-flags) → Recover re-enters fullscreen + blink/head-turn →
+     resume. Then show the lecturer dashboard counter + incident clip.
+   - **Single focus-loss strike → recovery**: Alt-Tab out, hold >900 ms
+     (debounced), back → `focus_lost` paused overlay → same recovery. State
+     aloud this is strike 1 of 3 — never demo the 3rd strike live (terminal
+     `flagged`, lecturer-only unlock).
+   - **Second-face advisory** (rehearsed only): second person steps into
+     frame 2–3 s → student never blocked, `second_face` chip + count appears
+     on the lecturer dashboard (server needs ≥2 of 3 frames with extra face;
+     throttled 1 per 55 s, so one shot per show). No second presenter?
+     substitute the incident clip from the Esc beat.
+   - **Do NOT stage:** 3rd-strike flagging (focus/hand), face-mismatch
+     flagging, verify-silence auto-flag (5+ min, invisible), frozen-frame
+     replay pause, `looked_away`/`voice_activity` (8 s+ dead air, mic/stage
+     dependent). Mention as slides, never live.
 5. **(Student)** Submit. Show that the student sees **"awaiting results"** —
    no score, no correct answers.
 6. **(Lecturer)** Results dashboard: session appears, advisories/face-check
@@ -335,7 +485,9 @@ gradebook is the core story.
 | Start refused: `consent_required` | Consent not granted | Student completes consent on the enrollment page |
 | Enrollment refused: `live_assessment` | Student has an active assessment session | Finish/exit that session first (deliberate anti-bypass rule) |
 | Quiz locked for editing | It's live/closed | Editing is draft-only by design; duplicate the quiz to edit a copy |
-| AI generation fails | AI endpoint/env missing, or OCR needed on scanned PDF | Check `AI_*` env; for scanned docs run the OCR path (`glm:start` locally or Z.ai remote) |
+| AI generation fails | AI endpoint/env missing, or OCR needed on scanned PDF | Check `AI_*` env; for scanned docs run the OCR path (`glm:start` locally or Z.ai remote — booth runs remote, see §2) |
+| `POST /api/demo/guest` → `invalid_origin` | Browser origin not in `TRUSTED_ORIGINS` (direct-LAN/IP access) | Use the tunnel URL (`https://innovision.zikr-i.uk/join/SCAN23`); for LAN fallback add `http://<LAN-IP>:3000` to `TRUSTED_ORIGINS` + `TRUSTED_PROXY_COUNT=0` + restart |
+| Remote OCR 503 `glm_model_unavailable` | Key/entitlement/probe negative | Check `ZAI_API_KEY`, account balance, `GLM_SPEND_DISABLED=0`; probe recovers in ~30 s after a key fix; over-cap PDFs 413 pre-spend is by design |
 | Notification bell empty | Realtime needs Supabase up; polling fallback exists | Check Supabase; there is a visibility-aware polling fallback |
 | Everything 404-ish after login | Wrong Supabase env / schema not pushed | `npx supabase start`, then `npx supabase db push` (or `db reset`) |
 | VPS: site down | Check container + nginx | `docker compose ps` on the box; app binds loopback :3000, nginx fronts TLS. See `docs/DEPLOY_VPS.md` §13 failure-mode table |

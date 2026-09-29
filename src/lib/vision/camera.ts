@@ -111,13 +111,166 @@ export function isCoarsePointerDevice(): boolean {
   }
 }
 
-/** Video constraints per device class (pure — unit-tested). */
-export function resolveVideoConstraints(coarse: boolean): MediaTrackConstraints {
-  return {
+/** Video constraints per device class (pure — unit-tested).
+ *
+ * Virtual cameras (Camo, DroidCam/Iriun phone-as-webcam, OBS virtual cam)
+ * often reject `facingMode` or 720p outright with `OverconstrainedError`
+ * instead of degrading — so callers must go through the downgrade ladder in
+ * `acquireMediaStream()` rather than using these directly with getUserMedia.
+ */
+export function resolveVideoConstraints(
+  coarse: boolean,
+  deviceId?: string,
+): MediaTrackConstraints {
+  const base: MediaTrackConstraints = {
     facingMode: "user",
     width: { ideal: coarse ? 640 : 1280 },
     height: { ideal: coarse ? 480 : 720 },
   };
+  if (deviceId) base.deviceId = { ideal: deviceId };
+  return base;
+}
+
+/**
+ * Preferred camera persistence (virtual-camera UX).
+ *
+ * Camo / phone-as-webcam apps register as just another videoinput and the
+ * browser remembers nothing about which one the user picked last time — every
+ * visit re-opens the OS default (usually the built-in laptop cam), so the
+ * user has to re-pick Camo in the browser permission dropdown each session.
+ * The last WORKING deviceId is persisted here so repeat visits stick to it.
+ * A stale id (unplugged phone) only costs one failed attempt: the downgrade
+ * ladder falls back to the default device. SSR-safe (no window → null).
+ */
+const PREFERRED_CAMERA_KEY = "innovision:camera-device-id";
+
+export function getPreferredCameraId(): string | null {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return null;
+    return window.localStorage.getItem(PREFERRED_CAMERA_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setPreferredCameraId(deviceId: string | null): void {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return;
+    if (deviceId) window.localStorage.setItem(PREFERRED_CAMERA_KEY, deviceId);
+    else window.localStorage.removeItem(PREFERRED_CAMERA_KEY);
+  } catch {
+    // Private-mode quota / disabled storage — preference is best-effort only.
+  }
+}
+
+/** List attached video inputs for a camera picker. Empty when unsupported. */
+export async function listVideoDevices(): Promise<MediaDeviceInfo[]> {
+  try {
+    const devices = navigator.mediaDevices;
+    if (!devices?.enumerateDevices) return [];
+    const all = await devices.enumerateDevices();
+    return all.filter((d) => d.kind === "videoinput");
+  } catch {
+    return [];
+  }
+}
+
+/** Options for `acquireCameraStream`. All optional — existing callers unchanged. */
+export type AcquireCameraOptions = {
+  /** Pin to a specific device (takes precedence over the persisted preference). */
+  deviceId?: string;
+};
+
+/**
+ * Mid-session disconnect notifier (phone-as-webcam unplug / sleep / USB
+ * glitch, Camo device switch). Consumers subscribe to degrade visibly
+ * (gesture layer → click-first `off`) instead of freezing on a dead stream.
+ * Returns an unsubscribe function.
+ */
+type DisconnectListener = () => void;
+const disconnectListeners = new Set<DisconnectListener>();
+
+export function onCameraDisconnected(listener: DisconnectListener): () => void {
+  disconnectListeners.add(listener);
+  return () => {
+    disconnectListeners.delete(listener);
+  };
+}
+
+/**
+ * Video tracks of a stream, tolerating mock streams that only implement
+ * `getTracks()` (unit tests) instead of the full `getVideoTracks()`.
+ */
+function videoTracksOf(stream: MediaStream): MediaStreamTrack[] {
+  try {
+    if (typeof stream.getVideoTracks === "function") return stream.getVideoTracks();
+  } catch {
+    // Fall through to the getTracks fallback below.
+  }
+  try {
+    return stream
+      .getTracks()
+      .filter((t) => (t as MediaStreamTrack).kind !== "audio");
+  } catch {
+    return [];
+  }
+}
+
+/** True while the shared stream has at least one live video track.
+ *
+ * Tracks without a `readyState` (unit-test mocks) fall back to
+ * `stream.active` so mock streams count as live.
+ */
+export function isCameraStreamLive(): boolean {
+  const stream = state.stream;
+  if (!stream || !stream.active) return false;
+  try {
+    const videos = videoTracksOf(stream);
+    if (videos.length === 0) return stream.active;
+    return videos.some((t) =>
+      (t as MediaStreamTrack).readyState === undefined
+        ? stream.active
+        : (t as MediaStreamTrack).readyState === "live",
+    );
+  } catch {
+    return stream.active;
+  }
+}
+
+function notifyCameraDisconnected(): void {
+  for (const listener of [...disconnectListeners]) {
+    try {
+      listener();
+    } catch {
+      // A broken listener must not break the notifier for the rest.
+    }
+  }
+}
+
+function watchStreamTracks(stream: MediaStream): void {
+  try {
+    for (const track of videoTracksOf(stream)) {
+      const prev = (track as MediaStreamTrack).onended;
+      (track as MediaStreamTrack).onended = (ev) => {
+        if (typeof prev === "function") prev.call(track, ev);
+        handleStreamEnded();
+      };
+    }
+  } catch {
+    // Track enumeration / onended assignment failing is non-fatal (mocks).
+  }
+}
+
+function handleStreamEnded(): void {
+  // Invalidate the shared stream so the NEXT acquire opens a fresh
+  // getUserMedia instead of coalescing onto / resolving a dead stream.
+  // Outstanding holders keep their token but `isCameraStreamLive()` goes
+  // false; the notifier tells mounted consumers to degrade + reboot.
+  if (state.stream) {
+    state.stream = null;
+    state.inFlight = null;
+    notifyCameraDisconnected();
+  }
 }
 
 /** Reset the module (test-only; also used on hot-reload in dev). */
@@ -141,13 +294,22 @@ export function _resetCameraState(): void {
  * earlier caller). The supersede guard stops a stale in-flight stream that
  * resolves after a reset replaced the in-flight promise.
  */
-export async function acquireCameraStream(): Promise<number> {
+export async function acquireCameraStream(opts?: AcquireCameraOptions): Promise<number> {
   const token = nextToken++;
   state.live.set(token, nextToken); // generation = token's serial (monotonic)
   console.debug("[camera] acquire token", token, "refcount", state.refcount, "inFlight", !!state.inFlight);
 
+  // A mid-session disconnect invalidates state.stream/inFlight; a NEW acquire
+  // after that must open a fresh stream even if a previous in-flight promise
+  // object lingers. (handleStreamEnded already nulled it; this is belt-and-
+  // braces for races where the ended event fires mid-acquire.)
+  if (state.stream && !isCameraStreamLive()) {
+    state.stream = null;
+    state.inFlight = null;
+  }
+
   if (!state.inFlight) {
-    state.inFlight = acquireMediaStream();
+    state.inFlight = acquireMediaStream(opts);
   }
   // Capture the promise AT CALL TIME.
   const inFlight = state.inFlight;
@@ -172,6 +334,16 @@ export async function acquireCameraStream(): Promise<number> {
       throw new Error("Camera stream is not active.");
     }
     state.stream = stream;
+    watchStreamTracks(stream);
+    // Persist the working device so the next visit re-opens Camo / the phone
+    // instead of the OS default. Best-effort: getSettings may be absent on
+    // mock streams.
+    try {
+      const activeDeviceId = videoTracksOf(stream)[0]?.getSettings?.().deviceId;
+      if (activeDeviceId) setPreferredCameraId(activeDeviceId);
+    } catch {
+      // Ignore — preference is cosmetic.
+    }
   } catch (err) {
     state.live.delete(token);
     state.refcount = Math.max(0, state.refcount - 1);
@@ -188,7 +360,49 @@ export async function acquireCameraStream(): Promise<number> {
   return token;
 }
 
-async function acquireMediaStream(): Promise<MediaStream> {
+/**
+ * Constraint ladder for `getUserMedia` (virtual-camera hardening).
+ *
+ * Built-in webcams satisfy the full ask; Camo / phone-as-webcam drivers
+ * commonly reject `facingMode` or 720p with `OverconstrainedError` instead of
+ * degrading gracefully. Each rung drops one requirement; the last rung is a
+ * bare `video: true` (browser default device, driver-chosen resolution).
+ * Permission / security / busy failures abort immediately — retrying those is
+ * pointless (and a busy-device retry loop would spin while the user reads the
+ * "close the other app" copy).
+ */
+function buildConstraintLadder(
+  coarse: boolean,
+  deviceId?: string,
+): (MediaTrackConstraints | true)[] {
+  const full = resolveVideoConstraints(coarse, deviceId);
+  const noFacing: MediaTrackConstraints = { ...full };
+  delete noFacing.facingMode;
+  const low: MediaTrackConstraints = {
+    width: { ideal: 640 },
+    height: { ideal: 480 },
+  };
+  if (deviceId) low.deviceId = { ideal: deviceId };
+  const bare: MediaTrackConstraints | true = deviceId ? { deviceId: { ideal: deviceId } } : true;
+  // Dedupe identical rungs (e.g. coarse full already equals low without facing).
+  const ladder = [full, noFacing, low, bare];
+  return ladder.filter(
+    (rung, i) => ladder.findIndex((other) => JSON.stringify(other) === JSON.stringify(rung)) === i,
+  );
+}
+
+/**
+ * Rungs worth retrying on: the device exists but rejected this constraint
+ * shape (`OverconstrainedError` / `NotFoundError` — the classic virtual-cam
+ * response to `facingMode` or 720p). Everything else aborts immediately:
+ * permission / security / busy failures would fail identically on every rung,
+ * and `unknown` errors must surface (not spin through 4 getUserMedia prompts).
+ */
+function isLadderRetryable(err: unknown): boolean {
+  return classifyCameraFailure(err) === "no_device";
+}
+
+async function acquireMediaStream(opts?: AcquireCameraOptions): Promise<MediaStream> {
   if (!navigator.mediaDevices?.getUserMedia) {
     // Insecure contexts (plain http://, non-localhost) EXPOSE no mediaDevices
     // at all — prefer the actionable security diagnosis when it applies.
@@ -203,23 +417,37 @@ async function acquireMediaStream(): Promise<MediaStream> {
       "This browser does not support webcam access.",
     );
   }
-  console.debug("[camera] getUserMedia start");
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: resolveVideoConstraints(isCoarsePointerDevice()),
-    });
-    console.debug("[camera] getUserMedia resolved, active=", stream.active);
-    return stream;
-  } catch (err) {
-    // Re-throw WITH the classification attached so callers upstream (tracker
-    // boot, enroll page) can render cause-specific copy instead of a generic
-    // unavailable panel.
-    throw new CameraFailureError(
-      classifyCameraFailure(err),
-      err instanceof Error ? err.message : "Camera access failed.",
-    );
+  const deviceId = opts?.deviceId ?? getPreferredCameraId() ?? undefined;
+  const ladder = buildConstraintLadder(isCoarsePointerDevice(), deviceId);
+  console.debug("[camera] getUserMedia start", { rungs: ladder.length, pinnedDevice: Boolean(deviceId) });
+  let lastErr: unknown = null;
+  for (let i = 0; i < ladder.length; i++) {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: ladder[i],
+      });
+      console.debug("[camera] getUserMedia resolved, active=", stream.active, "rung=", i);
+      return stream;
+    } catch (err) {
+      lastErr = err;
+      // Permission denied, insecure context, or device busy (Camo Studio
+      // preview / Zoom holding the virtual cam): further rungs will fail the
+      // same way — abort with the classification attached.
+      if (!isLadderRetryable(err)) break;
+      console.debug("[camera] getUserMedia rung failed, trying next", {
+        rung: i,
+        cause: classifyCameraFailure(err),
+      });
+    }
   }
+  // Re-throw WITH the classification attached so callers upstream (tracker
+  // boot, enroll page) can render cause-specific copy instead of a generic
+  // unavailable panel.
+  throw new CameraFailureError(
+    classifyCameraFailure(lastErr),
+    lastErr instanceof Error ? lastErr.message : "Camera access failed.",
+  );
 }
 
 /** Resolve the opaque token to the shared `MediaStream`. */

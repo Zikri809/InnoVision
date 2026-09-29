@@ -1,5 +1,7 @@
 // Demo walk-up reset — CLI twin of POST /api/demo/reset-walkup
-// (docs/plans/PLAN_DEMO_MODE.md D6).
+// (docs/plans/PLAN_DEMO_MODE.md D6). GENTLE between-shows reset: demo data
+// only, never interrupts a mid-quiz visitor (see src/lib/demo/walkup-reset.ts
+// header for the tier contract).
 //
 // WHY a direct service-role script instead of the plan's "5-line fetch": the
 // route authenticates on an SSR session COOKIE (the demo lecturer's), which a
@@ -8,14 +10,21 @@
 // the route's `resetWalkup()` helper performs, against the service-role client.
 //
 // KEEP IN SYNC with src/lib/demo/walkup-reset.ts. The steps:
-//   1. delete guest accounts older than N hours (FK cascade clears their
-//      enrollments/sessions/answers);
-//   2. find the demo class by join code (DEMO_JOIN_CODE = SCAN23);
-//   3. strip non-guest enrollments from the demo class;
+//   1. delete IDLE guest accounts older than N hours (FK cascade clears their
+//      enrollments/sessions/answers); guests holding a live session are
+//      skipped at any age;
+//   2. find the demo class by join code (DEMO_JOIN_CODE = SCAN23) + snapshot
+//      the live-student set;
+//   3. strip IDLE non-guest enrollments from the demo class (mid-quiz real
+//      accounts are preserved);
 //   4. recreate a fresh walk-up practice quiz cloned from the newest WALK-UP
-//      one (title prefix "Try InnoVision"), then delete the stale walk-up
-//      ones; clear remaining guest sessions on curated gesture-off quizzes
-//      (their rows + seeded history are kept).
+//      one (title prefix "Try InnoVision") — DEFERRED while a walk-up quiz
+//      has live sessions; then delete stale walk-up ones without live
+//      sessions; clear COMPLETED guest sessions on curated gesture-off
+//      quizzes (their rows + seeded history are kept).
+//
+// For the MORNING NUKE (booth closed, destroys everything including live
+// sessions):  npm run demo:reset:full   (= supabase db reset + seed:demo).
 //
 // Run:  node scripts/demo-reset.mjs [--max-age-hours=2] [--skip-guest-purge]
 //                                   [--remote]
@@ -61,7 +70,9 @@ async function main() {
   log("\n== Demo walk-up reset ==\n");
   const summary = {
     guestsDeleted: 0,
+    guestsSkippedActive: 0,
     realEnrollmentsRemoved: 0,
+    realEnrollmentsPreserved: 0,
     quizRecreated: false,
     newQuizId: null,
     staleQuizzesDeleted: 0,
@@ -71,28 +82,9 @@ async function main() {
     curatedQuizzesPreserved: 0,
   };
 
-  let demoLecturerId = null;
-  if (!SKIP_PURGE) {
-    const cutoffMs = Date.now() - MAX_AGE_HOURS * 3600_000;
-    const users = await listAllUsers();
-    for (const u of users) {
-      if (u.email === DEMO_LECTURER_EMAIL) demoLecturerId = u.id;
-    }
-    const toDelete = users.filter(
-      (u) =>
-        u.email?.endsWith(`@${GUEST_DOMAIN}`) &&
-        (u.created_at ? Date.parse(u.created_at) : 0) <= cutoffMs,
-    );
-    for (const u of toDelete) {
-      const { error } = await admin.auth.admin.deleteUser(u.id);
-      if (!error) summary.guestsDeleted += 1;
-    }
-    log(`  - deleted ${summary.guestsDeleted} guest(s) older than ${MAX_AGE_HOURS}h`);
-  }
-
   // Find demo lecturer + guest ids.
   const users = await listAllUsers();
-  if (!demoLecturerId) demoLecturerId = users.find((u) => u.email === DEMO_LECTURER_EMAIL)?.id ?? null;
+  const demoLecturerId = users.find((u) => u.email === DEMO_LECTURER_EMAIL)?.id ?? null;
   const guestIds = new Set(
     users.filter((u) => u.email?.endsWith(`@${GUEST_DOMAIN}`)).map((u) => u.id),
   );
@@ -108,31 +100,11 @@ async function main() {
   }
   summary.demoClassFound = true;
 
-  // Strip non-guest enrollments.
-  const { data: enrollments } = await admin
-    .from("class_enrollments")
-    .select("student_id")
-    .eq("class_id", demoClass.id);
-  const realIds = [...new Set((enrollments ?? []).map((e) => e.student_id))].filter(
-    (id) => id && !guestIds.has(id),
-  );
-  if (realIds.length > 0) {
-    const { error } = await admin
-      .from("class_enrollments")
-      .delete()
-      .eq("class_id", demoClass.id)
-      .in("student_id", realIds);
-    if (!error) summary.realEnrollmentsRemoved = realIds.length;
-  }
-  log(`  - removed ${summary.realEnrollmentsRemoved} real enrollment(s)`);
-
-  // Recreate the walk-up quiz (guarded ordering: never delete the source until
-  // a replacement is verified live). Scoped to WALK-UP-titled quizzes so the
-  // curated gesture-off quizzes are never collapsed into the clone; their
-  // guest attempts are cleared instead (seeded history is kept).
+  // Live-student snapshot: anyone holding an active/paused/flagged session on
+  // a demo-class quiz is mid-quiz and untouchable by every arm below.
   const { data: quizzes } = await admin
     .from("quizzes")
-    .select("id, title, created_at")
+    .select("id, title, created_at, sources")
     .eq("class_id", demoClass.id)
     .order("created_at", { ascending: false });
   const walkupQuizzes = (quizzes ?? []).filter((q) =>
@@ -144,6 +116,64 @@ async function main() {
   summary.curatedQuizzesPreserved = curatedQuizzes.length;
   const source = walkupQuizzes[0] ?? (quizzes ?? [])[0];
 
+  const liveStudentIds = new Set();
+  const liveQuizIds = new Set();
+  const demoQuizIds = (quizzes ?? []).map((q) => q.id);
+  if (demoQuizIds.length > 0) {
+    const { data: liveSessions } = await admin
+      .from("quiz_sessions")
+      .select("quiz_id, student_id, status")
+      .in("quiz_id", demoQuizIds)
+      .in("status", ["active", "paused", "flagged"]);
+    for (const s of liveSessions ?? []) {
+      if (s?.student_id) liveStudentIds.add(s.student_id);
+      if (s?.quiz_id) liveQuizIds.add(s.quiz_id);
+    }
+  }
+
+  if (!SKIP_PURGE) {
+    const cutoffMs = Date.now() - MAX_AGE_HOURS * 3600_000;
+    const candidates = users.filter(
+      (u) =>
+        u.email?.endsWith(`@${GUEST_DOMAIN}`) &&
+        (u.created_at ? Date.parse(u.created_at) : 0) <= cutoffMs,
+    );
+    for (const u of candidates) {
+      if (liveStudentIds.has(u.id)) {
+        summary.guestsSkippedActive += 1;
+        continue;
+      }
+      const { error } = await admin.auth.admin.deleteUser(u.id);
+      if (!error) summary.guestsDeleted += 1;
+    }
+    log(`  - deleted ${summary.guestsDeleted} idle guest(s) older than ${MAX_AGE_HOURS}h (skipped ${summary.guestsSkippedActive} mid-quiz)`);
+  }
+
+  // Strip IDLE non-guest enrollments only; mid-quiz real accounts are kept.
+  const { data: enrollments } = await admin
+    .from("class_enrollments")
+    .select("student_id")
+    .eq("class_id", demoClass.id);
+  const realIds = [...new Set((enrollments ?? []).map((e) => e.student_id))].filter(
+    (id) => id && !guestIds.has(id),
+  );
+  const idleRealIds = realIds.filter((id) => !liveStudentIds.has(id));
+  summary.realEnrollmentsPreserved = realIds.length - idleRealIds.length;
+  if (idleRealIds.length > 0) {
+    const { error } = await admin
+      .from("class_enrollments")
+      .delete()
+      .eq("class_id", demoClass.id)
+      .in("student_id", idleRealIds);
+    if (!error) summary.realEnrollmentsRemoved = idleRealIds.length;
+  }
+  log(`  - removed ${summary.realEnrollmentsRemoved} idle real enrollment(s) (preserved ${summary.realEnrollmentsPreserved} mid-quiz)`);
+
+  // Recreate the walk-up quiz (guarded ordering: never delete the source until
+  // a replacement is verified live). Scoped to WALK-UP-titled quizzes so the
+  // curated gesture-off quizzes are never collapsed into the clone; their
+  // COMPLETED guest attempts are cleared instead (seeded history is kept,
+  // live attempts preserved).
   if (curatedQuizzes.length > 0 && guestIds.size > 0) {
     const { count, error: clearError } = await admin
       .from("quiz_sessions")
@@ -152,9 +182,18 @@ async function main() {
         "quiz_id",
         curatedQuizzes.map((q) => q.id),
       )
-      .in("student_id", [...guestIds]);
+      .in("student_id", [...guestIds])
+      .eq("status", "completed");
     if (!clearError) summary.curatedGuestSessionsCleared = count ?? 0;
-    log(`  - cleared ${summary.curatedGuestSessionsCleared} guest session(s) on ${curatedQuizzes.length} curated quiz(zes)`);
+    log(`  - cleared ${summary.curatedGuestSessionsCleared} completed guest session(s) on ${curatedQuizzes.length} curated quiz(zes)`);
+  }
+
+  // Defer while visitors are on a walk-up quiz — retry after the show.
+  if (walkupQuizzes.some((q) => liveQuizIds.has(q.id))) {
+    summary.quizRecreateFailedReason = "deferred_active_sessions";
+    log("  ! walk-up quiz has live sessions — recreation deferred (retry after the show)");
+    log("\n== Done ==\n");
+    return summary;
   }
   if (source && demoLecturerId) {
     const { data: questions, error: questionsError } = await admin
@@ -172,6 +211,8 @@ async function main() {
     }
 
     const title = `Try InnoVision Live Demo (${new Date().toISOString().slice(0, 16).replace("T", " ")})`;
+    // Walk-up practice recreates with gestures ON (practice+gestures = tracker
+    // with face off, no guest lockup). Mirrors walkup-reset.ts.
     const { data: created, error: createError } = await admin
       .from("quizzes")
       .insert({
@@ -180,7 +221,8 @@ async function main() {
         title,
         mode: "practice",
         time_limit_sec: null,
-        gestures_enabled: false,
+        gestures_enabled: true,
+        sources: source.sources ?? [],
       })
       .select("id")
       .single();
@@ -211,8 +253,9 @@ async function main() {
       return summary;
     }
 
-    // Verified live → prune the stale WALK-UP quizzes (curated ids excluded).
-    const staleIds = walkupQuizzes.map((q) => q.id).filter((id) => id !== created.id);
+    // Verified live → prune the stale WALK-UP quizzes (curated ids excluded;
+    // any quiz that gained a live session meanwhile is kept to drain).
+    const staleIds = walkupQuizzes.map((q) => q.id).filter((id) => id !== created.id && !liveQuizIds.has(id));
     if (staleIds.length > 0) {
       const { count } = await admin.from("quizzes").delete({ count: "exact" }).in("id", staleIds);
       summary.staleQuizzesDeleted = count ?? 0;

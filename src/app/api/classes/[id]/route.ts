@@ -80,7 +80,7 @@ export async function GET(_request: Request, { params }: Params) {
         archived_at: cls.archived_at,
       },
       roster,
-      // audit-2 M-13: additive truncation flag — "showing first 100".
+      // audit-2 M-13: additive truncation flag — "showing first 200" (A6 raised the cap).
       rosterTruncated,
     });
   }

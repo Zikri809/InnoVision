@@ -11,6 +11,7 @@ if (existsSync(".env.local")) {
 
 const PORT = process.env.PLAYWRIGHT_PORT ?? "3001";
 const BASE_URL = `http://localhost:${PORT}`;
+const SSO_PORT = process.env.PLAYWRIGHT_SSO_PORT ?? "3003";
 const MOCK_AI_PORT = process.env.MOCK_AI_PORT ?? "8787";
 const MOCK_TINYFISH_PORT = process.env.MOCK_TINYFISH_PORT ?? "8788";
 const NOWEBSEARCH_PORT = process.env.PLAYWRIGHT_NOWEBSEARCH_PORT ?? "3002";
@@ -230,8 +231,22 @@ const config = defineConfig({
       // play stage) that only render at phone viewports — running them on the
       // 1280×720 desktop project would fail every assertion and, with CI's
       // maxFailures: 1, abort the whole step. They run in the `mobile`
-      // project below.
-      testIgnore: ["**/m*.spec.ts", "**/e2f-web-generate-flags.spec.ts"],
+      // project below. e64b targets the SSO-configured :3003 server — the
+      // default build's /login has no SSO button, so its first assertion
+      // would fail here.
+      testIgnore: ["**/m*.spec.ts", "**/e2f-web-generate-flags.spec.ts", "**/e64b-sso-configured.spec.ts", "**/prod-smoke.spec.ts"],
+    },
+    {
+      // SSO-configured instance (e64b): serves the SAME .next build on a
+      // third port with INSTITUTIONAL_EMAIL_DOMAINS set at RUNTIME (server
+      // env — no second build). Mirrors the chromium-nowebsearch project:
+      // testMatch pins this project to its one file, the main project's
+      // testIgnore (below) keeps the default run off the :3003 server, and
+      // the file's own project-name guard makes a stray invocation skip.
+      name: "chromium-sso",
+      use: { ...devices["Desktop Chrome"], baseURL: `http://localhost:${SSO_PORT}` },
+      testMatch: ["**/e64b-sso-configured.spec.ts"],
+      testIgnore: ["**/m*.spec.ts", "**/prod-smoke.spec.ts"],
     },
     {
       // Mobile project (plan §6): phone viewport + touch + mobile UA so the
@@ -257,7 +272,17 @@ const config = defineConfig({
       name: "chromium-nowebsearch",
       use: { ...devices["Desktop Chrome"], baseURL: `http://localhost:${NOWEBSEARCH_PORT}` },
       testMatch: ["**/e2f-web-generate-flags.spec.ts"],
-      testIgnore: ["**/m*.spec.ts"],
+      testIgnore: ["**/m*.spec.ts", "**/prod-smoke.spec.ts"],
+    },
+    {
+      // Prod smoke (docs/PROD_TESTING.md §2): read-only pulse against the
+      // LIVE deployment. Runs ONLY with PROD_SMOKE=1 + PROD_URL set (the
+      // spec file skips otherwise); every other project testIgnores it so
+      // default runs never collect it (a fully-skipped file would trip the
+      // min-exec reporter). No other project may match this file.
+      name: "prod-smoke",
+      use: { ...devices["Desktop Chrome"], baseURL: process.env.PROD_URL ?? BASE_URL },
+      testMatch: ["**/prod-smoke.spec.ts"],
     },
   ],
   webServer: [
@@ -310,6 +335,23 @@ const config = defineConfig({
         TINYFISH_API_KEY: "",
         TINYFISH_SEARCH_URL: "",
         TINYFISH_FETCH_URL: "",
+      },
+    },
+    {
+      // SSO-configured server instance (chromium-sso project, e64b): the SAME
+      // .next build on a third port with the institutional domain allowlist
+      // set at RUNTIME. isSsoConfigured() reads process.env per request
+      // (/login is force-dynamic), so the flag must be in THIS process's env
+      // — never inherited from a .env.local that the other servers would also
+      // see. The domain value is irrelevant to the harness (no real Azure
+      // tenant is reachable); only its PRESENCE arms the login-page button.
+      command: `node -e "const fs=require('fs');(function w(){fs.existsSync('.next/BUILD_ID')?require('child_process').execSync('npm run start -- -p ${SSO_PORT}',{stdio:'inherit'}):setTimeout(w,1000)})()"`,
+      url: `http://localhost:${SSO_PORT}`,
+      reuseExistingServer: !process.env.CI,
+      timeout: 300_000,
+      env: {
+        ...HARNESS_BASE_ENV,
+        INSTITUTIONAL_EMAIL_DOMAINS: "innovision.test",
       },
     },
   ],

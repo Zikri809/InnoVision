@@ -37,6 +37,14 @@ export { DEMO_GUEST_EMAIL_DOMAIN, isGuestEmail };
 const GUEST_MATRIC_MIN = 980_000;
 const GUEST_MATRIC_MAX = 989_999;
 
+/**
+ * Absolute ceiling on concurrently provisioned guest accounts. Per-user spend
+ * caps bound AI spend, not account count; this caps roster bloat and keeps the
+ * reset script's work bounded. Generous for a full exhibition day. Surfaced on
+ * /demo (A5, PLAN_DEMO_DAY_HARDENING) — import this, never re-literal 200.
+ */
+export const GUEST_ACCOUNT_CAP = 200;
+
 /** Guest #N label cap — matches the profile full_name CHECK (120 chars). */
 const GUEST_NAME_MAX = 120;
 
@@ -85,16 +93,20 @@ export function guestDisplayName(guestNumber: number): string {
  * `head: true` COUNT on profiles' `98xxxx` matric range, which only guests use.
  * Cheap (no rows transferred) and accurate regardless of total user count —
  * unlike the bounded listUsers scan, which under-counts past 1000 users.
+ *
+ * Returns null on DB error (R2 MINOR-1): callers must NOT render that as
+ * "0 / 200" — a failed preflight read is indistinguishable from an empty
+ * booth, exactly the wrong signal before doors.
  */
 export async function countGuestAccounts(
   admin: SupabaseClient<Database> = createAdminClient(),
-): Promise<number> {
+): Promise<number | null> {
   const { count, error } = await admin
     .from("profiles")
     .select("id", { count: "exact", head: true })
     .gte("matric_no", "980000")
     .lte("matric_no", "989999");
-  if (error) return 0;
+  if (error) return null;
   return count ?? 0;
 }
 

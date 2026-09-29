@@ -132,7 +132,30 @@ export async function updateSession(request: NextRequest) {
 
   const {
     data: { user },
+    error: authError,
   } = await supabase.auth.getUser();
+
+  // Outage-vs-missing distinction (mirrors requireUser in
+  // src/lib/classes/guards.ts): a transient Auth/GoTrue failure must not read
+  // as logged-out, or a blip bounces a live session to /login (false logout —
+  // worse behind a tunnel, where refresh round-trips are slower and blips more
+  // likely). Only a session-missing-shaped error — or no error with no user —
+  // means logged out; anything else passes through and the page-level guards
+  // report the outage honestly (503) instead of destroying navigation state.
+  let authUnreachable = false;
+  if (!user && authError) {
+    const msg = String(
+      (authError as { message?: unknown }).message ?? authError,
+    ).toLowerCase();
+    const sessionMissing =
+      msg.includes("session missing") ||
+      msg.includes("no session") ||
+      msg.includes("not authenticated");
+    if (!sessionMissing) {
+      authUnreachable = true;
+      console.error(`[middleware] getUser failed (${msg}); passing through`);
+    }
+  }
 
   const { pathname } = request.nextUrl;
 
@@ -148,8 +171,10 @@ export async function updateSession(request: NextRequest) {
   // returns JSON 401 on its own, so no HTML-login redirect can reach an API
   // caller.
 
-  // Redirect unauthenticated users to login (except public routes)
-  if (!user && !isPublicRoute(pathname)) {
+  // Redirect unauthenticated users to login (except public routes).
+  // On an Auth outage (authUnreachable) the session state is UNKNOWN, not
+  // absent — bouncing would strand a live session on /login, so pass through.
+  if (!user && !authUnreachable && !isPublicRoute(pathname)) {
     // Demo mode: the seeded demo class QR must reach /join/[code] anonymously
     // so the walk-up guest flow can render. See isDemoJoinSkip.
     if (pathname.startsWith("/join/") && isDemoJoinSkip(pathname)) {

@@ -110,15 +110,18 @@ target is **single-instance** (`docs/DEPLOY_VPS.md` §6). A shared store
 
 ### 2.5 The pausing risk, priced
 
-Free-tier pausing stops **all five cron jobs**. In order of damage:
+Free-tier pausing stops **all seven cron jobs**. In order of damage:
 
 1. `innovision-flag-verify-silence` (every minute) — the **integrity bypass**:
    verification can be suppressed with nothing flagged.
 2. `innovision-quiz-autoclose` — sessions stop closing on schedule.
-3. `innovision-incident-prune` + `innovision-retention` — nothing is pruned, so
+3. `innovision-ai-mark-sweep` (every minute) + `innovision-ai-mark-escalate` (every 5 min) —
+   short-text answers stall at `mark_status='pending'` and reveal waits forever (the sweep is
+   the reveal's precondition).
+4. `innovision-incident-prune` + `innovision-retention` — nothing is pruned, so
    storage grows toward the 1 GB quota (**the death spiral**: pause → no prune →
    quota hit → uploads fail).
-4. `innovision-notifications` — weekly cleanup stalls.
+5. `innovision-notifications` — weekly cleanup stalls.
 
 Two ways to price that:
 

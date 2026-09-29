@@ -18,6 +18,11 @@ export default async function StudentQuizzesPage({
   // validation beyond the shape check is needed (no oracle either way).
   const rawClass = params.class;
   const classFilter = typeof rawClass === "string" ? rawClass : null;
+  // A3 (PLAN_DEMO_DAY_HARDENING): the demo guest route redirects here with
+  // ?join=retry when enrollment failed post-sign-in. The client renders a
+  // retry-join button only when this is present AND the list is empty.
+  const rawJoin = params.join;
+  const joinRetry = rawJoin === "retry";
 
   const supabase = await createClient();
   const {
@@ -146,6 +151,7 @@ export default async function StudentQuizzesPage({
       enrolled={profile.face_enrollment_status === "enrolled" && hasBaseline}
       classFilter={classFilter}
       classFilterTitle={classFilter ? (classTitleById.get(classFilter) ?? null) : null}
+      joinRetry={joinRetry}
     />
   );
 }

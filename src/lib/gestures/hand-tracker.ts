@@ -242,8 +242,14 @@ export class HandLandmarkerTracker implements IHandTracker {
       this.video.playsInline = true;
       void this.video.play().catch(() => {});
     }
-    const w = this.video.videoWidth || CAMERA_WIDTH_MAX;
-    const h = this.video.videoHeight || CAMERA_HEIGHT_MAX;
+    // A freshly mounted <video> reports 0×0 until its metadata arrives, even
+    // for an already-live shared stream. Prefer the live dims when known;
+    // otherwise KEEP the new canvas's current dims (a re-bind mid-session must
+    // not snap a correct 16:9 canvas back to the 4:3 fallback — that squeeze
+    // is exactly the "squished preview" complaint). The detect loop re-syncs
+    // once metadata lands.
+    const w = this.video.videoWidth || this.canvas.width || CAMERA_WIDTH_MAX;
+    const h = this.video.videoHeight || this.canvas.height || CAMERA_HEIGHT_MAX;
     this.canvas.width = w;
     this.canvas.height = h;
   }
@@ -393,6 +399,17 @@ export class HandLandmarkerTracker implements IHandTracker {
   private renderVideo(): void {
     const ctx = this.canvas.getContext("2d");
     if (!ctx) return;
+    // Re-sync canvas dims if the video's real frame size arrived after the
+    // initial sizing (or differs from the fallback): a canvas locked to the
+    // wrong ratio stretches every drawImage — the squish survives even with
+    // correct CSS. Cheap guard: assignments clear the canvas, so only resize
+    // on actual change.
+    const vw = this.video.videoWidth;
+    const vh = this.video.videoHeight;
+    if (vw > 0 && vh > 0 && (this.canvas.width !== vw || this.canvas.height !== vh)) {
+      this.canvas.width = vw;
+      this.canvas.height = vh;
+    }
     const w = this.canvas.width;
     const h = this.canvas.height;
     ctx.save();

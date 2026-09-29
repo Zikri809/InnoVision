@@ -79,7 +79,7 @@ create quizzes in it. Do not send the code to someone who should not join.
 2. **Desktop:** find the **Students** section or tab. **Phone:** select the
    **Students** tab to switch from class quizzes to the roster.
 3. Check the student names and matric numbers shown there. For a large class,
-   a notice may say only the first 100 students are listed; other enrolled
+   a notice may say only the first 200 students are listed; other enrolled
    students still count toward quizzes and exports.
 
 For a student who cannot join, confirm you shared this class's current code

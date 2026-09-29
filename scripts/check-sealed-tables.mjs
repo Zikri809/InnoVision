@@ -123,6 +123,13 @@ const ALLOWLIST = [
     reason:
       "Booth-only demo reset DELETES guest attempts on curated gesture-off quizzes (answers cascade from the session rows); seeded history belongs to real students and is untouched. Same service-role client as the clone arms above (default-parameter admin, not a const assignment, so not recognized lexically). Flag+demo-lecturer gated, dead in production.",
   },
+  {
+    file: "src/lib/demo/walkup-reset.ts",
+    table: "quiz_sessions",
+    snippet: ".in(\"status\", [\"active\", \"paused\", \"flagged\"])",
+    reason:
+      "Booth-only demo reset SNAPSHOTS students holding a live session (active/paused/flagged) on demo-class quizzes so mid-quiz visitors are never purged. Same service-role client as the clone/delete arms above (default-parameter admin, not a const assignment, so not recognized lexically). Read-only, id-only columns. Flag+demo-lecturer gated, dead in production.",
+  },
 ];
 
 const REQUIRED_NOTIFY = ["0054", "0055", "0057", "0058", "0060"];

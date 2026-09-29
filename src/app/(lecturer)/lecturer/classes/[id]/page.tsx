@@ -43,8 +43,8 @@ export default async function LecturerClassDetailPage({
   if (!cls) notFound();
 
   // audit-2 M-13 / audit-3 B-F6: the roster read reports truncation; the
-  // page must render it (a 250-enrolled class otherwise shows "100 students"
-  // with students 101-250 invisible).
+  // page must render it (a 250-enrolled class otherwise shows "200 students"
+  // with students 201-250 invisible).
   const { roster, truncated: rosterTruncated, error: rosterError } = await getClassRoster(supabase, id);
   if (rosterError) {
     console.error("Roster fetch error:", rosterError);

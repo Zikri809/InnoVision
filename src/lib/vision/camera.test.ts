@@ -1,7 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   acquireCameraStream,
+  isCameraStreamLive,
   isCoarsePointerDevice,
+  listVideoDevices,
+  onCameraDisconnected,
   resolveStream,
   releaseCameraStream,
   resolveVideoConstraints,
@@ -238,6 +241,110 @@ describe("camera.ts refcount/generation", () => {
     expect(shared.active).toBe(true); // t2 still holds a ref → still live
     releaseCameraStream(t2);
     expect(shared.getTracks()[0].stopped).toBe(true);
+  });
+});
+
+describe("camera.ts virtual-camera hardening (Camo / phone-as-webcam)", () => {
+  it("retries with downgraded constraints after OverconstrainedError", async () => {
+    const shared = makeStream();
+    const gUM = vi
+      .fn()
+      .mockRejectedValueOnce(new DOMException("unsupported", "OverconstrainedError"))
+      .mockResolvedValueOnce(shared);
+    setGetUserMedia(gUM);
+
+    const token = await acquireCameraStream();
+    expect(resolveStream(token)).toBe(shared);
+    // Full 720p rung failed → ladder fell through to a degraded rung.
+    expect(gUM).toHaveBeenCalledTimes(2);
+    const secondVideo = (gUM.mock.calls[1][0] as { video: object }).video;
+    expect(JSON.stringify(secondVideo)).not.toBe(
+      JSON.stringify((gUM.mock.calls[0][0] as { video: object }).video),
+    );
+    releaseCameraStream(token);
+  });
+
+  it("does NOT retry permission denials (single attempt, classified cause)", async () => {
+    const gUM = vi
+      .fn()
+      .mockRejectedValue(new DOMException("denied", "NotAllowedError"));
+    setGetUserMedia(gUM);
+
+    const err: CameraFailureError = await acquireCameraStream().then(
+      () => {
+        throw new Error("expected rejection");
+      },
+      (e: unknown) => e as CameraFailureError,
+    );
+    expect(err).toBeInstanceOf(CameraFailureError);
+    expect(err.failure).toBe("permission");
+    expect(gUM).toHaveBeenCalledTimes(1);
+  });
+
+  it("pins an explicit deviceId into the requested constraints", async () => {
+    const shared = makeStream();
+    const gUM = vi.fn().mockResolvedValue(shared);
+    setGetUserMedia(gUM);
+
+    const token = await acquireCameraStream({ deviceId: "camo-123" });
+    expect(gUM).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify((gUM.mock.calls[0][0] as { video: object }).video)).toContain(
+      "camo-123",
+    );
+    releaseCameraStream(token);
+  });
+
+  it("track end notifies listeners, drops liveness, and forces a fresh stream on next acquire", async () => {
+    type LiveTrack = {
+      kind: string;
+      readyState: string;
+      stopped: boolean;
+      onended: ((ev: unknown) => void) | null;
+      stop: () => void;
+    };
+    const track: LiveTrack = {
+      kind: "video",
+      readyState: "live",
+      stopped: false,
+      onended: null,
+      stop: () => {},
+    };
+    const live = { active: true, getTracks: () => [track] };
+    track.stop = () => {
+      track.stopped = true;
+      track.readyState = "ended";
+      live.active = false;
+    };
+    const fresh = makeStream();
+    const gUM = vi.fn().mockResolvedValueOnce(live).mockResolvedValue(fresh);
+    setGetUserMedia(gUM as unknown as () => Promise<never>);
+
+    const t1 = await acquireCameraStream();
+    expect(isCameraStreamLive()).toBe(true);
+
+    const fired: boolean[] = [];
+    const unsubscribe = onCameraDisconnected(() => fired.push(true));
+
+    // Simulate a Camo unplug / phone sleep killing the track.
+    track.readyState = "ended";
+    live.active = false;
+    track.onended?.({});
+    expect(fired).toEqual([true]);
+    expect(isCameraStreamLive()).toBe(false);
+
+    // The next acquire must NOT coalesce onto the dead stream.
+    const t2 = await acquireCameraStream();
+    expect(gUM).toHaveBeenCalledTimes(2);
+    expect(resolveStream(t2)).toBe(fresh);
+
+    unsubscribe();
+    releaseCameraStream(t1);
+    releaseCameraStream(t2);
+  });
+
+  it("listVideoDevices returns [] when enumerateDevices is unavailable", async () => {
+    setGetUserMedia(() => Promise.resolve(makeStream()));
+    await expect(listVideoDevices()).resolves.toEqual([]);
   });
 });
 

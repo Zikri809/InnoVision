@@ -51,7 +51,7 @@ export const metadata: Metadata = {
   metadataBase: new URL(SITE_ORIGIN),
   title: "Easy2U",
   description: SITE_DESCRIPTION,
-  // og:image comes from ./opengraph-image.tsx (auto-wired by Next).
+  // og:image comes from ./opengraph-image.png (auto-wired by Next).
   openGraph: {
     title: "Easy2U",
     description: SITE_DESCRIPTION,
@@ -71,7 +71,7 @@ export const metadata: Metadata = {
   manifest: "/manifest.webmanifest",
   icons: {
     icon: "/icon.svg",
-    apple: "/icon.svg",
+    apple: "/apple-touch-icon.png",
   },
 };
 

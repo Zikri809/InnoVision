@@ -17,6 +17,9 @@ const LECTURER = "lect-1";
 
 interface Recorded {
   quizDeletes: (string[] | undefined)[];
+  /** Status filter captured on the quiz_sessions delete (curated clear). */
+  sessionDeleteStatus: (string | undefined)[];
+  deletedUsers: string[];
 }
 
 function makeAdmin(opts: {
@@ -24,8 +27,9 @@ function makeAdmin(opts: {
   questionsError?: unknown;
   quizzes?: { id: string; title?: string; created_at: string }[];
   users?: { id: string; email: string; created_at: string }[];
+  liveSessions?: { quiz_id: string; student_id: string; status: string }[];
 }): { admin: SupabaseClient<Database>; rec: Recorded } {
-  const rec: Recorded = { quizDeletes: [] };
+  const rec: Recorded = { quizDeletes: [], sessionDeleteStatus: [], deletedUsers: [] };
   const questions =
     opts.questions === undefined ? [{ order_index: 0, type: "mcq" }] : opts.questions;
   const users =
@@ -38,10 +42,14 @@ function makeAdmin(opts: {
   function builder(table: string) {
     let mode: "select" | "insert" | "update" | "delete" = "select";
     let capturedIds: string[] | undefined;
+    let capturedStatus: string | undefined;
     const b: Record<string, unknown> = {};
     const chain = () => b;
     b.select = chain;
-    b.eq = chain;
+    b.eq = (c: string, v: string) => {
+      if (table === "quiz_sessions" && c === "status") capturedStatus = v;
+      return b;
+    };
     b.neq = chain;
     b.order = chain;
     b.limit = chain;
@@ -64,6 +72,13 @@ function makeAdmin(opts: {
       return b;
     };
     const settle = () => {
+      if (table === "quiz_sessions") {
+        if (mode === "delete") {
+          rec.sessionDeleteStatus.push(capturedStatus);
+          return { data: null, error: null, count: 0 };
+        }
+        return { data: opts.liveSessions ?? [], error: null };
+      }
       if (table === "quizzes") {
         if (mode === "delete") {
           rec.quizDeletes.push(capturedIds);
@@ -92,11 +107,15 @@ function makeAdmin(opts: {
     return b;
   }
 
+  const deleteUser = vi.fn().mockImplementation(async (id: string) => {
+    rec.deletedUsers.push(id);
+    return { error: null };
+  });
   const admin = {
     auth: {
       admin: {
         listUsers: vi.fn().mockResolvedValue({ data: { users }, error: null }),
-        deleteUser: vi.fn().mockResolvedValue({ error: null }),
+        deleteUser,
       },
     },
     from: (table: string) => builder(table),
@@ -164,5 +183,42 @@ describe("resetWalkup — ordering guarantees", () => {
     expect(summary.quizRecreated).toBe(false);
     expect(summary.quizRecreateFailedReason).toBe("no_lecturer");
     expect(rec.quizDeletes.length).toBe(0);
+  });
+
+  it("gentle: mid-quiz guests are skipped even at 0h", async () => {
+    const oldGuest = {
+      id: "g-old",
+      email: "guest-old@demo.innovision.test",
+      created_at: new Date(Date.now() - 5 * 3600_000).toISOString(),
+    };
+    const { admin, rec } = makeAdmin({
+      users: [
+        { id: LECTURER, email: DEMO_LECTURER_EMAIL, created_at: new Date().toISOString() },
+        oldGuest,
+      ],
+      liveSessions: [{ quiz_id: SOURCE_QUIZ, student_id: "g-old", status: "active" }],
+    });
+    const summary = await resetWalkup(admin, { maxAgeHours: 0 });
+    expect(summary.guestsDeleted).toBe(0);
+    expect(summary.guestsSkippedActive).toBe(1);
+    expect(rec.deletedUsers).not.toContain("g-old");
+    // Recreation defers while the walk-up quiz has a live session.
+    expect(summary.quizRecreated).toBe(false);
+    expect(summary.quizRecreateFailedReason).toBe("deferred_active_sessions");
+    expect(rec.quizDeletes.length).toBe(0);
+  });
+
+  it("gentle: curated clear deletes only completed guest sessions", async () => {
+    const CURATED = "quiz-curated";
+    const { admin, rec } = makeAdmin({
+      quizzes: [
+        { id: SOURCE_QUIZ, title: "Try InnoVision — Live Demo", created_at: "2026-01-01T00:00:00Z" },
+        { id: CURATED, title: "Demo Assessment — Click to Answer (No Camera)", created_at: "2026-01-02T00:00:00Z" },
+      ],
+    });
+    const summary = await resetWalkup(admin);
+    expect(summary.quizRecreated).toBe(true);
+    expect(rec.sessionDeleteStatus).toContain("completed");
+    expect(rec.sessionDeleteStatus).not.toContain(undefined);
   });
 });

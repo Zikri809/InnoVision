@@ -548,8 +548,8 @@ export function buildExportModel(input: BuildExportInput): ExportModel {
   };
 }
 
-/** Roster read cap used by the export route (mirrors getClassRoster's cap). */
-export const ROSTER_EXPORT_CAP = 100;
+/** Roster read cap used by the export route (mirrors getClassRoster's cap; A6: 200). */
+export const ROSTER_EXPORT_CAP = 200;
 
 /** Times-correct/times-answered aggregates per question (key sheet). */
 export function summarizeQuestionStats(

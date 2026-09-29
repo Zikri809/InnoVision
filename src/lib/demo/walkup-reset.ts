@@ -6,24 +6,35 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { DEMO_JOIN_CODE, DEMO_GUEST_EMAIL_DOMAIN } from "@/lib/demo/gate";
 
 /**
- * Walk-up reset (PLAN_DEMO_MODE.md D6) — the safe, mid-day reset between talk
- * shows. It does NOT touch the showcase class or the lecturer's seeded history.
+ * Walk-up reset (PLAN_DEMO_MODE.md D6) — the gentle between-shows reset. It
+ * does NOT touch the showcase class, the lecturer's seeded history, or any
+ * non-demo class. Two tiers exist (see package.json):
+ *
+ *   - `demo:reset:full` (MORNING NUKE, booth closed): `supabase db reset` +
+ *     `seed:demo`. Destroys everything, including live guest sessions.
+ *   - THIS helper / `demo:reset:walkup` (BETWEEN SHOWS, booth open): demo
+ *     data only, and never interrupts a visitor mid-quiz:
  *
  * Steps:
  *  1. Delete guest accounts older than `maxAgeHours` (FK cascade removes their
- *     enrollments, sessions, and answers). `maxAgeHours = 0` deletes ALL guests.
- *  2. Build the current guest-id set + locate the demo class.
- *  3. Strip non-guest enrollments from the demo class (a visitor who scanned
- *     with their REAL account before/after a show must not linger in the demo
- *     roster).
+ *     enrollments, sessions, and answers) — EXCEPT guests holding a live
+ *     session (`active`/`paused`/`flagged`) on a demo-class quiz. They are
+ *     counted in `guestsSkippedActive` and left alone, even at 0h.
+ *  2. Locate the demo class + its quizzes, then snapshot the live-student set.
+ *  3. Strip IDLE non-guest enrollments from the demo class (a real-account
+ *     visitor's stale roster row). Enrollments holding a live session are
+ *     preserved (`realEnrollmentsPreserved`) — a guest on their own account
+ *     is never kicked mid-quiz.
  *  4. Recreate a FRESH walk-up practice quiz by cloning the newest WALK-UP
  *     demo-class quiz's questions (title prefix `Try InnoVision`; quizzes are
  *     one-way lifecycle: recreate, never re-publish a closed/revealed row).
- *     The stale walk-up quizzes are deleted ONLY AFTER the replacement is
- *     verified live — a failed clone must never leave the demo class with
- *     nothing to play. Curated gesture-off quizzes (fixed titles) are never
- *     recreated; only guest attempts on them are cleared (seeded history from
- *     real students is kept for the results dashboard).
+ *     DEFERRED (`deferred_active_sessions`) while any walk-up quiz still has
+ *     a live session — the operator retries after the show. On success, stale
+ *     walk-up quizzes are deleted ONLY AFTER the replacement is verified
+ *     live, and only when they hold no live session themselves. Curated
+ *     gesture-off quizzes (fixed titles) are never recreated; only COMPLETED
+ *     guest attempts on them are cleared (seeded history from real students
+ *     is kept for the results dashboard; live guest attempts are preserved).
  *
  * Direct table writes under the service role (rather than an RPC) are the
  * deliberate posture for this booth-only reset: every other assessment write
@@ -49,7 +60,10 @@ export const DEMO_LECTURER_EMAIL = "demo-lecturer@innovision.test";
 export const WALKUP_QUIZ_TITLE_PREFIX = "Try InnoVision";
 
 export interface WalkupResetOptions {
-  /** Delete guests older than this many hours. 0 = delete all guests. */
+  /**
+   * Delete IDLE guests older than this many hours. Guests holding a live
+   * session are always skipped. 0 = all idle guests.
+   */
   maxAgeHours?: number;
   /** Skip the guest-deletion arm (e.g. a quiz-only refresh). */
   skipGuestPurge?: boolean;
@@ -57,19 +71,24 @@ export interface WalkupResetOptions {
 
 export interface WalkupResetSummary {
   guestsDeleted: number;
+  /** Live guests deliberately NOT deleted (mid-quiz, any age). */
+  guestsSkippedActive: number;
   realEnrollmentsRemoved: number;
+  /** Mid-quiz real-account enrollments deliberately kept. */
+  realEnrollmentsPreserved: number;
   quizRecreated: boolean;
   newQuizId: string | null;
   staleQuizzesDeleted: number;
   demoClassFound: boolean;
-  /** Guest attempts cleared on the curated demo quizzes (seeded history kept). */
+  /** COMPLETED guest attempts cleared on curated quizzes (live kept, history kept). */
   curatedGuestSessionsCleared: number;
   /** Curated demo quizzes left in place (rows never recreated). */
   curatedQuizzesPreserved: number;
   /**
    * Why the quiz recreation did not happen (for the /demo operator). Absent on
    * success. Values: "questions_read_error" | "source_empty" | "create_failed"
-   * | "insert_failed" | "publish_failed" | "no_lecturer".
+   * | "insert_failed" | "publish_failed" | "no_lecturer" |
+   * "deferred_active_sessions".
    */
   quizRecreateFailedReason?: string;
 }
@@ -118,7 +137,9 @@ export async function resetWalkup(
   const maxAgeHours = opts.maxAgeHours ?? DEFAULT_MAX_AGE_HOURS;
   const summary: WalkupResetSummary = {
     guestsDeleted: 0,
+    guestsSkippedActive: 0,
     realEnrollmentsRemoved: 0,
+    realEnrollmentsPreserved: 0,
     quizRecreated: false,
     newQuizId: null,
     staleQuizzesDeleted: 0,
@@ -129,22 +150,10 @@ export async function resetWalkup(
 
   const { guestIds, demoLecturerId, users } = await listDemoUsers(admin);
 
-  // 1. Purge guests (auth.users delete cascades profile + enrollments + sessions
-  //    + answers).
-  if (!opts.skipGuestPurge) {
-    const cutoffMs = Date.now() - maxAgeHours * 3600_000;
-    const toDelete = users.filter(
-      (u) =>
-        u.email?.endsWith(`@${DEMO_GUEST_EMAIL_DOMAIN}`) &&
-        (u.created_at ? Date.parse(u.created_at) : 0) <= cutoffMs,
-    );
-    for (const u of toDelete) {
-      const { error } = await admin.auth.admin.deleteUser(u.id);
-      if (!error) summary.guestsDeleted += 1;
-    }
-  }
-
-  // 2. Locate the demo class.
+  // 2 (first — the live set gates every destructive arm). Locate the demo
+  // class + its quizzes, then snapshot students holding a LIVE session
+  // (active/paused/flagged) on any demo-class quiz. Everyone in this set is
+  // mid-quiz and must not be touched.
   const { data: demoClass } = await admin
     .from("classes")
     .select("id")
@@ -153,32 +162,9 @@ export async function resetWalkup(
   if (!demoClass?.id) return summary;
   summary.demoClassFound = true;
 
-  // 3. Remove enrollments whose student is NOT a guest. A real-account visitor
-  //    who scanned the demo QR is dropped from the demo roster.
-  const { data: enrollments } = await admin
-    .from("class_enrollments")
-    .select("student_id")
-    .eq("class_id", demoClass.id);
-  const realIds = [...new Set((enrollments ?? []).map((e) => e.student_id))].filter(
-    (id) => id && !guestIds.has(id),
-  );
-  if (realIds.length > 0) {
-    const { error } = await admin
-      .from("class_enrollments")
-      .delete()
-      .eq("class_id", demoClass.id)
-      .in("student_id", realIds);
-    if (!error) summary.realEnrollmentsRemoved = realIds.length;
-  }
-
-  // 4. Recreate the walk-up quiz from the newest WALK-UP demo-class quiz.
-  // Curated gesture-off quizzes (fixed titles, seeded history) are NEVER
-  // recreated: their rows stay in place and only GUEST attempts on them are
-  // cleared below. Scoping by title prefix is what stops a multi-quiz demo
-  // class from collapsing into a single clone.
   const { data: quizzes } = await admin
     .from("quizzes")
-    .select("id, title, created_at")
+    .select("id, title, created_at, sources")
     .eq("class_id", demoClass.id)
     .order("created_at", { ascending: false });
   const walkupQuizzes = (quizzes ?? []).filter((q) =>
@@ -193,10 +179,66 @@ export async function resetWalkup(
   // ever touches walk-up-titled rows, so curated rows are safe either way.
   const source = walkupQuizzes[0] ?? quizzes?.[0];
 
-  // 4b. Clear guest attempts on the curated quizzes (answers cascade from the
-  // session rows). Seeded history belongs to REAL seeded students, not guests,
-  // so the past-results dashboard survives the reset. Runs BEFORE the walk-up
-  // recreation so a walk-up failure still leaves curated quizzes guest-clean.
+  const liveStudentIds = new Set<string>();
+  const liveQuizIds = new Set<string>();
+  const demoQuizIds = (quizzes ?? []).map((q) => q.id);
+  if (demoQuizIds.length > 0) {
+    const { data: liveSessions } = await admin
+      .from("quiz_sessions")
+      .select("quiz_id, student_id, status")
+      .in("quiz_id", demoQuizIds)
+      .in("status", ["active", "paused", "flagged"]);
+    for (const s of liveSessions ?? []) {
+      if (s?.student_id) liveStudentIds.add(s.student_id);
+      if (s?.quiz_id) liveQuizIds.add(s.quiz_id);
+    }
+  }
+
+  // 1. Purge IDLE guests only (auth.users delete cascades profile +
+  //    enrollments + sessions + answers). A guest holding a live session is
+  //    skipped at any age — even 0h never kills a mid-quiz visitor.
+  if (!opts.skipGuestPurge) {
+    const cutoffMs = Date.now() - maxAgeHours * 3600_000;
+    const candidates = users.filter(
+      (u) =>
+        u.email?.endsWith(`@${DEMO_GUEST_EMAIL_DOMAIN}`) &&
+        (u.created_at ? Date.parse(u.created_at) : 0) <= cutoffMs,
+    );
+    for (const u of candidates) {
+      if (liveStudentIds.has(u.id)) {
+        summary.guestsSkippedActive += 1;
+        continue;
+      }
+      const { error } = await admin.auth.admin.deleteUser(u.id);
+      if (!error) summary.guestsDeleted += 1;
+    }
+  }
+
+  // 3. Strip IDLE non-guest enrollments from the demo class. A real-account
+  //    visitor's stale roster row is hygiene; a mid-quiz one is untouchable.
+  const { data: enrollments } = await admin
+    .from("class_enrollments")
+    .select("student_id")
+    .eq("class_id", demoClass.id);
+  const realIds = [...new Set((enrollments ?? []).map((e) => e.student_id))].filter(
+    (id) => id && !guestIds.has(id),
+  );
+  const idleRealIds = realIds.filter((id) => !liveStudentIds.has(id));
+  summary.realEnrollmentsPreserved = realIds.length - idleRealIds.length;
+  if (idleRealIds.length > 0) {
+    const { error } = await admin
+      .from("class_enrollments")
+      .delete()
+      .eq("class_id", demoClass.id)
+      .in("student_id", idleRealIds);
+    if (!error) summary.realEnrollmentsRemoved = idleRealIds.length;
+  }
+
+  // 4b. Clear COMPLETED guest attempts on the curated quizzes (answers cascade
+  // from the session rows). Seeded history belongs to REAL seeded students,
+  // not guests, so the past-results dashboard survives the reset; live guest
+  // attempts are preserved. Runs BEFORE the walk-up recreation so a walk-up
+  // deferral still leaves curated quizzes guest-clean.
   if (curatedQuizzes.length > 0 && guestIds.size > 0) {
     const { count, error: clearError } = await admin
       .from("quiz_sessions")
@@ -205,8 +247,19 @@ export async function resetWalkup(
         "quiz_id",
         curatedQuizzes.map((q) => q.id),
       )
-      .in("student_id", [...guestIds]);
+      .in("student_id", [...guestIds])
+      .eq("status", "completed");
     if (!clearError) summary.curatedGuestSessionsCleared = count ?? 0;
+  }
+
+  // 4. Recreate the walk-up quiz from the newest WALK-UP demo-class quiz —
+  // unless visitors are on it right now. Deleting (or stranding) a quiz with
+  // live sessions would blank mid-quiz screens; defer and let the operator
+  // retry after the show. Scoping by title prefix is what stops a multi-quiz
+  // demo class from collapsing into a single clone.
+  if (walkupQuizzes.some((q) => liveQuizIds.has(q.id))) {
+    summary.quizRecreateFailedReason = "deferred_active_sessions";
+    return summary;
   }
 
   if (source && demoLecturerId) {
@@ -233,6 +286,8 @@ export async function resetWalkup(
 
     // insert-as-draft (quiz_status_transition forces it), then publish.
     const title = `Try InnoVision Live Demo (${new Date().toISOString().slice(0, 16).replace("T", " ")})`;
+    // Walk-up practice recreates with gestures ON (see seed-demo.mjs): practice
+    // +gestures boots the hand tracker with face staying off (no lockup).
     const { data: created, error: createError } = await admin
       .from("quizzes")
       .insert({
@@ -241,7 +296,8 @@ export async function resetWalkup(
         title,
         mode: "practice",
         time_limit_sec: null,
-        gestures_enabled: false,
+        gestures_enabled: true,
+        sources: ((source as { sources?: unknown }).sources ?? []) as never,
       })
       .select("id")
       .single();
@@ -289,8 +345,12 @@ export async function resetWalkup(
     }
 
     // Replacement is verified live — NOW prune the stale WALK-UP quizzes.
-    // Curated ids are excluded by construction (see the partition above).
-    const staleIds = walkupQuizzes.map((q) => q.id).filter((id) => id !== newQuizId);
+    // Curated ids are excluded by construction (see the partition above), and
+    // any walk-up quiz that gained a live session in the meantime is kept for
+    // the next reset (its players drain on the quiz they started).
+    const staleIds = walkupQuizzes
+      .map((q) => q.id)
+      .filter((id) => id !== newQuizId && !liveQuizIds.has(id));
     if (staleIds.length > 0) {
       const { count } = await admin
         .from("quizzes")

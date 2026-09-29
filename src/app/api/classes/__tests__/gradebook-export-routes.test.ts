@@ -476,10 +476,12 @@ describe("GET /api/classes/[id]/gradebook-export — truncation signals (B-F4/B-
     seedOwner(client);
     seedQuiz(client);
     client.tables["questions"] = [];
-    // 101 rows → getClassRoster reports truncated (fetches LIMIT+1).
+    // ROSTER_LIMIT+1 rows → getClassRoster reports truncated (fetches LIMIT+1).
+    // Pinned to the constant (A6), not a literal.
+    const { ROSTER_LIMIT } = await import("@/lib/classes/roster");
     seedRoster(
       client,
-      Array.from({ length: 101 }, (_, i) => ({
+      Array.from({ length: ROSTER_LIMIT + 1 }, (_, i) => ({
         student_id: `stu-${i}`,
         full_name: `Student ${i}`,
         matric_no: null,
@@ -491,7 +493,7 @@ describe("GET /api/classes/[id]/gradebook-export — truncation signals (B-F4/B-
     expect(res.headers.get("X-Gradebook-Roster-Truncated")).toBe("1");
     const wb = await loadWorkbook(res);
     const notes = collectStrings(wb.getWorksheet("Summary")!);
-    expect(notes.some((s) => s.includes("100"))).toBe(true);
+    expect(notes.some((s) => s.includes(String(ROSTER_LIMIT)))).toBe(true);
   });
 
   it("sessions read with a dropped tail → sessionsTruncated flag (B-F7)", async () => {

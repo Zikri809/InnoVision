@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  * session assertion, join call) runs. Covers:
  *  - flag-off → framework notFound() (no bespoke shape)
  *  - happy path: create → sign in → assert session → join → { redirect }
+ *  - A1: grant_face_consent invoked on the guest session; failure tolerated
  *  - sign-in failure → 503 (never a 200 with no session)
  *  - session assertion failure → 503 (the swallowed-cookie-set failure mode)
  *  - account cap → 503 demo_full
@@ -20,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   countGuestAccounts: vi.fn(),
   signInWithPassword: vi.fn(),
   getUser: vi.fn(),
+  rpc: vi.fn(),
   admin: {},
 }));
 
@@ -28,6 +30,7 @@ vi.mock("@/lib/demo/guests", () => ({
   joinDemoClass: mocks.joinDemoClass,
   countExistingGuests: mocks.countExistingGuests,
   countGuestAccounts: mocks.countGuestAccounts,
+  GUEST_ACCOUNT_CAP: 200,
   isGuestEmail: (e: string | null | undefined) =>
     Boolean(e && e.endsWith("@demo.innovision.test")),
 }));
@@ -39,6 +42,7 @@ vi.mock("@/lib/supabase/admin", () => ({
 vi.mock("@/lib/supabase/server", () => ({
   createServerActionClient: async () => ({
     auth: { signInWithPassword: mocks.signInWithPassword, getUser: mocks.getUser },
+    rpc: mocks.rpc,
   }),
 }));
 
@@ -86,6 +90,7 @@ beforeEach(() => {
   mocks.signInWithPassword.mockResolvedValue({ error: null });
   mocks.getUser.mockResolvedValue({ data: { user: { id: "g1", email: GUEST.email } } });
   mocks.joinDemoClass.mockResolvedValue({ ok: true });
+  mocks.rpc.mockResolvedValue({ data: { ok: true }, error: null });
   process.env.NEXT_PUBLIC_DEMO_MODE = "1";
 });
 
@@ -114,11 +119,41 @@ describe("POST /api/demo/guest", () => {
     expect(mocks.joinDemoClass).toHaveBeenCalledTimes(1);
   });
 
-  it("still returns a redirect when the join RPC fails (visitor is signed in)", async () => {
+  it("A1: grants biometric consent on the guest session (curated assessment start)", async () => {
+    const res = await POST(req({ code: "SCAN23" }));
+    expect(res.status).toBe(200);
+    expect(mocks.rpc).toHaveBeenCalledWith("grant_face_consent");
+  });
+
+  it("A1: consent failure is tolerated (practice loop survives)", async () => {
+    mocks.rpc.mockResolvedValueOnce({ data: null, error: { message: "db down" } });
+    const res = await POST(req({ code: "SCAN23" }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).redirect).toBe("/student/quizzes");
+    expect(mocks.joinDemoClass).toHaveBeenCalledTimes(1);
+  });
+
+  it("A1: consent throw is tolerated (practice loop survives)", async () => {
+    mocks.rpc.mockRejectedValueOnce(new Error("boom"));
+    const res = await POST(req());
+    expect(res.status).toBe(200);
+  });
+
+  it("join RPC failure → 200 with retry signal (A3: no dead empty list)", async () => {
     mocks.joinDemoClass.mockResolvedValue({ ok: false, error: "join_unavailable" });
     const res = await POST(req());
     expect(res.status).toBe(200);
-    expect((await res.json()).redirect).toBe("/student/quizzes");
+    const body = await res.json();
+    expect(body.redirect).toBe("/student/quizzes?join=retry");
+    expect(body.joinError).toBe("join_unavailable");
+  });
+
+  it("join success → plain redirect (no retry signal)", async () => {
+    const res = await POST(req());
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.redirect).toBe("/student/quizzes");
+    expect(body.joinError).toBeUndefined();
   });
 
   it("sign-in failure → 503 (never a 200 with no session)", async () => {

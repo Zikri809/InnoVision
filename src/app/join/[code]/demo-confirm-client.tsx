@@ -21,7 +21,9 @@ import { createClient } from "@/lib/supabase/client";
  * resolved the auth branch; this island only performs the actions:
  *
  *  - anonymous            → "Join the demo" → POST /api/demo/guest → redirect
- *  - authenticated guest  → "Continue as Guest #N" OR "Start fresh"
+ *  - authenticated guest  → "Continue as Guest #N" (NO POST — the session is
+ *                           already theirs; minting again would orphan Guest #N
+ *                           and double-burn the account cap) OR "Start fresh"
  *                           (sign out client-side, then re-run provisioning)
  *
  * The POST is user-initiated on purpose: a link-preview bot scanning a shared
@@ -71,6 +73,15 @@ export function DemoConfirmClient({
       lockRef.current = false;
       setBusy(false);
     }
+  }
+
+  function cont() {
+    // A2 (PLAN_DEMO_DAY_HARDENING): Continue performs NO POST. The visitor
+    // already holds this guest's session — minting again would orphan the
+    // current guest and double-burn the 200-account cap on shared booth
+    // devices. Navigation is idempotent, so no re-entry lock is needed.
+    router.replace("/student/quizzes");
+    router.refresh();
   }
 
   async function startFresh() {
@@ -124,10 +135,10 @@ export function DemoConfirmClient({
                 type="button"
                 size="lg"
                 className="w-full"
-                onClick={() => void provision()}
+                onClick={() => cont()}
                 disabled={busy}
               >
-                {busy ? t("starting") : t("continueCta", { name: guestName })}
+                {t("continueCta", { name: guestName })}
               </Button>
               <Button
                 type="button"

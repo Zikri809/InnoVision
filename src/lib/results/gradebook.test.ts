@@ -5,6 +5,7 @@ import {
   type BuildGradebookInput,
   type GradebookQuiz,
 } from "./gradebook";
+import { ROSTER_LIMIT } from "@/lib/classes/roster";
 import type { ExportSessionInput } from "./export";
 
 function session(overrides: Partial<ExportSessionInput> & { id: string; student_id: string }): ExportSessionInput {
@@ -67,15 +68,16 @@ describe("buildGradebookModel — column policy", () => {
     // Exactly ROSTER_LIMIT students is a FULL, untruncated roster — the old
     // `>=` off-by-one reported it as truncated. The flag is true only when
     // an uncapped feed actually exceeded the cap, or the caller passes the
-    // roster read's own flag through.
-    const full = Array.from({ length: 100 }, (_, i) => ({
+    // roster read's own flag through. Pinned to the constant (A6), not a
+    // literal, so a cap change cannot silently rot this boundary.
+    const full = Array.from({ length: ROSTER_LIMIT }, (_, i) => ({
       student_id: `s${i}`,
       full_name: `S ${i}`,
       matric_no: null,
     }));
     expect(buildGradebookModel(baseInput({ roster: full })).rosterTruncated).toBe(false);
 
-    const over = Array.from({ length: 101 }, (_, i) => ({
+    const over = Array.from({ length: ROSTER_LIMIT + 1 }, (_, i) => ({
       student_id: `s${i}`,
       full_name: `S ${i}`,
       matric_no: null,

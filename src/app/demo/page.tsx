@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isDemoModeEnabled, DEMO_JOIN_CODE } from "@/lib/demo/gate";
 import { DEMO_LECTURER_EMAIL } from "@/lib/demo/walkup-reset";
+import { countGuestAccounts, GUEST_ACCOUNT_CAP } from "@/lib/demo/guests";
 import { DemoResetButton } from "./demo-reset-button";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +28,8 @@ interface Check {
   label: string;
   ok: boolean;
   detail?: string;
+  /** Amber state: passing but near a limit (A5 cap warning). */
+  warn?: boolean;
 }
 
 async function sidecarUp(): Promise<boolean> {
@@ -97,6 +100,35 @@ export default async function DemoPage() {
       ok: Boolean(liveAssessment?.id),
       detail: liveAssessment?.title,
     });
+    // Face-gate invariant guardrail: every live ASSESSMENT in the walk-up class
+    // must be gestures-off. Guests hit the real face gate (gate phase +
+    // commit_answer proof) on assessments+gestures and lock up with no
+    // self-recovery. The walk-up PRACTICE quiz is intentionally gestures-ON
+    // (tracker boots, face stays off — no lockup) so guests get finger
+    // answering from the scanned code. Red until fixed.
+    // NOTE: filter in JS with !== false (not .eq(true)) so legacy NULL rows —
+    // which the player treats as gestures-ON (?? true) — also trip red.
+    // A read error is red, never green: a failed read must not masquerade as
+    // an all-clear booth.
+    const { data: liveGestureFlags, error: gestureCheckError } = await admin
+      .from("quizzes")
+      .select("id, title, gestures_enabled")
+      .eq("class_id", demoClass.id)
+      .eq("status", "live")
+      .eq("mode", "assessment")
+      .limit(20);
+    const gestureOffenders = (liveGestureFlags ?? []).filter(
+      (q) => (q as { gestures_enabled: boolean | null }).gestures_enabled !== false,
+    );
+    checks.push({
+      label: t("checkGesturesOff"),
+      ok: !gestureCheckError && gestureOffenders.length === 0,
+      detail: gestureCheckError
+        ? t("checkGesturesOffError")
+        : gestureOffenders.length === 0
+          ? t("checkGesturesOffOk")
+          : gestureOffenders.map((q) => q.title).join(", "),
+    });
   }
 
   // AI keys (generation/showcase features fail without them).
@@ -109,6 +141,22 @@ export default async function DemoPage() {
     label: t("checkSidecar"),
     ok: await sidecarUp(),
     detail: process.env.INSIGHTFACE_BASE_URL || "http://localhost:8000",
+  });
+
+  // A5 (PLAN_DEMO_DAY_HARDENING): live guest count vs the provisioning cap.
+  // Amber at ≥80% so the operator plans a 0h reset BEFORE new visitors hit
+  // demo_full; red at cap (provisioning refuses until a reset frees rows).
+  // A null count (DB error) is red, never green "0 / 200" — a failed read
+  // must not masquerade as an empty booth (R2 MINOR-1).
+  const guestCount = await countGuestAccounts(admin);
+  checks.push({
+    label: t("checkGuestCap"),
+    ok: guestCount !== null && guestCount < GUEST_ACCOUNT_CAP,
+    detail: guestCount === null ? t("checkGuestCapError") : `${guestCount} / ${GUEST_ACCOUNT_CAP}`,
+    warn:
+      guestCount !== null &&
+      guestCount >= GUEST_ACCOUNT_CAP * 0.8 &&
+      guestCount < GUEST_ACCOUNT_CAP,
   });
 
   return (
@@ -129,14 +177,16 @@ export default async function DemoPage() {
               <span
                 aria-hidden
                 className={
-                  c.ok
-                    ? "inline-flex size-6 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
-                    : "inline-flex size-6 items-center justify-center rounded-full bg-destructive/15 text-destructive"
+                  !c.ok
+                    ? "inline-flex size-6 items-center justify-center rounded-full bg-destructive/15 text-destructive"
+                    : c.warn
+                      ? "inline-flex size-6 items-center justify-center rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                      : "inline-flex size-6 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
                 }
               >
-                {c.ok ? "✓" : "✕"}
+                {!c.ok ? "✕" : c.warn ? "!" : "✓"}
               </span>
-              <span className={c.ok ? undefined : "text-destructive"}>
+              <span className={!c.ok ? "text-destructive" : c.warn ? "text-amber-700 dark:text-amber-300" : undefined}>
                 {c.label}
                 {c.detail ? (
                   <span className="ml-2 font-normal text-muted-foreground">{c.detail}</span>

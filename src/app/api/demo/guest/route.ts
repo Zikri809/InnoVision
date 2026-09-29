@@ -9,6 +9,7 @@ import {
   joinDemoClass,
   countExistingGuests,
   countGuestAccounts,
+  GUEST_ACCOUNT_CAP,
 } from "@/lib/demo/guests";
 import { rateLimit } from "@/lib/classes/rate-limit";
 import { checkSameOrigin, readCappedJson } from "@/lib/http";
@@ -40,21 +41,17 @@ export const dynamic = "force-dynamic";
 /** Booth-NAT budget: the whole crowd shares one egress IP. */
 const GUEST_RATE = { limit: 300, windowMs: 10 * 60_000 };
 
-/**
- * Absolute ceiling on concurrently provisioned guest accounts. Per-user spend
- * caps bound AI spend, not account count; this caps roster bloat and keeps the
- * reset script's work bounded. Generous for a full exhibition day.
- */
-const GUEST_ACCOUNT_CAP = 200;
-
 export async function POST(request: Request) {
   if (!isDemoModeEnabled()) notFound();
 
   const originError = checkSameOrigin(request);
   if (originError) return originError;
 
-  // Per-IP budget. With the booth's documented `TRUSTED_PROXY_COUNT=0`, a
-  // forged forwarding header cannot mint a fresh bucket (see request-ip.ts).
+  // Per-IP budget. Hop-count posture (see request-ip.ts): behind the tunnel
+  // (the deployed booth plan) leave TRUSTED_PROXY_COUNT unset (=1) so each
+  // phone's tunnel-appended IP gets its own bucket; on the direct-LAN
+  // fallback set TRUSTED_PROXY_COUNT=0 so a forged forwarding header cannot
+  // mint a fresh bucket (at the cost of one shared global bucket).
   try {
     const ip = clientIpFromHeaders(await headers());
     if (!rateLimit(`demo-guest:${ip}`, GUEST_RATE)) {
@@ -88,7 +85,10 @@ export async function POST(request: Request) {
 
   // The CAP uses the authoritative profile count (98xxxx matric range); the
   // bounded listUsers scan only supplies the cosmetic "Guest #N" label.
-  const guestCount = await countGuestAccounts(admin);
+  // Null (DB error) degrades to 0: fail-open preserves the pre-existing
+  // posture (a transient blip must not 503 the whole booth); the /demo
+  // preflight surfaces the failure explicitly instead.
+  const guestCount = (await countGuestAccounts(admin)) ?? 0;
   if (guestCount >= GUEST_ACCOUNT_CAP) {
     return NextResponse.json(
       { error: "demo_full", message: "The demo is at capacity right now." },
@@ -144,13 +144,36 @@ export async function POST(request: Request) {
     );
   }
 
+  // A1 (PLAN_DEMO_DAY_HARDENING): guests need biometric consent to start
+  // assessments — start_quiz_session gates EVERY assessment start on
+  // consent_given_at (0062), gestures-off included. grant_face_consent writes
+  // ONLY consent_given_at under the app.consent_write GUC (0019) — no samples,
+  // no camera, no enrollment state change. Guest consent ≠ guest enrollment:
+  // the face stack stays off via gestures_enabled=false, never via identity
+  // checks. Failure-tolerant by design: the practice quiz is the primary loop,
+  // so a consent failure must NOT fail provisioning (same posture as join).
+  try {
+    const { error: consentError } = await userClient.rpc("grant_face_consent");
+    if (consentError) {
+      console.warn(`[demo] guest consent grant did not complete: ${consentError.message}`);
+    }
+  } catch {
+    console.warn("[demo] guest consent grant threw; practice still playable");
+  }
+
   // Enroll via the real RPC with the guest's own session. A join failure must
   // NOT strand the visitor: they are signed in, so send them to the quiz list
-  // and let the confirm card retry the join. Only a transport failure is
-  // reported, and even then we still return the redirect.
+  // with a retry signal (A3) — the list renders a "Retry joining the demo"
+  // button when ?join=retry is present and the list is empty. Without the
+  // signal the guest would face a dead empty list with no recourse.
   const join = await joinDemoClass(userClient);
   if (!join.ok) {
     console.warn(`[demo] guest join did not complete: ${join.error}`);
+    return NextResponse.json({
+      redirect: "/student/quizzes?join=retry",
+      joinError: join.error,
+      guest: { name: guest.fullName },
+    });
   }
 
   return NextResponse.json({ redirect: "/student/quizzes", guest: { name: guest.fullName } });

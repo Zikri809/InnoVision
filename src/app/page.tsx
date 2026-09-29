@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { BrandLogo } from "@/components/brand-logo";
 import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { ArrowRight, BookOpen, Check, Eye, FileText, Hand, ListChecks, LockKeyhole, MousePointerClick, ScanFace, ShieldCheck, Sparkles, Table2 } from "lucide-react";
@@ -50,8 +51,7 @@ export default async function Home() {
       <header className="sticky top-0 z-50 border-b-[3px] border-border bg-background/95 pt-[var(--safe-top)] backdrop-blur">
         <div className="mx-auto flex h-[74px] w-full max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
           <Link href="/" className="flex shrink-0 items-center gap-2.5" aria-label={tNav("brand")}>
-            <span aria-hidden className="grid h-10 w-10 -rotate-4 place-items-center rounded-[14px] bg-primary font-heading text-lg font-bold text-primary-foreground shadow-[0_4px_0_var(--primary-deep)]">E2</span>
-            <span className="hidden font-heading text-[23px] font-semibold min-[480px]:inline">{tNav("brand")}</span>
+            <BrandLogo wordmarkClassName="hidden min-[480px]:inline" />
           </Link>
           <nav aria-label={tNav("primaryNav")} className="hidden items-center gap-7 lg:flex">
             <a href="#lecturers" className="text-[15px] font-bold text-muted-foreground transition-colors hover:text-primary-deep dark:hover:text-primary focus-visible:outline-3 focus-visible:outline-offset-4 focus-visible:outline-ring">{t("navLecturers")}</a>
@@ -251,7 +251,7 @@ export default async function Home() {
 
       <footer className="border-t-[3px] border-border py-9">
         <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-4 px-4 text-sm font-semibold text-muted-foreground sm:px-6">
-          <div className="flex items-center gap-2"><span aria-hidden className="grid h-8 w-8 -rotate-4 place-items-center rounded-[10px] bg-primary font-heading text-sm font-bold text-primary-foreground shadow-[0_3px_0_var(--primary-deep)]">E2</span><span className="font-heading text-[17px] font-semibold text-foreground">{tNav("brand")}</span></div>
+          <BrandLogo size="small" />
           <div>{t("footerCopy")}</div>
         </div>
       </footer>

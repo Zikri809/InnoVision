@@ -105,9 +105,17 @@ next-env.d.ts
 # then commit the day's per-user accounting.
 .glm-spend-ledger.json*
 
+# Booth QR card output (generated per tunnel link; regenerate with scripts/booth-qr.mjs)
+/booth-card/
+
 # scratch: dev logs, probe scripts, throwaway screenshots
 /.tmp/
 /.tmp_*
+# agent scratch: screenshots + throwaway artifacts (root-anchored to the repo's
+# own tmp/ dir; regenerate on demand)
+/tmp/
+/output/
+/vitest-output.txt
 # audit/coverage scratch produced by critic + coverage runs (not repo artifacts;
 # the `/.tmp_*` rule above is root-anchored and does NOT match these names)
 /tmp_audit/

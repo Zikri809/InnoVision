@@ -3,6 +3,7 @@
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { BrandLogo } from "@/components/brand-logo";
 import { useLocale, useTranslations } from "next-intl";
 
 import { register } from "@/lib/auth/register";
@@ -182,10 +183,7 @@ function RegisterForm() {
 
       <div className="w-full max-w-md">
         <Link href="/" className="mb-8 flex items-center justify-center gap-2.5">
-          <span className="grid h-11 w-11 -rotate-4 place-items-center rounded-2xl bg-primary font-heading text-xl font-bold text-primary-foreground shadow-[0_4px_0_var(--primary-deep)]">
-            E2
-          </span>
-          <span className="font-heading text-2xl font-semibold">Easy2U</span>
+          <BrandLogo size="large" />
         </Link>
 
         <Card>

@@ -23,6 +23,7 @@ import { getFakeHandTracker } from "@/lib/gestures/fake-seam";
 import { isFakeFaceSeamEnabled } from "@/lib/face/seam-gate";
 import { isPalmNextAllowed } from "@/lib/sessions/gesture-arming";
 import { HandLandmarkerTracker } from "@/lib/gestures/hand-tracker";
+import { onCameraDisconnected } from "@/lib/vision/camera";
 import type { HandFrame, HoldProgress, IHandTracker } from "@/lib/gestures/types";
 import type { FaceStatus } from "@/lib/face/types";
 import { GestureCalibration, CalibrationHud } from "@/components/vision/gesture-calibration";
@@ -563,6 +564,17 @@ export function GestureLayer({
     timedOutRef.current = false;
     const bootId = ++bootIdRef.current;
 
+    // Virtual-camera safety: a Camo / phone-as-webcam unplug, sleep, or USB
+    // glitch ends the shared track mid-session. Degrade to click-first `off`
+    // (same as the loop-failure path below) instead of freezing on a dead
+    // video frame; the user can re-enter by toggling/re-mounting the layer.
+    const unsubscribeDisconnect = onCameraDisconnected(() => {
+      trackerRef.current?.stop();
+      if (bootId === bootIdRef.current && !disposedRef.current) {
+        setStatus("off");
+      }
+    });
+
     const fake = isFakeFaceSeamEnabled() ? getFakeHandTracker() : undefined;
 
     if (fake) {
@@ -652,6 +664,7 @@ export function GestureLayer({
 
     return () => {
       disposedRef.current = true;
+      unsubscribeDisconnect();
       if (scanTimerRef.current) clearTimeout(scanTimerRef.current);
       if (bootTimerRef.current) clearTimeout(bootTimerRef.current);
       trackerRef.current?.stop();
@@ -790,8 +803,13 @@ export function GestureLayer({
       // directly beneath (adjacency), instructions one at a time.
       : "relative aspect-[3/4] w-full overflow-hidden rounded-[2rem] border-[3.5px] border-border bg-muted shadow-[var(--shadow-clay)]";
   } else if (status === "active") {
+    // Wide active: full-height side cam. The 16:9 webcam fills the tall frame
+    // via object-cover (center crop, true proportions — never stretched). The
+    // old "squished" look was a canvas backing-store mismatch (the 4:3
+    // fallback baked into a 16:9 feed), fixed in hand-tracker.ts — not the
+    // frame itself.
     videoContainerClass = isWide
-      ? `relative w-full h-full flex-1 min-h-[350px] lg:min-h-0 overflow-hidden rounded-[2rem] border-[3.5px] ${statusRingClass} bg-[#fff7ed] p-2.5 shadow-[var(--shadow-clay)] transition-[border-color,box-shadow] duration-300 pointer-events-none`
+      ? `relative w-full h-full flex-1 min-h-[350px] lg:min-h-0 overflow-hidden rounded-[2rem] border-[3.5px] ${statusRingClass} bg-[#fff7ed] p-2.5 shadow-[var(--shadow-clay)] transition-[border-color,box-shadow] duration-300 pointer-events-none dark:bg-[#2a170c]`
       : pipExpanded
         // Expanded self-check card: centered, tap scrim or PIP to collapse.
         ? `fixed inset-x-4 top-1/2 z-50 mx-auto aspect-[3/4] max-h-[70dvh] w-auto max-w-[240px] -translate-y-1/2 overflow-hidden rounded-[18px] border-[3px] ${statusRingClass} bg-background p-2 shadow-[var(--shadow-clay)] transition-[border-color,box-shadow] duration-200 cursor-pointer`

@@ -218,4 +218,30 @@ describe("updateSession — middleware redirect matrix", () => {
     const res = await updateSession(nextReq("/dashboard"));
     expect(res.status).toBe(200);
   });
+
+  it("does NOT bounce to /login when Auth is unreachable (outage ≠ logout)", async () => {
+    // A transient GoTrue/Kong failure must not read as logged-out: the
+    // session state is UNKNOWN, so the request passes through and the
+    // page-level guards report the outage honestly (503) instead of
+    // stranding a live session on /login. Tunnel round-trips make blips
+    // more likely, which is where false logouts were observed.
+    mockGetUser.mockResolvedValue({
+      data: { user: null },
+      error: { message: "fetch failed" },
+    });
+
+    const res = await updateSession(nextReq("/lecturer/classes"));
+    expect(res.status).toBe(200);
+  });
+
+  it("still bounces on a session-missing-shaped error", async () => {
+    mockGetUser.mockResolvedValue({
+      data: { user: null },
+      error: { message: "Auth session missing!" },
+    });
+
+    const res = await updateSession(nextReq("/lecturer/classes"));
+    expect(res.status).toBe(307);
+    expect(new URL(res.headers.get("location")!).pathname).toBe("/login");
+  });
 });

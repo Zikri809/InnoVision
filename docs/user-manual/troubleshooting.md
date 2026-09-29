@@ -132,7 +132,7 @@ codes. Send them the [student join steps](student.md#join-a-class).
 
 Confirm that the student joined this class, not another class with a similar
 name. On a phone, select the **Students** tab in class detail. If a large
-class shows a truncation notice, only the first 100 students are listed, but
+class shows a truncation notice, only the first 200 students are listed, but
 other enrolled students still count toward quizzes and exports. Check the
 gradebook or contact [Support](support.md) if the enrollment is disputed.
 

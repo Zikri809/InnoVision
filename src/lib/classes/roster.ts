@@ -27,14 +27,21 @@ export type RosterEntry = {
  * columns to a lecturer (security audit MED-3; matric added by 0027 as
  * directory data). Direct `profiles` SELECT is self-only.
  */
-export const ROSTER_LIMIT = 100;
+/**
+ * Roster read cap. A6 (PLAN_DEMO_DAY_HARDENING): raised 100 → 200 to match
+ * RESULTS_SESSION_LIMIT and the demo guest cap (GUEST_ACCOUNT_CAP) — past 100
+ * guests the lecturer dashboard rendered null names exactly when the crowd
+ * was biggest. Cost is one bounded read; the LIMIT+1 overflow probe and the
+ * `truncated` surfacing are unchanged.
+ */
+export const ROSTER_LIMIT = 200;
 
 export async function getClassRoster(
   supabase: SupabaseClient<Database>,
   classId: string,
 ): Promise<{ roster: RosterEntry[]; truncated: boolean; error: string | null }> {
-  // audit-2 M-13: fetch LIMIT+1 and report truncation — the silent 100-row
-  // cap previously let a lecturer certify an incomplete roster in a grade
+  // audit-2 M-13: fetch LIMIT+1 and report truncation — the silent capped-row
+  // read previously let a lecturer certify an incomplete roster in a grade
   // dispute with no signal at all.
   const { data: rows, error } = await supabase
     .from("student_roster_view")

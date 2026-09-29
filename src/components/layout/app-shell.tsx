@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { BrandLogo } from "@/components/brand-logo";
 import type { ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import { AppUserMenu } from "./app-user-menu";
@@ -74,12 +75,7 @@ export function AppShell({
         <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between gap-3 px-3 sm:px-6">
           <div className="flex min-w-0 items-center gap-2 sm:gap-6 md:gap-8">
             <Link href="/dashboard" aria-label={t("brand")} className="flex shrink-0 items-center gap-2.5">
-              <span className="grid h-8 w-8 -rotate-4 place-items-center rounded-[12px] bg-primary font-heading text-base font-bold text-primary-foreground shadow-[0_3px_0_var(--primary-deep)]">
-                E2
-              </span>
-              <span className="hidden font-heading text-[21px] font-semibold sm:inline">
-                Easy2U
-              </span>
+              <BrandLogo size="small" wordmarkClassName="hidden sm:inline" />
             </Link>
 
             <nav aria-label={t("primaryNav")} className="hidden sm:flex items-center gap-1.5 overflow-x-auto scrollbar-none py-1">

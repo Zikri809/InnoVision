@@ -93,7 +93,7 @@ export function ClassDetailClient({
 }: {
   cls: ClassInfo;
   roster: RosterEntry[];
-  /** audit-2 M-13: the roster read hit its 100-row cap (students dropped). */
+  /** audit-2 M-13: the roster read hit its row cap (students dropped). */
   rosterTruncated: boolean;
   quizzes: QuizRow[];
   /** AP-2: owned, unarchived classes — duplicate destination options. */
@@ -109,8 +109,8 @@ export function ClassDetailClient({
 
   // Mirrors ROSTER_LIMIT in @/lib/classes/roster (the read cap the server
   // reports via `rosterTruncated`). Kept local so this client island never
-  // imports the server roster module.
-  const ROSTER_DISPLAY_LIMIT = 100;
+  // imports the server roster module. A6: 200 (was 100) — keep in step.
+  const ROSTER_DISPLAY_LIMIT = 200;
   const rosterCountLabel = rosterTruncated
     ? t("rosterCountTruncated", { limit: ROSTER_DISPLAY_LIMIT })
     : t("rosterCount", { count: roster.length });
@@ -1195,10 +1195,10 @@ export function ClassDetailClient({
           </div>
         </CardHeader>
         <CardContent className="px-4 sm:px-6 pt-0 sm:pt-4 pb-2 sm:pb-4">
-          {/* audit-2 M-13 / audit-3 B-F6: the roster read is capped at 100
-              rows. Without this note a 250-enrolled class reads "100 students"
-              with students 101-250 invisible. Clay amber pattern per
-              AGENTS.md (dark-mode variants mandatory). */}
+          {/* audit-2 M-13 / audit-3 B-F6: the roster read is capped
+              (ROSTER_DISPLAY_LIMIT). Without this note a 250-enrolled class
+              reads "200 students" with students 201-250 invisible. Clay amber
+              pattern per AGENTS.md (dark-mode variants mandatory). */}
           {rosterTruncated && (
             <p
               role="status"

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
@@ -46,6 +46,7 @@ import type {
   DisplayStatus,
   ResultsSessionRow,
 } from "@/lib/results/types";
+import { LIVE_REFRESH_MS, shouldLiveRefresh } from "./live-updates";
 
 /** Status → chip classes. Tint + text only (no border): status is
  *  information, not a control. Both light and dark variants. */
@@ -235,6 +236,42 @@ export function ResultsDashboardClient({
   const [closeCooled, setCloseCooled] = useState(false);
   const [closing, setClosing] = useState(false);
   const [closeError, setCloseError] = useState<string | null>(null);
+
+  // A4 (PLAN_DEMO_DAY_HARDENING): live-updates polling for the monitoring
+  // beat (the booth big screen mirrors this page). Default ON; the tick
+  // re-runs the RSC read via router.refresh() and pauses while hidden, while
+  // any dialog is open, or while a mutation is busy (see shouldLiveRefresh).
+  const [liveUpdates, setLiveUpdates] = useState(true);
+  useEffect(() => {
+    if (!liveUpdates) return;
+    const id = window.setInterval(() => {
+      const dialogOpen =
+        exemptRow !== null || resetRow !== null || revealOpen || closeOpen;
+      const busy =
+        busyRows.size > 0 || revealing || closing || exporting;
+      if (
+        shouldLiveRefresh({
+          hidden: document.visibilityState === "hidden",
+          dialogOpen,
+          busy,
+        })
+      ) {
+        router.refresh();
+      }
+    }, LIVE_REFRESH_MS);
+    return () => window.clearInterval(id);
+  }, [
+    liveUpdates,
+    exemptRow,
+    resetRow,
+    revealOpen,
+    closeOpen,
+    busyRows,
+    revealing,
+    closing,
+    exporting,
+    router,
+  ]);
 
   function pickFilename(res: Response): string {
     // Blob URLs ignore Content-Disposition — mirror its filename explicitly.
@@ -674,9 +711,28 @@ export function ResultsDashboardClient({
           <h2 id="sessions-heading" className="font-heading text-lg font-semibold">
             {t("attendanceTitle")}
           </h2>
-          <p className="text-xs font-bold text-muted-foreground sm:text-sm sm:font-semibold">
-            {t("heroSubtitle")}
-          </p>
+          <div className="flex items-center gap-3">
+            <p className="text-xs font-bold text-muted-foreground sm:text-sm sm:font-semibold">
+              {t("heroSubtitle")}
+            </p>
+            {/* A4: live-updates toggle — freeze the board for close/reveal beats */}
+            <button
+              type="button"
+              onClick={() => setLiveUpdates((v) => !v)}
+              aria-pressed={liveUpdates}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-full border-[2.5px] border-border bg-card px-2.5 py-1 text-xs font-extrabold text-muted-foreground transition-colors hover:text-primary"
+            >
+              <span
+                aria-hidden
+                className={
+                  liveUpdates
+                    ? "inline-block size-[7px] animate-pulse rounded-full bg-emerald-500"
+                    : "inline-block size-[7px] rounded-full bg-muted-foreground/40"
+                }
+              />
+              {liveUpdates ? t("liveUpdatesOn") : t("liveUpdatesOff")}
+            </button>
+          </div>
         </div>
         {rows.length === 0 ? (
           <p className="rounded-2xl border-[3px] border-dashed border-border bg-card p-6 text-center text-sm font-semibold text-muted-foreground">

@@ -96,4 +96,31 @@ describe("POST /api/demo/reset-walkup", () => {
     expect(body.summary.guestsDeleted).toBe(3);
     expect(mocks.resetWalkup).toHaveBeenCalledTimes(1);
   });
+
+  it("A5: maxAgeHours passes through to resetWalkup", async () => {
+    mocks.getUser.mockResolvedValue({
+      data: { user: { id: "l1", email: "demo-lecturer@innovision.test" } },
+    });
+    const res = await POST(req({ confirm: true, maxAgeHours: 0 }));
+    expect(res.status).toBe(200);
+    expect(mocks.resetWalkup).toHaveBeenCalledWith(undefined, { maxAgeHours: 0 });
+  });
+
+  it("A5: unbounded maxAgeHours clamps to 24 (confirm-dialog blast radius)", async () => {
+    mocks.getUser.mockResolvedValue({
+      data: { user: { id: "l1", email: "demo-lecturer@innovision.test" } },
+    });
+    const res = await POST(req({ confirm: true, maxAgeHours: 48 }));
+    expect(res.status).toBe(200);
+    expect(mocks.resetWalkup).toHaveBeenCalledWith(undefined, { maxAgeHours: 24 });
+  });
+
+  it("A5: absent maxAgeHours → undefined (route default 2h applies)", async () => {
+    mocks.getUser.mockResolvedValue({
+      data: { user: { id: "l1", email: "demo-lecturer@innovision.test" } },
+    });
+    const res = await POST(req());
+    expect(res.status).toBe(200);
+    expect(mocks.resetWalkup).toHaveBeenCalledWith(undefined, { maxAgeHours: undefined });
+  });
 });
